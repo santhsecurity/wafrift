@@ -4,6 +4,7 @@ mod tests {
     use crate::safety::{CircuitBreaker, ScanPolicy, guard_prefix_len, sanitize_input};
     use crate::smuggling::*;
     use proptest::prelude::*;
+    use std::collections::HashSet;
 
     fn parse_request(raw: &[u8]) -> Result<(), httparse::Error> {
         let mut headers = [httparse::EMPTY_HEADER; 64];
