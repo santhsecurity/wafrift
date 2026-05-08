@@ -94,7 +94,7 @@ pub fn fullwidth_encode(payload: &str) -> String {
     let mut out = String::with_capacity(payload.len() * 3);
     for ch in payload.chars() {
         let mapped = match ch {
-            ' ' => '\u{3000}',  // Ideographic space
+            ' ' => '\u{3000}', // Ideographic space
             c if ('\x21'..='\x7e').contains(&c) => {
                 // Fullwidth offset: U+FF01 = U+0021 + 0xFEE0
                 char::from_u32(c as u32 + 0xFEE0).unwrap_or(c)
@@ -123,17 +123,17 @@ pub fn homoglyph_encode(payload: &str) -> String {
         let mapped = match ch {
             // Quotes and delimiters
             '\'' => '\u{2019}', // RIGHT SINGLE QUOTATION MARK (')
-            '"'  => '\u{201D}', // RIGHT DOUBLE QUOTATION MARK (")
+            '"' => '\u{201D}',  // RIGHT DOUBLE QUOTATION MARK (")
             // Comparison operators
-            '<'  => '\u{FF1C}', // FULLWIDTH LESS-THAN SIGN (＜)
-            '>'  => '\u{FF1E}', // FULLWIDTH GREATER-THAN SIGN (＞)
-            '='  => '\u{FF1D}', // FULLWIDTH EQUALS SIGN (＝)
+            '<' => '\u{FF1C}', // FULLWIDTH LESS-THAN SIGN (＜)
+            '>' => '\u{FF1E}', // FULLWIDTH GREATER-THAN SIGN (＞)
+            '=' => '\u{FF1D}', // FULLWIDTH EQUALS SIGN (＝)
             // Punctuation
-            '('  => '\u{FF08}', // FULLWIDTH LEFT PARENTHESIS (（)
-            ')'  => '\u{FF09}', // FULLWIDTH RIGHT PARENTHESIS (）)
-            ';'  => '\u{FF1B}', // FULLWIDTH SEMICOLON (；)
-            '-'  => '\u{2010}', // HYPHEN (‐)
-            '/'  => '\u{2215}', // DIVISION SLASH (∕)
+            '(' => '\u{FF08}', // FULLWIDTH LEFT PARENTHESIS (（)
+            ')' => '\u{FF09}', // FULLWIDTH RIGHT PARENTHESIS (）)
+            ';' => '\u{FF1B}', // FULLWIDTH SEMICOLON (；)
+            '-' => '\u{2010}', // HYPHEN (‐)
+            '/' => '\u{2215}', // DIVISION SLASH (∕)
             // Keep letters and digits unchanged for readability
             c => c,
         };
@@ -141,7 +141,6 @@ pub fn homoglyph_encode(payload: &str) -> String {
     }
     out
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -221,14 +220,21 @@ mod tests {
         assert_eq!(encoded, "ＳＥＬＥＣＴ");
         // Every ASCII letter should be in fullwidth range
         for ch in encoded.chars() {
-            assert!(ch as u32 >= 0xFF01, "expected fullwidth char, got {ch} (U+{:04X})", ch as u32);
+            assert!(
+                ch as u32 >= 0xFF01,
+                "expected fullwidth char, got {ch} (U+{:04X})",
+                ch as u32
+            );
         }
     }
 
     #[test]
     fn fullwidth_encode_spaces() {
         let encoded = fullwidth_encode("A B");
-        assert!(encoded.contains('\u{3000}'), "space should become ideographic space");
+        assert!(
+            encoded.contains('\u{3000}'),
+            "space should become ideographic space"
+        );
     }
 
     #[test]
@@ -261,8 +267,14 @@ mod tests {
     #[test]
     fn homoglyph_replaces_quotes() {
         let encoded = homoglyph_encode("' OR '1'='1");
-        assert!(!encoded.contains('\''), "ASCII single quote should be replaced");
-        assert!(encoded.contains('\u{2019}'), "should contain RIGHT SINGLE QUOTATION MARK");
+        assert!(
+            !encoded.contains('\''),
+            "ASCII single quote should be replaced"
+        );
+        assert!(
+            encoded.contains('\u{2019}'),
+            "should contain RIGHT SINGLE QUOTATION MARK"
+        );
     }
 
     #[test]

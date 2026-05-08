@@ -14,7 +14,10 @@ fn main() {
     if !rules_dir.is_dir() {
         // Not in the workspace tree — skip embedding.  The engine
         // will fall back to runtime loading or empty rules.
-        println!("cargo::warning=rules/detect not found at {}, embedded rules will be empty", rules_dir.display());
+        println!(
+            "cargo::warning=rules/detect not found at {}, embedded rules will be empty",
+            rules_dir.display()
+        );
         fs::write(
             Path::new(&std::env::var("OUT_DIR").unwrap()).join("embedded_detect_rules.toml"),
             "# No rules found at build time.\n",
@@ -43,7 +46,10 @@ fn main() {
     for entry in &entries {
         let content = fs::read_to_string(entry)
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", entry.display()));
-        merged.push_str(&format!("# ── {} ──\n", entry.file_name().unwrap().to_string_lossy()));
+        merged.push_str(&format!(
+            "# ── {} ──\n",
+            entry.file_name().unwrap().to_string_lossy()
+        ));
         merged.push_str(&content);
         merged.push('\n');
     }

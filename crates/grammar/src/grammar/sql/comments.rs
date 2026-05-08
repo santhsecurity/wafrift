@@ -86,10 +86,7 @@ pub(crate) fn keyword_comment_mutations(
                 let split = null_comment_split(keyword);
                 let mutated = payload.replacen(original, &split, 1);
                 if mutated != payload {
-                    results.push((
-                        mutated,
-                        format!("Null-byte comment split: {keyword}"),
-                    ));
+                    results.push((mutated, format!("Null-byte comment split: {keyword}")));
                 }
             }
         }
@@ -152,10 +149,7 @@ pub(crate) fn nested_comment_mutations(
             let nested = format!("/*/**/*/{keyword}/*/**/ */");
             let mutated = payload.replacen(original, &nested, 1);
             if mutated != payload {
-                results.push((
-                    mutated,
-                    format!("Nested comment: {keyword} → {nested}"),
-                ));
+                results.push((mutated, format!("Nested comment: {keyword} → {nested}")));
             }
 
             // Empty comment padding
@@ -163,10 +157,7 @@ pub(crate) fn nested_comment_mutations(
                 let padded = format!("/**/{keyword}/**/");
                 let mutated = payload.replacen(original, &padded, 1);
                 if mutated != payload {
-                    results.push((
-                        mutated,
-                        format!("Comment-padded: {keyword} → {padded}"),
-                    ));
+                    results.push((mutated, format!("Comment-padded: {keyword} → {padded}")));
                 }
             }
         }
@@ -191,21 +182,30 @@ mod tests {
 
     #[test]
     fn null_split_select() {
-        assert_eq!(null_comment_split("SELECT"), "S/*%00*/E/*%00*/L/*%00*/E/*%00*/C/*%00*/T");
+        assert_eq!(
+            null_comment_split("SELECT"),
+            "S/*%00*/E/*%00*/L/*%00*/E/*%00*/C/*%00*/T"
+        );
     }
 
     #[test]
     fn keyword_comment_mutations_produces_variants() {
         let mutations = keyword_comment_mutations("' UNION SELECT 1--", 50);
         // Should produce at least conditional + inline + null for both UNION and SELECT
-        assert!(mutations.len() >= 4, "should produce multiple comment variants, got {}", mutations.len());
+        assert!(
+            mutations.len() >= 4,
+            "should produce multiple comment variants, got {}",
+            mutations.len()
+        );
     }
 
     #[test]
     fn keyword_comment_mutations_inline_split() {
         let mutations = keyword_comment_mutations("' UNION SELECT 1--", 50);
         assert!(
-            mutations.iter().any(|(m, _)| m.contains("U/**/N/**/I/**/O/**/N")),
+            mutations
+                .iter()
+                .any(|(m, _)| m.contains("U/**/N/**/I/**/O/**/N")),
             "should include inline comment split for UNION"
         );
     }
@@ -221,7 +221,10 @@ mod tests {
     #[test]
     fn nested_comment_mutations_exist() {
         let mutations = nested_comment_mutations("' SELECT 1--", 10);
-        assert!(!mutations.is_empty(), "should produce nested comment variants");
+        assert!(
+            !mutations.is_empty(),
+            "should produce nested comment variants"
+        );
     }
 
     #[test]
@@ -234,7 +237,9 @@ mod tests {
     fn extended_keyword_list_includes_and_or() {
         let mutations = keyword_comment_mutations("' OR 1=1 AND 1=1--", 50);
         assert!(
-            mutations.iter().any(|(_, d)| d.contains("OR") || d.contains("AND")),
+            mutations
+                .iter()
+                .any(|(_, d)| d.contains("OR") || d.contains("AND")),
             "should mutate AND/OR keywords"
         );
     }

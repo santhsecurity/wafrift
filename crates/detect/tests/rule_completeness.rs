@@ -20,10 +20,10 @@ const TIER1_WAFS: &[&str] = &[
     "Cloudflare",
     "ModSecurity",
     "AWS Elastic Load Balancer",
-    "Kona SiteDefender",     // Akamai
-    "Incapsula",             // Imperva
+    "Kona SiteDefender", // Akamai
+    "Incapsula",         // Imperva
     "Azure Front Door",
-    "BIG-IP AP Manager",     // F5
+    "BIG-IP AP Manager", // F5
     "Sucuri CloudProxy",
     "Barracuda",
     "FortiWeb",
@@ -89,16 +89,12 @@ fn tier1_wafs_detect_from_realistic_headers() {
         ),
         (
             "Barracuda",
-            vec![
-                ("set-cookie".into(), "barra_counter_session=abc".into()),
-            ],
+            vec![("set-cookie".into(), "barra_counter_session=abc".into())],
             b"Blocked by Barracuda",
         ),
         (
             "FortiWeb",
-            vec![
-                ("set-cookie".into(), "fortiwafsid=abc123".into()),
-            ],
+            vec![("set-cookie".into(), "fortiwafsid=abc123".into())],
             b"",
         ),
         (

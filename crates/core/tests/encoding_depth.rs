@@ -680,7 +680,8 @@ fn layered_combinations_all_produce_different_results() {
 #[test]
 fn layered_unicode_then_url_sql() {
     let payload = "' OR 1=1--";
-    let result = encoding::encode_layered(payload, &[Strategy::UnicodeEncode, Strategy::UrlEncode]).unwrap();
+    let result =
+        encoding::encode_layered(payload, &[Strategy::UnicodeEncode, Strategy::UrlEncode]).unwrap();
     // Unicode escapes get URL-encoded - backslash becomes %5C
     assert!(result.contains("%5C")); // \ is URL-encoded as %5C
     assert!(!result.is_empty());
@@ -690,7 +691,8 @@ fn layered_unicode_then_url_sql() {
 fn layered_html_entity_then_url_xss() {
     let payload = "<script>alert(1)</script>";
     let result =
-        encoding::encode_layered(payload, &[Strategy::HtmlEntityEncode, Strategy::UrlEncode]).unwrap();
+        encoding::encode_layered(payload, &[Strategy::HtmlEntityEncode, Strategy::UrlEncode])
+            .unwrap();
     assert!(result.contains("%26"));
     assert!(result.contains("%23"));
 }
@@ -699,7 +701,8 @@ fn layered_html_entity_then_url_xss() {
 fn layered_case_alt_then_url_cmd() {
     let payload = "; ls -la";
     let result =
-        encoding::encode_layered(payload, &[Strategy::CaseAlternation, Strategy::UrlEncode]).unwrap();
+        encoding::encode_layered(payload, &[Strategy::CaseAlternation, Strategy::UrlEncode])
+            .unwrap();
     assert!(result.starts_with('%'));
     assert!(result.contains("%20"));
 }
@@ -710,7 +713,8 @@ fn layered_sql_comment_then_url() {
     let result = encoding::encode_layered(
         payload,
         &[Strategy::SqlCommentInsertion, Strategy::UrlEncode],
-    ).unwrap();
+    )
+    .unwrap();
     assert!(result.contains("%2F"));
     assert!(result.contains("%2A"));
 }
@@ -721,14 +725,16 @@ fn layered_whitespace_then_double_url() {
     let result = encoding::encode_layered(
         payload,
         &[Strategy::WhitespaceInsertion, Strategy::DoubleUrlEncode],
-    ).unwrap();
+    )
+    .unwrap();
     assert!(result.contains("%2509") || result.contains("%25"));
 }
 
 #[test]
 fn layered_overlong_then_url_path_traversal() {
     let payload = "../../../etc/passwd";
-    let result = encoding::encode_layered(payload, &[Strategy::OverlongUtf8, Strategy::UrlEncode]).unwrap();
+    let result =
+        encoding::encode_layered(payload, &[Strategy::OverlongUtf8, Strategy::UrlEncode]).unwrap();
     assert!(result.contains("%25"));
 }
 
@@ -736,7 +742,8 @@ fn layered_overlong_then_url_path_traversal() {
 fn layered_null_byte_then_case_alt() {
     let payload = "file.txt";
     let result =
-        encoding::encode_layered(payload, &[Strategy::NullByte, Strategy::CaseAlternation]).unwrap();
+        encoding::encode_layered(payload, &[Strategy::NullByte, Strategy::CaseAlternation])
+            .unwrap();
     assert!(result.contains("%00"));
     assert!(result.contains("FiLe") || result.contains("FiLE"));
 }
@@ -839,7 +846,8 @@ fn layered_triple_encoding_aggressiveness() {
             Strategy::UrlEncode,
             Strategy::UnicodeEncode,
         ],
-    ).unwrap();
+    )
+    .unwrap();
     // Triple-layered should be significantly transformed
     assert!(!result.contains("admin"));
     assert!(result.contains("\\u") || result.contains('%'));

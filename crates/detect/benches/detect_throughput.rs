@@ -128,11 +128,7 @@ fn bench_fingerprint(c: &mut Criterion) {
     let (status, headers, body) = cloudflare_response();
     group.bench_function("create", |b| {
         b.iter(|| {
-            let fp = fingerprint(
-                black_box(status),
-                black_box(&headers),
-                black_box(&body),
-            );
+            let fp = fingerprint(black_box(status), black_box(&headers), black_box(&body));
             black_box(fp)
         })
     });
@@ -158,10 +154,7 @@ fn bench_blocking_check(c: &mut Criterion) {
     let (_, _, body) = cloudflare_response();
     group.bench_function("waf_body_4k", |b| {
         b.iter(|| {
-            let result = waf_detect::is_blocked_response(
-                black_box(503),
-                black_box(&body),
-            );
+            let result = waf_detect::is_blocked_response(black_box(503), black_box(&body));
             black_box(result)
         })
     });
@@ -169,10 +162,7 @@ fn bench_blocking_check(c: &mut Criterion) {
     let (_, _, body) = clean_response();
     group.bench_function("clean_body_small", |b| {
         b.iter(|| {
-            let result = waf_detect::is_blocked_response(
-                black_box(200),
-                black_box(&body),
-            );
+            let result = waf_detect::is_blocked_response(black_box(200), black_box(&body));
             black_box(result)
         })
     });
@@ -180,10 +170,7 @@ fn bench_blocking_check(c: &mut Criterion) {
     let (_, _, body) = large_body_response();
     group.bench_function("large_body_4k", |b| {
         b.iter(|| {
-            let result = waf_detect::is_blocked_response(
-                black_box(200),
-                black_box(&body),
-            );
+            let result = waf_detect::is_blocked_response(black_box(200), black_box(&body));
             black_box(result)
         })
     });

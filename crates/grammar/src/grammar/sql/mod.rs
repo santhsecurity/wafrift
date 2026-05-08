@@ -11,6 +11,8 @@ pub mod blind;
 pub mod comments;
 /// Shared SQL mutation types and helpers.
 pub mod common;
+/// Keyword-free SQL mutation helpers for high-paranoia WAF bypass.
+pub mod keywordless;
 /// MSSQL dialect mutations.
 pub mod mssql;
 /// MySQL dialect mutations.
@@ -27,29 +29,31 @@ pub mod sqlite;
 pub mod strings;
 /// Tautology SQL mutation helpers.
 pub mod tautology;
-/// Keyword-free SQL mutation helpers for high-paranoia WAF bypass.
-pub mod keywordless;
 /// UNION-specific SQL mutation helpers.
 pub mod union;
 
 pub use common::SqlMutation;
 
 use crate::grammar::sql::blind::{
-    json_xml_mutations, order_by_probes, stacked_query_mutations, time_blind_mutations,
-    boolean_blind_mutations, error_blind_mutations,
+    boolean_blind_mutations, error_blind_mutations, json_xml_mutations, order_by_probes,
+    stacked_query_mutations, time_blind_mutations,
 };
-use crate::grammar::sql::comments::{keyword_comment_mutations, version_comment_mutations, nested_comment_mutations};
+use crate::grammar::sql::comments::{
+    keyword_comment_mutations, nested_comment_mutations, version_comment_mutations,
+};
 use crate::grammar::sql::common::{
     COMMENT_TERMINATORS, WHITESPACE_ALTERNATIVES, and_alternatives, equality_alternatives,
     extract_quoted_string, or_alternatives,
 };
+use crate::grammar::sql::keywordless::keywordless_mutations;
 use crate::grammar::sql::operators::{
     replace_comment_terminator, replace_equality, replace_logical_operator,
 };
 use crate::grammar::sql::strings::{hex_literal, no_space_wrap, split_string_concat};
 use crate::grammar::sql::tautology::{TAUTOLOGIES, contains_tautology, replace_tautology};
-use crate::grammar::sql::keywordless::keywordless_mutations;
-use crate::grammar::sql::union::{UNION_ALTERNATIVES, replace_union, union_mutations, union_column_probes};
+use crate::grammar::sql::union::{
+    UNION_ALTERNATIVES, replace_union, union_column_probes, union_mutations,
+};
 
 #[cfg(test)]
 mod tests;
@@ -268,11 +272,7 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     }
     // UNION column probes (only if payload contains UNION)
     if lower.contains("union") {
-        extend_until_limit(
-            &mut results,
-            max_mutations,
-            union_column_probes(10),
-        );
+        extend_until_limit(&mut results, max_mutations, union_column_probes(10));
     }
 
     // Dialect-specific mutations — always reserve at least 20% of budget.

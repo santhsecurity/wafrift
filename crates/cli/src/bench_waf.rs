@@ -85,8 +85,7 @@ fn parse_bench_json(raw: &str) -> Result<BenchFile, String> {
 
 fn load_cases(args: &BenchWafArgs) -> Result<BenchFile, String> {
     if let Some(path) = &args.payloads {
-        let s = fs::read_to_string(path)
-            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        let s = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
         parse_bench_json(&s)
     } else {
         parse_bench_json(DEFAULT_PAYLOADS)
@@ -140,7 +139,10 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
             .await
             .map_err(|e| format!("{}: {e}", case.id))?;
         let status = resp.status().as_u16();
-        let body = resp.bytes().await.map_err(|e| format!("{} body: {e}", case.id))?;
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("{} body: {e}", case.id))?;
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         let blocked = is_waf_block(status, &body);
 
@@ -186,12 +188,7 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
     } else {
         println!(
             "{}",
-            format!(
-                "WAF bench — {} ({} cases)\n",
-                base_url,
-                rows.len()
-            )
-            .bold()
+            format!("WAF bench — {} ({} cases)\n", base_url, rows.len()).bold()
         );
         println!(
             "{:<22} {:>5} {:>8} {:>8} {:>10} ok",
@@ -208,12 +205,7 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
             };
             println!(
                 "{:<22} {:>5} {:>8.2} {:>8} {:>10} {}",
-                r.id,
-                r.status,
-                r.latency_ms,
-                r.blocked,
-                r.expect,
-                ok_str
+                r.id, r.status, r.latency_ms, r.blocked, r.expect, ok_str
             );
         }
         if mismatches > 0 {
@@ -225,8 +217,7 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
         } else {
             println!(
                 "\n{}",
-                "all expectations satisfied (for cases that define expect)."
-                    .green()
+                "all expectations satisfied (for cases that define expect).".green()
             );
         }
     }

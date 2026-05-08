@@ -69,11 +69,7 @@ pub fn generate_family_probes(family: ProbeFamily) -> Vec<Probe> {
         ProbeFamily::Command => {
             let mut seps = command_separator_probes();
             let mut paths = command_path_probes();
-            vec![
-                seps.remove(0),
-                seps.remove(0),
-                paths.remove(0),
-            ]
+            vec![seps.remove(0), seps.remove(0), paths.remove(0)]
         }
     }
 }

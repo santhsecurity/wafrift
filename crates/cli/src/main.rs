@@ -19,8 +19,8 @@ mod scan;
 mod technique_filter;
 
 use helpers::{
-    build_variants, confidence_badge, max_mutations_for_level, parse_headers,
-    payload_type_label, probe_target_label, strategies_for_level,
+    build_variants, confidence_badge, max_mutations_for_level, parse_headers, payload_type_label,
+    probe_target_label, strategies_for_level,
 };
 use technique_filter::TechniqueFilter;
 
@@ -600,7 +600,10 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
 
     if variants.is_empty() {
         if quiet {
-            println!("{}", json!({ "error": "no variants generated", "payload_type": payload_type_label(payload_type) }));
+            println!(
+                "{}",
+                json!({ "error": "no variants generated", "payload_type": payload_type_label(payload_type) })
+            );
         } else {
             eprintln!(
                 "{}",
@@ -668,11 +671,16 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
 
     let detected = waf_detect::detect(args.status, &headers, args.body.as_bytes());
     if quiet {
-        let results: Vec<_> = detected.iter().map(|r| json!({
-            "name": r.name,
-            "confidence": r.confidence,
-            "indicators": r.indicators,
-        })).collect();
+        let results: Vec<_> = detected
+            .iter()
+            .map(|r| {
+                json!({
+                    "name": r.name,
+                    "confidence": r.confidence,
+                    "indicators": r.indicators,
+                })
+            })
+            .collect();
         println!("{}", json!({ "detected": results }));
         ExitCode::SUCCESS
     } else if let Some(result) = detected.first() {

@@ -24,11 +24,12 @@ use hyper_util::rt::TokioIo;
 use tokio::net::{TcpListener, TcpStream};
 
 use wafrift_proxy::hop_by_hop::{
-    collect_connection_header_names, collect_connection_header_names_hyper, should_strip_proxy_header,
+    collect_connection_header_names, collect_connection_header_names_hyper,
+    should_strip_proxy_header,
 };
 use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::upstream_policy::{
-    assert_connect_target_allowed, assert_forward_url_allowed, UpstreamPolicy,
+    UpstreamPolicy, assert_connect_target_allowed, assert_forward_url_allowed,
 };
 use wafrift_strategy::strategy::evade;
 use wafrift_strategy::{EvasionConfig, HostState};
@@ -161,10 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             wafrift_proxy::mitm::TrustResult::ManualRequired { instructions } => {
                 println!("\n{instructions}\n");
-                info!(
-                    "CA generated at: {}",
-                    cert_path.display()
-                );
+                info!("CA generated at: {}", cert_path.display());
             }
             wafrift_proxy::mitm::TrustResult::Failed {
                 error,
@@ -522,7 +520,11 @@ async fn mitm_plaintext_request(
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // Pin upstream to the CONNECT target; do not follow a different inner `Host:`.
     let sni_host = tls_server_name_from_authority(&connect_authority);
-    if let Some(h) = req.headers().get(hyper::header::HOST).and_then(|x| x.to_str().ok()) {
+    if let Some(h) = req
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|x| x.to_str().ok())
+    {
         let inner = extract_host_from_header(h);
         if !inner.eq_ignore_ascii_case(&sni_host) {
             warn!(inner = %inner, expected = %sni_host, "mitm Host header does not match CONNECT");

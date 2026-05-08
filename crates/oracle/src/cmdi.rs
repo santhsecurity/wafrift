@@ -109,7 +109,10 @@ fn contains_word(text: &str, word: &str) -> bool {
     text_lower
         .split(|c: char| {
             c.is_ascii_whitespace()
-                || matches!(c, ';' | '|' | '&' | '`' | '$' | '(' | ')' | '<' | '>' | '\'' | '"')
+                || matches!(
+                    c,
+                    ';' | '|' | '&' | '`' | '$' | '(' | ')' | '<' | '>' | '\'' | '"'
+                )
                 || c == '\0'
         })
         .any(|part| {

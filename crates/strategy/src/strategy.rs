@@ -21,8 +21,8 @@ use wafrift_smuggling::h2_evasion;
 use wafrift_smuggling::smuggling;
 use wafrift_types::{EvasionResult, Request, Technique};
 
-use mctrust::{Environment, TreeSearch, SearchConfig};
 use crate::mcts_bridge::WafRiftEnv;
+use mctrust::{Environment, SearchConfig, TreeSearch};
 
 // Re-export types that consumers depend on.
 pub use crate::host_state::HostState;
@@ -422,9 +422,7 @@ pub fn evade_intelligent<'a>(
 
     // Step 2: Generate advisor playbook
     // Use the highest-confidence detection, or None if empty.
-    let top_waf = detected_wafs
-        .as_ref()
-        .and_then(|vec| vec.first());
+    let top_waf = detected_wafs.as_ref().and_then(|vec| vec.first());
     let plan = advisor::advise(top_waf, None);
 
     // Step 3: Try MCTS search first (explores combinatorial space)
@@ -627,10 +625,8 @@ fn apply_header_obfuscation(
         .any(|(k, _)| k.eq_ignore_ascii_case("connection"));
     if has_connection {
         // Add a duplicate Connection header with different value
-        req.headers.push((
-            "Connection".into(),
-            "keep-alive, close".into(),
-        ));
+        req.headers
+            .push(("Connection".into(), "keep-alive, close".into()));
         techniques.push(Technique::HeaderObfuscation("DuplicateHopByHop".into()));
     }
 
@@ -642,10 +638,8 @@ fn apply_header_obfuscation(
         .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"));
     if !has_te {
         // Add TE header with tab prefix (some parsers strip it, others don't)
-        req.headers.push((
-            "Transfer-Encoding".into(),
-            "\tchunked".into(),
-        ));
+        req.headers
+            .push(("Transfer-Encoding".into(), "\tchunked".into()));
         techniques.push(Technique::HeaderObfuscation("TEAmbiguity".into()));
     }
 

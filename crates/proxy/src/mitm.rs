@@ -32,18 +32,18 @@ impl CertificateAuthority {
     pub fn generate() -> anyhow::Result<Self> {
         let mut ca_params = CertificateParams::new(vec!["WAF Rift MITM CA".to_string()])
             .context("CA CertificateParams::new")?;
-        ca_params.distinguished_name.push(DnType::OrganizationName, "WafRift");
+        ca_params
+            .distinguished_name
+            .push(DnType::OrganizationName, "WafRift");
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_params.key_usages = vec![
             KeyUsagePurpose::DigitalSignature,
             KeyUsagePurpose::KeyCertSign,
             KeyUsagePurpose::CrlSign,
         ];
-        let ca_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-            .context("generate CA key")?;
-        let ca_cert = ca_params
-            .self_signed(&ca_key)
-            .context("self_signed CA")?;
+        let ca_key =
+            KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate CA key")?;
+        let ca_cert = ca_params.self_signed(&ca_key).context("self_signed CA")?;
 
         Ok(Self {
             cert_pem: ca_cert.pem(),
@@ -88,8 +88,8 @@ impl CertificateAuthority {
     ///
     /// Returns an error if signing or key generation fails.
     pub fn issue_server_cert(&self, tls_server_name: &str) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-        let issuer =
-            Issuer::from_ca_cert_pem(&self.cert_pem, &self.key_pair).context("Issuer::from_ca_cert_pem")?;
+        let issuer = Issuer::from_ca_cert_pem(&self.cert_pem, &self.key_pair)
+            .context("Issuer::from_ca_cert_pem")?;
         let mut leaf_params =
             CertificateParams::new(vec![tls_server_name.to_string()]).context("leaf params")?;
         leaf_params.is_ca = IsCa::NoCa;
@@ -162,7 +162,9 @@ pub fn extract_connect_host(req: &hyper::Request<hyper::body::Incoming>) -> Opti
 /// TLS certificate name from CONNECT authority (e.g. `example.com:443` → `example.com`).
 #[must_use]
 pub fn tls_server_name_from_authority(authority: &str) -> String {
-    if authority.starts_with('[') && let Some(end) = authority.find(']') {
+    if authority.starts_with('[')
+        && let Some(end) = authority.find(']')
+    {
         return authority[1..end].to_string();
     }
     authority
@@ -240,11 +242,15 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
             let cp = std::process::Command::new("sudo")
                 .args(["cp", &cert_display, &dest.display().to_string()])
                 .status();
-            if let Ok(status) = cp && status.success() {
+            if let Ok(status) = cp
+                && status.success()
+            {
                 let update = std::process::Command::new("sudo")
                     .args(["update-ca-certificates"])
                     .status();
-                if let Ok(s) = update && s.success() {
+                if let Ok(s) = update
+                    && s.success()
+                {
                     return TrustResult::Installed {
                         method: "update-ca-certificates (Debian/Ubuntu)".into(),
                     };
@@ -358,10 +364,7 @@ mod tests {
 
     #[test]
     fn write_and_load_round_trip() {
-        let dir = std::env::temp_dir().join(format!(
-            "wafrift_mitm_ca_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("wafrift_mitm_ca_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let ca = CertificateAuthority::generate().unwrap();
         ca.write_to_dir(&dir).unwrap();
@@ -398,10 +401,7 @@ mod tests {
 
     #[test]
     fn ensure_ca_generates_and_reloads() {
-        let dir = std::env::temp_dir().join(format!(
-            "wafrift_ensure_ca_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("wafrift_ensure_ca_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         // First call: generates.
@@ -415,4 +415,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

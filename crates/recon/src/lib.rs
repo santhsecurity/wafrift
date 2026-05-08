@@ -34,7 +34,10 @@ pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
     let body = res.text().await.context("failed to read crt.sh body")?;
     let subdomains = parse_crtsh_response(&body, domain)?;
 
-    tracing::info!(found = subdomains.len(), "discovered subdomains via CT logs");
+    tracing::info!(
+        found = subdomains.len(),
+        "discovered subdomains via CT logs"
+    );
     Ok(subdomains)
 }
 
@@ -89,19 +92,16 @@ pub async fn resolve_origins(hosts: &[String]) -> Result<Vec<String>> {
 pub fn is_edge_ip(ip: &str) -> bool {
     // Cloudflare IPv4 ranges (prefixes — not exhaustive, but covers most)
     const CF_PREFIXES: &[&str] = &[
-        "173.245.", "103.21.", "103.22.", "103.31.", "141.101.", "108.162.",
-        "190.93.", "188.114.", "197.234.", "198.41.", "162.158.", "104.16.",
-        "104.17.", "104.18.", "104.19.", "104.20.", "104.21.", "104.22.",
-        "104.23.", "104.24.", "104.25.", "104.26.", "104.27.",
+        "173.245.", "103.21.", "103.22.", "103.31.", "141.101.", "108.162.", "190.93.", "188.114.",
+        "197.234.", "198.41.", "162.158.", "104.16.", "104.17.", "104.18.", "104.19.", "104.20.",
+        "104.21.", "104.22.", "104.23.", "104.24.", "104.25.", "104.26.", "104.27.",
     ];
     // Fastly IPv4 prefixes
-    const FASTLY_PREFIXES: &[&str] = &[
-        "151.101.", "199.232.",
-    ];
+    const FASTLY_PREFIXES: &[&str] = &["151.101.", "199.232."];
     // AWS CloudFront prefix (partial)
     const CF_AWS_PREFIXES: &[&str] = &[
-        "13.32.", "13.33.", "13.35.", "52.84.", "52.85.", "54.182.", "54.192.", "54.230.", "54.239.",
-        "99.84.", "99.86.", "143.204.", "204.246.", "205.251.",
+        "13.32.", "13.33.", "13.35.", "52.84.", "52.85.", "54.182.", "54.192.", "54.230.",
+        "54.239.", "99.84.", "99.86.", "143.204.", "204.246.", "205.251.",
     ];
 
     CF_PREFIXES.iter().any(|p| ip.starts_with(p))
@@ -112,10 +112,7 @@ pub fn is_edge_ip(ip: &str) -> bool {
 /// Filter a list of IPs to remove known CDN/WAF edge addresses.
 #[must_use]
 pub fn filter_origin_ips(ips: &[String]) -> Vec<String> {
-    ips.iter()
-        .filter(|ip| !is_edge_ip(ip))
-        .cloned()
-        .collect()
+    ips.iter().filter(|ip| !is_edge_ip(ip)).cloned().collect()
 }
 
 #[cfg(test)]
@@ -134,11 +131,10 @@ mod tests {
         ]"#;
 
         let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(result, vec![
-            "api.example.com",
-            "mail.example.com",
-            "www.example.com",
-        ]);
+        assert_eq!(
+            result,
+            vec!["api.example.com", "mail.example.com", "www.example.com",]
+        );
     }
 
     #[test]
@@ -184,11 +180,10 @@ mod tests {
         ]"#;
 
         let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(result, vec![
-            "a.example.com",
-            "b.example.com",
-            "c.example.com",
-        ]);
+        assert_eq!(
+            result,
+            vec!["a.example.com", "b.example.com", "c.example.com",]
+        );
     }
 
     #[test]
@@ -199,10 +194,7 @@ mod tests {
         ]"#;
 
         let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(result, vec![
-            "api.example.com",
-            "www.example.com",
-        ]);
+        assert_eq!(result, vec!["api.example.com", "www.example.com",]);
     }
 
     // ── is_edge_ip tests ───────────────────────────────────────────────
@@ -239,10 +231,10 @@ mod tests {
     #[test]
     fn filters_edge_ips_from_list() {
         let ips = vec![
-            "10.0.0.1".to_string(),     // origin — keep
-            "104.16.0.1".to_string(),    // Cloudflare — filter
-            "192.168.1.1".to_string(),   // origin — keep
-            "151.101.0.1".to_string(),   // Fastly — filter
+            "10.0.0.1".to_string(),    // origin — keep
+            "104.16.0.1".to_string(),  // Cloudflare — filter
+            "192.168.1.1".to_string(), // origin — keep
+            "151.101.0.1".to_string(), // Fastly — filter
         ];
 
         let origins = filter_origin_ips(&ips);

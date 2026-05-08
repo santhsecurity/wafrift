@@ -393,7 +393,7 @@ fn technique_diversity(techniques: &[Technique]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mctrust::{TreeSearch, SearchConfig};
+    use mctrust::{SearchConfig, TreeSearch};
 
     #[test]
     fn mcts_bridge_finds_encoding_technique() {

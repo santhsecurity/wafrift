@@ -564,11 +564,7 @@ mod tests {
         let quarantined: Vec<_> = fs::read_dir(&tmp)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .contains(".corrupt.")
-            })
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt."))
             .collect();
         assert_eq!(
             quarantined.len(),
@@ -618,13 +614,12 @@ mod tests {
         let tmp_files: Vec<_> = fs::read_dir(&tmp)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .ends_with(".tmp")
-            })
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
-        assert!(tmp_files.is_empty(), "no .tmp files should remain after save");
+        assert!(
+            tmp_files.is_empty(),
+            "no .tmp files should remain after save"
+        );
 
         let _ = fs::remove_dir_all(&tmp);
     }

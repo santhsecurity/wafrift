@@ -112,7 +112,10 @@ mod tests {
     fn detects_aws_waf_block() {
         let headers = vec![("x-amzn-waf-action".to_string(), "block".to_string())];
         let signals = classify_headers(&headers);
-        assert!(signals.len() >= 2, "should detect both WAF header and block header");
+        assert!(
+            signals.len() >= 2,
+            "should detect both WAF header and block header"
+        );
     }
 
     #[test]
@@ -145,7 +148,11 @@ mod tests {
         let headers = vec![("x-amzn-waf-action".to_string(), "allow".to_string())];
         let signals = classify_headers(&headers);
         let has_allow = signals.iter().any(|s| {
-            if let Signal::BodyMarker(m) = s { m.contains("aws_waf_allow") } else { false }
+            if let Signal::BodyMarker(m) = s {
+                m.contains("aws_waf_allow")
+            } else {
+                false
+            }
         });
         assert!(has_allow, "should detect AWS WAF allow action");
     }

