@@ -21,13 +21,13 @@ pub(crate) const UNION_ALTERNATIVES: &[&str] = &[
     "UNION%0ASELECT",
     "UNION%09SELECT",
     "UNION%0D%0ASELECT",
-    "UNION%0BSELECT",       // Vertical tab
-    "UNION%0CSELECT",       // Form feed
-    "UNION%A0SELECT",       // Non-breaking space (Latin-1)
+    "UNION%0BSELECT", // Vertical tab
+    "UNION%0CSELECT", // Form feed
+    "UNION%A0SELECT", // Non-breaking space (Latin-1)
     // Comment-based splitting
     "UNION/**/SELECT",
     "UNION/*foo*/SELECT",
-    "UNION/*%00*/SELECT",   // Null byte inside comment
+    "UNION/*%00*/SELECT", // Null byte inside comment
     "/*!UNION*/ SELECT",
     "/*!UNION*//*!SELECT*/",
     "UNION/*! SELECT*/",
@@ -200,7 +200,9 @@ mod tests {
 
     #[test]
     fn double_keyword_bypass() {
-        assert!(UNION_ALTERNATIVES.iter().any(|a| a.contains("UNUNIONION")),
-            "should include double-keyword bypass");
+        assert!(
+            UNION_ALTERNATIVES.iter().any(|a| a.contains("UNUNIONION")),
+            "should include double-keyword bypass"
+        );
     }
 }

@@ -200,8 +200,16 @@ mod tests {
     #[test]
     fn sql_xss_polyglots_exist() {
         let polyglots = polyglots_for("sql");
-        assert!(polyglots.len() >= 7, "should have at least 7 SQL polyglots, got {}", polyglots.len());
-        assert!(polyglots.iter().any(|p| p.contains("<script>") || p.contains("<svg") || p.contains("<img")));
+        assert!(
+            polyglots.len() >= 7,
+            "should have at least 7 SQL polyglots, got {}",
+            polyglots.len()
+        );
+        assert!(
+            polyglots
+                .iter()
+                .any(|p| p.contains("<script>") || p.contains("<svg") || p.contains("<img"))
+        );
     }
 
     #[test]
@@ -214,7 +222,10 @@ mod tests {
     #[test]
     fn ssti_xss_polyglots_exist() {
         let polyglots = polyglots_for("ssti");
-        assert!(polyglots.len() >= 5, "should have at least 5 SSTI polyglots");
+        assert!(
+            polyglots.len() >= 5,
+            "should have at least 5 SSTI polyglots"
+        );
         assert!(
             polyglots
                 .iter()
@@ -236,7 +247,11 @@ mod tests {
     fn universal_polyglots_cover_multiple_contexts() {
         let universals = universal_polyglots();
         for p in &universals {
-            assert!(p.contexts.len() >= 2, "universal polyglots should cover 2+ contexts: {:?}", p.contexts);
+            assert!(
+                p.contexts.len() >= 2,
+                "universal polyglots should cover 2+ contexts: {:?}",
+                p.contexts
+            );
         }
     }
 
@@ -249,7 +264,11 @@ mod tests {
     #[test]
     fn total_polyglot_count() {
         let all = all_polyglots();
-        assert!(all.len() >= 25, "should have at least 25 total polyglots, got {}", all.len());
+        assert!(
+            all.len() >= 25,
+            "should have at least 25 total polyglots, got {}",
+            all.len()
+        );
     }
 
     #[test]

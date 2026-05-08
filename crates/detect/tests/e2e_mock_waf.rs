@@ -25,10 +25,7 @@ use wafrift_detect::{
 };
 
 /// Helper: make a GET request and return (status, headers, body).
-async fn fetch(
-    client: &Client,
-    url: &str,
-) -> (u16, Vec<(String, String)>, Vec<u8>) {
+async fn fetch(client: &Client, url: &str) -> (u16, Vec<(String, String)>, Vec<u8>) {
     let resp = client.get(url).send().await.expect("request failed");
     let status = resp.status().as_u16();
     let headers: Vec<(String, String)> = resp
@@ -70,7 +67,11 @@ async fn e2e_cloudflare_challenge_detected() {
     let wafs = waf_detect::detect(status, &headers, &body);
     assert!(!wafs.is_empty(), "should detect Cloudflare");
     assert_eq!(wafs[0].name, "Cloudflare");
-    assert!(wafs[0].confidence >= 0.5, "confidence should be high: {}", wafs[0].confidence);
+    assert!(
+        wafs[0].confidence >= 0.5,
+        "confidence should be high: {}",
+        wafs[0].confidence
+    );
 
     // Blocking
     assert!(is_blocked_response(status, &body));
@@ -226,7 +227,10 @@ async fn e2e_clean_response_no_false_positive() {
     let (status, headers, body) = fetch(&client, &server.uri()).await;
 
     let wafs = waf_detect::detect(status, &headers, &body);
-    assert!(wafs.is_empty(), "clean response should not trigger WAF detection, got: {wafs:?}");
+    assert!(
+        wafs.is_empty(),
+        "clean response should not trigger WAF detection, got: {wafs:?}"
+    );
 
     assert!(!is_blocked_response(status, &body));
 
@@ -279,7 +283,10 @@ async fn e2e_incapsula_cookie_detection() {
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("x-cdn", "Incapsula")
-                .insert_header("set-cookie", "visid_incap_1234=abcdef123; path=/; domain=.example.com")
+                .insert_header(
+                    "set-cookie",
+                    "visid_incap_1234=abcdef123; path=/; domain=.example.com",
+                )
                 .insert_header("x-iinfo", "10-12345678-0 0NNN RT(0")
                 .set_body_string("<html><body>Protected content</body></html>"),
         )
@@ -366,7 +373,11 @@ async fn e2e_status_change_detected_as_drift() {
     let fp2 = fingerprint(s2, &h2, &b2);
 
     let drift = compare(&fp1, &fp2);
-    assert!(drift.score >= 0.3, "status change should register drift: {}", drift.score);
+    assert!(
+        drift.score >= 0.3,
+        "status change should register drift: {}",
+        drift.score
+    );
     assert!(drift.changed.contains(&"status_code"));
     assert!(drift.likely_blocked);
 }

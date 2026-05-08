@@ -121,7 +121,10 @@ async fn run_async(args: &OriginHintsArgs) -> Result<(), String> {
         "Copy into EvasionConfig JSON (pick one host key and one IP):".bright_black()
     );
     let example = json!({ "origin_bypass": { &host: first_ip.to_string() } });
-    println!("{}", serde_json::to_string_pretty(&example).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&example).map_err(|e| e.to_string())?
+    );
 
     Ok(())
 }
@@ -136,10 +139,7 @@ mod tests {
             normalize_host("https://API.EXAMPLE.com/v1/x").unwrap(),
             "api.example.com"
         );
-        assert_eq!(
-            normalize_host("http://10.0.0.1:8080/").unwrap(),
-            "10.0.0.1"
-        );
+        assert_eq!(normalize_host("http://10.0.0.1:8080/").unwrap(), "10.0.0.1");
     }
 
     #[test]

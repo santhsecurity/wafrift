@@ -25,7 +25,7 @@ use wafrift_encoding::tamper::TamperRegistry;
 use wafrift_evolution::advisor;
 use wafrift_evolution::intelligence::IntelligenceLoop;
 use wafrift_grammar::grammar::{self, PayloadType};
-use wafrift_oracle::response_oracle::{ResponseOracle, ResponseContext};
+use wafrift_oracle::response_oracle::{ResponseContext, ResponseOracle};
 use wafrift_strategy::composition;
 use wafrift_strategy::cost;
 use wafrift_strategy::gene_bank::GeneBank;
@@ -51,7 +51,10 @@ pub(crate) fn scan_url_with_param(target: &str, param: &str, value_encoded: &str
 }
 
 /// Fire evasion variants against a live target and report bypass/block results.
-pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::CancellationToken) -> ExitCode {
+pub(crate) async fn run_scan(
+    args: ScanArgs,
+    cancel: tokio_util::sync::CancellationToken,
+) -> ExitCode {
     let target = args.target.trim_end_matches('/');
     let filter = match crate::TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,
@@ -296,11 +299,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
             "[2/7] Testing baseline (raw payload)...".bold().cyan()
         );
     }
-    let raw_url = scan_url_with_param(
-        target,
-        &args.param,
-        &urlencoding::encode(&args.payload),
-    );
+    let raw_url = scan_url_with_param(target, &args.param, &urlencoding::encode(&args.payload));
     let (raw_status, raw_blocked, raw_transport_ok) = match http.get(&raw_url).send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
@@ -321,7 +320,9 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         if scan_text {
             println!(
                 "  {}",
-                "⚠ Baseline inconclusive — fix connectivity and re-run".yellow().bold()
+                "⚠ Baseline inconclusive — fix connectivity and re-run"
+                    .yellow()
+                    .bold()
             );
         }
     } else if raw_blocked {
@@ -348,18 +349,18 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
     if scan_text && !diff_probes.is_empty() {
         println!(
             "\n{}",
-            format!("[2b/7] Differential probing — {} probes...", diff_probes.len())
-                .bold()
-                .cyan()
+            format!(
+                "[2b/7] Differential probing — {} probes...",
+                diff_probes.len()
+            )
+            .bold()
+            .cyan()
         );
     }
     for probe in &diff_probes {
         let probe_payload = format!("{:?}", probe.tests);
-        let probe_url = scan_url_with_param(
-            target,
-            &args.param,
-            &urlencoding::encode(&probe_payload),
-        );
+        let probe_url =
+            scan_url_with_param(target, &args.param, &urlencoding::encode(&probe_payload));
         let was_blocked = match http.get(&probe_url).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
@@ -383,7 +384,13 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
             println!(
                 "\n  {} {}",
                 "Differential insights:".bold().cyan(),
-                suggestions.iter().take(3).cloned().collect::<Vec<_>>().join(", ").yellow()
+                suggestions
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+                    .yellow()
             );
         }
     }
@@ -407,50 +414,47 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         if let Some(entry) = cache.get(&key)
             && entry.success_rate() > 0.5
         {
-                // Replay the winning pipeline's encoding on raw payload.
-                for tech in &entry.pipeline.techniques {
-                    let encoded = match tech {
-                        wafrift_types::Technique::PayloadEncoding(enc_name) => {
-                            encoding::all_strategies()
-                                .iter()
-                                .find(|s| s.as_str() == enc_name.as_str())
-                                .and_then(|s| encoding::encode(&args.payload, *s).ok())
-                        }
-                        _ => None,
-                    };
-                    if let Some(ref enc_payload) = encoded {
-                        let url = scan_url_with_param(
-                            target,
-                            &args.param,
-                            &urlencoding::encode(enc_payload),
-                        );
-                        if let Ok(resp) = http.get(&url).send().await {
-                            let status = resp.status().as_u16();
-                            let body = resp.bytes().await.unwrap_or_default();
-                            if !is_waf_block(status, &body) {
-                                cache_hit_bypass = true;
-                                bypassed += 1;
-                                total_fired += 1;
-                                bypass_variants.push((
-                                    0,
-                                    enc_payload.clone(),
-                                    vec![format!("cache_replay::{}", tech)],
-                                    0.95,
-                                ));
-                                if scan_text {
-                                    println!(
-                                        "  {} cached pipeline '{}' bypassed immediately!",
-                                        "⚡ Cache replay:".bold().green(),
-                                        entry.pipeline.name.yellow()
-                                    );
-                                }
-                                break;
+            // Replay the winning pipeline's encoding on raw payload.
+            for tech in &entry.pipeline.techniques {
+                let encoded = match tech {
+                    wafrift_types::Technique::PayloadEncoding(enc_name) => {
+                        encoding::all_strategies()
+                            .iter()
+                            .find(|s| s.as_str() == enc_name.as_str())
+                            .and_then(|s| encoding::encode(&args.payload, *s).ok())
+                    }
+                    _ => None,
+                };
+                if let Some(ref enc_payload) = encoded {
+                    let url =
+                        scan_url_with_param(target, &args.param, &urlencoding::encode(enc_payload));
+                    if let Ok(resp) = http.get(&url).send().await {
+                        let status = resp.status().as_u16();
+                        let body = resp.bytes().await.unwrap_or_default();
+                        if !is_waf_block(status, &body) {
+                            cache_hit_bypass = true;
+                            bypassed += 1;
+                            total_fired += 1;
+                            bypass_variants.push((
+                                0,
+                                enc_payload.clone(),
+                                vec![format!("cache_replay::{}", tech)],
+                                0.95,
+                            ));
+                            if scan_text {
+                                println!(
+                                    "  {} cached pipeline '{}' bypassed immediately!",
+                                    "⚡ Cache replay:".bold().green(),
+                                    entry.pipeline.name.yellow()
+                                );
                             }
+                            break;
                         }
                     }
                 }
             }
         }
+    }
 
     // Step 2d: Differential-guided strategy reorder.
     // Promote encoding strategies that match differential insights.
@@ -459,7 +463,13 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         println!(
             "  {} promoting: {}",
             "🎯 Diff-guided:".bold().cyan(),
-            diff_suggestions.iter().take(3).cloned().collect::<Vec<_>>().join(", ").yellow()
+            diff_suggestions
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+                .yellow()
         );
     }
 
@@ -468,7 +478,9 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         if cache_hit_bypass {
             println!(
                 "\n{}",
-                "[3/7] Exploring evasion variants (cache hit — already have a bypass)...".bold().cyan()
+                "[3/7] Exploring evasion variants (cache hit — already have a bypass)..."
+                    .bold()
+                    .cyan()
             );
         } else {
             println!("\n{}", "[3/7] Exploring evasion variants...".bold().cyan());
@@ -482,7 +494,12 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
     // Create the tamper registry for advanced payload transforms.
     let tamper_registry = TamperRegistry::with_defaults();
     // Tamper-only names that are NOVEL (not duplicating basic encoding::encode).
-    let novel_tamper_names: Vec<&str> = vec!["sql_comment", "whitespace_insertion", "null_byte", "overlong_utf8"];
+    let novel_tamper_names: Vec<&str> = vec![
+        "sql_comment",
+        "whitespace_insertion",
+        "null_byte",
+        "overlong_utf8",
+    ];
 
     // Concurrency level for parallel variant firing.
     let concurrency = if delay.is_zero() { 8_usize } else { 4 };
@@ -492,7 +509,10 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
     while variant_idx < variants.len() {
         if cancel.is_cancelled() {
             if scan_text {
-                println!("\n  {}", "⚠ Cancelled — skipping remaining variants".yellow().bold());
+                println!(
+                    "\n  {}",
+                    "⚠ Cancelled — skipping remaining variants".yellow().bold()
+                );
             }
             break;
         }
@@ -508,11 +528,8 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         // Fire all requests in this batch concurrently.
         let mut tasks = tokio::task::JoinSet::new();
         for (index, variant) in batch {
-            let url = scan_url_with_param(
-                target,
-                &args.param,
-                &urlencoding::encode(&variant.payload),
-            );
+            let url =
+                scan_url_with_param(target, &args.param, &urlencoding::encode(&variant.payload));
             let client = http.clone();
             let payload = variant.payload.clone();
             let techniques = variant.techniques.clone();
@@ -571,12 +588,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                 }
             } else {
                 bypassed += 1;
-                bypass_variants.push((
-                    total_fired,
-                    payload,
-                    techniques.clone(),
-                    confidence,
-                ));
+                bypass_variants.push((total_fired, payload, techniques.clone(), confidence));
                 // Record winning encoding strategies for exploitation.
                 for tech in &techniques {
                     if tech.starts_with("encoding::") {
@@ -655,7 +667,11 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                 break;
             }
             for tamper_name in &novel_tamper_names {
-                let tampered = match tamper_registry.tamper_with(tamper_name, &mutation.payload, tamper_context) {
+                let tampered = match tamper_registry.tamper_with(
+                    tamper_name,
+                    &mutation.payload,
+                    tamper_context,
+                ) {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
@@ -663,11 +679,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     continue;
                 }
 
-                let url = scan_url_with_param(
-                    target,
-                    &args.param,
-                    &urlencoding::encode(&tampered),
-                );
+                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&tampered));
 
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -778,7 +790,11 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         // Strategy: re-derive from original mutations — the encode is invertible for our purposes
         // because we're going to re-encode with different strategies anyway.
         let original_mutations = if !encoding_only {
-            grammar::mutate_as(&args.payload, payload_type, max_mutations_for_level(args.level))
+            grammar::mutate_as(
+                &args.payload,
+                payload_type,
+                max_mutations_for_level(args.level),
+            )
         } else {
             Vec::new()
         };
@@ -792,7 +808,11 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                 {
                     winning_raw_payloads.push((
                         mutation.payload.clone(),
-                        mutation.rules_applied.iter().map(|r| r.to_string()).collect(),
+                        mutation
+                            .rules_applied
+                            .iter()
+                            .map(|r| r.to_string())
+                            .collect(),
                     ));
                     break; // Don't add the same raw payload multiple times for different strategies
                 }
@@ -853,20 +873,22 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         let chainable: Vec<Strategy> = exploit_strategies
             .iter()
             .copied()
-            .filter(|s| matches!(
-                s,
-                Strategy::DoubleUrlEncode
-                    | Strategy::TripleUrlEncode
-                    | Strategy::UrlEncode
-                    | Strategy::UrlEncodeLower
-                    | Strategy::CaseAlternation
-                    | Strategy::RandomCase
-                    | Strategy::PercentagePrefix
-                    | Strategy::HtmlEntityEncode
-                    | Strategy::HtmlEntityDecimalEncode
-                    | Strategy::UnicodeEncode
-                    | Strategy::IisUnicodeEncode
-            ))
+            .filter(|s| {
+                matches!(
+                    s,
+                    Strategy::DoubleUrlEncode
+                        | Strategy::TripleUrlEncode
+                        | Strategy::UrlEncode
+                        | Strategy::UrlEncodeLower
+                        | Strategy::CaseAlternation
+                        | Strategy::RandomCase
+                        | Strategy::PercentagePrefix
+                        | Strategy::HtmlEntityEncode
+                        | Strategy::HtmlEntityDecimalEncode
+                        | Strategy::UnicodeEncode
+                        | Strategy::IisUnicodeEncode
+                )
+            })
             .collect();
 
         'chain_loop: for (bypass_payload, bypass_techs) in &encoded_bypass_payloads {
@@ -882,11 +904,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     continue;
                 }
 
-                let url = scan_url_with_param(
-                    target,
-                    &args.param,
-                    &urlencoding::encode(&chained),
-                );
+                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&chained));
 
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -961,11 +979,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     continue;
                 }
 
-                let url = scan_url_with_param(
-                    target,
-                    &args.param,
-                    &urlencoding::encode(&encoded),
-                );
+                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&encoded));
 
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -1057,11 +1071,8 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                         continue;
                     }
 
-                    let url = scan_url_with_param(
-                        target,
-                        &args.param,
-                        &urlencoding::encode(&encoded),
-                    );
+                    let url =
+                        scan_url_with_param(target, &args.param, &urlencoding::encode(&encoded));
 
                     let is_blocked = match http.get(&url).send().await {
                         Ok(resp) => {
@@ -1149,8 +1160,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
     } else if scan_text {
         println!(
             "\n\n{}",
-            "[4/7] No bypasses found to exploit — skipping amplification"
-                .bright_black()
+            "[4/7] No bypasses found to exploit — skipping amplification".bright_black()
         );
     }
 
@@ -1229,7 +1239,10 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                             args.param
                         );
                         http.post(target)
-                            .header("Content-Type", format!("multipart/form-data; boundary={boundary}"))
+                            .header(
+                                "Content-Type",
+                                format!("multipart/form-data; boundary={boundary}"),
+                            )
                             .body(body)
                             .send()
                             .await
@@ -1248,11 +1261,8 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     "x-forwarded-for" => {
                         // Inject payload in X-Forwarded-For header — many WAFs skip header inspection
                         // or whitelist requests that appear to come from internal IPs.
-                        let url = scan_url_with_param(
-                            target,
-                            &args.param,
-                            &urlencoding::encode(payload),
-                        );
+                        let url =
+                            scan_url_with_param(target, &args.param, &urlencoding::encode(payload));
                         http.get(&url)
                             .header("X-Forwarded-For", payload.as_str())
                             .send()
@@ -1261,11 +1271,8 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     "referer" => {
                         // Inject payload in Referer header — many WAFs don't inspect Referer,
                         // but some backends read it for analytics/redirect purposes.
-                        let url = scan_url_with_param(
-                            target,
-                            &args.param,
-                            &urlencoding::encode(payload),
-                        );
+                        let url =
+                            scan_url_with_param(target, &args.param, &urlencoding::encode(payload));
                         http.get(&url)
                             .header("Referer", format!("https://example.com/?{}", payload))
                             .send()
@@ -1329,9 +1336,13 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     0.0
                 };
                 let status = if *vb > 0 {
-                    format!("{vb}/{total} bypassed ({rate:.0}%)").green().to_string()
+                    format!("{vb}/{total} bypassed ({rate:.0}%)")
+                        .green()
+                        .to_string()
                 } else {
-                    format!("0/{total} — fully blocked").bright_black().to_string()
+                    format!("0/{total} — fully blocked")
+                        .bright_black()
+                        .to_string()
                 };
                 println!("  {} {}: {}", "→".bright_magenta(), name.yellow(), status);
             }
@@ -1339,8 +1350,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
     } else if scan_text {
         println!(
             "\n{}",
-            "[5/7] No bypasses — skipping multi-vector probing"
-                .bright_black()
+            "[5/7] No bypasses — skipping multi-vector probing".bright_black()
         );
     }
 
@@ -1397,17 +1407,22 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     "case_mixing" => header_obfuscation::case_mix(header_name),
                     "underscore_sub" => header_obfuscation::underscore_substitute(header_name),
                     "null_byte" => header_obfuscation::null_byte_inject(header_name),
-                    "whitespace_pad" => header_obfuscation::whitespace_pad(header_name, "application/x-www-form-urlencoded"),
-                    "trailing_space" => header_obfuscation::trailing_space(header_name, "application/x-www-form-urlencoded"),
-                    "line_fold" => header_obfuscation::line_fold(header_name, "application/x-www-form-urlencoded"),
+                    "whitespace_pad" => header_obfuscation::whitespace_pad(
+                        header_name,
+                        "application/x-www-form-urlencoded",
+                    ),
+                    "trailing_space" => header_obfuscation::trailing_space(
+                        header_name,
+                        "application/x-www-form-urlencoded",
+                    ),
+                    "line_fold" => header_obfuscation::line_fold(
+                        header_name,
+                        "application/x-www-form-urlencoded",
+                    ),
                     _ => header_name.to_string(),
                 };
 
-                let url = scan_url_with_param(
-                    target,
-                    &args.param,
-                    &urlencoding::encode(payload),
-                );
+                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(payload));
 
                 let verdict = match http
                     .get(&url)
@@ -1442,12 +1457,7 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                         .map(|(_, _, t, _)| t.clone())
                         .unwrap_or_default();
                     techs.push(format!("header::{technique_name}"));
-                    bypass_variants.push((
-                        total_fired,
-                        payload.clone(),
-                        techs,
-                        0.85,
-                    ));
+                    bypass_variants.push((total_fired, payload.clone(), techs, 0.85));
                     if scan_text {
                         print!("{}", "!".bright_green().bold());
                     }
@@ -1479,7 +1489,9 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
         if scan_text {
             println!(
                 "\n{}",
-                "[7/7] Intelligence loop — evolving candidates...".bold().cyan()
+                "[7/7] Intelligence loop — evolving candidates..."
+                    .bold()
+                    .cyan()
             );
         }
 
@@ -1500,11 +1512,17 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
             if let Some((idx, chromosome)) = intel_loop.next_candidate() {
                 // Use the chromosome's gene flags to build a payload variant.
                 let has_grammar = chromosome.genes.iter().any(|(k, _)| k == "grammar");
-                let enc_gene = chromosome.genes.iter().find(|(k, _)| k == "encoding").map(|(_, v)| v.clone());
+                let enc_gene = chromosome
+                    .genes
+                    .iter()
+                    .find(|(k, _)| k == "encoding")
+                    .map(|(_, v)| v.clone());
 
                 let intel_payload = if has_grammar {
                     let mutations = grammar::mutate_as(&args.payload, payload_type, 1);
-                    mutations.first().map_or(args.payload.clone(), |m| m.payload.clone())
+                    mutations
+                        .first()
+                        .map_or(args.payload.clone(), |m| m.payload.clone())
                 } else {
                     args.payload.clone()
                 };
@@ -1514,16 +1532,15 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
                     encoding::all_strategies()
                         .iter()
                         .find(|s| s.as_str() == enc_name.as_str())
-                        .map_or(intel_payload.clone(), |s| encoding::encode(&intel_payload, *s).unwrap_or_else(|_| intel_payload.clone()))
+                        .map_or(intel_payload.clone(), |s| {
+                            encoding::encode(&intel_payload, *s)
+                                .unwrap_or_else(|_| intel_payload.clone())
+                        })
                 } else {
                     intel_payload.clone()
                 };
 
-                let url = scan_url_with_param(
-                    target,
-                    &args.param,
-                    &urlencoding::encode(&encoded),
-                );
+                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&encoded));
 
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -1801,66 +1818,70 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
     if !bypass_variants.is_empty()
         && let Some(ref mut cache) = learning_cache
     {
-            // Build a pipeline from the best winning technique combination.
-            let best_techniques: Vec<wafrift_types::Technique> = bypass_variants
-                .first()
-                .map(|(_, _, techs, _)| {
-                    techs
-                        .iter()
-                        .map(|t| {
-                            if t.starts_with("encoding::") {
-                                wafrift_types::Technique::PayloadEncoding(t.clone())
-                            } else if t.starts_with("tamper::") {
-                                wafrift_types::Technique::GrammarMutation(t.clone())
-                            } else if t.starts_with("vector::") {
-                                wafrift_types::Technique::ContentTypeSwitch(t.clone())
-                            } else {
-                                wafrift_types::Technique::GrammarMutation(t.clone())
-                            }
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+        // Build a pipeline from the best winning technique combination.
+        let best_techniques: Vec<wafrift_types::Technique> = bypass_variants
+            .first()
+            .map(|(_, _, techs, _)| {
+                techs
+                    .iter()
+                    .map(|t| {
+                        if t.starts_with("encoding::") {
+                            wafrift_types::Technique::PayloadEncoding(t.clone())
+                        } else if t.starts_with("tamper::") {
+                            wafrift_types::Technique::GrammarMutation(t.clone())
+                        } else if t.starts_with("vector::") {
+                            wafrift_types::Technique::ContentTypeSwitch(t.clone())
+                        } else {
+                            wafrift_types::Technique::GrammarMutation(t.clone())
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
-            // Validate composition ordering.
-            let layers: Vec<composition::EvasionLayer> = best_techniques
-                .iter()
-                .map(|t| match t {
-                    wafrift_types::Technique::PayloadEncoding(_) => composition::EvasionLayer::Encoding,
-                    wafrift_types::Technique::GrammarMutation(_) => composition::EvasionLayer::Grammar,
-                    wafrift_types::Technique::ContentTypeSwitch(_) => composition::EvasionLayer::ContentType,
-                    wafrift_types::Technique::HeaderObfuscation(_) => composition::EvasionLayer::Header,
-                    _ => composition::EvasionLayer::Encoding,
-                })
-                .collect();
-            let valid_order = composition::is_valid_sequence(&layers);
+        // Validate composition ordering.
+        let layers: Vec<composition::EvasionLayer> = best_techniques
+            .iter()
+            .map(|t| match t {
+                wafrift_types::Technique::PayloadEncoding(_) => composition::EvasionLayer::Encoding,
+                wafrift_types::Technique::GrammarMutation(_) => composition::EvasionLayer::Grammar,
+                wafrift_types::Technique::ContentTypeSwitch(_) => {
+                    composition::EvasionLayer::ContentType
+                }
+                wafrift_types::Technique::HeaderObfuscation(_) => composition::EvasionLayer::Header,
+                _ => composition::EvasionLayer::Encoding,
+            })
+            .collect();
+        let valid_order = composition::is_valid_sequence(&layers);
 
-            let pipeline_cost = cost::pipeline_cost(&best_techniques);
-            let pipeline = EvasionPipeline::new(
-                format!("auto_{waf_name}_{payload_type_str}"),
-                best_techniques,
+        let pipeline_cost = cost::pipeline_cost(&best_techniques);
+        let pipeline = EvasionPipeline::new(
+            format!("auto_{waf_name}_{payload_type_str}"),
+            best_techniques,
+            pipeline_cost,
+        );
+
+        let key = CacheKey::new(&waf_name, &payload_type_str);
+        cache.record_success(key, pipeline);
+        if let Err(e) = cache.save() {
+            eprintln!("  {} {}", "⚠ Learning cache save failed:".yellow(), e);
+        } else if scan_text {
+            println!(
+                "{} {} (cost: {}, valid order: {})",
+                "📦".bold(),
+                "Learning cache updated".bold().cyan(),
                 pipeline_cost,
+                if valid_order { "yes" } else { "no" }
             );
-
-            let key = CacheKey::new(&waf_name, &payload_type_str);
-            cache.record_success(key, pipeline);
-            if let Err(e) = cache.save() {
-                eprintln!("  {} {}", "⚠ Learning cache save failed:".yellow(), e);
-            } else if scan_text {
-                println!(
-                    "{} {} (cost: {}, valid order: {})",
-                    "📦".bold(),
-                    "Learning cache updated".bold().cyan(),
-                    pipeline_cost,
-                    if valid_order { "yes" } else { "no" }
-                );
         }
     }
 
     if args.report_layers && scan_text {
         println!(
             "\n{}",
-            "Layer summary (docs/GAP_CLOSURE_ROADMAP.md):".bold().bright_black()
+            "Layer summary (docs/GAP_CLOSURE_ROADMAP.md):"
+                .bold()
+                .bright_black()
         );
         println!(
             "  network: baseline_get_status={}  detection: {} candidate(s)  baseline_probe: raw_get_status={} treated_as_blocked={}  evasion: bypass_rate={:.1}%",
@@ -1875,4 +1896,3 @@ pub(crate) async fn run_scan(args: ScanArgs, cancel: tokio_util::sync::Cancellat
     println!();
     ExitCode::SUCCESS
 }
-

@@ -144,7 +144,8 @@ fn default_weight() -> f64 {
 /// This is the concatenation of all `rules/detect/*.toml` files,
 /// baked into the binary so `cargo install wafrift` produces a
 /// standalone executable with no runtime filesystem dependency.
-const EMBEDDED_RULES_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_detect_rules.toml"));
+const EMBEDDED_RULES_TOML: &str =
+    include_str!(concat!(env!("OUT_DIR"), "/embedded_detect_rules.toml"));
 
 impl RuleEngine {
     /// Load WAF detection rules.
@@ -167,8 +168,8 @@ impl RuleEngine {
         };
 
         // Tier 1: Try compile-time embedded rules.
-        let embedded_ok = engine.load_from_str(EMBEDDED_RULES_TOML).is_ok()
-            && !engine.rules.is_empty();
+        let embedded_ok =
+            engine.load_from_str(EMBEDDED_RULES_TOML).is_ok() && !engine.rules.is_empty();
 
         // Tier 2: Filesystem fallback (development, or if embedded is empty).
         if !embedded_ok {
@@ -376,9 +377,7 @@ impl RuleEngine {
                 }
 
                 let mut matched = false;
-                let entry = waf_scores
-                    .entry(name)
-                    .or_insert_with(|| (0.0, Vec::new()));
+                let entry = waf_scores.entry(name).or_insert_with(|| (0.0, Vec::new()));
 
                 if let Some(expected) = sig.status_code
                     && status == expected

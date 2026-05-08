@@ -104,7 +104,10 @@ mod tests {
     fn technique_display() {
         let t = Technique::PayloadEncoding("UrlEncode".into());
         assert_eq!(t.to_string(), "encoding:UrlEncode");
-        assert_eq!(Technique::from_pool_key("encoding:UrlEncode"), Some(t.clone()));
+        assert_eq!(
+            Technique::from_pool_key("encoding:UrlEncode"),
+            Some(t.clone())
+        );
         assert_eq!(
             Technique::GrammarMutation("sql_tautology".into()).to_string(),
             "grammar:sql_tautology"

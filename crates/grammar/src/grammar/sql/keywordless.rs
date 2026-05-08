@@ -143,12 +143,51 @@ mod tests {
     #[test]
     fn keywordless_tautologies_contain_no_sql_keywords() {
         let sql_keywords = [
-            "select", "union", "insert", "update", "delete", "drop", "where", "from",
-            "order", "group", "having", "like", "between", "case", "when", "then",
-            "else", "end", "join", "left", "right", "inner", "outer", "null",
-            "is", "not", "and", "or", "in", "exists", "into", "values", "set",
-            "alter", "create", "table", "database", "schema", "exec", "execute",
-            "waitfor", "sleep", "benchmark", "if", "iif",
+            "select",
+            "union",
+            "insert",
+            "update",
+            "delete",
+            "drop",
+            "where",
+            "from",
+            "order",
+            "group",
+            "having",
+            "like",
+            "between",
+            "case",
+            "when",
+            "then",
+            "else",
+            "end",
+            "join",
+            "left",
+            "right",
+            "inner",
+            "outer",
+            "null",
+            "is",
+            "not",
+            "and",
+            "or",
+            "in",
+            "exists",
+            "into",
+            "values",
+            "set",
+            "alter",
+            "create",
+            "table",
+            "database",
+            "schema",
+            "exec",
+            "execute",
+            "waitfor",
+            "sleep",
+            "benchmark",
+            "if",
+            "iif",
         ];
         for (tautology, _) in KEYWORDLESS_TAUTOLOGIES {
             let lower = tautology.to_ascii_lowercase();
@@ -164,8 +203,8 @@ mod tests {
     #[test]
     fn keywordless_injections_contain_no_dangerous_keywords() {
         let dangerous_keywords = [
-            "select", "union", "insert", "update", "delete", "drop",
-            "where", "from", "order", "group", "having",
+            "select", "union", "insert", "update", "delete", "drop", "where", "from", "order",
+            "group", "having",
         ];
         for (injection, _) in KEYWORDLESS_INJECTIONS {
             let lower = injection.to_ascii_lowercase();

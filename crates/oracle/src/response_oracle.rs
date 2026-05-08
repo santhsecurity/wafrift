@@ -88,56 +88,58 @@ impl ResponseOracle {
 
         // ── H2 GOAWAY ──
         if let Some(ref reason) = ctx.h2_goaway
-            && let Some(s) = classify_h2_goaway(reason) {
-                signals.push(s);
-            }
+            && let Some(s) = classify_h2_goaway(reason)
+        {
+            signals.push(s);
+        }
 
         // ── Calibration drift ──
         if let Some(ref cal) = self.calibration
-            && cal.is_complete() {
-                let benign_drift = cal.drift_from_benign(ctx.status, ctx.body.len());
-                let blocked_drift = cal.drift_from_blocked(ctx.status, ctx.body.len());
+            && cal.is_complete()
+        {
+            let benign_drift = cal.drift_from_benign(ctx.status, ctx.body.len());
+            let blocked_drift = cal.drift_from_blocked(ctx.status, ctx.body.len());
 
-                match (benign_drift, blocked_drift) {
-                    (Some(b), Some(bl)) => {
-                        if b.is_closer_than(&bl) {
-                            signals.push(Signal::FingerprintDrift(
-                                "closer to benign baseline".into(),
-                            ));
-                        } else if bl.is_closer_than(&b) {
-                            signals.push(Signal::FingerprintDrift(
-                                "closer to blocked baseline".into(),
-                            ));
-                        } else {
-                            signals.push(Signal::FingerprintDrift(
-                                "equidistant from baselines".into(),
-                            ));
-                        }
-                    }
-                    (Some(_), None) => {
-                        signals.push(Signal::FingerprintDrift(
-                            "closer to benign baseline".into(),
-                        ));
-                    }
-                    (None, Some(_)) => {
+            match (benign_drift, blocked_drift) {
+                (Some(b), Some(bl)) => {
+                    if b.is_closer_than(&bl) {
+                        signals.push(Signal::FingerprintDrift("closer to benign baseline".into()));
+                    } else if bl.is_closer_than(&b) {
                         signals.push(Signal::FingerprintDrift(
                             "closer to blocked baseline".into(),
                         ));
+                    } else {
+                        signals.push(Signal::FingerprintDrift(
+                            "equidistant from baselines".into(),
+                        ));
                     }
-                    _ => {}
                 }
+                (Some(_), None) => {
+                    signals.push(Signal::FingerprintDrift("closer to benign baseline".into()));
+                }
+                (None, Some(_)) => {
+                    signals.push(Signal::FingerprintDrift(
+                        "closer to blocked baseline".into(),
+                    ));
+                }
+                _ => {}
             }
+        }
 
         // ── Resolve challenge vs block vs rate-limit from body ──
         let has_challenge = signals.iter().any(|s| {
             matches!(s, Signal::ChallengePlatform(_))
                 || matches!(s, Signal::BodyMarker(m) if m.contains("challenge"))
         });
-        let has_rate_limit = signals.iter().any(|s| {
-            matches!(s, Signal::BodyMarker(m) if m.contains("rate-limit"))
-        });
-        let has_block_marker = body_signals.iter().any(|s| matches!(s, Signal::BodyMarker(_)));
-        let has_success_marker = body_signals.iter().any(|s| matches!(s, Signal::SuccessMarker(_)));
+        let has_rate_limit = signals
+            .iter()
+            .any(|s| matches!(s, Signal::BodyMarker(m) if m.contains("rate-limit")));
+        let has_block_marker = body_signals
+            .iter()
+            .any(|s| matches!(s, Signal::BodyMarker(_)));
+        let has_success_marker = body_signals
+            .iter()
+            .any(|s| matches!(s, Signal::SuccessMarker(_)));
 
         // If status says allowed but body has block markers, that's a conflict.
         if status_verdict.is_allowed() && has_block_marker {
@@ -203,10 +205,7 @@ impl ResponseOracle {
         if !competing.is_empty() {
             return Verdict::Ambiguous {
                 competing,
-                explanation: format!(
-                    "status {} conflicts with body markers",
-                    ctx.status
-                ),
+                explanation: format!("status {} conflicts with body markers", ctx.status),
             };
         }
 
@@ -333,13 +332,17 @@ mod tests {
         // 200 with RST should still be allowed by status, but connection signal is present
         assert!(v.is_allowed());
         let signals = v.signals();
-        assert!(signals.iter().any(|s| matches!(s, Signal::ConnectionBehavior(ConnectionBehavior::TcpReset))));
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s, Signal::ConnectionBehavior(ConnectionBehavior::TcpReset)))
+        );
     }
 
     #[test]
     fn adversarial_gzipped_block_page() {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -356,7 +359,11 @@ mod tests {
         let v = oracle.classify(&ctx);
         assert!(v.is_blocked());
         let signals = v.signals();
-        assert!(signals.iter().any(|s| matches!(s, Signal::BodyMarker(m) if m == "access denied")));
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s, Signal::BodyMarker(m) if m == "access denied"))
+        );
     }
 
     #[test]
@@ -374,7 +381,11 @@ mod tests {
         let v = oracle.classify(&ctx);
         assert!(v.is_allowed());
         let signals = v.signals();
-        assert!(signals.iter().any(|s| matches!(s, Signal::FingerprintDrift(_))));
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s, Signal::FingerprintDrift(_)))
+        );
     }
 
     #[test]

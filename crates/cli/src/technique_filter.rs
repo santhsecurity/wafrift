@@ -70,10 +70,7 @@ impl TechniqueFilter {
     /// Build a filter. Empty `only` means "include everything by default".
     /// Returns `Err` listing any selectors that don't match a known family
     /// or leaf — fail-fast rather than silently drop.
-    pub fn parse(
-        only: &[String],
-        exclude: &[String],
-    ) -> Result<Self, String> {
+    pub fn parse(only: &[String], exclude: &[String]) -> Result<Self, String> {
         let only = split_csv(only);
         let exclude = split_csv(exclude);
         let known = all_known_paths();
@@ -160,8 +157,7 @@ fn all_known_paths() -> Vec<&'static str> {
 fn is_known(selector: &str, known: &[&'static str]) -> bool {
     known.iter().any(|leaf| {
         *leaf == selector
-            || (leaf.starts_with(selector)
-                && leaf.as_bytes().get(selector.len()) == Some(&b'/'))
+            || (leaf.starts_with(selector) && leaf.as_bytes().get(selector.len()) == Some(&b'/'))
     })
 }
 
@@ -215,11 +211,8 @@ mod tests {
 
     #[test]
     fn only_plus_exclude_compose() {
-        let f = TechniqueFilter::parse(
-            &["encoding/url".into()],
-            &["encoding/url/triple".into()],
-        )
-        .expect("parses");
+        let f = TechniqueFilter::parse(&["encoding/url".into()], &["encoding/url/triple".into()])
+            .expect("parses");
         assert!(f.allows_strategy(Strategy::UrlEncode));
         assert!(f.allows_strategy(Strategy::DoubleUrlEncode));
         assert!(!f.allows_strategy(Strategy::TripleUrlEncode));
@@ -234,11 +227,8 @@ mod tests {
 
     #[test]
     fn comma_separated_lists_split() {
-        let f = TechniqueFilter::parse(
-            &["encoding/url,encoding/unicode".into()],
-            &[],
-        )
-        .expect("parses");
+        let f =
+            TechniqueFilter::parse(&["encoding/url,encoding/unicode".into()], &[]).expect("parses");
         assert!(f.allows_strategy(Strategy::DoubleUrlEncode));
         assert!(f.allows_strategy(Strategy::OverlongUtf8));
         assert!(!f.allows_strategy(Strategy::HtmlEntityEncode));

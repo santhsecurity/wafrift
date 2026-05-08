@@ -96,11 +96,7 @@ fn completion_help() {
 
 #[test]
 fn evade_sql_injection() {
-    let (code, stdout, _) = wafrift(&[
-        "evade",
-        "--payload", "' OR 1=1--",
-        "--level", "light",
-    ]);
+    let (code, stdout, _) = wafrift(&["evade", "--payload", "' OR 1=1--", "--level", "light"]);
     assert_eq!(code, 0, "evade should succeed");
     assert!(
         stdout.contains("SQL") || stdout.contains("sql"),
@@ -112,8 +108,10 @@ fn evade_sql_injection() {
 fn evade_xss() {
     let (code, stdout, _) = wafrift(&[
         "evade",
-        "--payload", "<script>alert(1)</script>",
-        "--level", "light",
+        "--payload",
+        "<script>alert(1)</script>",
+        "--level",
+        "light",
     ]);
     assert_eq!(code, 0, "evade should succeed");
     assert!(
@@ -124,11 +122,7 @@ fn evade_xss() {
 
 #[test]
 fn evade_encoding_only() {
-    let (code, stdout, _) = wafrift(&[
-        "evade",
-        "--payload", "test_payload",
-        "--encoding-only",
-    ]);
+    let (code, stdout, _) = wafrift(&["evade", "--payload", "test_payload", "--encoding-only"]);
     assert_eq!(code, 0, "evade --encoding-only should succeed");
     // Should produce some output
     assert!(!stdout.is_empty(), "should produce output");
@@ -137,12 +131,11 @@ fn evade_encoding_only() {
 #[test]
 fn evade_all_levels() {
     for level in &["light", "medium", "heavy"] {
-        let (code, _stdout, stderr) = wafrift(&[
-            "evade",
-            "--payload", "1=1",
-            "--level", level,
-        ]);
-        assert_eq!(code, 0, "evade --level {level} should succeed: stderr={stderr}");
+        let (code, _stdout, stderr) = wafrift(&["evade", "--payload", "1=1", "--level", level]);
+        assert_eq!(
+            code, 0,
+            "evade --level {level} should succeed: stderr={stderr}"
+        );
     }
 }
 
@@ -152,8 +145,10 @@ fn evade_all_levels() {
 fn detect_cloudflare() {
     let (code, stdout, _) = wafrift(&[
         "detect",
-        "--status", "403",
-        "--headers", "server: cloudflare",
+        "--status",
+        "403",
+        "--headers",
+        "server: cloudflare",
     ]);
     assert_eq!(code, 0);
     assert!(
@@ -166,9 +161,12 @@ fn detect_cloudflare() {
 fn detect_modsecurity() {
     let (code, stdout, _) = wafrift(&[
         "detect",
-        "--status", "403",
-        "--headers", "server: Apache",
-        "--body", "ModSecurity Action",
+        "--status",
+        "403",
+        "--headers",
+        "server: Apache",
+        "--body",
+        "ModSecurity Action",
     ]);
     assert_eq!(code, 0);
     assert!(
@@ -179,11 +177,7 @@ fn detect_modsecurity() {
 
 #[test]
 fn detect_unknown_waf() {
-    let (code, stdout, _) = wafrift(&[
-        "detect",
-        "--status", "200",
-        "--headers", "server: nginx",
-    ]);
+    let (code, stdout, _) = wafrift(&["detect", "--status", "200", "--headers", "server: nginx"]);
     assert_eq!(code, 0);
     // Should handle gracefully even with no WAF detected
     // Output can be "No WAF detected" or empty — just shouldn't crash
@@ -211,7 +205,8 @@ fn completion_bash() {
     assert_eq!(code, 0, "bash completion should succeed");
     assert!(
         stdout.contains("complete") || stdout.contains("wafrift") || stdout.contains("_wafrift"),
-        "should produce bash completion script: {}", &stdout[..stdout.len().min(200)]
+        "should produce bash completion script: {}",
+        &stdout[..stdout.len().min(200)]
     );
 }
 
@@ -236,11 +231,8 @@ fn unknown_subcommand_fails() {
 
 #[test]
 fn invalid_level_fails() {
-    let (code, _stdout, stderr) = wafrift(&[
-        "evade",
-        "--payload", "test",
-        "--level", "nonexistent_level",
-    ]);
+    let (code, _stdout, stderr) =
+        wafrift(&["evade", "--payload", "test", "--level", "nonexistent_level"]);
     assert_ne!(code, 0, "invalid level should fail");
     assert!(
         stderr.contains("error") || stderr.contains("invalid"),

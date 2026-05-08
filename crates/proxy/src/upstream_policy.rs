@@ -93,7 +93,10 @@ pub async fn assert_forward_url_allowed(url: &str, policy: &UpstreamPolicy) -> R
 }
 
 /// Validate `CONNECT` authority `host:port` before tunnel/MITM.
-pub async fn assert_connect_target_allowed(addr: &str, policy: &UpstreamPolicy) -> Result<(), String> {
+pub async fn assert_connect_target_allowed(
+    addr: &str,
+    policy: &UpstreamPolicy,
+) -> Result<(), String> {
     if policy.insecure_open_upstream {
         return Ok(());
     }
@@ -107,9 +110,7 @@ pub async fn assert_connect_target_allowed(addr: &str, policy: &UpstreamPolicy) 
     let port = authority.port_u16().unwrap_or(443);
     if let Ok(ip) = host.parse::<IpAddr>() {
         if ip_addr_is_bogon(ip) {
-            return Err(format!(
-                "refusing CONNECT to non-public literal IP {ip}"
-            ));
+            return Err(format!("refusing CONNECT to non-public literal IP {ip}"));
         }
         return Ok(());
     }

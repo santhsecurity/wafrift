@@ -89,22 +89,23 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     // ── Unicode string via NCHAR ──
     // Build string from NCHAR values — invisible to keyword filters
     if let Some(start) = payload.find('\'')
-        && let Some(end) = payload[start + 1..].find('\'') {
-            let inner = &payload[start + 1..start + 1 + end];
-            if !inner.is_empty() && inner.len() <= 15 && results.len() < max_mutations {
-                let nchar_chain: String = inner
-                    .chars()
-                    .map(|c| format!("NCHAR({})", c as u32))
-                    .collect::<Vec<_>>()
-                    .join("+");
-                results.push(format!(
-                    "{}{}{}",
-                    &payload[..start],
-                    nchar_chain,
-                    &payload[start + 1 + end + 1..]
-                ));
-            }
+        && let Some(end) = payload[start + 1..].find('\'')
+    {
+        let inner = &payload[start + 1..start + 1 + end];
+        if !inner.is_empty() && inner.len() <= 15 && results.len() < max_mutations {
+            let nchar_chain: String = inner
+                .chars()
+                .map(|c| format!("NCHAR({})", c as u32))
+                .collect::<Vec<_>>()
+                .join("+");
+            results.push(format!(
+                "{}{}{}",
+                &payload[..start],
+                nchar_chain,
+                &payload[start + 1 + end + 1..]
+            ));
         }
+    }
 
     results.truncate(max_mutations);
     results
@@ -145,7 +146,11 @@ mod tests {
     #[test]
     fn convert_cast_error_based() {
         let mutations = mutate("' OR 1=1--", 30);
-        assert!(mutations.iter().any(|m| m.contains("CONVERT(int,@@version)")));
+        assert!(
+            mutations
+                .iter()
+                .any(|m| m.contains("CONVERT(int,@@version)"))
+        );
     }
 
     #[test]

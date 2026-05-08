@@ -129,21 +129,26 @@ fn has_ssrf_structure(payload: &str) -> bool {
     let has_scheme = URL_SCHEMES.iter().any(|scheme| lower.starts_with(scheme));
 
     // Check for SSRF indicator hosts
-    let has_indicator_host = ssrf_indicator_hosts().iter().any(|host| lower.contains(host));
+    let has_indicator_host = ssrf_indicator_hosts()
+        .iter()
+        .any(|host| lower.contains(host));
 
     // Check for private IP prefixes
-    let has_private_ip = private_ip_prefixes().iter().any(|prefix| {
-        lower.contains(prefix) || lower.contains(&prefix.replace('.', "_"))
-    });
+    let has_private_ip = private_ip_prefixes()
+        .iter()
+        .any(|prefix| lower.contains(prefix) || lower.contains(&prefix.replace('.', "_")));
 
     // Check for internal path indicators
-    let has_internal_path = internal_path_indicators().iter().any(|path| lower.contains(path));
+    let has_internal_path = internal_path_indicators()
+        .iter()
+        .any(|path| lower.contains(path));
 
     // Valid SSRF structure: scheme + (indicator host OR private IP OR internal path)
     // OR protocol-relative URL (//localhost)
     let is_protocol_relative = payload.starts_with("//");
 
-    has_scheme && (has_indicator_host || has_private_ip || has_internal_path) || is_protocol_relative
+    has_scheme && (has_indicator_host || has_private_ip || has_internal_path)
+        || is_protocol_relative
 }
 
 /// Validates that the payload looks like a parseable URL.
@@ -160,9 +165,9 @@ fn has_valid_url_syntax(payload: &str) -> bool {
     match url::Url::parse(payload) {
         Ok(url) => {
             // Must have a scheme we recognize
-            let scheme_ok = URL_SCHEMES.iter().any(|s| {
-                s.trim_end_matches("://") == url.scheme()
-            });
+            let scheme_ok = URL_SCHEMES
+                .iter()
+                .any(|s| s.trim_end_matches("://") == url.scheme());
             if !scheme_ok {
                 return false;
             }
@@ -209,28 +214,21 @@ mod tests {
     #[test]
     fn localhost_http_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://localhost/admin",
-            "http://localhost/admin",
-        ));
+        assert!(oracle.is_semantically_valid("http://localhost/admin", "http://localhost/admin",));
     }
 
     #[test]
     fn loopback_ip_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://127.0.0.1/",
-            "http://127.0.0.1/",
-        ));
+        assert!(oracle.is_semantically_valid("http://127.0.0.1/", "http://127.0.0.1/",));
     }
 
     #[test]
     fn https_localhost_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "https://localhost:8443/",
-            "https://localhost:8443/",
-        ));
+        assert!(
+            oracle.is_semantically_valid("https://localhost:8443/", "https://localhost:8443/",)
+        );
     }
 
     #[test]
@@ -254,92 +252,71 @@ mod tests {
     #[test]
     fn ipv6_loopback_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://[::1]/admin",
-            "http://[::1]/admin",
-        ));
+        assert!(oracle.is_semantically_valid("http://[::1]/admin", "http://[::1]/admin",));
     }
 
     #[test]
     fn ipv4_mapped_ipv6_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://[::ffff:127.0.0.1]/",
-            "http://[::ffff:127.0.0.1]/",
-        ));
+        assert!(
+            oracle
+                .is_semantically_valid("http://[::ffff:127.0.0.1]/", "http://[::ffff:127.0.0.1]/",)
+        );
     }
 
     #[test]
     fn private_ip_10_x_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://10.0.0.1/internal",
-            "http://10.0.0.1/internal",
-        ));
+        assert!(
+            oracle.is_semantically_valid("http://10.0.0.1/internal", "http://10.0.0.1/internal",)
+        );
     }
 
     #[test]
     fn private_ip_192_168_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://192.168.1.1/",
-            "http://192.168.1.1/",
-        ));
+        assert!(oracle.is_semantically_valid("http://192.168.1.1/", "http://192.168.1.1/",));
     }
 
     #[test]
     fn ip_integer_encoding_valid() {
         let oracle = SsrfOracle;
         // 127.0.0.1 as 32-bit integer
-        assert!(oracle.is_semantically_valid(
-            "http://2130706433/",
-            "http://2130706433/",
-        ));
+        assert!(oracle.is_semantically_valid("http://2130706433/", "http://2130706433/",));
     }
 
     #[test]
     fn ip_octal_encoding_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://0177.0.0.1/",
-            "http://0177.0.0.1/",
-        ));
+        assert!(oracle.is_semantically_valid("http://0177.0.0.1/", "http://0177.0.0.1/",));
     }
 
     #[test]
     fn protocol_relative_url_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "//localhost/admin",
-            "//localhost/admin",
-        ));
+        assert!(oracle.is_semantically_valid("//localhost/admin", "//localhost/admin",));
     }
 
     #[test]
     fn file_scheme_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "file:///etc/passwd",
-            "file:///etc/passwd",
-        ));
+        assert!(oracle.is_semantically_valid("file:///etc/passwd", "file:///etc/passwd",));
     }
 
     #[test]
     fn dict_scheme_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "dict://localhost:11211/",
-            "dict://localhost:11211/",
-        ));
+        assert!(
+            oracle.is_semantically_valid("dict://localhost:11211/", "dict://localhost:11211/",)
+        );
     }
 
     #[test]
     fn gopher_scheme_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "gopher://localhost:9001/",
-            "gopher://localhost:9001/",
-        ));
+        assert!(
+            oracle.is_semantically_valid("gopher://localhost:9001/", "gopher://localhost:9001/",)
+        );
     }
 
     #[test]
@@ -354,10 +331,7 @@ mod tests {
     #[test]
     fn internal_admin_path_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://localhost/admin",
-            "http://localhost/admin",
-        ));
+        assert!(oracle.is_semantically_valid("http://localhost/admin", "http://localhost/admin",));
     }
 
     #[test]
@@ -376,30 +350,21 @@ mod tests {
     fn url_without_scheme_invalid() {
         let oracle = SsrfOracle;
         // No scheme and doesn't start with //
-        assert!(!oracle.is_semantically_valid(
-            "http://127.0.0.1/",
-            "127.0.0.1/admin",
-        ));
+        assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "127.0.0.1/admin",));
     }
 
     #[test]
     fn public_url_invalid() {
         let oracle = SsrfOracle;
         // Public URL without internal indicators
-        assert!(!oracle.is_semantically_valid(
-            "http://127.0.0.1/",
-            "http://example.com/",
-        ));
+        assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "http://example.com/",));
     }
 
     #[test]
     fn destroyed_scheme_invalid() {
         let oracle = SsrfOracle;
         // URL encoding destroyed the scheme
-        assert!(!oracle.is_semantically_valid(
-            "http://127.0.0.1/",
-            "%68%74%74%70://127.0.0.1/",
-        ));
+        assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "%68%74%74%70://127.0.0.1/",));
     }
 
     #[test]
@@ -414,39 +379,27 @@ mod tests {
     #[test]
     fn oracle_metadata_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://192.0.0.1/",
-            "http://192.0.0.1/",
-        ));
+        assert!(oracle.is_semantically_valid("http://192.0.0.1/", "http://192.0.0.1/",));
     }
 
     #[test]
     fn zero_ip_valid() {
         let oracle = SsrfOracle;
         // 0 can represent 0.0.0.0
-        assert!(oracle.is_semantically_valid(
-            "http://0/",
-            "http://0/",
-        ));
+        assert!(oracle.is_semantically_valid("http://0/", "http://0/",));
     }
 
     #[test]
     fn short_loopback_valid() {
         let oracle = SsrfOracle;
         // 127.1 is shorthand for 127.0.0.1
-        assert!(oracle.is_semantically_valid(
-            "http://127.1/",
-            "http://127.1/",
-        ));
+        assert!(oracle.is_semantically_valid("http://127.1/", "http://127.1/",));
     }
 
     #[test]
     fn ldap_scheme_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "ldap://localhost:389/",
-            "ldap://localhost:389/",
-        ));
+        assert!(oracle.is_semantically_valid("ldap://localhost:389/", "ldap://localhost:389/",));
     }
 
     #[test]
@@ -461,29 +414,29 @@ mod tests {
     #[test]
     fn url_with_fragment_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://127.0.0.1/#section",
-            "http://127.0.0.1/#section",
-        ));
+        assert!(
+            oracle.is_semantically_valid("http://127.0.0.1/#section", "http://127.0.0.1/#section",)
+        );
     }
 
     #[test]
     fn userinfo_in_url_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "http://user:pass@127.0.0.1/",
-            "http://user:pass@127.0.0.1/",
-        ));
+        assert!(
+            oracle.is_semantically_valid(
+                "http://user:pass@127.0.0.1/",
+                "http://user:pass@127.0.0.1/",
+            )
+        );
     }
 
     #[test]
     fn nip_io_domain_valid() {
         let oracle = SsrfOracle;
         // nip.io is a wildcard DNS that resolves to the IP in the subdomain
-        assert!(oracle.is_semantically_valid(
-            "http://127.0.0.1.nip.io/",
-            "http://127.0.0.1.nip.io/",
-        ));
+        assert!(
+            oracle.is_semantically_valid("http://127.0.0.1.nip.io/", "http://127.0.0.1.nip.io/",)
+        );
     }
 
     #[test]
@@ -501,10 +454,7 @@ mod tests {
     fn adversarial_null_byte() {
         let oracle = SsrfOracle;
         // Null byte injection - structure is still valid
-        assert!(oracle.is_semantically_valid(
-            "http://127.0.0.1/",
-            "http://127.0.0.1/\x00",
-        ));
+        assert!(oracle.is_semantically_valid("http://127.0.0.1/", "http://127.0.0.1/\x00",));
     }
 
     #[test]
@@ -517,18 +467,12 @@ mod tests {
     fn scheme_only_invalid() {
         let oracle = SsrfOracle;
         // Just a scheme with no host
-        assert!(!oracle.is_semantically_valid(
-            "http://127.0.0.1/",
-            "http://",
-        ));
+        assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "http://",));
     }
 
     #[test]
     fn ftp_scheme_private_ip_valid() {
         let oracle = SsrfOracle;
-        assert!(oracle.is_semantically_valid(
-            "ftp://192.168.1.1/",
-            "ftp://192.168.1.1/",
-        ));
+        assert!(oracle.is_semantically_valid("ftp://192.168.1.1/", "ftp://192.168.1.1/",));
     }
 }

@@ -1,8 +1,8 @@
 #[cfg(test)]
 #[allow(clippy::module_inception)]
 mod tests {
+    use crate::safety::{CircuitBreaker, ScanPolicy, guard_prefix_len, sanitize_input};
     use crate::smuggling::*;
-    use crate::safety::{guard_prefix_len, sanitize_input, CircuitBreaker, ScanPolicy};
     use proptest::prelude::*;
 
     fn parse_request(raw: &[u8]) -> Result<(), httparse::Error> {
@@ -40,7 +40,11 @@ mod tests {
             let raw = String::from_utf8_lossy(&payload.raw_bytes);
             // The chunk line is "{len:x}\r\n"
             let chunk_line = format!("{:x}\r\n", prefix.len() + 2).len();
-            assert!(raw.contains(&format!("Content-Length: {}", chunk_line)), "failed for len={}", len);
+            assert!(
+                raw.contains(&format!("Content-Length: {}", chunk_line)),
+                "failed for len={}",
+                len
+            );
         }
     }
 
@@ -85,14 +89,19 @@ mod tests {
     #[test]
     fn te_obfuscations_covers_smuggler_matrix() {
         let obs = te_obfuscations();
-        assert!(obs.len() >= 20, "expected 20+ obfuscations, got {}", obs.len());
+        assert!(
+            obs.len() >= 20,
+            "expected 20+ obfuscations, got {}",
+            obs.len()
+        );
         assert!(obs.iter().any(|s| s.contains('\n')));
         assert!(obs.iter().any(|s| s.contains('\t')));
         assert!(obs.iter().any(|s| s.contains('\u{00a0}')));
         assert!(obs.iter().any(|s| s.contains('"')));
-        assert!(obs
-            .iter()
-            .any(|s| s.eq_ignore_ascii_case("transfer-encoding: chunked")));
+        assert!(
+            obs.iter()
+                .any(|s| s.eq_ignore_ascii_case("transfer-encoding: chunked"))
+        );
     }
 
     #[test]
@@ -101,9 +110,10 @@ mod tests {
         assert!(!probes.is_empty());
         for p in &probes {
             assert!(!p.canary.token.is_empty());
-            assert!(
-                matches!(p.variant, SmugglingVariant::DetectClTe | SmugglingVariant::DetectTeCl)
-            );
+            assert!(matches!(
+                p.variant,
+                SmugglingVariant::DetectClTe | SmugglingVariant::DetectTeCl
+            ));
         }
     }
 
@@ -126,7 +136,11 @@ mod tests {
         let mut set = HashSet::new();
         for (i, r) in raw.iter().enumerate() {
             if !set.insert(r.clone()) {
-                panic!("duplicate payload at index {}: {:?}", i, String::from_utf8_lossy(r));
+                panic!(
+                    "duplicate payload at index {}: {:?}",
+                    i,
+                    String::from_utf8_lossy(r)
+                );
             }
         }
     }
@@ -166,7 +180,9 @@ mod tests {
         let ps = http10_persistence("example.com", "GET / HTTP/1.1");
         let s0 = String::from_utf8_lossy(&ps[0].raw_bytes);
         assert!(s0.contains("HTTP/1.0"));
-        assert!(s0.contains("Connection: keep-alive") || s0.contains("Proxy-Connection: keep-alive"));
+        assert!(
+            s0.contains("Connection: keep-alive") || s0.contains("Proxy-Connection: keep-alive")
+        );
     }
 
     #[test]
@@ -321,7 +337,10 @@ mod tests {
         let s1 = String::from_utf8_lossy(&p.raw_bytes);
         let p2 = detect_cl_te("example.com");
         let s2 = String::from_utf8_lossy(&p2.raw_bytes);
-        assert_eq!(s1.replace(&p.canary.token, ""), s2.replace(&p2.canary.token, ""));
+        assert_eq!(
+            s1.replace(&p.canary.token, ""),
+            s2.replace(&p2.canary.token, "")
+        );
     }
 
     proptest! {
