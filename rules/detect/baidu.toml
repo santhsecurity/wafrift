@@ -1,0 +1,16 @@
+[[waf]]
+name = "Yunjiasu"
+vendor = "Baidu Cloud Computing"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:baidu"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "yunjiasu.*"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "href=\"/.well-known/yunjiasu-cgi/"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "document.cookie='yjs_use_ob=0"
+  weight = 0.4

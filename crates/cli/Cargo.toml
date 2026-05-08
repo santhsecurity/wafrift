@@ -1,0 +1,43 @@
+[package]
+name = "wafrift-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "WAF evasion toolkit CLI"
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "cli", "evasion", "security", "scanner"]
+categories = ["command-line-utilities", "network-programming"]
+
+[[bin]]
+name = "wafrift"
+path = "src/main.rs"
+
+[dependencies]
+wafrift-encoding = { workspace = true }
+wafrift-grammar = { workspace = true }
+wafrift-detect = { workspace = true }
+wafrift-evolution = { workspace = true }
+clap = { workspace = true }
+clap_complete = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+colored = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+toml = { workspace = true }
+urlencoding = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+dirs = { workspace = true }
+wafrift-strategy = { workspace = true }
+wafrift-transport = { workspace = true }
+wafrift-oracle = { workspace = true }
+wafrift-types = { workspace = true }
+
+[features]
+default = []
+gossan-integration = ["origin-bypass"]
+origin-bypass = ["wafrift-transport/origin-bypass"]

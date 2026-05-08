@@ -1,0 +1,42 @@
+# WafRift Configuration
+# Place this file at `.wafrift.toml` in your project or `~/.config/wafrift/config.toml`
+# CLI flags override all config file values.
+
+[scan]
+# Evasion intensity: "light", "medium", or "heavy"
+# level = "heavy"
+
+# Query parameter name for injection
+# param = "q"
+
+# Delay between requests in milliseconds (avoid rate-limit bans)
+# delay_ms = 50
+
+# Apply encoding only, without grammar-aware mutations
+# encoding_only = false
+
+# Number of concurrent requests per batch
+# concurrency = 8
+
+[http]
+# Browser fingerprint to impersonate: "chrome", "safari", "edge"
+# stealth_browser = "chrome"
+
+# Disable TLS certificate verification
+# insecure = false
+
+# Custom User-Agent header
+# user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+# Request timeout in seconds
+# timeout_secs = 30
+
+[output]
+# Default output format: "text" or "json"
+# format = "text"
+
+# Include layer report in JSON output
+# report_layers = false
+
+# Suppress human-readable output
+# quiet = false

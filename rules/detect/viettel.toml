@@ -1,0 +1,15 @@
+[[waf]]
+name = "Viettel"
+vendor = "Cloudrity"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:viettel"
+[[waf.signature]]
+  body_regex = "Access Denied.{0,10}?Viettel WAF"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "cloudrity\\.com\\.(vn)?/"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Viettel WAF System"
+  weight = 0.4

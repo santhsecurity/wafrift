@@ -1,0 +1,33 @@
+[package]
+name = "wafrift-transport"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "reqwest middleware for automatic WAF evasion — drop-in replacement for reqwest::Client"
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "transport", "reqwest", "http", "evasion"]
+categories = ["network-programming", "web-programming::http-client"]
+
+[dependencies]
+wafrift-types = { workspace = true }
+wafrift-strategy = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+http = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+wafrift-pool = { workspace = true, optional = true }
+# gossan-origin = { path = "../../../gossan/crates/origin", optional = true }
+
+[features]
+proxy-pool = ["dep:wafrift-pool"]
+# origin-bypass = ["dep:gossan-origin"]
+origin-bypass = []
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+wiremock = { workspace = true }

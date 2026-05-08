@@ -1,0 +1,12 @@
+[[waf]]
+name = "PT Application Firewall"
+vendor = "Positive Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:ptaf"
+[[waf.signature]]
+  body_regex = "<h1.{0,10}?Forbidden"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<pre>Request.ID:.{0,10}?\\d{4}\\-(\\d{2})+.{0,35}?pre>"
+  weight = 0.4

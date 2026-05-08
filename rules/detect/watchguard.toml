@@ -1,0 +1,16 @@
+[[waf]]
+name = "WatchGuard"
+vendor = "WatchGuard Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:watchguard"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "WatchGuard"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Request denied by WatchGuard Firewall"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "WatchGuard Technologies Inc\\."
+  weight = 0.4

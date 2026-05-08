@@ -1,0 +1,20 @@
+[[waf]]
+name = "URLMaster SecurityCheck"
+vendor = "iFinity/DotNetNuke"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:urlmaster"
+[[waf.signature]]
+  header_name = "x-urlmaster-debug"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-urlmaster-ex"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Ur[li]RewriteModule"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "SecurityCheck"
+  weight = 0.4

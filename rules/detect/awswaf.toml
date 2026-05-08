@@ -1,0 +1,34 @@
+[[waf]]
+name = "AWS Elastic Load Balancer"
+vendor = "Amazon"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "ContentTypeSwitch", "JsonUnicodeEscape", "SqlCommentInsertion"]
+source = "WAFW00F:awswaf"
+[[waf.signature]]
+  header_name = "x-amz-id"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-amz-request-id"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-blocked-by-waf"
+  header_regex = "Blocked_by_custom_response_for_AWSManagedRules.*"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "aws waf"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "aws-waf"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-amzn-waf-action"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "request blocked"
+  weight = 0.3
+[[waf.signature]]
+  body_regex = "waf"
+  weight = 0.3

@@ -1,0 +1,9 @@
+[[waf]]
+name = "WebTotem"
+vendor = "WebTotem"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:webtotem"
+[[waf.signature]]
+  body_regex = "The current request was blocked.{0,8}?>WebTotem"
+  weight = 0.4

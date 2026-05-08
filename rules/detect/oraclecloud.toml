@@ -1,0 +1,15 @@
+[[waf]]
+name = "Oracle Cloud"
+vendor = "Oracle"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:oraclecloud"
+[[waf.signature]]
+  body_regex = "<title>fw_error_www"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "src=\\\"/oralogo_small\\.gif\\\""
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "www\\.oracleimg\\.com/us/assets/metrics/ora_ocom\\.js"
+  weight = 0.4

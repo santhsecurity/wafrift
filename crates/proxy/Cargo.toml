@@ -1,0 +1,39 @@
+[package]
+name = "wafrift-proxy"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "HTTP forward proxy with automatic WAF evasion and optional TLS interception support."
+readme = "README.md"
+keywords = ["waf", "proxy", "http", "evasion", "security"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+wafrift-types = { workspace = true }
+wafrift-strategy = { workspace = true }
+wafrift-transport = { workspace = true }
+wafrift-encoding = { workspace = true }
+tokio.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+rcgen = { workspace = true }
+tokio-rustls.workspace = true
+rustls.workspace = true
+rustls-pki-types = { workspace = true }
+rustls-pemfile = { workspace = true }
+webpki-roots = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+moka = { workspace = true }
+dirs = { workspace = true }

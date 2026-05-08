@@ -1,0 +1,12 @@
+[[waf]]
+name = "Vercel WAF"
+vendor = "Vercel"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:vercel"
+[[waf.signature]]
+  body_regex = "<title>Vercel Security Checkpoint</title>"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "/vercel/security/"
+  weight = 0.4

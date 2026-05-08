@@ -1,0 +1,10 @@
+[[waf]]
+name = "DDoS-GUARD"
+vendor = "DDOS-GUARD CORP."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:ddosguard"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "ddos-guard"
+  weight = 0.5

@@ -1,0 +1,32 @@
+[[waf]]
+name = "BIG-IP AP Manager"
+vendor = "F5 Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "ContentTypeSwitch", "DoubleUrlEncode"]
+source = "WAFW00F:f5bigipapm"
+[[waf.signature]]
+  cookie_regex = "^LastMRH_Session"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "^MRHSession"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "^F5_fullWT"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "^F5_HT_shrinked"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "bigip|big-ip"
+  weight = 0.6
+[[waf.signature]]
+  cookie_regex = "bigipserver"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-wa-info"
+  header_regex = ".+"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "the requested url was rejected"
+  weight = 0.4

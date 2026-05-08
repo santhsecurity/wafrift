@@ -1,0 +1,69 @@
+name: Nightly Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_duration:
+        description: 'Duration for the benchmark tests (in seconds)'
+        required: false
+        default: '600'
+  schedule:
+    - cron: '0 2 * * *' # Run at 2 AM UTC daily
+
+jobs:
+  bench-waf:
+    name: Nightly WAF Benchmark
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Cargo Registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install ModSecurity testbed (docker-compose)
+        run: |
+          # Requires docker-compose to spin up the local CRS ModSecurity environment
+          cd bench-waf
+          # Expected that bench-waf/docker-compose.yml sets up a local apache/modsec
+          docker-compose up -d
+          # Wait for the ModSecurity container to be ready
+          sleep 15
+
+      - name: Build wafrift
+        run: cargo build --release
+
+      - name: Run Evasion Benchmarks
+        run: |
+          echo "Running ModSecurity Benchmarks for ${{ github.event.inputs.test_duration || '600' }} seconds"
+          ./run-waf-bench.sh --target http://localhost:8080 --duration ${{ github.event.inputs.test_duration || '600' }}
+          
+      - name: Archive Benchmark Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: bench-waf/results/
+          
+      - name: Tear Down Testbed
+        if: always()
+        run: |
+          cd bench-waf
+          docker-compose down

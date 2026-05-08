@@ -1,0 +1,12 @@
+[[waf]]
+name = "BitNinja"
+vendor = "BitNinja"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:bitninja"
+[[waf.signature]]
+  body_regex = "Security check by BitNinja"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Visitor anti-robot validation"
+  weight = 0.4

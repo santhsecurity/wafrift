@@ -1,0 +1,15 @@
+[package]
+name = "wafrift-fingerprint"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Browser and TLS JA3/JA4 fingerprint rotation profiles for WAF evasion."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "tls", "ja3", "fingerprint", "evasion"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+wafrift-types = { workspace = true }
+rand = { workspace = true }

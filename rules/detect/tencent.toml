@@ -1,0 +1,12 @@
+[[waf]]
+name = "Tencent Cloud Firewall"
+vendor = "Tencent Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:tencent"
+[[waf.signature]]
+  body_regex = "waf\\.tencent\\-?cloud\\.com/"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "window\\.location\\.href.{1,3}?https?://waf.tencent(?:-?cloud)?.com/(?:403|501)page\\.html"
+  weight = 0.4

@@ -1,0 +1,12 @@
+[[waf]]
+name = "Approach"
+vendor = "Approach"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:approach"
+[[waf.signature]]
+  body_regex = "approach.{0,10}?web application (firewall|filtering)"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "approach.{0,10}?infrastructure team"
+  weight = 0.4

@@ -1,0 +1,16 @@
+[[waf]]
+name = "FirePass"
+vendor = "F5 Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "ContentTypeSwitch", "DoubleUrlEncode"]
+source = "WAFW00F:f5firepass"
+[[waf.signature]]
+  header_name = "location"
+  header_regex = "\\/my\\.logon\\.php3"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "^VHOST"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "^F5_passid_shrinked"
+  weight = 0.5

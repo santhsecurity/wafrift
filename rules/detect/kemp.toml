@@ -1,0 +1,16 @@
+[[waf]]
+name = "Kemp LoadMaster"
+vendor = "Progress Software"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:kemp"
+[[waf.signature]]
+  header_name = "x-servedby"
+  header_regex = "KEMP-LM"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "<title>403 Forbidden</title>"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 403
+  weight = 0.2

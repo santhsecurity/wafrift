@@ -1,0 +1,10 @@
+[[waf]]
+name = "West263 CDN"
+vendor = "West263CDN"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:west263cdn"
+[[waf.signature]]
+  header_name = "x-cache"
+  header_regex = "WS?T263CDN"
+  weight = 0.5

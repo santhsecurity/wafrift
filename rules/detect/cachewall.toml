@@ -1,0 +1,31 @@
+[[waf]]
+name = "CacheWall"
+vendor = "Varnish"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:cachewall"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Varnish"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-varnish"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-cachewall-action"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-cachewall-reason"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "security by cachewall"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "403 naughty.{0,10}?not nice!"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "varnish cache server"
+  weight = 0.4

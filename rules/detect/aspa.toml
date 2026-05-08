@@ -1,0 +1,14 @@
+[[waf]]
+name = "ASPA Firewall"
+vendor = "ASPA Engineering Co."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:aspa"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "ASPA[\\-_]?WAF"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "aspa-cache-status"
+  header_regex = ".+?"
+  weight = 0.5

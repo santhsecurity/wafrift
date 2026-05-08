@@ -1,0 +1,9 @@
+[[waf]]
+name = "BIG-IP Local Traffic Manager"
+vendor = "F5 Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "ContentTypeSwitch", "DoubleUrlEncode"]
+source = "WAFW00F:f5bigipltm"
+[[waf.signature]]
+  cookie_regex = "^bigipserver"
+  weight = 0.5

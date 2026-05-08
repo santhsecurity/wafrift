@@ -1,0 +1,9 @@
+[[waf]]
+name = "SquidProxy IDS"
+vendor = "SquidProxy"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:squidproxy"
+[[waf.signature]]
+  body_regex = "Access control configuration prevents your request"
+  weight = 0.4

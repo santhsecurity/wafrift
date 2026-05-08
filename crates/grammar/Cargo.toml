@@ -1,0 +1,22 @@
+[package]
+name = "wafrift-grammar"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Grammar-aware payload mutation engine — SQL, XSS, CMD, LDAP, SSRF, path traversal, SSTI."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "grammar", "parser", "evasion", "security"]
+categories = ["parser-implementations", "network-programming"]
+
+[dependencies]
+wafrift-types = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+sqlparser = { workspace = true }
+wafrift-oracle = { workspace = true }
+proptest = { workspace = true }

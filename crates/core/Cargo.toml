@@ -1,0 +1,30 @@
+[package]
+name = "wafrift-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "WAF Rift — intelligent WAF evasion engine. Façade crate re-exporting all modules."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "evasion", "security", "http", "engine"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+wafrift-types = { workspace = true }
+wafrift-encoding = { workspace = true }
+wafrift-grammar = { workspace = true }
+wafrift-content-type = { workspace = true }
+wafrift-smuggling = { workspace = true }
+wafrift-fingerprint = { workspace = true }
+wafrift-detect = { workspace = true }
+wafrift-evolution = { workspace = true }
+wafrift-strategy = { workspace = true }
+
+# Keep direct deps for existing integration tests
+rand = { workspace = true }
+urlencoding = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+toml = { workspace = true }
+rcgen = { workspace = true }

@@ -1,0 +1,18 @@
+[[waf]]
+name = "ASP.NET Generic"
+vendor = "Microsoft"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:aspnetgen"
+[[waf.signature]]
+  body_regex = "iis (\\d+.)+?detailed error"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "potentially dangerous request querystring"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "application error from being viewed remotely (for security reasons)?"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "An application error occurred on the server"
+  weight = 0.4

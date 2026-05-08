@@ -1,0 +1,19 @@
+[package]
+name = "wafrift-recon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Origin discovery and recon (CT logs, historical DNS) for Wafrift"
+
+[dependencies]
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+wafrift-types = { workspace = true }

@@ -1,0 +1,19 @@
+[[waf]]
+name = "Greywizard"
+vendor = "Grey Wizard"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:greywizard"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "greywizard"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "<(title|h\\d{1})>Grey Wizard"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "contact the website owner or Grey Wizard"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "We.ve detected attempted attack or non standard traffic from your ip address"
+  weight = 0.4

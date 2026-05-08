@@ -1,0 +1,10 @@
+[[waf]]
+name = "360PanYun"
+vendor = "360 Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:panyun360"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "panyun"
+  weight = 0.5

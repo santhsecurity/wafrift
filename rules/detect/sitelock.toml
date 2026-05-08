@@ -1,0 +1,18 @@
+[[waf]]
+name = "Sitelock"
+vendor = "TrueShield"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:sitelock"
+[[waf.signature]]
+  body_regex = "SiteLock will remember you"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Sitelock is leader in Business Website Security Services"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "sitelock[_\\-]shield([_\\-]logo|[\\-_]badge)?"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "SiteLock incident ID"
+  weight = 0.4

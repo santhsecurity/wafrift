@@ -1,0 +1,28 @@
+[package]
+name = "wafrift-evolution"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Genetic algorithm engine, differential analysis, intelligence feedback loop, and WAF-aware advisor."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "evolution", "security", "fuzzing", "evasion"]
+categories = ["algorithms", "network-programming"]
+
+[dependencies]
+wafrift-types = { workspace = true }
+wafrift-encoding = { workspace = true }
+wafrift-detect = { workspace = true }
+rand = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+lru = "0.12"
+tokio = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.11"
+tokio-test = "0.4"

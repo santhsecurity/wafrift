@@ -1,0 +1,12 @@
+[[waf]]
+name = "SiteGround"
+vendor = "SiteGround"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:siteground"
+[[waf.signature]]
+  body_regex = "Our system thinks you might be a robot!"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "access is restricted due to a security rule"
+  weight = 0.4

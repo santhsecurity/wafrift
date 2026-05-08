@@ -1,0 +1,40 @@
+[[waf]]
+name = "FortiWeb"
+vendor = "Fortinet"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:fortiweb"
+[[waf.signature]]
+  body_regex = ".fgd_icon"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "fgd_icon"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "web.page.blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "url"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "attack.id"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "message.id"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "client.ip"
+  weight = 0.4
+[[waf.signature]]
+  cookie_regex = "fortiwafsid"
+  weight = 0.6
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "fortiweb"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "fortiweb"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "fortiguard"
+  weight = 0.3

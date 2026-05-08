@@ -1,0 +1,19 @@
+[[waf]]
+name = "Imunify360"
+vendor = "CloudLinux"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:imunify360"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "imunify360.{0,10}?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "protected.by.{0,10}?imunify360"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "powered.by.{0,10}?imunify360"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "imunify360.preloader"
+  weight = 0.4

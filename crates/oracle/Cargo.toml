@@ -1,0 +1,24 @@
+[package]
+name = "wafrift-oracle"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Payload validity oracles for SQL, SSRF, path traversal, command injection, and template injection."
+readme = "README.md"
+keywords = ["waf", "oracle", "sql", "security", "parser"]
+categories = ["parser-implementations", "network-programming"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml = { workspace = true }
+sqlparser = { workspace = true }
+wafrift-grammar = { workspace = true }
+wafrift-types = { workspace = true }
+url = "2"
+flate2 = "1"
+
+[dev-dependencies]
+proptest = { workspace = true }

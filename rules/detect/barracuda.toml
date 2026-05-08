@@ -1,0 +1,18 @@
+[[waf]]
+name = "Barracuda"
+vendor = "Barracuda Networks"
+confidence_threshold = 0.3
+evasions = ["SqlCommentInsertion", "CaseAlternation", "ContentTypeSwitch", "UnicodeEncode"]
+source = "WAFW00F:barracuda"
+[[waf.signature]]
+  body_regex = "Barracuda.Networks"
+  weight = 0.4
+[[waf.signature]]
+  cookie_regex = "barra_counter_session"
+  weight = 0.6
+[[waf.signature]]
+  body_regex = "barracuda"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "you have been blocked"
+  weight = 0.3

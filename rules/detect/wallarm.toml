@@ -1,0 +1,10 @@
+[[waf]]
+name = "Wallarm"
+vendor = "Wallarm Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:wallarm"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "nginx[\\-_]wallarm"
+  weight = 0.5

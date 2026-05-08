@@ -1,0 +1,13 @@
+[[waf]]
+name = "WTS-WAF"
+vendor = "WTS"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:wts"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "wts/[0-9\\.]+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "<(title|h\\d{1})>WTS\\-WAF"
+  weight = 0.4

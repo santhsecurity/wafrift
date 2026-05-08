@@ -1,0 +1,9 @@
+[[waf]]
+name = "SEnginx"
+vendor = "Neusoft"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:senginx"
+[[waf.signature]]
+  body_regex = "SENGINX\\-ROBOT\\-MITIGATION"
+  weight = 0.4

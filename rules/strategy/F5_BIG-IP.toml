@@ -1,0 +1,37 @@
+# F5 BIG-IP ASM default strategy
+# F5 is sensitive to protocol anomalies; smuggling and H2 evasion are effective.
+
+waf = "F5 BIG-IP"
+
+[[pipeline]]
+name = "f5-light"
+cost = 2
+techniques = [
+    "user-agent-rotation",
+    "encoding:CaseAlternation",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "f5-medium"
+cost = 4
+techniques = [
+    "user-agent-rotation",
+    "grammar:sql_tautology",
+    "encoding:UrlEncode",
+    "content-type:Multipart",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "f5-heavy"
+cost = 7
+techniques = [
+    "user-agent-rotation",
+    "grammar:sql_tautology",
+    "encoding:DoubleUrlEncode",
+    "content-type:MultipartQuotedBoundary",
+    "header:TEAmbiguity",
+    "smuggling:CL.TE",
+    "h2:MixedCaseHeaders",
+]

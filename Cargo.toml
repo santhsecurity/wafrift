@@ -1,0 +1,105 @@
+[workspace]
+resolver = "2"
+members = [
+    # ── Foundation ──
+    "crates/types",
+    # ── Evasion technique crates ──
+    "crates/encoding",
+    "crates/grammar",
+    "crates/content-type",
+    "crates/smuggling",
+    "crates/fingerprint",
+    # ── Intelligence crates ──
+    "crates/detect",
+    "crates/evolution",
+    # ── Pipeline ──
+    "crates/strategy",
+    # ── Existing outer crates ──
+    "crates/core",
+    "crates/cli",
+    "crates/proxy",  # May require external dependencies
+    "crates/transport", "crates/oracle", "crates/pool",
+    "crates/recon",
+    "libs/general/mctrust",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/santhsecurity/wafrift"
+description = "Intelligent WAF evasion engine — Content-Type switching, parsing discrepancy exploitation, TLS fingerprint rotation"
+keywords = ["waf", "evasion", "security", "bypass", "firewall"]
+categories = ["network-programming", "web-programming"]
+authors = ["Santh Project <contact@santh.dev>"]
+
+[workspace.metadata.santh]
+status = "beta"
+
+[workspace.dependencies]
+# Internal crates — `version` required for crates.io (`cargo publish`)
+wafrift-types = { path = "crates/types", version = "0.1.0" }
+wafrift-encoding = { path = "crates/encoding", version = "0.1.0" }
+wafrift-grammar = { path = "crates/grammar", version = "0.1.0" }
+wafrift-content-type = { path = "crates/content-type", version = "0.1.0" }
+wafrift-smuggling = { path = "crates/smuggling", version = "0.1.0" }
+wafrift-fingerprint = { path = "crates/fingerprint", version = "0.1.0" }
+wafrift-detect = { path = "crates/detect", version = "0.1.0" }
+wafrift-evolution = { path = "crates/evolution", version = "0.1.0" }
+wafrift-strategy = { path = "crates/strategy", version = "0.1.0" }
+wafrift-oracle = { path = "crates/oracle", version = "0.1.0" }
+wafrift-transport = { path = "crates/transport", version = "0.1.0" }
+wafrift-pool = { path = "crates/pool", version = "0.1.0" }
+mctrust = { path = "libs/general/mctrust", version = "0.1.0" }
+# External dependencies (unavailable in this environment)
+# attackstr = { path = "../../libs/offensive/attackstr" }
+# scanclient = { path = "../../libs/scanner/scanclient" }
+# secfinding = { path = "../../libs/scanner/secfinding" }
+# Core
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+anyhow = "1"
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream"] }
+http = "1"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+
+# Crypto / TLS
+rustls = "0.23"
+tokio-rustls = "0.26"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+rand = "0.8"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+urlencoding = "2"
+regex = "1"
+toml = "0.8"
+ratatui = "0.29"
+crossterm = "0.28"
+dirs = "6"
+proptest = "1.11.0"
+base64 = "0.22.1"
+hex = "0.4.3"
+colored = "2"
+rcgen = { version = "0.14.7", features = ["pem", "x509-parser"] }
+sqlparser = "0.61.0"
+wiremock = "0.6.5"
+async-trait = "0.1.89"
+futures-util = "0.3.32"
+moka = { version = "0.12.15", features = ["future"] }
+rustls-pki-types = "1.14.0"
+rustls-pemfile = "2.2.0"
+webpki-roots = "1.0.6"

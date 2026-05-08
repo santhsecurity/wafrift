@@ -1,0 +1,8 @@
+# Tabu Search hyperparameters
+# Tabu list tenure and aspiration criteria.
+
+[algorithm]
+name = "tabu_search"
+mutation_rate = 0.25
+tabu_tenure = 20
+max_generations = 200

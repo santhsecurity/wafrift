@@ -1,0 +1,38 @@
+# Cloudflare Edge Bypass & Fingerprint Rules (P3)
+# WARNING: This module is for authorized lab testing only.
+# Do not use for malicious evasion of production infrastructure.
+
+[fingerprint]
+name = "Cloudflare"
+headers = [
+    { name = "CF-Connecting-IP", exists = true },
+    { name = "CF-Ray", exists = true }
+]
+# Oracle signals indicating Cloudflare blocks
+oracles = [
+    { type = "StatusCode", value = "403" },
+    { type = "BodyContains", value = "cloudflare" },
+    { type = "BodyContains", value = "error code: 1020" },
+    { type = "HeaderMatch", name = "Server", pattern = "cloudflare" }
+]
+
+[[allowlist_probes]]
+# Attempt to spoof internal Cloudflare headers (often stripped by the edge, but good for misconfigurations)
+name = "Spoof CF-Connecting-IP"
+headers = [
+    { name = "CF-Connecting-IP", value = "127.0.0.1" },
+    { name = "X-Forwarded-For", value = "127.0.0.1" },
+    { name = "True-Client-IP", value = "127.0.0.1" }
+]
+
+[[allowlist_probes]]
+name = "Spoof CF-Visitor"
+headers = [
+    { name = "CF-Visitor", value = "{\"scheme\":\"https\"}" }
+]
+
+[[allowlist_probes]]
+name = "Spoof CDN-Loop"
+headers = [
+    { name = "CDN-Loop", value = "cloudflare" }
+]

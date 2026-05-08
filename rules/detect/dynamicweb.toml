@@ -1,0 +1,9 @@
+[[waf]]
+name = "DynamicWeb Injection Check"
+vendor = "DynamicWeb"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:dynamicweb"
+[[waf.signature]]
+  body_regex = "by dynamic check(.{0,10}?module)?"
+  weight = 0.4

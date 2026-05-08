@@ -1,0 +1,9 @@
+[[waf]]
+name = "GoDaddy Website Protection"
+vendor = "GoDaddy"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:godaddy"
+[[waf.signature]]
+  body_regex = "GoDaddy (security|website firewall)"
+  weight = 0.4

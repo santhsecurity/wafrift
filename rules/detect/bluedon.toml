@@ -1,0 +1,13 @@
+[[waf]]
+name = "Bluedon"
+vendor = "Bluedon IST"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:bluedon"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "BDWAF"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "bluedon web application firewall"
+  weight = 0.4
