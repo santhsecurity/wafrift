@@ -1,0 +1,9 @@
+[[waf]]
+name = "CdnNS Application Gateway"
+vendor = "CdnNs/WdidcNet"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:cdnns"
+[[waf.signature]]
+  body_regex = "cdnnswaf application gateway"
+  weight = 0.4

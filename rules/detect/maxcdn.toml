@@ -1,0 +1,10 @@
+[[waf]]
+name = "MaxCDN"
+vendor = "MaxCDN"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:maxcdn"
+[[waf.signature]]
+  header_name = "x-cdn"
+  header_regex = "maxcdn"
+  weight = 0.5

@@ -1,0 +1,10 @@
+[[waf]]
+name = "Profense"
+vendor = "ArmorLogic"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:profense"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Profense"
+  weight = 0.5

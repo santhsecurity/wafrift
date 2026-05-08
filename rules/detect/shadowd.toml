@@ -1,0 +1,12 @@
+[[waf]]
+name = "Shadow Daemon"
+vendor = "Zecure"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:shadowd"
+[[waf.signature]]
+  body_regex = "<h\\d{1}>\\d{3}.forbidden<.h\\d{1}>"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "request forbidden by administrative rules"
+  weight = 0.4

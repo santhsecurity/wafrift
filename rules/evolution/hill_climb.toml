@@ -1,0 +1,7 @@
+# Hill Climbing hyperparameters
+# Community-tunable settings for the hill-climbing local search algorithm.
+
+[algorithm]
+name = "hill_climbing"
+mutation_rate = 0.25
+max_generations = 200

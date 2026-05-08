@@ -1,0 +1,37 @@
+# Sucuri default strategy
+# Sucuri is wordlist-heavy; encoding and grammar mutations bypass signature sets.
+
+waf = "Sucuri"
+
+[[pipeline]]
+name = "sucuri-light"
+cost = 2
+techniques = [
+    "user-agent-rotation",
+    "encoding:CaseAlternation",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "sucuri-medium"
+cost = 4
+techniques = [
+    "user-agent-rotation",
+    "grammar:comment_obfuscation",
+    "encoding:UnicodeEncode",
+    "content-type:JsonUnicodeEscape",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "sucuri-heavy"
+cost = 7
+techniques = [
+    "user-agent-rotation",
+    "grammar:comment_obfuscation",
+    "encoding:UnicodeEncode",
+    "content-type:XmlCdata",
+    "header:ObsFold",
+    "smuggling:CL.TE",
+    "h2:MixedCaseHeaders",
+]

@@ -1,0 +1,16 @@
+[[waf]]
+name = "SonicWall"
+vendor = "Dell"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:sonicwall"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "SonicWALL"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "<(title|h\\d{1})>Web Site Blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "\\+?nsa_banner"
+  weight = 0.4

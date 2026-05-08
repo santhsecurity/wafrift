@@ -1,0 +1,9 @@
+[[waf]]
+name = "Airlock"
+vendor = "Phion/Ergon"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:airlock"
+[[waf.signature]]
+  body_regex = "server detected a syntax error in your request"
+  weight = 0.4

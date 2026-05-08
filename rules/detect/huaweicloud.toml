@@ -1,0 +1,16 @@
+[[waf]]
+name = "Huawei Cloud Firewall"
+vendor = "Huawei"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:huaweicloud"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "HuaweiCloudWAF"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "hwclouds\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "hws_security@"
+  weight = 0.4

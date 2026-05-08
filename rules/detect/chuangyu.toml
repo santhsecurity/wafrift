@@ -1,0 +1,12 @@
+[[waf]]
+name = "Chuang Yu Shield"
+vendor = "Yunaq"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:chuangyu"
+[[waf.signature]]
+  body_regex = "www\\.365cyd\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "help\\.365cyd\\.com/cyd\\-error\\-help.html\\?code=403"
+  weight = 0.4

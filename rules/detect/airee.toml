@@ -1,0 +1,13 @@
+[[waf]]
+name = "AireeCDN"
+vendor = "Airee"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:airee"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Airee"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "airee\\.cloud"
+  weight = 0.4

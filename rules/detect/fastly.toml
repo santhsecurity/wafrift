@@ -1,0 +1,14 @@
+[[waf]]
+name = "Fastly"
+vendor = "Fastly CDN"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:fastly"
+[[waf.signature]]
+  header_name = "x-fastly-request-id"
+  header_regex = "\\w+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-served-by"
+  header_regex = "^cache-[a-z]{3}\\d+-[A-Z]{3}"
+  weight = 0.5

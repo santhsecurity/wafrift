@@ -1,0 +1,32 @@
+[package]
+name = "wafrift-strategy"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Evasion strategy pipeline — orchestrates all WAF Rift modules into a coherent evasion flow."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "strategy", "evasion", "security", "http"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+mctrust = { workspace = true }
+wafrift-types = { workspace = true }
+wafrift-encoding = { workspace = true }
+wafrift-grammar = { workspace = true }
+wafrift-content-type = { workspace = true }
+wafrift-smuggling = { workspace = true }
+wafrift-fingerprint = { workspace = true }
+wafrift-detect = { workspace = true }
+wafrift-evolution = { workspace = true }
+wafrift-oracle = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+urlencoding.workspace = true
+tracing = { workspace = true }
+toml = { workspace = true }
+
+[features]
+default = []

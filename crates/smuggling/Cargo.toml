@@ -1,0 +1,28 @@
+[package]
+name = "wafrift-smuggling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "HTTP request smuggling and HTTP/2 frame-level evasion payloads."
+readme = "README.md"
+keywords = ["waf", "smuggling", "http2", "security", "evasion"]
+categories = ["network-programming", "web-programming"]
+repository.workspace = true
+
+[features]
+default = []
+unsafe-probes = []
+
+[dependencies]
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+base64 = { workspace = true }
+thiserror = { workspace = true }
+httparse = "1.8"
+
+[dev-dependencies]
+proptest = { workspace = true }
+httparse = "1.8"
+

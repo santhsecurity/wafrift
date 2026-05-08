@@ -1,0 +1,14 @@
+[[waf]]
+name = "RayWAF"
+vendor = "WebRay Solutions"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:webray"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "WebRay\\-WAF"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "drivedby"
+  header_regex = "RaySrv.RayEng/[0-9\\.]+?"
+  weight = 0.5

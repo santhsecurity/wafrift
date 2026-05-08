@@ -1,0 +1,18 @@
+[[waf]]
+name = "FortiGate"
+vendor = "Fortinet"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:fortigate"
+[[waf.signature]]
+  body_regex = "//globalurl.fortinet.net"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "FortiGate Application Control"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Web Application Firewall"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Event ID"
+  weight = 0.4

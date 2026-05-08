@@ -1,0 +1,30 @@
+[package]
+name = "wafrift-detect"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+repository.workspace = true
+description = "WAF detection from response headers and body, response fingerprint drift analysis."
+readme = "README.md"
+keywords = ["waf", "detection", "fingerprinting", "security", "http"]
+categories = ["network-programming", "web-programming"]
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+regex = { workspace = true }
+toml = { workspace = true }
+once_cell = "1"
+tracing = { workspace = true }
+aho-corasick = "1"
+
+[dev-dependencies]
+proptest = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "detect_throughput"
+harness = false

@@ -1,0 +1,37 @@
+# AWS WAF default strategy
+# AWS WAF is rule-set based; grammar mutations and content-type switches work well.
+
+waf = "AWS WAF"
+
+[[pipeline]]
+name = "aws-light"
+cost = 2
+techniques = [
+    "user-agent-rotation",
+    "encoding:UrlEncode",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "aws-medium"
+cost = 4
+techniques = [
+    "user-agent-rotation",
+    "grammar:comment_obfuscation",
+    "encoding:UnicodeEncode",
+    "content-type:XmlCdata",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "aws-heavy"
+cost = 7
+techniques = [
+    "user-agent-rotation",
+    "grammar:comment_obfuscation",
+    "encoding:UnicodeEncode",
+    "content-type:XmlCdata",
+    "header:DuplicateHopByHop",
+    "smuggling:TE.CL",
+    "h2:MixedCaseHeaders",
+]

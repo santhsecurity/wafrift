@@ -1,0 +1,10 @@
+[[waf]]
+name = "Link11 WAAP"
+vendor = "Link11"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:link11"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "rhino-core-shield"
+  weight = 0.5

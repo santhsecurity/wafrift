@@ -1,0 +1,17 @@
+[[waf]]
+name = "Zenedge"
+vendor = "Zenedge"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:zenedge"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "ZENEDGE"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-zen-fury"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "/__zenedge/"
+  weight = 0.4

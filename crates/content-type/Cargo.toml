@@ -1,0 +1,15 @@
+[package]
+name = "wafrift-content-type"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "WAFFLED Content-Type switching — parsing discrepancy exploitation for WAF bypass."
+readme = "README.md"
+keywords = ["waf", "content-type", "parser", "evasion", "security"]
+categories = ["network-programming", "web-programming"]
+repository.workspace = true
+
+[dependencies]
+rand = { workspace = true }
+serde_json = { workspace = true }

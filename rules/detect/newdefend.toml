@@ -1,0 +1,16 @@
+[[waf]]
+name = "Newdefend"
+vendor = "NewDefend"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:newdefend"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Newdefend"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "www\\.newdefend\\.com/feedback"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "/nd\\-block/"
+  weight = 0.4

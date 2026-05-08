@@ -1,0 +1,9 @@
+[[waf]]
+name = "ISA Server"
+vendor = "Microsoft"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:isaserver"
+[[waf.signature]]
+  body_regex = "The.{0,10}?(isa.)?server.{0,10}?denied the specified uniform resource locator \\(url\\)"
+  weight = 0.4

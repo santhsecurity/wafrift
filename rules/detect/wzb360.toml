@@ -1,0 +1,27 @@
+[[waf]]
+name = "360WangZhanBao"
+vendor = "360 Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:wzb360"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "qianxin\\-waf"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "wzws-ray"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-powered-by-360wzb"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "wzws\\-waf\\-cgi/"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "wangshan\\.360\\.cn"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 493
+  weight = 0.2

@@ -1,0 +1,9 @@
+# MAP-Elites hyperparameters
+# Quality-diversity grid settings.
+
+[algorithm]
+name = "map_elites"
+mutation_rate = 0.25
+# Feature descriptors are derived from (encoding, grammar_rule, content_type)
+grid_dimensions = ["encoding", "grammar_rule", "content_type"]
+max_generations = 200

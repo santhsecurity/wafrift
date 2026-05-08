@@ -1,0 +1,19 @@
+[[waf]]
+name = "Reblaze"
+vendor = "Reblaze"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:reblaze"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Reblaze Secure Web Gateway"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "current session has been terminated"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "do not hesitate to contact us"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "access denied \\(\\d{3}\\)"
+  weight = 0.4

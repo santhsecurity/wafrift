@@ -1,0 +1,9 @@
+[[waf]]
+name = "Varnish"
+vendor = "OWASP"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:varnish"
+[[waf.signature]]
+  body_regex = "Request rejected by xVarnish\\-WAF"
+  weight = 0.4

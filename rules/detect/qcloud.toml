@@ -1,0 +1,12 @@
+[[waf]]
+name = "Qcloud"
+vendor = "Tencent Cloud"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:qcloud"
+[[waf.signature]]
+  body_regex = "腾讯云Web应用防火墙"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 403
+  weight = 0.2

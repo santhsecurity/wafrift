@@ -1,0 +1,12 @@
+[[waf]]
+name = "FortiGuard"
+vendor = "Fortinet"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:fortiguard"
+[[waf.signature]]
+  body_regex = "FortiGuard Intrusion Prevention"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "//globalurl.fortinet.net"
+  weight = 0.4

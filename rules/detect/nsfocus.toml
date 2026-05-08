@@ -1,0 +1,10 @@
+[[waf]]
+name = "NSFocus"
+vendor = "NSFocus Global Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:nsfocus"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "NSFocus"
+  weight = 0.5

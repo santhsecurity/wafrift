@@ -1,0 +1,13 @@
+[[waf]]
+name = "Anquanbao"
+vendor = "Anquanbao"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:anquanbao"
+[[waf.signature]]
+  header_name = "x-powered-by-anquanbao"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "aqb_cc/error/"
+  weight = 0.4

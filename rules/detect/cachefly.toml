@@ -1,0 +1,10 @@
+[[waf]]
+name = "CacheFly CDN"
+vendor = "CacheFly"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:cachefly"
+[[waf.signature]]
+  header_name = "bestcdn"
+  header_regex = "Cachefly"
+  weight = 0.5

@@ -1,0 +1,10 @@
+[[waf]]
+name = "Baffin Bay"
+vendor = "Mastercard"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:baffinbay"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "baffin-bay-inlet"
+  weight = 0.5

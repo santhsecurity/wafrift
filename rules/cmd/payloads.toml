@@ -1,0 +1,76 @@
+# Command Injection Payload Rules
+# Grammar-aware payload mutations for shell command injection
+
+# Command separator alternatives in shell contexts
+[[separator]]
+pattern = "; "
+description = "Standard semicolon separator"
+
+[[separator]]
+pattern = "| "
+description = "Pipe to next command"
+
+[[separator]]
+pattern = "|| "
+description = "OR-else (execute if previous fails)"
+
+[[separator]]
+pattern = "&& "
+description = "AND-then (execute if previous succeeds)"
+
+[[separator]]
+pattern = "\n"
+description = "Newline separator"
+
+[[separator]]
+pattern = "%0a"
+description = "URL-encoded newline"
+
+[[separator]]
+pattern = "`"
+description = "Backtick command substitution"
+
+[[separator]]
+pattern = "$("
+description = "Dollar-paren command substitution"
+
+# Whitespace/space alternatives in shell contexts
+[[space_alternative]]
+pattern = " "
+description = "Standard space"
+
+[[space_alternative]]
+pattern = "${IFS}"
+description = "Internal Field Substitution variable"
+
+[[space_alternative]]
+pattern = "$IFS"
+description = "IFS variable shorthand"
+
+[[space_alternative]]
+pattern = "${IFS%%[*}"
+description = "IFS with pattern removal"
+
+[[space_alternative]]
+pattern = "\t"
+description = "Tab character"
+
+[[space_alternative]]
+pattern = "{,}"
+description = "Brace expansion empty variant"
+
+[[space_alternative]]
+pattern = "$'\\x20'"
+description = "ANSI-C quoted space (hex)"
+
+[[space_alternative]]
+pattern = "%09"
+description = "URL-encoded tab"
+
+[[space_alternative]]
+pattern = "%20"
+description = "URL-encoded space"
+
+[[space_alternative]]
+pattern = "<"
+description = "Input redirection (works as space in some contexts)"

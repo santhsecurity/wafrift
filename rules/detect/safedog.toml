@@ -1,0 +1,19 @@
+[[waf]]
+name = "Safedog"
+vendor = "SafeDog"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:safedog"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Safedog"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "safedogsite/broswer_logo\\.jpg"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "404\\.safedog\\.cn/sitedog_stat.html"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "404\\.safedog\\.cn/images/safedogsite/head\\.png"
+  weight = 0.4

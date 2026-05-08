@@ -1,0 +1,37 @@
+# ModSecurity default strategy
+# ModSecurity CRS is regex-heavy; whitespace insertion and comment evasion excel.
+
+waf = "ModSecurity"
+
+[[pipeline]]
+name = "modsec-light"
+cost = 2
+techniques = [
+    "user-agent-rotation",
+    "encoding:CaseAlternation",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "modsec-medium"
+cost = 4
+techniques = [
+    "user-agent-rotation",
+    "grammar:whitespace_insertion",
+    "encoding:UrlEncode",
+    "content-type:Multipart",
+    "header:CaseMixing",
+]
+
+[[pipeline]]
+name = "modsec-heavy"
+cost = 7
+techniques = [
+    "user-agent-rotation",
+    "grammar:whitespace_insertion",
+    "encoding:DoubleUrlEncode",
+    "content-type:MultipartQuotedBoundary",
+    "header:TEAmbiguity",
+    "smuggling:CL.TE",
+    "h2:MixedCaseHeaders",
+]

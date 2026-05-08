@@ -1,0 +1,18 @@
+[[waf]]
+name = "SecureSphere"
+vendor = "Imperva Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:securesphere"
+[[waf.signature]]
+  body_regex = "<(title|h2)>Error"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "The incident ID is"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "This page can't be displayed"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Contact support for additional information"
+  weight = 0.4

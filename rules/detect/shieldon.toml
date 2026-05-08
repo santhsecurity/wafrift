@@ -1,0 +1,34 @@
+[[waf]]
+name = "Shieldon Firewall"
+vendor = "Shieldon.io"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:shieldon"
+[[waf.signature]]
+  header_name = "[xx]-[pp]rotected-[bb]y"
+  header_regex = "shieldon.io"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Please solve CAPTCHA"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "shieldon_captcha"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Unusual behavior detected"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "status-user-info"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Access denied"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "The IP address you are using has been blocked."
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Please line up"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "This page is limiting the number of people online. Please wait a moment."
+  weight = 0.4

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "benign_literal",
+      "path": "/",
+      "query": "q=hello",
+      "expect": "allowed"
+    },
+    {
+      "id": "benign_numeric",
+      "path": "/",
+      "query": "q=1",
+      "expect": "allowed"
+    },
+    {
+      "id": "sqli_classic",
+      "path": "/",
+      "query": "q=' OR 1=1--",
+      "expect": "blocked"
+    },
+    {
+      "id": "sqli_union",
+      "path": "/",
+      "query": "q=1 UNION SELECT NULL--",
+      "expect": "blocked"
+    },
+    {
+      "id": "xss_script",
+      "path": "/",
+      "query": "q=<script>alert(1)</script>",
+      "expect": "any"
+    },
+    {
+      "id": "path_traversal",
+      "path": "/",
+      "query": "q=....//....//etc/passwd",
+      "expect": "any"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+[[waf]]
+name = "Shield Security"
+vendor = "One Dollar Plugin"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:shieldsecurity"
+[[waf.signature]]
+  body_regex = "You were blocked by the Shield"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "remaining transgression\\(s\\) against this site"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Something in the URL.{0,5}?Form or Cookie data wasn\\'t appropriate"
+  weight = 0.4

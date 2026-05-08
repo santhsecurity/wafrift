@@ -1,0 +1,12 @@
+[[waf]]
+name = "NinjaFirewall"
+vendor = "NinTechNet"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:ninja"
+[[waf.signature]]
+  body_regex = "<title>NinjaFirewall.{0,10}?\\d{3}.forbidden"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "For security reasons?.{0,10}?it was blocked and logged"
+  weight = 0.4

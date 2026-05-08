@@ -1,0 +1,18 @@
+[[waf]]
+name = "StackPath"
+vendor = "StackPath"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:stackpath"
+[[waf.signature]]
+  body_regex = "<title>StackPath[^<]+</title>"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Protected by <a href=\"https?:\\/\\/(?:www\\.)?stackpath\\.com\\/\"[^>]+>StackPath"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "is using a security service for protection against online attacks"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "An action has triggered the service and blocked your request"
+  weight = 0.4

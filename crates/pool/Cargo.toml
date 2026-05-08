@@ -1,0 +1,14 @@
+[package]
+name = "wafrift-pool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Round-robin HTTP and SOCKS proxy pool rotation for WAF Rift."
+readme = "README.md"
+keywords = ["proxy", "pool", "rotation", "http", "socks5"]
+categories = ["network-programming", "web-programming"]
+repository.workspace = true
+
+[dependencies]
+reqwest = { workspace = true }

@@ -1,0 +1,12 @@
+[[waf]]
+name = "VirusDie"
+vendor = "VirusDie LLC"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:virusdie"
+[[waf.signature]]
+  body_regex = "cdn\\.virusdie\\.ru/splash/firewallstop\\.png"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "copy.{0,10}?Virusdie\\.ru"
+  weight = 0.4

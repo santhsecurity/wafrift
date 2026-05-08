@@ -1,0 +1,18 @@
+[[waf]]
+name = "Nemesida"
+vendor = "PentestIt"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:nemesida"
+[[waf.signature]]
+  body_regex = "@?nemesida(\\-security)?\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Suspicious activity detected.{0,10}?Access to the site is blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "nwaf@"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 222
+  weight = 0.2

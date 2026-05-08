@@ -1,0 +1,12 @@
+[[waf]]
+name = "Xuanwudun"
+vendor = "Xuanwudun"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:xuanwudun"
+[[waf.signature]]
+  body_regex = "admin\\.dbappwaf\\.cn/(index\\.php/Admin/ClientMisinform/)?"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "class=.(db[\\-_]?)?waf(.)?([\\-_]?row)?>"
+  weight = 0.4

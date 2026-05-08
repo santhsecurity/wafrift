@@ -1,0 +1,389 @@
+//! Strategy enum and main encode() dispatcher.
+
+use super::keyword::{
+    between_obfuscate, case_alternate, mysql_versioned_comment, percentage_prefix,
+    random_case_alternate, space_to_comment, space_to_dash, space_to_hash, space_to_plus,
+    space_to_random_blank, sql_comment_insert, unmagic_quotes, whitespace_insert,
+};
+use super::structural::{
+    base64_encode, base64_url_encode, chunked_split, deflate_encode, gzip_encode, hex_encode,
+    null_byte_inject, overlong_utf8, overlong_utf8_more, parameter_pollute, utf7_encode,
+};
+use super::unicode::{
+    fullwidth_encode, homoglyph_encode, html_entity_decimal_encode, html_entity_encode,
+    iis_unicode_encode, json_string_encode, unicode_encode,
+};
+use super::url::{double_url_encode, triple_url_encode, url_encode, url_encode_lower};
+use crate::error::EncodeError;
+
+/// Maximum input payload size to prevent OOM on adversarial input.
+pub const MAX_PAYLOAD_SIZE: usize = 8 * 1024 * 1024;
+
+/// Available encoding strategies.
+///
+/// # Context hints
+/// Many strategies are only semantically correct in specific parser contexts.
+/// Use [`Strategy::contexts`] to query the applicable contexts for a strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum Strategy {
+    /// Standard URL encoding (%XX) — preserves unreserved chars per RFC 3986.
+    /// Safe for: query strings, paths, form data.
+    UrlEncode,
+    /// Lowercase hex URL encoding (%xx) — same semantics as UrlEncode.
+    /// Safe for: query strings, paths, form data.
+    UrlEncodeLower,
+    /// Double URL encoding (%25XX) — bypasses WAFs that decode once.
+    /// Safe for: query strings, paths, form data.
+    DoubleUrlEncode,
+    /// Triple URL encoding (%2525XX) — bypasses WAFs that decode twice.
+    /// Safe for: query strings, paths, form data.
+    TripleUrlEncode,
+    /// Unicode escape (\uXXXX) — ONLY safe when target parses JSON/JavaScript.
+    /// Unsafe for: raw HTTP parameters, headers, most server frameworks.
+    UnicodeEncode,
+    /// IIS/ASP percent Unicode (%uXXXX) — ONLY safe on IIS/ASP classic parsers.
+    /// Unsafe for: modern servers (nginx, Apache, Node.js, etc.).
+    IisUnicodeEncode,
+    /// JSON string encoding with Unicode escapes — ONLY safe in JSON contexts.
+    /// Unsafe for: raw HTTP parameters.
+    JsonEncode,
+    /// HTML entity encoding (&#xXX;) — ONLY safe in HTML contexts.
+    /// Unsafe for: raw HTTP parameters, JSON bodies.
+    HtmlEntityEncode,
+    /// HTML decimal entity encoding (&#60;) — ONLY safe in HTML contexts.
+    /// Unsafe for: raw HTTP parameters, JSON bodies.
+    HtmlEntityDecimalEncode,
+    /// Alternating case (`SeLeCt`) — bypasses case-sensitive keyword filters.
+    /// Safe for: any text context where case is preserved.
+    CaseAlternation,
+    /// Random alternating case — non-deterministic variant of CaseAlternation.
+    /// Safe for: any text context where case is preserved.
+    RandomCase,
+    /// Tab insertion BETWEEN tokens — preserves keyword integrity.
+    /// Safe for: SQL contexts where whitespace separates tokens.
+    WhitespaceInsertion,
+    /// SQL comment insertion BETWEEN tokens — preserves keyword integrity.
+    /// Safe for: SQL contexts where comments are treated as whitespace.
+    SqlCommentInsertion,
+    /// MySQL versioned comment (`/*!50000SELECT*/`) — executed by MySQL, ignored by WAFs.
+    /// Safe for: MySQL backends.
+    MysqlVersionedComment,
+    /// Null byte injection (%00) — ONLY semantically correct for C-style string parsers.
+    /// Context: php, some CGI implementations.
+    NullByte,
+    /// Overlong UTF-8 encoding (2-byte) — ONLY works against legacy WAFs that normalize.
+    /// Context: iis-6, very old frontends.
+    OverlongUtf8,
+    /// Extended overlong UTF-8 encoding (3-byte) — broader coverage than OverlongUtf8.
+    /// Context: iis-6, very old frontends.
+    OverlongUtf8More,
+    /// Chunked transfer-encoding split — ONLY valid with `Transfer-Encoding: chunked`.
+    /// Context: http-request-body.
+    ChunkedSplit,
+    /// HTTP parameter pollution — duplicate parameter with benign first value.
+    /// Safe for: query strings, form data.
+    ParameterPollution,
+    /// Base64 encoding (standard alphabet).
+    /// Safe for: headers, bodies, query strings (may need URL encoding after).
+    Base64Encode,
+    /// Base64 URL-safe encoding (-_ no padding).
+    /// Safe for: URL contexts where +/ would be mangled.
+    Base64UrlEncode,
+    /// Hex encoding.
+    /// Safe for: any byte context.
+    HexEncode,
+    /// UTF-7 encoding per RFC 2152.
+    /// Context: legacy IIS/.NET parsers that decode UTF-7.
+    Utf7Encode,
+    /// Gzip compression — ONLY valid with `Content-Encoding: gzip`.
+    /// Context: http-request-body.
+    GzipEncode,
+    /// Deflate compression — ONLY valid with `Content-Encoding: deflate`.
+    /// Context: http-request-body.
+    DeflateEncode,
+    /// Replace spaces with SQL comments (`/**/`).
+    /// Safe for: SQL contexts.
+    SpaceToComment,
+    /// Replace spaces with dash comments (`--`).
+    /// Safe for: SQL contexts.
+    SpaceToDash,
+    /// Replace spaces with hash comments (`#`).
+    /// Safe for: MySQL contexts.
+    SpaceToHash,
+    /// Replace spaces with plus signs (`+`).
+    /// Safe for: URL-encoded form data.
+    SpaceToPlus,
+    /// Replace spaces with random blank characters.
+    /// Safe for: SQL contexts.
+    SpaceToRandomBlank,
+    /// Prefix each character with `%` — lightweight bypass.
+    /// Safe for: contexts that strip `%` before parsing.
+    PercentagePrefix,
+    /// Between obfuscation (`=` → `BETWEEN # AND #`).
+    /// Safe for: SQL contexts.
+    BetweenObfuscation,
+    /// Unmagic quotes (`%bf%27`) — multi-byte charset quote escape.
+    /// Context: PHP with GBK/Big5/Shift-JIS connections.
+    UnmagicQuotes,
+    /// Fullwidth Unicode (ＳＥＬＥＣＴuntouched) — bypasses ASCII keyword regex.
+    /// Context: backends that perform NFKC normalization (Java, .NET, Python 3, PostgreSQL).
+    FullwidthEncode,
+    /// Homoglyph substitution — visually identical Unicode chars for `'`, `"`, `<`, `>`, `=`.
+    /// Context: byte-level WAFs with Unicode-tolerant backends.
+    HomoglyphEncode,
+}
+
+impl Strategy {
+    /// Returns the string identifier for this encoding strategy.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::UrlEncode => "UrlEncode",
+            Self::UrlEncodeLower => "UrlEncodeLower",
+            Self::DoubleUrlEncode => "DoubleUrlEncode",
+            Self::TripleUrlEncode => "TripleUrlEncode",
+            Self::UnicodeEncode => "UnicodeEncode",
+            Self::IisUnicodeEncode => "IisUnicodeEncode",
+            Self::JsonEncode => "JsonEncode",
+            Self::HtmlEntityEncode => "HtmlEntityEncode",
+            Self::HtmlEntityDecimalEncode => "HtmlEntityDecimalEncode",
+            Self::CaseAlternation => "CaseAlternation",
+            Self::RandomCase => "RandomCase",
+            Self::WhitespaceInsertion => "WhitespaceInsertion",
+            Self::SqlCommentInsertion => "SqlCommentInsertion",
+            Self::MysqlVersionedComment => "MysqlVersionedComment",
+            Self::NullByte => "NullByte",
+            Self::OverlongUtf8 => "OverlongUtf8",
+            Self::OverlongUtf8More => "OverlongUtf8More",
+            Self::ChunkedSplit => "ChunkedSplit",
+            Self::ParameterPollution => "ParameterPollution",
+            Self::Base64Encode => "Base64Encode",
+            Self::Base64UrlEncode => "Base64UrlEncode",
+            Self::HexEncode => "HexEncode",
+            Self::Utf7Encode => "Utf7Encode",
+            Self::GzipEncode => "GzipEncode",
+            Self::DeflateEncode => "DeflateEncode",
+            Self::SpaceToComment => "SpaceToComment",
+            Self::SpaceToDash => "SpaceToDash",
+            Self::SpaceToHash => "SpaceToHash",
+            Self::SpaceToPlus => "SpaceToPlus",
+            Self::SpaceToRandomBlank => "SpaceToRandomBlank",
+            Self::PercentagePrefix => "PercentagePrefix",
+            Self::BetweenObfuscation => "BetweenObfuscation",
+            Self::UnmagicQuotes => "UnmagicQuotes",
+            Self::FullwidthEncode => "FullwidthEncode",
+            Self::HomoglyphEncode => "HomoglyphEncode",
+        }
+    }
+
+    /// Returns the parser contexts where this strategy is semantically safe.
+    ///
+    /// An empty slice means the strategy is generally applicable.
+    /// Callers should gate strategy application by matching these contexts
+    /// against the target type (e.g., `json`, `html`, `sql`, `php`, `iis-6`).
+    #[must_use]
+    pub const fn contexts(&self) -> &'static [&'static str] {
+        match self {
+            Self::UrlEncode
+            | Self::UrlEncodeLower
+            | Self::DoubleUrlEncode
+            | Self::TripleUrlEncode
+            | Self::ParameterPollution => &[],
+            Self::UnicodeEncode => &["json", "javascript"],
+            Self::IisUnicodeEncode => &["iis", "asp"],
+            Self::JsonEncode => &["json"],
+            Self::HtmlEntityEncode | Self::HtmlEntityDecimalEncode => &["html"],
+            Self::CaseAlternation | Self::RandomCase | Self::WhitespaceInsertion => &[],
+            Self::SqlCommentInsertion
+            | Self::MysqlVersionedComment
+            | Self::SpaceToComment
+            | Self::SpaceToDash
+            | Self::SpaceToRandomBlank
+            | Self::BetweenObfuscation => &["sql"],
+            Self::SpaceToHash => &["sql", "mysql"],
+            Self::SpaceToPlus => &["url-encoded"],
+            Self::NullByte => &["php", "cgi"],
+            Self::OverlongUtf8 | Self::OverlongUtf8More => &["iis-6"],
+            Self::ChunkedSplit => &["http-request-body"],
+            Self::Base64Encode | Self::Base64UrlEncode | Self::HexEncode => &[],
+            Self::Utf7Encode => &["iis", "legacy-dotnet"],
+            Self::GzipEncode | Self::DeflateEncode => &["http-request-body"],
+            Self::PercentagePrefix => &[],
+            Self::UnmagicQuotes => &["php", "gbk", "big5", "shift-jis"],
+            Self::FullwidthEncode => &["nfkc", "java", "dotnet", "python3", "postgresql"],
+            Self::HomoglyphEncode => &[],
+        }
+    }
+}
+
+fn check_size(payload: &[u8]) -> Result<(), EncodeError> {
+    if payload.len() > MAX_PAYLOAD_SIZE {
+        Err(EncodeError::PayloadTooLarge {
+            max: MAX_PAYLOAD_SIZE,
+            actual: payload.len(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Encode a payload using the selected strategy.
+///
+/// # Errors
+/// Returns `EncodeError::PayloadTooLarge` if the input exceeds [`MAX_PAYLOAD_SIZE`].
+/// Returns `EncodeError::InvalidUtf8` for text-oriented strategies when the input
+/// contains invalid UTF-8.
+pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, EncodeError> {
+    let payload = payload.as_ref();
+    check_size(payload)?;
+
+    match strategy {
+        Strategy::UrlEncode => Ok(url_encode(payload)),
+        Strategy::UrlEncodeLower => Ok(url_encode_lower(payload)),
+        Strategy::DoubleUrlEncode => Ok(double_url_encode(payload)),
+        Strategy::TripleUrlEncode => Ok(triple_url_encode(payload)),
+        Strategy::UnicodeEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(unicode_encode(text))
+        }
+        Strategy::IisUnicodeEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(iis_unicode_encode(text))
+        }
+        Strategy::JsonEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(json_string_encode(text))
+        }
+        Strategy::HtmlEntityEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(html_entity_encode(text))
+        }
+        Strategy::HtmlEntityDecimalEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(html_entity_decimal_encode(text))
+        }
+        Strategy::CaseAlternation => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(case_alternate(text))
+        }
+        Strategy::RandomCase => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(random_case_alternate(text))
+        }
+        Strategy::WhitespaceInsertion => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(whitespace_insert(text))
+        }
+        Strategy::SqlCommentInsertion => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(sql_comment_insert(text))
+        }
+        Strategy::MysqlVersionedComment => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(mysql_versioned_comment(text, 50_000))
+        }
+        Strategy::NullByte => Ok(null_byte_inject(payload)),
+        Strategy::OverlongUtf8 => Ok(overlong_utf8(payload)),
+        Strategy::OverlongUtf8More => Ok(overlong_utf8_more(payload)),
+        Strategy::ChunkedSplit => {
+            let body = chunked_split(payload, 1024)?.body;
+            Ok(String::from_utf8_lossy(&body).into_owned())
+        }
+        Strategy::ParameterPollution => Ok(parameter_pollute(payload)),
+        Strategy::Base64Encode => Ok(base64_encode(payload)),
+        Strategy::Base64UrlEncode => Ok(base64_url_encode(payload)),
+        Strategy::HexEncode => Ok(hex_encode(payload)),
+        Strategy::Utf7Encode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(utf7_encode(text))
+        }
+        Strategy::GzipEncode => Ok(gzip_encode(payload)?),
+        Strategy::DeflateEncode => Ok(deflate_encode(payload)?),
+        Strategy::SpaceToComment => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(space_to_comment(text))
+        }
+        Strategy::SpaceToDash => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(space_to_dash(text))
+        }
+        Strategy::SpaceToHash => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(space_to_hash(text))
+        }
+        Strategy::SpaceToPlus => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(space_to_plus(text))
+        }
+        Strategy::SpaceToRandomBlank => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(space_to_random_blank(text))
+        }
+        Strategy::PercentagePrefix => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(percentage_prefix(text))
+        }
+        Strategy::BetweenObfuscation => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(between_obfuscate(text))
+        }
+        Strategy::UnmagicQuotes => Ok(unmagic_quotes(payload)),
+        Strategy::FullwidthEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(fullwidth_encode(text))
+        }
+        Strategy::HomoglyphEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(homoglyph_encode(text))
+        }
+    }
+}
+
+/// All available strategies in escalation order (least aggressive → most aggressive).
+#[must_use]
+pub fn all_strategies() -> Vec<Strategy> {
+    let mut strategies = vec![
+        Strategy::CaseAlternation,
+        Strategy::RandomCase,
+        Strategy::WhitespaceInsertion,
+        Strategy::SqlCommentInsertion,
+        Strategy::SpaceToPlus,
+        Strategy::SpaceToRandomBlank,
+        Strategy::SpaceToComment,
+        Strategy::SpaceToDash,
+        Strategy::SpaceToHash,
+        Strategy::UrlEncode,
+        Strategy::UrlEncodeLower,
+        Strategy::DoubleUrlEncode,
+        Strategy::UnicodeEncode,
+        Strategy::IisUnicodeEncode,
+        Strategy::JsonEncode,
+        Strategy::HtmlEntityEncode,
+        Strategy::HtmlEntityDecimalEncode,
+        Strategy::NullByte,
+        Strategy::PercentagePrefix,
+        Strategy::TripleUrlEncode,
+        Strategy::ChunkedSplit,
+        Strategy::ParameterPollution,
+        Strategy::MysqlVersionedComment,
+        Strategy::Base64Encode,
+        Strategy::Base64UrlEncode,
+        Strategy::OverlongUtf8,
+        Strategy::OverlongUtf8More,
+        Strategy::HexEncode,
+        Strategy::Utf7Encode,
+        Strategy::BetweenObfuscation,
+        Strategy::UnmagicQuotes,
+        Strategy::FullwidthEncode,
+        Strategy::HomoglyphEncode,
+        Strategy::GzipEncode,
+        Strategy::DeflateEncode,
+    ];
+    strategies.sort_by(|a, b| {
+        super::layered::aggressiveness(*a)
+            .partial_cmp(&super::layered::aggressiveness(*b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    strategies
+}

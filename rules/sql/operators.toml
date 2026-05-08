@@ -1,0 +1,115 @@
+# SQL Operator Alternatives
+# Logical and equality operator variations across SQL dialects for WAF bypass
+# Loaded at compile-time via include_str! — adding entries here = zero Rust changes
+
+# ═══════════════════════════════════════════
+#  Logical OR alternatives
+# ═══════════════════════════════════════════
+
+[[or_alternative]]
+pattern = "OR"
+description = "Standard SQL OR operator"
+
+[[or_alternative]]
+pattern = "||"
+description = "SQLite/Oracle concatenation and logical OR"
+
+[[or_alternative]]
+pattern = "oR"
+description = "Mixed case OR (bypass case-sensitive filters)"
+
+[[or_alternative]]
+pattern = "Or"
+description = "Mixed case Or (bypass case-sensitive filters)"
+
+[[or_alternative]]
+pattern = "OR/*bypass*/"
+description = "Comment-appended OR (breaks regex boundary)"
+
+[[or_alternative]]
+pattern = "/*!OR*/"
+description = "MySQL conditional comment OR"
+
+[[or_alternative]]
+pattern = "OR%0a"
+description = "OR with URL-encoded newline suffix"
+
+# ═══════════════════════════════════════════
+#  Logical AND alternatives
+# ═══════════════════════════════════════════
+
+[[and_alternative]]
+pattern = "AND"
+description = "Standard SQL AND operator"
+
+[[and_alternative]]
+pattern = "&&"
+description = "MySQL logical AND"
+
+[[and_alternative]]
+pattern = "aNd"
+description = "Mixed case AND (bypass case-sensitive filters)"
+
+[[and_alternative]]
+pattern = "AnD"
+description = "Mixed case AnD (bypass case-sensitive filters)"
+
+[[and_alternative]]
+pattern = "AND/*bypass*/"
+description = "Comment-appended AND (breaks regex boundary)"
+
+[[and_alternative]]
+pattern = "/*!AND*/"
+description = "MySQL conditional comment AND"
+
+[[and_alternative]]
+pattern = "%26%26"
+description = "URL-encoded double-ampersand (bypass filter)"
+
+# ═══════════════════════════════════════════
+#  Equality alternatives
+# ═══════════════════════════════════════════
+
+[[equality_alternative]]
+pattern = "="
+description = "Standard equality operator"
+
+[[equality_alternative]]
+pattern = " LIKE "
+description = "LIKE operator with spaces (string comparison)"
+
+[[equality_alternative]]
+pattern = " REGEXP "
+description = "REGEXP operator (MySQL/PostgreSQL)"
+
+[[equality_alternative]]
+pattern = " RLIKE "
+description = "RLIKE operator (MySQL)"
+
+[[equality_alternative]]
+pattern = " IS "
+description = "IS operator (NULL comparison, boolean)"
+
+[[equality_alternative]]
+pattern = " NOT IN ("
+description = "Double-negative NOT IN for equality (requires closing paren)"
+
+[[equality_alternative]]
+pattern = " BETWEEN "
+description = "BETWEEN range (use with matching value pair)"
+
+[[equality_alternative]]
+pattern = " GLOB "
+description = "SQLite GLOB operator"
+
+[[equality_alternative]]
+pattern = " SOUNDS LIKE "
+description = "MySQL phonetic comparison (bypasses string match filters)"
+
+[[equality_alternative]]
+pattern = " DIV "
+description = "MySQL integer division (1 DIV 1 = 1, truthy)"
+
+[[equality_alternative]]
+pattern = " XOR "
+description = "MySQL XOR operator (0 XOR 1 = 1, truthy)"

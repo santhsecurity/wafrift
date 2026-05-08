@@ -1,0 +1,12 @@
+[[waf]]
+name = "CrawlProtect"
+vendor = "Jean-Denis Brun"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:crawlprotect"
+[[waf.signature]]
+  body_regex = "<title>crawlprotect"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "this site is protected by crawlprotect"
+  weight = 0.4

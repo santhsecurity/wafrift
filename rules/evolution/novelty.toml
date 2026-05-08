@@ -1,0 +1,10 @@
+# Novelty Search hyperparameters
+# Behavioral-diversity archive settings.
+
+[algorithm]
+name = "novelty_search"
+mutation_rate = 0.30
+k_neighbors = 15
+novelty_threshold = 0.3
+archive_max_size = 500
+max_generations = 200

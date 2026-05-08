@@ -1,0 +1,21 @@
+[[waf]]
+name = "Cloudflare"
+vendor = "Cloudflare Inc."
+confidence_threshold = 0.3
+evasions = ["DoubleUrlEncode", "ContentTypeSwitch", "UnicodeEncode", "MultipartQuotedBoundary", "OverlongUtf8"]
+source = "WAFW00F:cloudflare"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "cloudflare"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "cloudflare[-_]nginx"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "cf-ray"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "__cfduid"
+  weight = 0.5

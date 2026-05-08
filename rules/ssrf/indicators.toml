@@ -1,0 +1,209 @@
+# SSRF (Server-Side Request Forgery) Indicator Rules
+# Patterns that indicate SSRF attack attempts
+
+# Loopback/sensitive IP patterns that indicate SSRF intent
+[[indicator_host]]
+host = "127.0.0.1"
+description = "IPv4 loopback address"
+
+[[indicator_host]]
+host = "localhost"
+description = "Localhost hostname"
+
+[[indicator_host]]
+host = "0.0.0.0"
+description = "All interfaces (IPv4)"
+
+[[indicator_host]]
+host = "::1"
+description = "IPv6 loopback address"
+
+[[indicator_host]]
+host = "0000::1"
+description = "Compressed IPv6 loopback"
+
+[[indicator_host]]
+host = "0:0:0:0:0:0:0:1"
+description = "Full IPv6 loopback"
+
+[[indicator_host]]
+host = "2130706433"
+description = "127.0.0.1 as 32-bit integer"
+
+[[indicator_host]]
+host = "0177.0.0.1"
+description = "Octal-encoded loopback"
+
+[[indicator_host]]
+host = "0x7f000001"
+description = "Hex-encoded loopback"
+
+[[indicator_host]]
+host = "169.254.169.254"
+description = "AWS EC2 metadata service"
+
+[[indicator_host]]
+host = "metadata.google.internal"
+description = "GCP metadata hostname"
+
+[[indicator_host]]
+host = "100.100.100.200"
+description = "Alibaba Cloud metadata"
+
+[[indicator_host]]
+host = "192.0.0.1"
+description = "Oracle Cloud metadata"
+
+[[indicator_host]]
+host = "0"
+description = "Shorthand for 0.0.0.0"
+
+# Private network ranges that indicate SSRF targets
+[[private_ip_prefix]]
+prefix = "10."
+description = "RFC1918 10.0.0.0/8 private range"
+
+[[private_ip_prefix]]
+prefix = "172.16."
+description = "RFC1918 172.16.0.0/12 private range"
+
+[[private_ip_prefix]]
+prefix = "172.17."
+description = "Docker default bridge"
+
+[[private_ip_prefix]]
+prefix = "172.18."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.19."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.20."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.21."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.22."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.23."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.24."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.25."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.26."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.27."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.28."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.29."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.30."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "172.31."
+description = "RFC1918 private range"
+
+[[private_ip_prefix]]
+prefix = "192.168."
+description = "RFC1918 192.168.0.0/16 private range"
+
+[[private_ip_prefix]]
+prefix = "127."
+description = "IPv4 loopback range"
+
+[[private_ip_prefix]]
+prefix = "0."
+description = "Current network (historical)"
+
+[[private_ip_prefix]]
+prefix = "::1"
+description = "IPv6 loopback"
+
+[[private_ip_prefix]]
+prefix = "fc00:"
+description = "IPv6 unique local address (ULA)"
+
+[[private_ip_prefix]]
+prefix = "fd00:"
+description = "IPv6 unique local address (common)"
+
+# URL path indicators that suggest API/internal endpoints
+[[internal_path]]
+path = "/admin"
+description = "Admin interface endpoint"
+
+[[internal_path]]
+path = "/api"
+description = "API endpoint"
+
+[[internal_path]]
+path = "/internal"
+description = "Internal service endpoint"
+
+[[internal_path]]
+path = "/metadata"
+description = "Metadata service endpoint"
+
+[[internal_path]]
+path = "/config"
+description = "Configuration endpoint"
+
+[[internal_path]]
+path = "/.env"
+description = "Environment file"
+
+[[internal_path]]
+path = "/actuator"
+description = "Spring Boot actuator"
+
+[[internal_path]]
+path = "/swagger"
+description = "Swagger API docs"
+
+[[internal_path]]
+path = "/api/v1"
+description = "API version 1 endpoint"
+
+[[internal_path]]
+path = "/debug"
+description = "Debug endpoint"
+
+[[internal_path]]
+path = "/etc/passwd"
+description = "Unix password file"
+
+[[internal_path]]
+path = "/etc/shadow"
+description = "Unix shadow file"
+
+[[internal_path]]
+path = "/proc/"
+description = "Linux proc filesystem"
+
+[[internal_path]]
+path = "/windows/system32"
+description = "Windows system directory"

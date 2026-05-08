@@ -1,0 +1,21 @@
+[[waf]]
+name = "pkSecurity IDS"
+vendor = "pkSec"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:pksec"
+[[waf.signature]]
+  body_regex = "pk.?Security.?Module"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Security.Alert"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "As this could be a potential hack attack"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "A safety critical (call|request) was (detected|discovered) and blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "maximum number of reloads per minute and prevented access"
+  weight = 0.4
