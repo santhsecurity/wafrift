@@ -21,7 +21,7 @@ use wafrift_smuggling::h2_evasion;
 use wafrift_smuggling::smuggling;
 use wafrift_types::{EvasionResult, Request, Technique};
 
-use mctrust::{Environment, GameSearch, SearchConfig};
+use mctrust::{Environment, TreeSearch, SearchConfig};
 use crate::mcts_bridge::WafRiftEnv;
 
 // Re-export types that consumers depend on.
@@ -246,9 +246,9 @@ pub fn evade_mcts(
         .build();
 
     // Run MCTS search
-    let mut search = GameSearch::new(env, search_config);
+    let mut search = TreeSearch::new(env, search_config);
     search.run()?;
-    let sequence = search.best_sequence();
+    let sequence = search.principal_variation();
     if sequence.is_empty() {
         return None;
     }

@@ -16,7 +16,7 @@
 //! discovering combinations like "unicode-encode → switch to multipart →
 //! grammar-mutate SQL" that no static escalation would find.
 
-use mctrust::{Environment, GameState, Reward};
+use mctrust::{Environment, Outcome, Reward};
 use wafrift_encoding::encoding;
 use wafrift_grammar::grammar;
 use wafrift_types::{Request, Technique};
@@ -272,7 +272,7 @@ impl Environment for WafRiftEnv {
         }
     }
 
-    fn evaluate(&self) -> GameState {
+    fn evaluate(&self) -> Outcome {
         // Multi-oracle validation: classify the payload type and validate
         // with the appropriate oracle.
         if !self.applied_techniques.is_empty()
@@ -303,7 +303,7 @@ impl Environment for WafRiftEnv {
                                     self.sql_dialect,
                                 )
                             {
-                                return GameState::Loss;
+                                return Outcome::Failure;
                             }
                         }
                         grammar::PayloadType::Xss => {
@@ -311,28 +311,28 @@ impl Environment for WafRiftEnv {
                             use wafrift_oracle::traits::PayloadOracle;
                             let oracle = wafrift_oracle::xss::XssOracle;
                             if !oracle.is_semantically_valid(&decoded, &decoded) {
-                                return GameState::Loss;
+                                return Outcome::Failure;
                             }
                         }
                         grammar::PayloadType::TemplateInjection => {
                             use wafrift_oracle::traits::PayloadOracle;
                             let oracle = wafrift_oracle::ssti::SstiOracle;
                             if !oracle.is_semantically_valid(&decoded, &decoded) {
-                                return GameState::Loss;
+                                return Outcome::Failure;
                             }
                         }
                         grammar::PayloadType::CommandInjection => {
                             use wafrift_oracle::traits::PayloadOracle;
                             let oracle = wafrift_oracle::cmdi::CmdiOracle;
                             if !oracle.is_semantically_valid(&decoded, &decoded) {
-                                return GameState::Loss;
+                                return Outcome::Failure;
                             }
                         }
                         grammar::PayloadType::PathTraversal => {
                             use wafrift_oracle::traits::PayloadOracle;
                             let oracle = wafrift_oracle::path::PathOracle;
                             if !oracle.is_semantically_valid(&decoded, &decoded) {
-                                return GameState::Loss;
+                                return Outcome::Failure;
                             }
                         }
                         // Unknown/LDAP/SSRF: no oracle available, accept the transform
@@ -346,9 +346,9 @@ impl Environment for WafRiftEnv {
         if self.applied_techniques.len() >= self.max_depth {
             // Higher reward for more diverse technique combinations
             let diversity = technique_diversity(&self.applied_techniques);
-            GameState::Win(Reward::new(0.5 + diversity * 0.5))
+            Outcome::Success(Reward::new(0.5 + diversity * 0.5))
         } else {
-            GameState::Ongoing
+            Outcome::Ongoing
         }
     }
 
@@ -393,7 +393,7 @@ fn technique_diversity(techniques: &[Technique]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mctrust::{GameSearch, SearchConfig};
+    use mctrust::{TreeSearch, SearchConfig};
 
     #[test]
     fn mcts_bridge_finds_encoding_technique() {
@@ -409,7 +409,7 @@ mod tests {
             .max_depth(2)
             .build();
 
-        let mut engine = GameSearch::new(env, config);
+        let mut engine = TreeSearch::new(env, config);
         let optimal_action = engine.run();
 
         assert!(
@@ -528,7 +528,7 @@ mod tests {
             .max_depth(3)
             .build();
 
-        let mut engine = GameSearch::new(env, config);
+        let mut engine = TreeSearch::new(env, config);
         let result = engine.run();
         assert!(result.is_some(), "MCTS should find a multi-step path");
     }
@@ -571,7 +571,7 @@ mod tests {
             .max_depth(2)
             .build();
 
-        let mut engine = GameSearch::new(env, config);
+        let mut engine = TreeSearch::new(env, config);
         // Should not panic; XSS oracle is used for validation
         let _ = engine.run();
     }

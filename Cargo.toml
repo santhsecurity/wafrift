@@ -20,7 +20,6 @@ members = [
     "crates/proxy",  # May require external dependencies
     "crates/transport", "crates/oracle", "crates/pool",
     "crates/recon",
-    "libs/general/mctrust",
 ]
 
 [workspace.package]
@@ -51,7 +50,7 @@ wafrift-strategy = { path = "crates/strategy", version = "0.1.0" }
 wafrift-oracle = { path = "crates/oracle", version = "0.1.0" }
 wafrift-transport = { path = "crates/transport", version = "0.1.0" }
 wafrift-pool = { path = "crates/pool", version = "0.1.0" }
-mctrust = { path = "libs/general/mctrust", version = "0.1.0" }
+mctrust = "=0.4.0"
 # External dependencies (unavailable in this environment)
 # attackstr = { path = "../../libs/offensive/attackstr" }
 # scanclient = { path = "../../libs/scanner/scanclient" }
