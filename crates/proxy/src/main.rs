@@ -110,6 +110,18 @@ struct Args {
     /// the host's gene bank so subsequent requests rotate it directly.
     #[arg(long, default_value_t = 0)]
     max_evade_retries: u32,
+
+    /// Path for the persistent gene bank — proven winners and
+    /// blocklisted techniques per host that survive proxy restarts.
+    /// Default is `~/.wafrift/gene-bank.json`. Pass an empty string
+    /// to disable persistence.
+    #[arg(long, default_value = "")]
+    gene_bank_path: String,
+
+    /// How often (in seconds) to flush the gene bank to disk.
+    /// Default 60. 0 disables periodic flush (still flushes on signal).
+    #[arg(long, default_value_t = 60)]
+    gene_bank_flush_interval_secs: u64,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
@@ -125,6 +137,98 @@ struct ProxyState {
     total_blocks: u32,
     /// Technique usage counts.
     techniques_used: HashMap<String, u32>,
+}
+
+/// Subset of HostState worth persisting across proxy restarts. Block
+/// counts and pending discovery state re-accumulate naturally; what we
+/// don't want to lose is the painstakingly-discovered winners pool and
+/// the per-host blocklist.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct PersistedHostState {
+    proven_winners: Vec<String>,
+    blocklisted: Vec<String>,
+    waf_name: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct PersistedGeneBank {
+    /// Format version so future schema changes can be detected.
+    schema: u32,
+    hosts: HashMap<String, PersistedHostState>,
+}
+
+fn default_gene_bank_path(supplied: &str) -> Option<std::path::PathBuf> {
+    if supplied.is_empty() {
+        // Default: ~/.wafrift/gene-bank.json. If $HOME is unset, disable.
+        let home = std::env::var_os("HOME")?;
+        let p = std::path::PathBuf::from(home)
+            .join(".wafrift")
+            .join("gene-bank.json");
+        Some(p)
+    } else if supplied == "off" || supplied == "-" {
+        None
+    } else {
+        Some(std::path::PathBuf::from(supplied))
+    }
+}
+
+fn load_gene_bank(path: &std::path::Path) -> PersistedGeneBank {
+    match std::fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+            warn!(path = %path.display(), error = %e, "gene bank parse failed; starting empty");
+            PersistedGeneBank::default()
+        }),
+        Err(_) => PersistedGeneBank::default(),
+    }
+}
+
+fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut bank = PersistedGeneBank {
+        schema: 1,
+        hosts: HashMap::new(),
+    };
+    for (host, hs) in &state.hosts {
+        if hs.proven_winners.is_empty() && hs.blocklisted.is_empty() {
+            continue; // skip empty hosts to keep the file small
+        }
+        bank.hosts.insert(
+            host.clone(),
+            PersistedHostState {
+                proven_winners: hs.proven_winners.clone(),
+                blocklisted: hs.blocklisted.clone(),
+                waf_name: hs.waf_name.clone(),
+            },
+        );
+    }
+    let json = serde_json::to_string_pretty(&bank)?;
+    // Atomic write via tempfile rename.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
+    let mut restored = 0usize;
+    for (host, persisted) in bank.hosts {
+        let hs = state.hosts.entry(host).or_default();
+        if !persisted.proven_winners.is_empty() {
+            hs.proven_winners = persisted.proven_winners;
+            hs.discovery_complete = true;
+            restored += 1;
+        }
+        if !persisted.blocklisted.is_empty() {
+            hs.blocklisted = persisted.blocklisted;
+        }
+        if persisted.waf_name.is_some() {
+            hs.waf_name = persisted.waf_name;
+            hs.waf_confirmed = true;
+        }
+    }
+    restored
 }
 
 use wafrift_proxy::extract_host_from_header;
@@ -257,6 +361,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.insecure_open_upstream {
         warn!("--insecure-open-upstream: upstream DNS/literal policy checks are disabled");
     }
+
+    // ── Persistent gene bank ────────────────────────────────────────
+    let gene_bank_path = default_gene_bank_path(&args.gene_bank_path);
+    if let Some(path) = &gene_bank_path {
+        let bank = load_gene_bank(path);
+        let restored = {
+            let mut st = shared_state.lock().await;
+            restore_gene_bank(&mut st, bank)
+        };
+        if restored > 0 {
+            info!(
+                path = %path.display(),
+                hosts_restored = restored,
+                "loaded persistent gene bank"
+            );
+        } else {
+            info!(path = %path.display(), "starting with empty gene bank");
+        }
+
+        // Periodic flush task.
+        if args.gene_bank_flush_interval_secs > 0 {
+            let flush_path = path.clone();
+            let flush_state = shared_state.clone();
+            let interval = args.gene_bank_flush_interval_secs;
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(interval));
+                tick.tick().await; // skip the immediate first tick
+                loop {
+                    tick.tick().await;
+                    let st = flush_state.lock().await;
+                    if let Err(e) = save_gene_bank(&st, &flush_path) {
+                        warn!(error = %e, "periodic gene bank flush failed");
+                    }
+                }
+            });
+        }
+    }
+
+    // ── Graceful shutdown: SIGINT/SIGTERM flush gene bank then exit ──
+    let shutdown_state = shared_state.clone();
+    let shutdown_path = gene_bank_path.clone();
+    tokio::spawn(async move {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let mut sigint = match signal(SignalKind::interrupt()) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        tokio::select! {
+            _ = sigterm.recv() => info!("received SIGTERM"),
+            _ = sigint.recv() => info!("received SIGINT"),
+        };
+        if let Some(path) = &shutdown_path {
+            let st = shutdown_state.lock().await;
+            match save_gene_bank(&st, path) {
+                Ok(()) => info!(path = %path.display(), "gene bank flushed on shutdown"),
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "gene bank flush on shutdown failed")
+                }
+            }
+        }
+        info!("shutting down");
+        std::process::exit(0);
+    });
 
     loop {
         let permit = match conn_sem.clone().acquire_owned().await {

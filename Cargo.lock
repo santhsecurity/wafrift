@@ -3026,7 +3026,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "wafrift-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3058,7 +3058,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-content-type"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand 0.8.5",
  "serde_json",
@@ -3066,7 +3066,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand 0.8.5",
  "rcgen",
@@ -3091,7 +3091,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-detect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aho-corasick",
  "criterion",
@@ -3108,7 +3108,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-encoding"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "flate2",
@@ -3122,7 +3122,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-evolution"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lru",
  "proptest",
@@ -3141,7 +3141,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-fingerprint"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand 0.8.5",
  "wafrift-types",
@@ -3149,7 +3149,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-grammar"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "rand 0.8.5",
@@ -3162,7 +3162,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-oracle"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "proptest",
@@ -3177,14 +3177,14 @@ dependencies = [
 
 [[package]]
 name = "wafrift-pool"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "reqwest",
 ]
 
 [[package]]
 name = "wafrift-proxy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3216,7 +3216,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-recon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -3229,7 +3229,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-smuggling"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "httparse",
@@ -3242,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-strategy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "mctrust",
@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-transport"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "http",
@@ -3281,7 +3281,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-types"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand 0.8.5",
  "serde",
