@@ -1,0 +1,18 @@
+[[waf]]
+name = "Reflected Networks"
+vendor = "Reflected Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:reflected"
+[[waf.signature]]
+  body_regex = "<img class=\"logo loader\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAbgAAABHCAIAAAD6G8WcAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyRpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "content=\"Request is denied\""
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<title>Forbidden</title>"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 403
+  weight = 0.2

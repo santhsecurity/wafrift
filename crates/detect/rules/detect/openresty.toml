@@ -1,0 +1,19 @@
+[[waf]]
+name = "Open-Resty Lua Nginx"
+vendor = "FLOSS"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:openresty"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "^openresty/[0-9\\.]+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "openresty/[0-9\\.]+?"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 403
+  weight = 0.2
+[[waf.signature]]
+  status_code = 406
+  weight = 0.2

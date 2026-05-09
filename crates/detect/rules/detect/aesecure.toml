@@ -1,0 +1,13 @@
+[[waf]]
+name = "aeSecure"
+vendor = "aeSecure"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:aesecure"
+[[waf.signature]]
+  header_name = "aesecure-code"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "aesecure_denied\\.png"
+  weight = 0.4

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use std::sync::OnceLock;
 
 /// Compile-time embedded TOML for WAF presets.
-const WAF_PRESETS_TOML: &str = include_str!("../../../rules/waf_presets.toml");
+const WAF_PRESETS_TOML: &str = include_str!("../rules/waf_presets.toml");
 
 /// A single WAF evasion preset.
 #[derive(Debug, Clone, Deserialize)]
@@ -40,7 +40,7 @@ fn all_presets() -> &'static [WafPreset] {
     static PRESETS: OnceLock<Vec<WafPreset>> = OnceLock::new();
     PRESETS.get_or_init(|| {
         let file: WafPresetsFile = toml::from_str(WAF_PRESETS_TOML).unwrap_or_else(|e| {
-            eprintln!("warn: invalid TOML in rules/waf_presets.toml: {e}");
+            tracing::warn!(error = %e, "invalid TOML in rules/waf_presets.toml; falling back to empty preset set");
             WafPresetsFile {
                 waf_preset: Vec::new(),
             }

@@ -230,6 +230,35 @@ fn unknown_subcommand_fails() {
 }
 
 #[test]
+fn bench_waf_help_lists_all_strategies() {
+    // bench-waf --help text must enumerate every selectable strategy and
+    // call out the `all` keyword shortcut. If a future change renames a
+    // strategy or drops one from the help, this test catches it.
+    let (code, stdout, _) = wafrift(&["bench-waf", "--help"]);
+    assert_eq!(code, 0, "bench-waf --help should exit 0");
+    for keyword in &[
+        "heavy",
+        "mcts",
+        "smuggling",
+        "content-type",
+        "redos",
+        "hill-climb",
+        "sim-anneal",
+        "tabu",
+        "novelty",
+        "map-elites",
+        "differential",
+        "all",
+        "lineage-output",
+    ] {
+        assert!(
+            stdout.contains(keyword),
+            "bench-waf --help missing strategy keyword {keyword:?}\n--- stdout ---\n{stdout}"
+        );
+    }
+}
+
+#[test]
 fn invalid_level_fails() {
     let (code, _stdout, stderr) =
         wafrift(&["evade", "--payload", "test", "--level", "nonexistent_level"]);

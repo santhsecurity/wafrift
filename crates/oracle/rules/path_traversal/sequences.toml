@@ -1,0 +1,129 @@
+# Path Traversal Rules
+# Directory escape sequences and target files for path traversal attacks
+
+# Traversal sequences (various encodings that servers may decode)
+[[traversal_sequence]]
+sequence = "../"
+description = "Standard Unix traversal"
+encoding = "plain"
+
+[[traversal_sequence]]
+sequence = "..\\"
+description = "Windows-style traversal"
+encoding = "plain"
+
+[[traversal_sequence]]
+sequence = "..%2f"
+description = "URL-encoded forward slash (lowercase)"
+encoding = "url"
+
+[[traversal_sequence]]
+sequence = "..%2F"
+description = "URL-encoded forward slash (uppercase)"
+encoding = "url"
+
+[[traversal_sequence]]
+sequence = "..%5c"
+description = "URL-encoded backslash (lowercase)"
+encoding = "url"
+
+[[traversal_sequence]]
+sequence = "..%5C"
+description = "URL-encoded backslash (uppercase)"
+encoding = "url"
+
+[[traversal_sequence]]
+sequence = "%2e%2e/"
+description = "Double-dot URL encoded (lowercase)"
+encoding = "url"
+
+[[traversal_sequence]]
+sequence = "%2e%2e%2f"
+description = "Fully URL-encoded traversal"
+encoding = "url"
+
+[[traversal_sequence]]
+sequence = "....//"
+description = "Double traversal (some server bypass)"
+encoding = "double"
+
+[[traversal_sequence]]
+sequence = "..;/"
+description = "Semicolon traversal (IIS bypass)"
+encoding = "iis"
+
+# Common target files for path traversal
+[[target_file]]
+path = "/etc/passwd"
+description = "Unix user account database"
+os = "unix"
+
+[[target_file]]
+path = "/etc/shadow"
+description = "Unix password hashes (privileged)"
+os = "unix"
+
+[[target_file]]
+path = "/etc/hosts"
+description = "Static host entries"
+os = "unix"
+
+[[target_file]]
+path = "/etc/hostname"
+description = "System hostname"
+os = "unix"
+
+[[target_file]]
+path = "/proc/self/environ"
+description = "Current process environment variables"
+os = "linux"
+
+[[target_file]]
+path = "/proc/self/cmdline"
+description = "Current process command line"
+os = "linux"
+
+[[target_file]]
+path = "/proc/version"
+description = "Kernel version information"
+os = "linux"
+
+[[target_file]]
+path = "/var/log/"
+description = "Log directory"
+os = "unix"
+
+[[target_file]]
+path = "\\windows\\system32\\"
+description = "Windows system directory"
+os = "windows"
+
+[[target_file]]
+path = "\\windows\\win.ini"
+description = "Windows configuration file"
+os = "windows"
+
+[[target_file]]
+path = "boot.ini"
+description = "Windows boot configuration"
+os = "windows"
+
+[[target_file]]
+path = "web.config"
+description = "ASP.NET configuration"
+os = "windows"
+
+[[target_file]]
+path = ".htaccess"
+description = "Apache directory configuration"
+os = "any"
+
+[[target_file]]
+path = ".env"
+description = "Environment variables file"
+os = "any"
+
+[[target_file]]
+path = "wp-config.php"
+description = "WordPress configuration"
+os = "any"

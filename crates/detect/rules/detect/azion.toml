@@ -1,0 +1,14 @@
+[[waf]]
+name = "Azion Edge Firewall"
+vendor = "Azion"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:azion"
+[[waf.signature]]
+  header_name = "x-azion-edge-pop"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-azion-request-id"
+  header_regex = ".+?"
+  weight = 0.5

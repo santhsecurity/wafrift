@@ -1,0 +1,32 @@
+[[waf]]
+name = "Kona SiteDefender"
+vendor = "Akamai"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:kona"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "AkamaiGHost"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-akamai-transformed"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "akamai-x-cache"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "reference #"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "access denied"
+  weight = 0.4
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "akamaighost"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "akamaighosthost"
+  weight = 0.5

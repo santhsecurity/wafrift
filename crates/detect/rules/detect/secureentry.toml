@@ -1,0 +1,10 @@
+[[waf]]
+name = "Secure Entry"
+vendor = "United Security Providers"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:secureentry"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Secure Entry Server"
+  weight = 0.5

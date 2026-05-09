@@ -1,0 +1,17 @@
+[[waf]]
+name = "Safe3 Web Firewall"
+vendor = "Safe3"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:safe3"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Safe3 Web Firewall"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-powered-by"
+  header_regex = "Safe3WAF/[\\.0-9]+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Safe3waf/[0-9\\.]+?"
+  weight = 0.4

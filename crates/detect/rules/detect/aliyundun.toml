@@ -1,0 +1,18 @@
+[[waf]]
+name = "AliYunDun"
+vendor = "Alibaba Cloud Computing"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:aliyundun"
+[[waf.signature]]
+  body_regex = "error(s)?\\.aliyun(dun)?\\.(com|net)?"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "alicdn\\.com\\/sd\\-base\\/static\\/\\d{1,2}\\.\\d{1,2}\\.\\d{1,2}\\/image\\/405\\.png"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Sorry, your request has been blocked as it may cause potential threats to the server\\'s security."
+  weight = 0.4
+[[waf.signature]]
+  status_code = 405
+  weight = 0.2

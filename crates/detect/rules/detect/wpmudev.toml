@@ -1,0 +1,27 @@
+[[waf]]
+name = "wpmudev WAF"
+vendor = "Incsub"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:wpmudev"
+[[waf.signature]]
+  body_regex = "href=\"http(s)?.\\/\\/wpmudev.com\\/.{0,15}?"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Click on the Logs tab, then the WAF Log."
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Choose your site from the list"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<h1>Whoops, this request has been blocked!"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "This request has been deemed suspicious"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "possible attack on our servers."
+  weight = 0.4
+[[waf.signature]]
+  status_code = 403
+  weight = 0.2

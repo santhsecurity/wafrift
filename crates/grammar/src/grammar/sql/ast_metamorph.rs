@@ -40,7 +40,8 @@ pub fn mutations(payload: &str, max: usize) -> Vec<SqlMutation> {
     }
 
     let mut out: Vec<SqlMutation> = Vec::new();
-    let transforms: &[(&str, fn(&mut Statement))] = &[
+    type TransformFn = fn(&mut Statement);
+    let transforms: &[(&str, TransformFn)] = &[
         ("ast_commute_or", apply_commute_or),
         ("ast_commute_eq", apply_commute_eq),
         ("ast_identity_add_zero", apply_identity_add_zero),

@@ -1,0 +1,15 @@
+[[waf]]
+name = "WebARX"
+vendor = "WebARX Security Solutions"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:webarx"
+[[waf.signature]]
+  body_regex = "WebARX.{0,10}?Web Application Firewall"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "www\\.webarxsecurity\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "/wp\\-content/plugins/webarx/includes/"
+  weight = 0.4

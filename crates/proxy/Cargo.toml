@@ -15,6 +15,7 @@ wafrift-types = { workspace = true }
 wafrift-strategy = { workspace = true }
 wafrift-transport = { workspace = true }
 wafrift-encoding = { workspace = true }
+wafrift-detect = { workspace = true }
 tokio.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
@@ -31,7 +32,6 @@ rcgen = { workspace = true }
 tokio-rustls.workspace = true
 rustls.workspace = true
 rustls-pki-types = { workspace = true }
-rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }

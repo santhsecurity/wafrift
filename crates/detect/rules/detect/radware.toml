@@ -1,0 +1,25 @@
+[[waf]]
+name = "AppWall"
+vendor = "Radware"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:radware"
+[[waf.signature]]
+  header_name = "x-sl-compstate"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "CloudWebSec\\.radware\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "because we have detected unauthorized activity"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<title>Unauthorized Request Blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "if you believe that there has been some mistake"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "\\?Subject=Security Page.{0,10}?Case Number"
+  weight = 0.4

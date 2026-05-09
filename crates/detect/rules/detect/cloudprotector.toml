@@ -1,0 +1,12 @@
+[[waf]]
+name = "Cloud Protector"
+vendor = "Rohde & Schwarz CyberSecurity"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:cloudprotector"
+[[waf.signature]]
+  body_regex = "Cloud Protector.*?by Rohde.{3,8}?Schwarz Cybersecurity"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<a href='https?:\\/\\/(?:www\\.)?cloudprotector\\.com\\/'>R.{1,6}?S.Cloud Protector"
+  weight = 0.4

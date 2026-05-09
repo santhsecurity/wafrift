@@ -1,0 +1,10 @@
+[[waf]]
+name = "WebLand"
+vendor = "WebLand"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:webland"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "protected by webland"
+  weight = 0.5

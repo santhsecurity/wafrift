@@ -1,5 +1,7 @@
 pub mod hop_by_hop;
 pub mod mitm;
+pub mod rate_limit;
+pub mod scope;
 pub mod upstream_policy;
 
 /// Extract the host from a Host header, handling IPv6 bracket notation and bare IPv6 literals.

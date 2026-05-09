@@ -1,0 +1,9 @@
+[[waf]]
+name = "Janusec Application Gateway"
+vendor = "Janusec"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:janusec"
+[[waf.signature]]
+  body_regex = "janusec application gateway"
+  weight = 0.4

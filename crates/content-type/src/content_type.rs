@@ -55,9 +55,17 @@ pub enum ContentTypeTechnique {
 ///
 /// Only segments containing `=` are considered valid key-value pairs.
 /// Plain text without `=` delimiters is skipped.
+///
+/// **UTF-8 handling.** Invalid UTF-8 bytes are rejected (returns the
+/// pairs successfully parsed before the failure) rather than silently
+/// replaced with U+FFFD. The earlier lossy decode could produce
+/// variants that diverged from how the upstream form decoder would
+/// have rejected the body, masking real parser-discrepancy attacks.
 #[must_use]
 pub fn parse_form_body(body: &[u8]) -> Vec<(String, String)> {
-    let body_str = String::from_utf8_lossy(body);
+    let Ok(body_str) = std::str::from_utf8(body) else {
+        return Vec::new();
+    };
     body_str
         .split('&')
         .filter_map(|pair| {
@@ -130,12 +138,26 @@ pub fn xml_safe_name(name: &str) -> String {
 }
 
 /// Build a standard multipart body from params using the given boundary.
+/// Keys and values are sanitised to prevent framing breakage:
+/// - Quotes in `name=` are backslash-escaped per RFC 7578 §4.2.
+/// - CR/LF in keys or values are stripped (they would otherwise close
+///   the part header section and let an attacker inject a fake part).
 fn build_multipart_body(params: &[(String, String)], boundary: &str) -> Vec<u8> {
+    fn safe_name(s: &str) -> String {
+        s.replace(['\r', '\n'], "")
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+    }
+    fn safe_value(s: &str) -> String {
+        s.replace(['\r', '\n'], "")
+    }
     let mut body = String::new();
     for (key, value) in params {
+        let k = safe_name(key);
+        let v = safe_value(value);
         let _ = write!(
             &mut body,
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n"
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n"
         );
     }
 
@@ -232,9 +254,23 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
                 if c.is_ascii_alphanumeric() || c == ' ' {
                     json_string.push(c);
                 } else {
-                    // We must format the literal unicode escape directly into the string.
-                    // If we used serde_json::to_string(), it would double-escape the backslash!
-                    let _ = write!(&mut json_string, "\\u{:04x}", c as u32);
+                    // Emit \uXXXX escapes directly. For BMP chars (≤ U+FFFF)
+                    // a single 4-hex escape is valid JSON. For supplementary-
+                    // plane chars (U+10000..U+10FFFF) JSON requires a UTF-16
+                    // surrogate pair; without it the output parses as
+                    // invalid JSON in strict parsers (and the variant ships
+                    // with `Content-Type: application/json` so it must be
+                    // valid JSON by contract).
+                    let cp = c as u32;
+                    if cp <= 0xFFFF {
+                        let _ = write!(&mut json_string, "\\u{cp:04x}");
+                    } else {
+                        // RFC 8259 §7: encode as a UTF-16 surrogate pair.
+                        let v = cp - 0x10000;
+                        let high = 0xD800 + (v >> 10);
+                        let low = 0xDC00 + (v & 0x3FF);
+                        let _ = write!(&mut json_string, "\\u{high:04x}\\u{low:04x}");
+                    }
                 }
             }
             json_string.push('"');

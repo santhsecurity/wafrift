@@ -1,0 +1,9 @@
+[[waf]]
+name = "KS-WAF"
+vendor = "KnownSec"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:knownsec"
+[[waf.signature]]
+  body_regex = "/ks[-_]waf[-_]error\\.png"
+  weight = 0.4

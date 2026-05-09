@@ -1,0 +1,15 @@
+[[waf]]
+name = "Eisoo Cloud Firewall"
+vendor = "Eisoo"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:eisoo"
+[[waf.signature]]
+  body_regex = "<link.{0,10}?href=\\\"/eisoo\\-firewall\\-block\\.css"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "www\\.eisoo\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "&copy; \\d{4} Eisoo Inc"
+  weight = 0.4

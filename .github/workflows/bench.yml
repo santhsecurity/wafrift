@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       stack:
-        description: 'WAF stack to bench (modsec-pl1, modsec-pl2, modsec-pl3, modsec-pl4, coraza, naxsi)'
+        description: 'WAF stack to bench (modsec-pl1, modsec-pl2, modsec-pl3, modsec-pl4, coraza, bunkerweb, naxsi)'
         required: false
         default: 'modsec-pl1'
       strategies:
@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stack: [modsec-pl1, modsec-pl2, modsec-pl3, modsec-pl4, coraza, naxsi]
+        stack: [modsec-pl1, modsec-pl2, modsec-pl3, modsec-pl4, coraza, bunkerweb, naxsi]
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +49,8 @@ jobs:
             modsec-pl3) echo "p=18083" >> "$GITHUB_OUTPUT" ;;
             modsec-pl4) echo "p=18084" >> "$GITHUB_OUTPUT" ;;
             coraza)     echo "p=18085" >> "$GITHUB_OUTPUT" ;;
-            naxsi)      echo "p=18086" >> "$GITHUB_OUTPUT" ;;
+            bunkerweb)  echo "p=18086" >> "$GITHUB_OUTPUT" ;;
+            naxsi)      echo "p=18087" >> "$GITHUB_OUTPUT" ;;
           esac
 
       - name: Run wafrift bench-waf with --evade

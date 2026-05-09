@@ -1,0 +1,12 @@
+[[waf]]
+name = "Malcare"
+vendor = "Inactiv"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:malcare"
+[[waf.signature]]
+  body_regex = "firewall.{0,15}?powered.by.{0,15}?malcare.{0,15}?pro"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "blocked because of malicious activities"
+  weight = 0.4

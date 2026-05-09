@@ -1,0 +1,9 @@
+[[waf]]
+name = "Expression Engine"
+vendor = "EllisLab"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:expressionengine"
+[[waf.signature]]
+  body_regex = "invalid get data"
+  weight = 0.4

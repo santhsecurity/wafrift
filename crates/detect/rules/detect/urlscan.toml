@@ -1,0 +1,12 @@
+[[waf]]
+name = "URLScan"
+vendor = "Microsoft"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:urlscan"
+[[waf.signature]]
+  body_regex = "Rejected[-_]By[_-]UrlScan"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "A custom filter or module.{0,4}?such as URLScan"
+  weight = 0.4

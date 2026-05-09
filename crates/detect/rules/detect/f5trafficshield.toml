@@ -1,0 +1,13 @@
+[[waf]]
+name = "Trafficshield"
+vendor = "F5 Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "ContentTypeSwitch", "DoubleUrlEncode"]
+source = "WAFW00F:f5trafficshield"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "F5-TrafficShield"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "^ASINFO="
+  weight = 0.5

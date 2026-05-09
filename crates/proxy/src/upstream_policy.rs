@@ -1,6 +1,7 @@
 //! Upstream destination policy: literal-IP bogons and DNS SSRF-style checks.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
 /// Policy for CONNECT and cleartext forward destinations.
 #[derive(Debug, Clone, Default)]
@@ -24,6 +25,17 @@ pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
                 || v.is_unspecified()
         }
         IpAddr::V6(v) => {
+            // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1, ::ffff:169.254.169.254)
+            // would otherwise sneak past the V6 bogon checks because
+            // is_loopback / is_unique_local return false for the mapped form.
+            // Re-check the embedded V4 explicitly. Same for IPv4-compatible
+            // (deprecated) form.
+            if let Some(mapped) = v.to_ipv4_mapped() {
+                return ip_addr_is_bogon(IpAddr::V4(mapped));
+            }
+            if let Some(compat) = v.to_ipv4() {
+                return ip_addr_is_bogon(IpAddr::V4(compat));
+            }
             v.is_loopback()
                 || v.is_multicast()
                 || v.is_unspecified()
@@ -117,6 +129,48 @@ pub async fn assert_connect_target_allowed(
     resolve_host_all_public(host, port).await
 }
 
+
+
+/// `reqwest::dns::Resolve` impl that wraps the system resolver and
+/// drops any address that fails `ip_addr_is_bogon`. This closes the
+/// DNS-rebinding TOCTOU between `assert_forward_url_allowed` (first
+/// lookup) and reqwest's connection-time lookup (second lookup): both
+/// now go through the same bogon filter, so a hostname that resolves
+/// to a public IP at policy-check time can't suddenly resolve to
+/// 169.254.169.254 / 127.0.0.1 / RFC1918 at fetch time.
+///
+/// The wrapper is permissive when `allow_private_upstream` is set —
+/// caller flips that switch when targeting localhost on purpose
+/// (e.g. lab tests).
+pub struct BogonFilteringResolver {
+    pub policy: Arc<UpstreamPolicy>,
+}
+
+impl reqwest::dns::Resolve for BogonFilteringResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let policy = self.policy.clone();
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let lookups = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+            let allow_private =
+                policy.allow_private_upstream || policy.insecure_open_upstream;
+            let filtered: Vec<SocketAddr> = lookups
+                .into_iter()
+                .filter(|sa| allow_private || !ip_addr_is_bogon(sa.ip()))
+                .collect();
+            if filtered.is_empty() {
+                return Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
+                    "DNS rebinding refused: every address for {host} is in the bogon set"
+                )));
+            }
+            let iter: reqwest::dns::Addrs = Box::new(filtered.into_iter());
+            Ok(iter)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +183,31 @@ mod tests {
     #[test]
     fn public_v4_ok() {
         assert!(!ip_addr_is_bogon("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv4_mapped_v6_loopback_is_bogon() {
+        // ::ffff:127.0.0.1 — without the IPv4-mapped re-check, this
+        // sneaks past v.is_loopback() (which only catches ::1).
+        assert!(ip_addr_is_bogon("::ffff:127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv4_mapped_v6_imds_is_bogon() {
+        // The exact bypass that would have leaked AWS IMDS via SSRF.
+        assert!(ip_addr_is_bogon("::ffff:169.254.169.254".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv4_mapped_v6_rfc1918_is_bogon() {
+        assert!(ip_addr_is_bogon("::ffff:10.0.0.1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("::ffff:192.168.1.1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("::ffff:172.16.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv4_mapped_v6_public_ok() {
+        // Sanity — mapped form of a public address must NOT be flagged.
+        assert!(!ip_addr_is_bogon("::ffff:8.8.8.8".parse().unwrap()));
     }
 }

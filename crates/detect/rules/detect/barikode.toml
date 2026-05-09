@@ -1,0 +1,9 @@
+[[waf]]
+name = "Barikode"
+vendor = "Ethic Ninja"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:barikode"
+[[waf.signature]]
+  body_regex = "<strong>barikode<.strong>"
+  weight = 0.4

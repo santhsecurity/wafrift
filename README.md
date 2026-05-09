@@ -47,7 +47,7 @@ cargo run --release -p wafrift-cli -- bench-waf \
     --base-url http://127.0.0.1:18084 \
     --corpus wafrift-bench/corpus \
     --evade --variants 20 \
-    --strategies heavy,mcts,smuggling,content-type,redos,hill-climb,sim-anneal,tabu,novelty,map-elites \
+    --strategies heavy,mcts,smuggling,content-type,redos,hill-climb,sim-anneal,tabu,novelty,map-elites,differential \
     --oracle-gate \
     --output repro.json
 jq .evaded_summary repro.json

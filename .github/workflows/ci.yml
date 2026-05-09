@@ -28,10 +28,28 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: vendored rules in sync with workspace
+        run: |
+          # Each publishable crate vendors a copy of the workspace
+          # rule files it `include_str!`s. If the workspace copy
+          # diverges (someone updated rules/ but forgot the vendored
+          # mirror), the published crate will ship stale data. Fail
+          # CI fast so the drift gets caught at PR time.
+          set -e
+          diff -q rules/cmd/payloads.toml crates/grammar/rules/cmd/payloads.toml
+          diff -q rules/sql/operators.toml crates/grammar/rules/sql/operators.toml
+          diff -q rules/templates.toml crates/grammar/rules/templates.toml
+          diff -q rules/cmd/oracle.toml crates/oracle/rules/cmd/oracle.toml
+          diff -q rules/ssrf/indicators.toml crates/oracle/rules/ssrf/indicators.toml
+          diff -q rules/path_traversal/sequences.toml crates/oracle/rules/path_traversal/sequences.toml
+          diff -q rules/waf_presets.toml crates/strategy/rules/waf_presets.toml
+          diff -rq rules/detect crates/detect/rules/detect
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
       - run: cargo build --workspace --all-features
       - run: cargo test --workspace --all-features
+      - name: bench corpus integrity
+        run: cargo run --release -p wafrift-cli -- bench-waf --validate-only --corpus wafrift-bench/corpus
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings

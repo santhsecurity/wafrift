@@ -97,6 +97,13 @@ pub fn multi_point_crossover(
     if max_len == 0 {
         return Chromosome::new(Vec::new());
     }
+    // gen_range(1..max_len) panics on empty range when max_len == 1
+    // (single distinct gene shared between both parents). Single-gene
+    // parents have no meaningful split point — fall back to a clone of
+    // parent_a, same shape as max_len == 0.
+    if max_len == 1 {
+        return build_child(parent_a, parent_b, |_, _| true);
+    }
     let mut points: Vec<usize> = (0..num_points.min(max_len))
         .map(|_| rng.gen_range(1..max_len))
         .collect();

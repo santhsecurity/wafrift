@@ -39,7 +39,7 @@ const URL_SCHEMES: &[&str] = &[
 // ──────────────────────────────────────────────
 
 /// Compile-time embedded TOML rules for SSRF indicators.
-const SSRF_INDICATORS_TOML: &str = include_str!("../../../rules/ssrf/indicators.toml");
+const SSRF_INDICATORS_TOML: &str = include_str!("../rules/ssrf/indicators.toml");
 
 /// Indicator host definition from TOML.
 #[derive(Debug, Clone, Deserialize)]

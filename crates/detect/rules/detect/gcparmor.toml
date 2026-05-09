@@ -1,0 +1,10 @@
+[[waf]]
+name = "Google Cloud App Armor"
+vendor = "Google Cloud"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:gcparmor"
+[[waf.signature]]
+  header_name = "via"
+  header_regex = "1.1 google"
+  weight = 0.5

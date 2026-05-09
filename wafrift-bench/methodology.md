@@ -107,6 +107,10 @@ workflow compares new runs against it:
 CI does not auto-fail on these — they're advisory until baseline
 methodology is settled.
 
+`wafrift bench-diff --current new.json --baseline last.json` runs the
+comparison and exits `3` on regression, ready to wire into a CI gate
+once a baseline is committed.
+
 ## Reproducer protocol
 
 A claim of "wafrift achieves X% bypass on Y" must include:

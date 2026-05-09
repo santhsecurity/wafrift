@@ -20,7 +20,7 @@ pub struct CmdiOracle;
 // ──────────────────────────────────────────────
 
 /// Compile-time embedded TOML rules for CMDI oracle.
-const CMD_ORACLE_TOML: &str = include_str!("../../../rules/cmd/oracle.toml");
+const CMD_ORACLE_TOML: &str = include_str!("../rules/cmd/oracle.toml");
 
 /// Command separator definition from TOML.
 #[derive(Debug, Clone, Deserialize)]

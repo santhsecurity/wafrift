@@ -1,0 +1,10 @@
+[[waf]]
+name = "PowerCDN"
+vendor = "PowerCDN"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:powercdn"
+[[waf.signature]]
+  header_name = "x-cdn"
+  header_regex = "PowerCDN"
+  weight = 0.5

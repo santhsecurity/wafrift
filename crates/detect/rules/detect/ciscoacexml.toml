@@ -1,0 +1,10 @@
+[[waf]]
+name = "ACE XML Gateway"
+vendor = "Cisco"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:ciscoacexml"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "ACE XML Gateway"
+  weight = 0.5

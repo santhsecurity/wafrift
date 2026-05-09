@@ -1,0 +1,27 @@
+[[waf]]
+name = "Instart DX"
+vendor = "Instart Logic"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:instartdx"
+[[waf.signature]]
+  header_name = "x-instart-request-id"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-instart-cache"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-instart-wl"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "the requested url was rejected"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "please consult with your administrator"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "your support id is"
+  weight = 0.4

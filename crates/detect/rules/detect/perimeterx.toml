@@ -1,0 +1,15 @@
+[[waf]]
+name = "PerimeterX"
+vendor = "PerimeterX"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:perimeterx"
+[[waf.signature]]
+  body_regex = "www\\.perimeterx\\.(com|net)/whywasiblocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "client\\.perimeterx\\.(net|com)"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "denied because we believe you are using automation tools"
+  weight = 0.4

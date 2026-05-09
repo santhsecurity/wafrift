@@ -1,0 +1,9 @@
+[[waf]]
+name = "HyperGuard"
+vendor = "Art of Defense"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:hyperguard"
+[[waf.signature]]
+  cookie_regex = "^WODSESSION="
+  weight = 0.5

@@ -17,6 +17,8 @@ pub mod strategy;
 /// WAF-specific evasion presets loaded from TOML rules.
 pub mod waf_presets;
 
+pub use host_state::HostState;
+pub use learning_cache::LearningCache;
 pub use pipeline::{EvasionPipeline, EvasionPlanOutput};
 pub use planner::plan_pipelines;
 pub use strategy::*;

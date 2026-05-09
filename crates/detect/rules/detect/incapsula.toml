@@ -1,0 +1,35 @@
+[[waf]]
+name = "Incapsula"
+vendor = "Imperva Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:incapsula"
+[[waf.signature]]
+  body_regex = "incapsula incident id"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "powered by incapsula"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "/_Incapsula_Resource"
+  weight = 0.4
+[[waf.signature]]
+  header_name = "x-iinfo"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-cdn"
+  header_regex = "incapsula"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "incapsula"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "imperva"
+  weight = 0.4
+[[waf.signature]]
+  cookie_regex = "visid_incap"
+  weight = 0.5
+[[waf.signature]]
+  cookie_regex = "incap_ses"
+  weight = 0.4

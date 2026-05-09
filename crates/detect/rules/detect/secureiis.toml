@@ -1,0 +1,15 @@
+[[waf]]
+name = "eEye SecureIIS"
+vendor = "BeyondTrust"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:secureiis"
+[[waf.signature]]
+  body_regex = "SecureIIS is an internet security application"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Download SecureIIS Personal Edition"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "https?://www\\.eeye\\.com/Secure\\-?IIS"
+  weight = 0.4

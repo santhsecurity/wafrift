@@ -1,0 +1,12 @@
+[[waf]]
+name = "Bekchy"
+vendor = "Faydata Technologies Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:bekchy"
+[[waf.signature]]
+  body_regex = "Bekchy.{0,10}?Access Denied"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "bekchy\\.com/report"
+  weight = 0.4

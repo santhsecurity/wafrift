@@ -1,0 +1,14 @@
+[[waf]]
+name = "XLabs Security WAF"
+vendor = "XLabs"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:xlabssecuritywaf"
+[[waf.signature]]
+  header_name = "x-cdn"
+  header_regex = "XLabs Security"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "secured"
+  header_regex = "^By XLabs Security"
+  weight = 0.5

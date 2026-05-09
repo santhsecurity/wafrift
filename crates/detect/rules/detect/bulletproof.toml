@@ -1,0 +1,15 @@
+[[waf]]
+name = "BulletProof Security Pro"
+vendor = "AITpro Security"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:bulletproof"
+[[waf.signature]]
+  body_regex = "\\+?bpsMessage"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "403 Forbidden Error Page"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "If you arrived here due to a search"
+  weight = 0.4

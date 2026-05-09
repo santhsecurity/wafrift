@@ -1,0 +1,9 @@
+[[waf]]
+name = "Safeline"
+vendor = "Chaitin Tech."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:safeline"
+[[waf.signature]]
+  body_regex = "safeline|<!\\-\\-\\sevent id:"
+  weight = 0.4

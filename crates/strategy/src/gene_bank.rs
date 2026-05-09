@@ -160,7 +160,8 @@ impl GeneBank {
     /// # Errors
     ///
     /// Returns an error if the directory cannot be created.
-    pub fn open(root: PathBuf) -> Result<Self, GeneBankError> {
+    pub fn open(root: impl AsRef<std::path::Path>) -> Result<Self, GeneBankError> {
+        let root = root.as_ref().to_path_buf();
         fs::create_dir_all(&root).map_err(|e| GeneBankError::Io {
             path: root.clone(),
             source: e,

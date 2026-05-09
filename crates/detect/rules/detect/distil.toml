@@ -1,0 +1,15 @@
+[[waf]]
+name = "Distil"
+vendor = "Distil Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:distil"
+[[waf.signature]]
+  body_regex = "cdn\\.distilnetworks\\.com/images/anomaly\\.detected\\.png"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "distilCaptchaForm"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "distilCallbackGuard"
+  weight = 0.4

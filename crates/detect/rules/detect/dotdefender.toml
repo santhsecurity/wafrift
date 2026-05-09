@@ -1,0 +1,12 @@
+[[waf]]
+name = "DotDefender"
+vendor = "Applicure Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:dotdefender"
+[[waf.signature]]
+  body_regex = "dotdefender blocked your request"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Applicure is the leading provider of web application security"
+  weight = 0.4

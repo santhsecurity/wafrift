@@ -1,0 +1,9 @@
+[[waf]]
+name = "Yunsuo"
+vendor = "Yunsuo"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:yunsuo"
+[[waf.signature]]
+  body_regex = "class=\\\"yunsuologo\\\""
+  weight = 0.4

@@ -17,12 +17,22 @@ pub fn tournament_select<'a>(population: &'a [Chromosome], rng: &mut impl Rng) -
 }
 
 /// Tournament selection with explicit tournament size.
+///
+/// # Panics
+/// Panics with a clear contract message if `population` is empty —
+/// silently returning a "default" Chromosome would mask the caller's
+/// state-machine bug. Callers that may have an empty population
+/// should guard before invoking this helper.
 #[must_use]
 pub fn tournament_select_with_size<'a>(
     population: &'a [Chromosome],
     tournament_size: usize,
     rng: &mut impl Rng,
 ) -> &'a Chromosome {
+    assert!(
+        !population.is_empty(),
+        "tournament_select_with_size called with empty population — caller bug"
+    );
     let size = tournament_size.min(population.len());
     let mut best_idx = rng.gen_range(0..population.len());
     for _ in 1..size {
@@ -35,9 +45,16 @@ pub fn tournament_select_with_size<'a>(
 }
 
 /// Roulette wheel selection (fitness proportionate selection).
+///
+/// # Panics
+/// Panics if `population` is empty (see `tournament_select_with_size`).
 #[must_use]
 pub fn roulette_select<'a>(population: &'a [Chromosome], rng: &mut impl Rng) -> &'a Chromosome {
-    if population.len() <= 1 {
+    assert!(
+        !population.is_empty(),
+        "roulette_select called with empty population — caller bug"
+    );
+    if population.len() == 1 {
         return &population[0];
     }
     let total_fitness: f64 = population.iter().map(|c| c.fitness.max(0.0)).sum();

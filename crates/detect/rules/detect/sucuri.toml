@@ -1,0 +1,29 @@
+[[waf]]
+name = "Sucuri CloudProxy"
+vendor = "Sucuri Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "WhitespaceInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:sucuri"
+[[waf.signature]]
+  header_name = "x-sucuri-id"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-sucuri-cache"
+  header_regex = ".+?"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Access Denied.{0,6}?Sucuri Website Firewall"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<title>Sucuri WebSite Firewall.{0,6}?(CloudProxy)?.{0,6}?Access Denied"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "sucuri\\.net/privacy\\-policy"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "cdn\\.sucuri\\.net/sucuri[-_]firewall[-_]block\\.css"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "cloudproxy@sucuri\\.net"
+  weight = 0.4

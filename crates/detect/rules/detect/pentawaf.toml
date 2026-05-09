@@ -1,0 +1,9 @@
+[[waf]]
+name = "PentaWAF"
+vendor = "Global Network Services"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:pentawaf"
+[[waf.signature]]
+  body_regex = "Penta.?Waf/[0-9\\.]+?.server"
+  weight = 0.4

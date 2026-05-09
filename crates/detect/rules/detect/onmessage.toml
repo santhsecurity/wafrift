@@ -1,0 +1,22 @@
+[[waf]]
+name = "OnMessage Shield"
+vendor = "BlackBaud"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:onmessage"
+[[waf.signature]]
+  header_name = "x-engine"
+  header_regex = "onMessage Shield"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Blackbaud K\\-12 conducts routine maintenance"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "onMessage SHEILD"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "maintenance\\.blackbaud\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "status\\.blackbaud\\.com"
+  weight = 0.4

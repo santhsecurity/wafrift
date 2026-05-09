@@ -1,0 +1,16 @@
+[[waf]]
+name = "ThreatX"
+vendor = "A10 Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:threatx"
+[[waf.signature]]
+  header_name = "x-request-id"
+  header_regex = ".*"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "^Forbidden - ID: ([a-fA-F0-9]{32})$"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 403
+  weight = 0.2

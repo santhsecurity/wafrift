@@ -1,0 +1,30 @@
+[[waf]]
+name = "WebKnight"
+vendor = "AQTRONIX"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:webknight"
+[[waf.signature]]
+  body_regex = "WebKnight Application Firewall Alert"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "What is webknight\\?"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "AQTRONIX WebKnight is an application firewall"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "WebKnight will take over and protect"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "aqtronix\\.com/WebKnight"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "AQTRONIX.{0,10}?WebKnight"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 999
+  weight = 0.2
+[[waf.signature]]
+  status_code = 404
+  weight = 0.2

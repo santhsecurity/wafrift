@@ -1,0 +1,12 @@
+[[waf]]
+name = "AnYu"
+vendor = "AnYu Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:anyu"
+[[waf.signature]]
+  body_regex = "anyu.{0,10}?the green channel"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "your access has been intercepted by anyu"
+  weight = 0.4

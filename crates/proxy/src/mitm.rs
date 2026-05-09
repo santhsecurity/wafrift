@@ -79,6 +79,25 @@ impl CertificateAuthority {
             std::fs::set_permissions(&key_path, perms)
                 .with_context(|| format!("chmod {}", key_path.display()))?;
         }
+        #[cfg(windows)]
+        {
+            // Strip inherited ACL entries and grant the current user
+            // exclusive read/write. Without this the key inherits the
+            // parent dir's ACL, leaving it potentially readable by
+            // other users on a shared host. icacls is documented and
+            // ships with every supported Windows version since Vista.
+            use std::process::Command;
+            let user = std::env::var("USERNAME").unwrap_or_else(|_| "%USERNAME%".to_string());
+            let _ = Command::new("icacls")
+                .arg(&key_path)
+                .arg("/inheritance:r")
+                .status();
+            let _ = Command::new("icacls")
+                .arg(&key_path)
+                .arg("/grant:r")
+                .arg(format!("{user}:F"))
+                .status();
+        }
         Ok(())
     }
 
@@ -114,6 +133,38 @@ impl CertificateAuthority {
         ))
     }
 
+    /// Issue a leaf server certificate for `tls_server_name` (SNI / Host) in DER format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if signing or key generation fails.
+    pub fn issue_server_cert_der(&self, tls_server_name: &str) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+        let issuer = Issuer::from_ca_cert_pem(&self.cert_pem, &self.key_pair)
+            .context("Issuer::from_ca_cert_pem")?;
+        let mut leaf_params =
+            CertificateParams::new(vec![tls_server_name.to_string()]).context("leaf params")?;
+        leaf_params.is_ca = IsCa::NoCa;
+        leaf_params.use_authority_key_identifier_extension = true;
+        leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        leaf_params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyEncipherment,
+        ];
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, tls_server_name);
+        leaf_params.distinguished_name = dn;
+
+        let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("leaf key")?;
+        let leaf_cert = leaf_params
+            .signed_by(&leaf_key, &issuer)
+            .context("sign leaf cert")?;
+
+        Ok((
+            leaf_cert.der().to_vec(),
+            leaf_key.serialize_der(),
+        ))
+    }
+
     /// Get the CA certificate as PEM bytes.
     #[must_use]
     pub fn cert_pem(&self) -> Vec<u8> {
@@ -132,12 +183,11 @@ impl CertificateAuthority {
     ///
     /// Returns an error if certificate or acceptor creation fails.
     pub fn create_tls_acceptor(&self, tls_server_name: &str) -> anyhow::Result<TlsAcceptor> {
-        let (cert_pem, key_pem) = self.issue_server_cert(tls_server_name)?;
+        let (cert_der, key_der) = self.issue_server_cert_der(tls_server_name)?;
 
-        let cert =
-            rustls_pemfile::certs(&mut cert_pem.as_slice()).collect::<Result<Vec<_>, _>>()?;
-        let key = rustls_pemfile::private_key(&mut key_pem.as_slice())?
-            .ok_or_else(|| anyhow::anyhow!("no private key found"))?;
+        let cert = vec![cert_der.into()];
+        let key = rustls_pki_types::PrivateKeyDer::try_from(key_der)
+            .map_err(|e| anyhow::anyhow!("no private key found: {e}"))?;
 
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()

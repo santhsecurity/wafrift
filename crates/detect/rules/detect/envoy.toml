@@ -1,0 +1,46 @@
+[[waf]]
+name = "Envoy"
+vendor = "EnvoyProxy"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:envoy"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "envoy"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-upstream-service-time"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-downstream-service-cluster"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-downstream-service-node"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-external-address"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-force-trace"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-internal"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-original-dst-host"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-original-path"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-envoy-local-overloaded"
+  header_regex = ".+"
+  weight = 0.5

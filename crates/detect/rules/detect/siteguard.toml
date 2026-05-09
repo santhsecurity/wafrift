@@ -1,0 +1,12 @@
+[[waf]]
+name = "SiteGuard"
+vendor = "EG Secure Solutions Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:siteguard"
+[[waf.signature]]
+  body_regex = "Powered by SiteGuard"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "The server refuse to browse the page"
+  weight = 0.4
