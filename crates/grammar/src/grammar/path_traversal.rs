@@ -29,7 +29,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // naxsi-friendly absolute paths so they're always sampled first.
     let mut results: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut push = |v: String, results: &mut Vec<String>, seen: &mut HashSet<String>| {
+    let push = |v: String, results: &mut Vec<String>, seen: &mut HashSet<String>| {
         if seen.insert(v.clone()) {
             results.push(v);
         }
