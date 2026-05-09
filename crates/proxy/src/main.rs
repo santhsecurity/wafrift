@@ -214,11 +214,44 @@ fn default_gene_bank_path(supplied: &str) -> Option<std::path::PathBuf> {
 
 fn load_gene_bank(path: &std::path::Path) -> PersistedGeneBank {
     match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            warn!(path = %path.display(), error = %e, "gene bank parse failed; starting empty");
+        Ok(s) => {
+            if s.trim().is_empty() {
+                info!(path = %path.display(), "gene bank file is empty; starting fresh");
+                return PersistedGeneBank::default();
+            }
+            match serde_json::from_str::<PersistedGeneBank>(&s) {
+                Ok(bank) => {
+                    if bank.schema > 1 {
+                        warn!(
+                            path = %path.display(),
+                            schema = bank.schema,
+                            "gene bank has newer schema than expected (1); data may be incomplete"
+                        );
+                    }
+                    bank
+                }
+                Err(e) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "gene bank malformed (invalid JSON); starting fresh. Fix: inspect the file and fix the JSON syntax, or delete it to start over."
+                    );
+                    PersistedGeneBank::default()
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            info!(path = %path.display(), "gene bank not found; starting fresh");
             PersistedGeneBank::default()
-        }),
-        Err(_) => PersistedGeneBank::default(),
+        }
+        Err(e) => {
+            warn!(
+                path = %path.display(),
+                error = %e,
+                "gene bank unreadable; starting fresh. Fix: check file permissions."
+            );
+            PersistedGeneBank::default()
+        }
     }
 }
 

@@ -57,16 +57,20 @@ pub fn run_init(args: InitArgs) -> ExitCode {
 
 const SCAFFOLD: &str = r#"# .wafrift.toml — wafrift configuration scaffold.
 #
-# This file is parsed by wafrift CLI subcommands that consult it
-# (currently `wafrift scan` reads `[scan]`). Every key below is
-# commented out, so an unmodified file behaves identically to the
-# compiled defaults — uncomment what you need.
+# This file is parsed by wafrift CLI subcommands that consult it.
+# Every key below is commented out, so an unmodified file behaves
+# identically to the compiled defaults — uncomment what you need.
+#
+# NOTE: `wafrift scan` does not yet auto-load this file. The `[scan]`
+# section below documents the keys that match `ScanArgs` flags; they
+# must be passed as CLI flags until the config-integration pass wires
+# `WafRiftConfig::load()` into the scan command.
 #
 # wafrift-proxy is configured via CLI flags, not this file. The values
 # below mirror the proxy flag names so you can copy-paste them into a
 # wrapper script.
 
-# ── scan defaults (used by `wafrift scan` when flags are omitted) ──
+# ── scan defaults (matches `wafrift scan` CLI flags) ──
 [scan]
 # Default evasion intensity: "light" | "medium" | "heavy".
 # level = "heavy"

@@ -452,3 +452,57 @@ fn tls_tunnel_addr_format_variations() {
         assert!(!addr.is_empty());
     }
 }
+
+
+// TEST 51-55: Gene bank persistence
+#[test]
+fn load_gene_bank_valid_v1() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_v1.json");
+    let json = r#"{"schema":1,"hosts":{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":null}}}"#;
+    std::fs::write(&tmp, json).unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 1);
+    assert!(bank.hosts.contains_key("api.example.com"));
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_future_schema_loads_but_warns() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_v2.json");
+    let json = r#"{"schema":2,"hosts":{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":"FutureWAF"}}}"#;
+    std::fs::write(&tmp, json).unwrap();
+    let bank = load_gene_bank(&tmp);
+    // Backward-compatible future schema should parse successfully.
+    assert_eq!(bank.schema, 2);
+    assert!(bank.hosts.contains_key("api.example.com"));
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_empty_file_returns_default() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_empty.json");
+    std::fs::write(&tmp, "   ").unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_malformed_json_returns_default() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_bad.json");
+    std::fs::write(&tmp, "not json").unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_missing_file_returns_default() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_missing.json");
+    let _ = std::fs::remove_file(&tmp);
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+}

@@ -28,7 +28,7 @@ use wafrift_transport::is_waf_block;
 use wafrift_types::{Method, Request};
 
 /// Arguments for `wafrift replay`.
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct ReplayArgs {
     /// Target URL, e.g. `https://api.example.com/search`.
     #[arg(long)]
@@ -51,21 +51,29 @@ pub struct ReplayArgs {
     /// Technique pool keys to replay, e.g. `EncodingUrl,GrammarTautology`.
     /// Comma-separated. At least one of `--technique` /
     /// `--from-host` / `--from-waf` must be set.
+    ///
+    /// Precedence when multiple sources are supplied:
+    /// `--technique` > `--from-host` > `--from-waf`.
     #[arg(long, num_args = 1.., value_delimiter = ',')]
     pub technique: Vec<String>,
 
     /// Pull the technique list from the proxy gene bank by host.
     /// Default file: `~/.wafrift/gene-bank.json`. Override with
     /// `--proxy-bank`.
+    ///
+    /// Only consulted when `--technique` is omitted.
     #[arg(long)]
     pub from_host: Option<String>,
 
-    /// Path to the proxy gene bank JSON file (used by `--from-host`).
+    /// Path to the proxy gene bank JSON file. Used **only** when
+    /// `--from-host` is also supplied; otherwise this flag is ignored.
     #[arg(long)]
     pub proxy_bank: Option<PathBuf>,
 
     /// Pull the technique list from the per-WAF GeneBank by WAF name.
     /// Reads from `~/.wafrift/genomes/`.
+    ///
+    /// Only consulted when both `--technique` and `--from-host` are omitted.
     #[arg(long)]
     pub from_waf: Option<String>,
 
@@ -343,6 +351,12 @@ fn load_from_waf_genome(waf_name: &str) -> Result<Vec<String>, String> {
     Ok(seeds)
 }
 
+/// Build a URL where `param` appears exactly once with `payload`.
+///
+/// Semantic: every existing occurrence of `param` in the query string is
+/// removed, then one fresh `param=payload` pair is appended. This
+/// guarantees deterministic replay even when the base URL contains
+/// duplicates or stale values for the same key.
 fn build_url_with_param(base: &str, param: &str, payload: &str) -> Result<String, String> {
     if !(base.starts_with("http://") || base.starts_with("https://")) {
         return Err("invalid --target URL: must start with http:// or https://".to_string());
@@ -417,6 +431,33 @@ mod tests {
     }
 
     #[test]
+    fn build_url_replaces_all_duplicate_params() {
+        // Semantic: all existing occurrences of the param are stripped,
+        // then exactly one new pair is appended.
+        let u = build_url_with_param("https://x/y?q=a&q=b&q=c", "q", "fresh").unwrap();
+        assert_eq!(u, "https://x/y?q=fresh");
+    }
+
+    #[test]
+    fn build_url_handles_empty_query() {
+        let u = build_url_with_param("https://x/y?", "q", "fresh").unwrap();
+        assert_eq!(u, "https://x/y?q=fresh");
+    }
+
+    #[test]
+    fn build_url_encodes_utf8_payload() {
+        let u = build_url_with_param("https://x/y", "q", "パイロード").unwrap();
+        assert_eq!(u, "https://x/y?q=%E3%83%91%E3%82%A4%E3%83%AD%E3%83%BC%E3%83%89");
+    }
+
+    #[test]
+    fn build_url_encodes_literal_plus_as_percent2b() {
+        // '+' must become %2B so the backend does not decode it as a space.
+        let u = build_url_with_param("https://x/y", "q", "a+b").unwrap();
+        assert_eq!(u, "https://x/y?q=a%2Bb");
+    }
+
+    #[test]
     fn build_url_rejects_garbage() {
         assert!(build_url_with_param("not a url", "q", "x").is_err());
     }
@@ -426,6 +467,45 @@ mod tests {
         let u = build_url_with_param("https://x/y#frag", "q", "1").unwrap();
         assert!(!u.contains('#'));
         assert!(u.ends_with("q=1"));
+    }
+
+    #[test]
+    fn resolve_techniques_precedence() {
+        let base = ReplayArgs {
+            target: "https://x".into(),
+            param: "q".into(),
+            payload: "1=1".into(),
+            method: "GET".into(),
+            technique: vec!["Explicit".into()],
+            from_host: Some("host".into()),
+            proxy_bank: None,
+            from_waf: Some("waf".into()),
+            insecure: false,
+            timeout_secs: 30,
+            format: "text".into(),
+            host: None,
+        };
+        // --technique wins over --from-host and --from-waf.
+        assert_eq!(resolve_techniques(&base).unwrap(), vec!["Explicit"]);
+
+        let args2 = ReplayArgs {
+            technique: vec![],
+            ..base.clone()
+        };
+        // --from-host wins over --from-waf when --technique is absent.
+        // (We can't test the full load here without a gene-bank file,
+        // but we can verify the error comes from the proxy-bank path.)
+        let err2 = resolve_techniques(&args2).unwrap_err();
+        assert!(err2.contains("proxy gene bank"), "unexpected: {err2}");
+
+        let args3 = ReplayArgs {
+            technique: vec![],
+            from_host: None,
+            ..base.clone()
+        };
+        // --from-waf is consulted last.
+        let err3 = resolve_techniques(&args3).unwrap_err();
+        assert!(err3.contains("genome"), "unexpected: {err3}");
     }
 
     #[test]
