@@ -38,6 +38,7 @@ use technique_filter::TechniqueFilter;
                     0  success\n\
                     1  generic error (bad input, IO, etc.)\n\
                     2  bench-waf: zero bypasses on any case in --evade mode\n\
+                    2  replay:    saved bypass got blocked (regression signal)\n\
                     3  bench-diff: regression vs baseline (see --bypass-drop-pp)\n\
                     4  bench-waf --validate-only: corpus integrity errors",
     version
