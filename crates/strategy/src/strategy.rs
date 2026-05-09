@@ -284,10 +284,27 @@ pub fn evade_mcts(
 }
 
 /// Build an EvasionResult from a finalized MCTS environment.
-fn build_mcts_result(env: WafRiftEnv, _config: &EvasionConfig) -> Option<EvasionResult> {
-    let techniques = env.applied_techniques;
+fn build_mcts_result(env: WafRiftEnv, config: &EvasionConfig) -> Option<EvasionResult> {
+    let mut techniques = env.applied_techniques;
 
     // Validate that we actually found a useful sequence
+    if techniques.is_empty() {
+        return None;
+    }
+
+    // Filter techniques according to config flags
+    techniques.retain(|t| {
+        match t {
+            Technique::PayloadEncoding(_) if !config.encoding_enabled => false,
+            Technique::GrammarMutation(_) if !config.grammar_mutations => false,
+            Technique::HeaderObfuscation(_) if !config.header_obfuscation => false,
+            Technique::ContentTypeSwitch(_) if !config.content_type_switching => false,
+            Technique::RequestSmuggling(_) if !config.smuggling_enabled => false,
+            Technique::H2Evasion(_) if !config.h2_evasion_enabled => false,
+            _ => true,
+        }
+    });
+
     if techniques.is_empty() {
         return None;
     }
@@ -459,7 +476,7 @@ pub type WafResponse<'a> = (u16, &'a [(String, String)], &'a [u8]);
 /// # Example
 ///
 /// ```rust,no_run
-/// use wafrift_strategy::{strategy, EvasionConfig};
+/// use wafrift_strategy::{strategy, EvasionConfig, HostState};
 /// use wafrift_types::Request;
 ///
 /// let req = Request::post("https://target.com/api", b"q=admin' OR 1=1--".to_vec());
@@ -468,11 +485,13 @@ pub type WafResponse<'a> = (u16, &'a [(String, String)], &'a [u8]);
 /// // After an initial probe returns 403
 /// let waf_response = Some((403u16, vec![("server".to_string(), "cloudflare".to_string())], b"Attention Required!".to_vec()));
 ///
+/// let state = HostState::default();
 /// let result = strategy::evade_intelligent(
 ///     &req,
 ///     &config,
 ///     waf_response.as_ref().map(|(s, h, b)| (*s, h.as_slice(), b.as_slice())),
 ///     3,
+///     &state,
 /// );
 /// ```
 #[must_use]
@@ -481,6 +500,7 @@ pub fn evade_intelligent<'a>(
     config: &EvasionConfig,
     waf_response: Option<WafResponse<'a>>,
     max_depth: usize,
+    state: &HostState,
 ) -> EvasionResult {
     use wafrift_detect::waf_detect;
     use wafrift_evolution::advisor;
@@ -500,8 +520,7 @@ pub fn evade_intelligent<'a>(
     }
 
     // Step 4: MCTS found no valid path — fall back to advisor playbook
-    let state = HostState::default();
-    evade_adaptive(request, config, &plan, &state)
+    evade_adaptive(request, config, &plan, state)
 }
 
 /// Apply body padding (cloud-WAF inspection-window bypass).

@@ -358,9 +358,26 @@ impl EvasionClient {
     }
 }
 
+
+
 impl Default for EvasionClient {
     fn default() -> Self {
-        Self::new().expect("failed to build default reqwest client — this is a bug")
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: build with absolutely minimal config if default fails
+            // (e.g. TLS backend unavailable in exotic environments).
+            let reqwest_client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(
+                    wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+                ))
+                .build()
+                .expect("even minimal reqwest client must build");
+            Self {
+                inner: reqwest_client,
+                config: EvasionConfig::default(),
+                host_states: std::sync::Mutex::new(std::collections::HashMap::new()),
+                host_fifo: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            }
+        })
     }
 }
 
