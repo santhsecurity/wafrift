@@ -15,6 +15,7 @@ mod bank;
 mod bench_diff;
 mod bench_waf;
 mod config;
+mod discover_cmd;
 mod egress_example;
 mod helpers;
 mod import_curl;
@@ -91,6 +92,10 @@ enum Commands {
     Completion(CompletionArgs),
     /// Origin discovery via crt.sh + DNS (authorized targets only).
     Recon(recon_cmd::ReconArgs),
+    /// Endpoint discovery: parse OpenAPI/Swagger, run GraphQL introspection,
+    /// or fire differential parameter mining. Emits DiscoveredEndpoint JSON
+    /// suitable for piping into `wafrift scan --from-discovery`.
+    Discover(discover_cmd::DiscoverArgs),
     /// Replay a saved bypass against a target — proves reproducibility.
     Replay(replay::ReplayArgs),
     /// Generate a markdown findings report from the proxy gene bank.
@@ -333,6 +338,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Recon(args)) => recon_cmd::run_recon(args),
+        Some(Commands::Discover(args)) => discover_cmd::run_discover(args),
         Some(Commands::Replay(args)) => replay::run_replay(args),
         Some(Commands::Report(args)) => report::run_report(args),
         Some(Commands::Init(args)) => init_cmd::run_init(args),

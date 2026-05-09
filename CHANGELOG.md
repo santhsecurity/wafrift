@@ -4,6 +4,109 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — intelligence loops + audit-grade explanations
+
+- **Rich response classification (H1).** New `wafrift_transport::signal`
+  module replaces the binary `is_waf_block` with a structured
+  `BlockClass` (`HardBlock | SoftBlock | RateLimit | Challenge | Pass`)
+  + matched-WAF + prioritize/avoid lists + inspection model. The proxy
+  now reads per-WAF profile recommendations from
+  `rules/responses/*.toml` (or compiled-in fallback) and biases
+  technique selection accordingly via `HostState::record_signal`.
+  Crucially: rate-limits and JS challenges no longer penalize the
+  active technique — they trigger backoff instead.
+
+- **`wafrift discover` subcommand.** Endpoint discovery from one of
+  three sources, output as JSON pipeable into `wafrift scan
+  --from-discovery`:
+    - `--spec api.json` — OpenAPI 2.0 (Swagger) + 3.x JSON parser
+      with media-type-aware injection-context inference
+      (`application/json` → `JsonString`, `application/xml` → `XmlText`,
+      etc.) and path-templating extraction (`/users/{id}` → `Path`).
+    - `--target ... --introspect` — POST a GraphQL `__schema` query,
+      emit one endpoint per top-level field on Query / Mutation /
+      Subscription with args as `Body` injection points.
+    - `--target ... --mine-params --wordlist params.txt` — differential
+      parameter mining: collect baseline (status / body length /
+      latency envelope), probe each candidate, flag hits whose response
+      diverges beyond configured thresholds.
+
+- **Per-finding rule attribution + audit explanations (Phase 2C).**
+  - `wafrift_detect::explain::explain_block(payload, waf)` returns the
+    list of `RuleAttribution`s a payload would have triggered. 16
+    OWASP-CRS-shaped rule families (SQLI/XSS/CMDI/LFI/RFI/SSTI/SSRF/
+    PROTO), per-WAF confidence bias from the matched profile's
+    inspection model.
+  - `wafrift_strategy::explain::explain_bypass(original, bypass,
+    techniques, waf, mode)` runs both payloads through `explain_block`,
+    set-diffs the rule lists to identify which techniques actually
+    removed the match, then narrates. Three modes: `Minimal` (one
+    line), `Standard` (rule IDs + technique chain), `Educational`
+    (per-technique 'why this works' paragraph for training material).
+  - Real Myers-LCS character-level diff for payloads ≤ 1024 chars.
+
+- **OOB confirmation oracle (Phase 2A).**
+  `OobOracle::{confirm, confirm_background}` register a canary against
+  the configured provider trait, poll until interaction or timeout,
+  return `Confirmed | Timeout | Error`. `embed::embed_canary` injects
+  per payload-type (SQL `LOAD_FILE`, CMDi `nslookup`, SSRF/XSS via URL).
+
+- **JWT manipulation primitives (Phase 1B).**
+  `wafrift_transport::jwt::manipulate(token, &JwtManipulation, key)`
+  supports `StripAlg` (alg:none confusion), `Hs256WithKey` (RS256→HS256
+  symmetric-key downgrade), `JwkEmbed` (header JWK injection).
+
+- **Cookie-jar persistence + CSRF helpers (Phase 1B).**
+  `session::{load_jar, save_jar, extract_csrf, inject_csrf}` —
+  newline-delimited "Set-Cookie | https://origin/" disk format,
+  regex-based CSRF extraction, header/query/body injection per
+  `CsrfInjectionLocation`.
+
+- **Modern body formats (Phase 2B).** `content_type::formats::{protobuf,
+  messagepack, grpc_web}` — minimal but correct serializers for moving
+  payloads out of WAF-inspected positions. Protobuf uses real varint
+  length-prefix (previously truncated payloads >255 bytes silently).
+
+- **Context-aware encoding (Phase 1A).**
+  `wafrift_encoding::contextual::encode_in_context(payload, strategy,
+  context)` applies strategy then escapes structurally per
+  `InjectionContext` (JSON `\"` and control-char escapes, XML `&amp;
+  &lt; &gt; &quot;`, URL percent, header CR/LF guard, multipart
+  filename guard, etc.). Per-context max-size guards.
+
+- **Response-profiles compiled into the binary.**
+  `ResponseProfileDb::compiled_in()` `include_str!`s
+  `crates/transport/rules/responses/profiles.toml` so `cargo install
+  wafrift-proxy` users get all 7 reference WAF profiles
+  (Cloudflare / ModSec / AWS / Imperva / F5 / Akamai / Sucuri) at
+  startup — no manual file management.
+
+### Robustness
+
+- **`recon::discover_subdomains_ct` 30 s timeout.** crt.sh routinely
+  takes 10-20 s and occasionally hangs entirely; the previous
+  `reqwest::Client::new()` had no timeout, making `wafrift discover`
+  a self-DoS for any blocked-up upstream.
+
+- **`detect::response_fingerprint::extract_title` regex hoisted to
+  `once_cell::Lazy`.** Was being compiled per response (~50 µs per call
+  in a hot path).
+
+- **15 `saturating_add(1)` sites.** Proxy/strategy/learning-cache u32
+  counters previously wrapped silently after ~5 days at 10 k req/s
+  — now plateau at `u32::MAX` for honest dashboards.
+
+- **`detect::suggest_evasion` no longer `Box::leak`s every call.** Was
+  leaking ~360 MB/hour at 1 k req/s. Switched to `Vec<String>`
+  (zero external callers; API change invisible).
+
+- **Tier B unblocked: 5 hardcoded marker tables → community TOML.**
+  Oracle block / challenge / rate-limit / success markers, rule-id
+  prefixes / categories / vendors, polyglot payloads, differential
+  probes — all now live in `rules/*.toml` with per-crate `build.rs`
+  generating Rust constants. Adding a new WAF block-marker is a
+  one-line PR with no Rust knowledge.
+
 ### Fixed (in source — release pending)
 
 - **`wafrift-grammar` / `wafrift-oracle` / `wafrift-strategy` rule files
