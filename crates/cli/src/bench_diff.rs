@@ -113,11 +113,15 @@ fn bypass_rate(v: &serde_json::Value) -> f64 {
 }
 
 fn raw_block_rate(v: &serde_json::Value) -> f64 {
-    v.pointer("/raw_block_rate").and_then(|x| x.as_f64()).unwrap_or(0.0)
+    v.pointer("/raw_block_rate")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0)
 }
 
 fn evade_mode(v: &serde_json::Value) -> bool {
-    v.pointer("/evade_mode").and_then(|x| x.as_bool()).unwrap_or(false)
+    v.pointer("/evade_mode")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -207,7 +211,10 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let cur = dir.join("cur.json");
         let base = dir.join("base.json");
-        write(&cur, r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.5}}"#);
+        write(
+            &cur,
+            r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.5}}"#,
+        );
         write(&base, "not json at all");
         let code = run_bench_diff(BenchDiffArgs {
             current: cur,
@@ -223,7 +230,10 @@ mod tests {
         let dir = std::env::temp_dir().join("wafrift_bench_diff_test_missing");
         let _ = std::fs::create_dir_all(&dir);
         let cur = dir.join("cur.json");
-        write(&cur, r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.5}}"#);
+        write(
+            &cur,
+            r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.5}}"#,
+        );
         let code = run_bench_diff(BenchDiffArgs {
             current: cur,
             baseline: dir.join("does-not-exist.json"),
@@ -243,7 +253,10 @@ mod tests {
         let cur = dir.join("cur.json");
         let base = dir.join("base.json");
         write(&base, r#"{"raw_block_rate":1.0,"evade_mode":false}"#);
-        write(&cur, r#"{"raw_block_rate":1.0,"evade_mode":true,"evaded_summary":{"overall_bypass_rate":0.10}}"#);
+        write(
+            &cur,
+            r#"{"raw_block_rate":1.0,"evade_mode":true,"evaded_summary":{"overall_bypass_rate":0.10}}"#,
+        );
         let code = run_bench_diff(BenchDiffArgs {
             current: cur,
             baseline: base,
@@ -265,7 +278,10 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let cur = dir.join("cur.json");
         let base = dir.join("base.json");
-        write(&cur, r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.30}}"#);
+        write(
+            &cur,
+            r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.30}}"#,
+        );
         write(&base, r#"{"raw_block_rate":1.0}"#); // no evaded_summary
         let code = run_bench_diff(BenchDiffArgs {
             current: cur,

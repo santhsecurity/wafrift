@@ -37,10 +37,9 @@ struct WafHeaderEntry {
 }
 
 fn read_strings(path: &Path, field: fn(Patterns) -> Vec<String>) -> Vec<String> {
-    let raw = fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let parsed: Patterns = toml::from_str(&raw)
-        .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+    let raw = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let parsed: Patterns =
+        toml::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
     field(parsed)
 }
 
@@ -79,8 +78,8 @@ fn main() {
     emit_str_array(&mut out, "BLOCK_HEADER_NAMES", &block_header_names);
 
     // ── waf_headers.toml: structured 3-tuples ──
-    let raw = fs::read_to_string(rules_dir.join("waf_headers.toml"))
-        .expect("read waf_headers.toml");
+    let raw =
+        fs::read_to_string(rules_dir.join("waf_headers.toml")).expect("read waf_headers.toml");
     let parsed: WafHeaders = toml::from_str(&raw).expect("parse waf_headers.toml");
     out.push_str("pub const WAF_HEADERS: &[(&str, &str, &str)] = &[\n");
     for e in &parsed.entry {

@@ -446,7 +446,6 @@ impl HostState {
         }
     }
 
-
     /// Check whether a technique should be skipped based on WAF profile hints.
     ///
     /// Returns `true` if the technique name appears in either:
@@ -777,14 +776,14 @@ mod tests {
     fn signal_rate_limit_does_not_penalize_technique() {
         let mut state = HostState::default();
         state.record_signal(
-            false,                           // not hard block
-            false,                           // not soft block
-            true,                            // IS rate limit
-            false,                           // not challenge
-            Some("Cloudflare"),              // matched WAF
-            &["DoubleUrlEncode".to_string()],// prioritize
-            &["CaseAlternation".to_string()],// avoid
-            Some("single_pass_url_decode"),  // inspection model
+            false,                                     // not hard block
+            false,                                     // not soft block
+            true,                                      // IS rate limit
+            false,                                     // not challenge
+            Some("Cloudflare"),                        // matched WAF
+            &["DoubleUrlEncode".to_string()],          // prioritize
+            &["CaseAlternation".to_string()],          // avoid
+            Some("single_pass_url_decode"),            // inspection model
             &["encoding:DoubleUrlEncode".to_string()], // technique keys
         );
         // Rate limit should NOT increase blocks.
@@ -792,16 +791,25 @@ mod tests {
         assert_eq!(state.rate_limits, 1);
         // But should still ingest WAF hints.
         assert_eq!(state.waf_name.as_deref(), Some("Cloudflare"));
-        assert!(state.prioritized_techniques.contains(&"DoubleUrlEncode".to_string()));
+        assert!(
+            state
+                .prioritized_techniques
+                .contains(&"DoubleUrlEncode".to_string())
+        );
     }
 
     #[test]
     fn signal_challenge_does_not_penalize_technique() {
         let mut state = HostState::default();
         state.record_signal(
-            false, false, false, true, // challenge
+            false,
+            false,
+            false,
+            true, // challenge
             Some("Cloudflare"),
-            &[], &[], None,
+            &[],
+            &[],
+            None,
             &["encoding:UrlEncode".to_string()],
         );
         assert_eq!(state.blocks, 0);
@@ -812,8 +820,10 @@ mod tests {
     fn signal_hard_block_records_block_with_technique() {
         let mut state = HostState::default();
         state.record_signal(
-            true,  // hard block
-            false, false, false,
+            true, // hard block
+            false,
+            false,
+            false,
             Some("ModSecurity CRS"),
             &["CommentObfuscation".to_string()],
             &[],
@@ -822,17 +832,32 @@ mod tests {
         );
         assert_eq!(state.blocks, 1);
         assert_eq!(state.waf_name.as_deref(), Some("ModSecurity CRS"));
-        assert_eq!(state.inspection_model.as_deref(), Some("multi_regex_scoring"));
+        assert_eq!(
+            state.inspection_model.as_deref(),
+            Some("multi_regex_scoring")
+        );
         // Technique should have been attributed.
-        assert!(state.technique_stats.iter().any(|(n, _, a)| n == "encoding:UrlEncode" && *a == 1));
+        assert!(
+            state
+                .technique_stats
+                .iter()
+                .any(|(n, _, a)| n == "encoding:UrlEncode" && *a == 1)
+        );
     }
 
     #[test]
     fn signal_pass_records_success() {
         let mut state = HostState::default();
         state.record_signal(
-            false, false, false, false, // pass
-            None, &[], &[], None, &[],
+            false,
+            false,
+            false,
+            false, // pass
+            None,
+            &[],
+            &[],
+            None,
+            &[],
         );
         assert_eq!(state.successes, 1);
         assert_eq!(state.blocks, 0);
@@ -843,19 +868,27 @@ mod tests {
         let mut state = HostState::default();
         // First signal.
         state.record_signal(
-            true, false, false, false,
+            true,
+            false,
+            false,
+            false,
             Some("TestWAF"),
             &["A".to_string(), "B".to_string()],
             &["X".to_string()],
-            None, &[],
+            None,
+            &[],
         );
         // Second signal with overlapping and new techniques.
         state.record_signal(
-            true, false, false, false,
+            true,
+            false,
+            false,
+            false,
             None,
             &["B".to_string(), "C".to_string()],
             &["X".to_string(), "Y".to_string()],
-            None, &[],
+            None,
+            &[],
         );
         // Union — no duplicates.
         assert_eq!(state.prioritized_techniques, vec!["A", "B", "C"]);
@@ -889,12 +922,26 @@ mod tests {
     fn waf_name_not_overwritten_by_subsequent_signals() {
         let mut state = HostState::default();
         state.record_signal(
-            true, false, false, false,
-            Some("Cloudflare"), &[], &[], None, &[],
+            true,
+            false,
+            false,
+            false,
+            Some("Cloudflare"),
+            &[],
+            &[],
+            None,
+            &[],
         );
         state.record_signal(
-            true, false, false, false,
-            Some("ModSecurity"), &[], &[], None, &[],
+            true,
+            false,
+            false,
+            false,
+            Some("ModSecurity"),
+            &[],
+            &[],
+            None,
+            &[],
         );
         // First detection wins — don't flip-flop.
         assert_eq!(state.waf_name.as_deref(), Some("Cloudflare"));

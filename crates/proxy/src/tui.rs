@@ -38,14 +38,14 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self as ce, Event as CtEvent, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table, Wrap};
-use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
@@ -304,9 +304,7 @@ pub async fn run(
                         }
                         break;
                     }
-                    KeyCode::Char('c')
-                        if k.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
+                    KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                         if let Some(tx) = quit.take() {
                             let _ = tx.send(());
                         }
@@ -332,11 +330,11 @@ fn draw(f: &mut ratatui::Frame, cfg: &DashboardConfig, state: &State) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),  // header
-            Constraint::Length(5),  // counters
-            Constraint::Length(8),  // tls rotation
-            Constraint::Length(8),  // per-host
-            Constraint::Min(5),     // recent (fills remainder)
+            Constraint::Length(4), // header
+            Constraint::Length(5), // counters
+            Constraint::Length(8), // tls rotation
+            Constraint::Length(8), // per-host
+            Constraint::Min(5),    // recent (fills remainder)
         ])
         .split(area);
 
@@ -348,7 +346,10 @@ fn draw(f: &mut ratatui::Frame, cfg: &DashboardConfig, state: &State) {
 }
 
 fn draw_header(f: &mut ratatui::Frame, area: Rect, cfg: &DashboardConfig, state: &State) {
-    let title = format!(" wafrift-proxy — uptime {} ", humanize_uptime(state.uptime()));
+    let title = format!(
+        " wafrift-proxy — uptime {} ",
+        humanize_uptime(state.uptime())
+    );
     let body = vec![
         Line::from(vec![
             Span::styled("Bind ", Style::default().fg(Color::DarkGray)),
@@ -393,7 +394,10 @@ fn draw_counters(f: &mut ratatui::Frame, area: Rect, state: &State) {
     let body = vec![
         Line::from(vec![
             Span::styled("Total ", Style::default().fg(Color::DarkGray)),
-            Span::styled(state.total.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                state.total.to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw("   "),
             Span::styled("Bypassed ", Style::default().fg(Color::DarkGray)),
             Span::styled(
@@ -430,13 +434,19 @@ fn draw_tls(f: &mut ratatui::Frame, area: Rect, state: &State) {
     if total == 0 || state.tls.counts.is_empty() {
         let p = Paragraph::new("(no TLS rotation active — start with --tls-impersonate-rotate)")
             .style(Style::default().fg(Color::DarkGray))
-            .block(Block::default().borders(Borders::ALL).title(" TLS Rotation "));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" TLS Rotation "),
+            );
         f.render_widget(p, area);
         return;
     }
     let mut profiles: Vec<_> = state.tls.counts.iter().collect();
     profiles.sort_by(|a, b| b.1.cmp(a.1));
-    let block = Block::default().borders(Borders::ALL).title(" TLS Rotation ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" TLS Rotation ");
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -464,7 +474,11 @@ fn draw_hosts(f: &mut ratatui::Frame, area: Rect, state: &State) {
         Cell::from("BYPASS%"),
         Cell::from("TOP TECHNIQUE"),
     ])
-    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
 
     let rows: Vec<Row> = state
         .top_hosts(5)
@@ -494,9 +508,11 @@ fn draw_hosts(f: &mut ratatui::Frame, area: Rect, state: &State) {
         Constraint::Length(8),
         Constraint::Percentage(40),
     ];
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(Block::default().borders(Borders::ALL).title(" Per-Host (top 5) "));
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Per-Host (top 5) "),
+    );
     f.render_widget(table, area);
 }
 
@@ -522,7 +538,9 @@ fn draw_recent(f: &mut ratatui::Frame, area: Rect, state: &State) {
             Line::styled(s.clone(), style)
         })
         .collect();
-    let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let p = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     f.render_widget(p, area);
 }
 

@@ -53,12 +53,12 @@ pub async fn from_graphql(
             url: endpoint.to_string(),
         });
     }
-    let json_resp: Value = resp
-        .json()
-        .await
-        .map_err(|_| DiscoveryError::GraphQlEndpointNotFound {
-            url: endpoint.to_string(),
-        })?;
+    let json_resp: Value =
+        resp.json()
+            .await
+            .map_err(|_| DiscoveryError::GraphQlEndpointNotFound {
+                url: endpoint.to_string(),
+            })?;
     parse_introspection_response(&json_resp, endpoint)
 }
 
@@ -152,7 +152,10 @@ mod tests {
         let user = eps.iter().find(|e| e.url.ends_with("user")).unwrap();
         assert_eq!(user.injection_points.len(), 1);
         assert!(user.injection_points[0].required);
-        assert_eq!(user.injection_points[0].context, InjectionContext::JsonString);
+        assert_eq!(
+            user.injection_points[0].context,
+            InjectionContext::JsonString
+        );
         let search = eps.iter().find(|e| e.url.ends_with("search")).unwrap();
         assert_eq!(search.injection_points.len(), 2);
         assert!(!search.injection_points[0].required); // SCALAR (not NON_NULL)
@@ -163,8 +166,8 @@ mod tests {
         let resp = serde_json::json!({
             "errors": [{"message": "GraphQL introspection is not allowed"}]
         });
-        let err = parse_introspection_response(&resp, "https://api.example.com/graphql")
-            .unwrap_err();
+        let err =
+            parse_introspection_response(&resp, "https://api.example.com/graphql").unwrap_err();
         assert!(matches!(err, DiscoveryError::IntrospectionDisabled { .. }));
     }
 
@@ -193,10 +196,19 @@ mod tests {
         });
         let eps = parse_introspection_response(&resp, "https://x").unwrap();
         assert_eq!(eps.len(), 2);
-        assert!(eps.iter().any(|e| e.url.contains("mutationType.createUser")));
-        assert!(eps.iter().any(|e| e.url.contains("subscriptionType.userUpdated")));
+        assert!(
+            eps.iter()
+                .any(|e| e.url.contains("mutationType.createUser"))
+        );
+        assert!(
+            eps.iter()
+                .any(|e| e.url.contains("subscriptionType.userUpdated"))
+        );
         assert!(eps.iter().all(|e| e.method == Method::Post));
-        assert!(eps.iter().all(|e| e.source == DiscoverySource::GraphQlIntrospection));
+        assert!(
+            eps.iter()
+                .all(|e| e.source == DiscoverySource::GraphQlIntrospection)
+        );
     }
 
     #[test]

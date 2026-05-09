@@ -214,10 +214,7 @@ fn run_list(args: BankListArgs) -> ExitCode {
                 .count(),
             "waf_genome_count": waf_genomes.len(),
         });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&out).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         return ExitCode::SUCCESS;
     }
 
@@ -503,7 +500,8 @@ mod tests {
 
     #[test]
     fn import_merge_unions_techniques_without_dupes() {
-        let dir = std::env::temp_dir().join(format!("wafrift-bank-test-merge-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("wafrift-bank-test-merge-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let proxy_path = dir.join("gene-bank.json");
@@ -542,15 +540,24 @@ mod tests {
             .iter()
             .filter(|t| *t == "EncodingUrl")
             .count();
-        assert_eq!(count, 1, "EncodingUrl dedup failed: {:?}", entry.proven_winners);
+        assert_eq!(
+            count, 1,
+            "EncodingUrl dedup failed: {:?}",
+            entry.proven_winners
+        );
         // GrammarTautology preserved from local.
-        assert!(entry.proven_winners.contains(&"GrammarTautology".to_string()));
+        assert!(
+            entry
+                .proven_winners
+                .contains(&"GrammarTautology".to_string())
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn import_replace_overwrites_existing_entry() {
-        let dir = std::env::temp_dir().join(format!("wafrift-bank-test-replace-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("wafrift-bank-test-replace-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let proxy_path = dir.join("gene-bank.json");

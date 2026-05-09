@@ -221,10 +221,7 @@ impl EvolutionEngine {
         if self.should_terminate() || n == 0 {
             return Vec::new();
         }
-        let remaining = self
-            .budget
-            .max_requests
-            .saturating_sub(self.request_count);
+        let remaining = self.budget.max_requests.saturating_sub(self.request_count);
         if remaining == 0 {
             return Vec::new();
         }

@@ -148,7 +148,10 @@ impl CertificateAuthority {
     /// # Errors
     ///
     /// Returns an error if signing or key generation fails.
-    pub fn issue_server_cert_der(&self, tls_server_name: &str) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+    pub fn issue_server_cert_der(
+        &self,
+        tls_server_name: &str,
+    ) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
         let issuer = Issuer::from_ca_cert_pem(&self.cert_pem, &self.key_pair)
             .context("Issuer::from_ca_cert_pem")?;
         let mut leaf_params =
@@ -169,10 +172,7 @@ impl CertificateAuthority {
             .signed_by(&leaf_key, &issuer)
             .context("sign leaf cert")?;
 
-        Ok((
-            leaf_cert.der().to_vec(),
-            leaf_key.serialize_der(),
-        ))
+        Ok((leaf_cert.der().to_vec(), leaf_key.serialize_der()))
     }
 
     /// Get the CA certificate as PEM bytes.

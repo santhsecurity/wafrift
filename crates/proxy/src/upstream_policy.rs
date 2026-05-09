@@ -155,8 +155,6 @@ pub async fn assert_connect_target_allowed(
     resolve_host_all_public(host, port).await
 }
 
-
-
 /// `reqwest::dns::Resolve` impl that wraps the system resolver and
 /// drops any address that fails `ip_addr_is_bogon`. This closes the
 /// DNS-rebinding TOCTOU between `assert_forward_url_allowed` (first
@@ -180,8 +178,7 @@ impl reqwest::dns::Resolve for BogonFilteringResolver {
             let lookups = tokio::net::lookup_host((host.as_str(), 0))
                 .await
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
-            let allow_private =
-                policy.allow_private_upstream || policy.insecure_open_upstream;
+            let allow_private = policy.allow_private_upstream || policy.insecure_open_upstream;
             let filtered: Vec<SocketAddr> = lookups
                 .into_iter()
                 .filter(|sa| allow_private || !ip_addr_is_bogon(sa.ip()))

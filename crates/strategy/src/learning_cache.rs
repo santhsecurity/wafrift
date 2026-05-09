@@ -182,8 +182,8 @@ fn current_epoch() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wafrift_types::Technique;
     use crate::pipeline::EvasionStage;
+    use wafrift_types::Technique;
 
     #[test]
     fn cache_roundtrip() {
@@ -191,7 +191,14 @@ mod tests {
         let _ = fs::remove_file(&tmp);
 
         let mut cache = LearningCache::open(&tmp).unwrap();
-        let pipeline = EvasionPipeline::new("test", vec![EvasionStage { technique: Technique::UserAgentRotation, context: None }], 1);
+        let pipeline = EvasionPipeline::new(
+            "test",
+            vec![EvasionStage {
+                technique: Technique::UserAgentRotation,
+                context: None,
+            }],
+            1,
+        );
         cache.record_success(CacheKey::new("cloudflare", "sql"), pipeline);
         cache.save().unwrap();
 
@@ -211,8 +218,14 @@ mod tests {
         // Process 1
         {
             let mut cache = LearningCache::open(&tmp).unwrap();
-            let pipeline =
-                EvasionPipeline::new("win", vec![EvasionStage { technique: Technique::GrammarMutation("sql".into()), context: None }], 2);
+            let pipeline = EvasionPipeline::new(
+                "win",
+                vec![EvasionStage {
+                    technique: Technique::GrammarMutation("sql".into()),
+                    context: None,
+                }],
+                2,
+            );
             cache.record_success(CacheKey::new("aws_waf", "xss"), pipeline);
             cache.save().unwrap();
         }

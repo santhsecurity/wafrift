@@ -362,10 +362,7 @@ fn run_man(args: ManArgs) -> ExitCode {
             Some(c) => c,
             None => {
                 let cmd = Cli::command();
-                let names: Vec<&str> = cmd
-                    .get_subcommands()
-                    .map(|c| c.get_name())
-                    .collect();
+                let names: Vec<&str> = cmd.get_subcommands().map(|c| c.get_name()).collect();
                 eprintln!("error: unknown subcommand {name:?}. Available: {names:?}");
                 return ExitCode::from(1);
             }
@@ -513,7 +510,10 @@ fn run_interactive() -> ExitCode {
                             .add_modifier(Modifier::ITALIC),
                     ),
                     Span::raw("   ·   "),
-                    Span::styled(concat!("v", env!("CARGO_PKG_VERSION")), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        concat!("v", env!("CARGO_PKG_VERSION")),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]),
             ];
             let header = Paragraph::new(header_text);

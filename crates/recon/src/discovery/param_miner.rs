@@ -79,8 +79,7 @@ pub async fn mine_params(
         return Err(DiscoveryError::WordlistEmpty);
     }
 
-    let baseline =
-        collect_baseline(target, client, config.baseline_requests.max(1)).await?;
+    let baseline = collect_baseline(target, client, config.baseline_requests.max(1)).await?;
 
     let sem = Arc::new(Semaphore::new(config.concurrency.max(1)));
     let mut tasks = Vec::with_capacity(wordlist.len());
@@ -176,11 +175,7 @@ async fn collect_baseline(
     })
 }
 
-async fn probe_one(
-    target: &str,
-    word: &str,
-    client: &reqwest::Client,
-) -> Option<ProbeResult> {
+async fn probe_one(target: &str, word: &str, client: &reqwest::Client) -> Option<ProbeResult> {
     let sep = if target.contains('?') { "&" } else { "?" };
     let url = format!("{}{}{}={}", target, sep, word, CANARY);
     let start = Instant::now();

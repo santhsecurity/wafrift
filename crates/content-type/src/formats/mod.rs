@@ -1,6 +1,6 @@
-pub mod protobuf;
-pub mod messagepack;
 pub mod grpc_web;
+pub mod messagepack;
+pub mod protobuf;
 
 use thiserror::Error;
 use wafrift_types::format::BodyFormat;
@@ -13,7 +13,10 @@ pub enum FormatError {
     #[error("Serialization failed: {reason}")]
     SerializationFailed { reason: String },
     #[error("Context incompatible: {format:?} for {context:?}")]
-    ContextIncompatible { format: BodyFormat, context: InjectionContext },
+    ContextIncompatible {
+        format: BodyFormat,
+        context: InjectionContext,
+    },
     #[error("Payload too large: {size} > {max}")]
     PayloadTooLarge { size: usize, max: usize },
 }

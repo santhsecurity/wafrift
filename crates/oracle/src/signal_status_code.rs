@@ -29,10 +29,7 @@ pub fn classify_status_code(code: u16) -> (Verdict, Signal) {
             ]),
             signal,
         ),
-        405 | 413 | 414 | 415 | 431 => (
-            Verdict::blocked(vec![signal.clone()]),
-            signal,
-        ),
+        405 | 413 | 414 | 415 | 431 => (Verdict::blocked(vec![signal.clone()]), signal),
         408 => (
             // Request timeout can indicate WAF tarpit / rate-limiting.
             Verdict::rate_limited(vec![signal.clone()]),

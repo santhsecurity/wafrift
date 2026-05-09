@@ -32,8 +32,6 @@ pub fn get_oob_domain() -> &'static str {
     })
 }
 
-
-
 /// Cloud metadata endpoints for SSRF testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetadataEndpoint {

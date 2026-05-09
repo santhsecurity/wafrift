@@ -258,8 +258,7 @@ mod tests {
                 for (idx, _) in body_str.match_indices(boundary) {
                     let before = &body_str[..idx];
                     assert!(
-                        before.ends_with("--")
-                            && (before.len() == 2 || before.ends_with("\r\n--")),
+                        before.ends_with("--") && (before.len() == 2 || before.ends_with("\r\n--")),
                         "boundary embedded in payload at position {idx} for {:?}: {body_str}",
                         variant.technique
                     );
@@ -927,7 +926,8 @@ mod tests {
     fn multipart_strips_crlf_from_value() {
         let params = vec![(
             "field".to_string(),
-            "innocent\r\nContent-Disposition: form-data; name=\"smuggled\"\r\n\r\nattacker".to_string(),
+            "innocent\r\nContent-Disposition: form-data; name=\"smuggled\"\r\n\r\nattacker"
+                .to_string(),
         )];
         let variants = generate_variants(&params);
         let mp = variants
@@ -957,9 +957,7 @@ mod tests {
         assert!(boundary_line.starts_with("--"));
         let boundary = &boundary_line[2..];
         // A "part" begins right after each boundary occurrence (excluding the closing one).
-        let part_count = body_str
-            .matches(&format!("--{boundary}\r\n"))
-            .count();
+        let part_count = body_str.matches(&format!("--{boundary}\r\n")).count();
         assert_eq!(
             part_count, 1,
             "expected exactly 1 part (no smuggled part); body = {body_str}"

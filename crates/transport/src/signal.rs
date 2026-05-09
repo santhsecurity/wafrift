@@ -220,9 +220,7 @@ impl ResponseProfileDb {
             return ResponseSignal {
                 classification: BlockClass::Challenge,
                 matched_waf: Some("Cloudflare".to_string()),
-                prioritize: cf_profile
-                    .map(|p| p.prioritize.clone())
-                    .unwrap_or_default(),
+                prioritize: cf_profile.map(|p| p.prioritize.clone()).unwrap_or_default(),
                 avoid: cf_profile.map(|p| p.avoid.clone()).unwrap_or_default(),
                 status,
                 body_size: body.len(),
@@ -258,7 +256,9 @@ impl ResponseProfileDb {
                         return true;
                     }
                     if let Some(ref contains) = hm.contains {
-                        return v.to_ascii_lowercase().contains(&contains.to_ascii_lowercase());
+                        return v
+                            .to_ascii_lowercase()
+                            .contains(&contains.to_ascii_lowercase());
                     }
                     false
                 });
@@ -267,9 +267,7 @@ impl ResponseProfileDb {
                 }
             }
 
-            if score > 0
-                && (best_match.is_none() || score > best_match.unwrap().0)
-            {
+            if score > 0 && (best_match.is_none() || score > best_match.unwrap().0) {
                 best_match = Some((score, profile));
             }
         }
@@ -299,9 +297,7 @@ impl ResponseProfileDb {
             prioritize: best_match
                 .map(|(_, p)| p.prioritize.clone())
                 .unwrap_or_default(),
-            avoid: best_match
-                .map(|(_, p)| p.avoid.clone())
-                .unwrap_or_default(),
+            avoid: best_match.map(|(_, p)| p.avoid.clone()).unwrap_or_default(),
             status,
             body_size: body.len(),
             inspection_model: best_match.and_then(|(_, p)| p.inspection_model.clone()),
@@ -324,7 +320,9 @@ fn legacy_body_block_check(body_lower: &str) -> bool {
         "malicious request",
         "automated request",
     ];
-    indicators.iter().any(|indicator| body_lower.contains(indicator))
+    indicators
+        .iter()
+        .any(|indicator| body_lower.contains(indicator))
 }
 
 #[cfg(test)]
@@ -353,7 +351,11 @@ mod tests {
     #[test]
     fn classify_hard_block() {
         let db = make_db();
-        let sig = db.classify(403, &[("X-TestWAF".into(), "1".into())], b"test-waf-block page");
+        let sig = db.classify(
+            403,
+            &[("X-TestWAF".into(), "1".into())],
+            b"test-waf-block page",
+        );
         assert_eq!(sig.classification, BlockClass::HardBlock);
         assert_eq!(sig.matched_waf.as_deref(), Some("TestWAF"));
         assert!(sig.prioritize.contains(&"DoubleUrlEncode".to_string()));

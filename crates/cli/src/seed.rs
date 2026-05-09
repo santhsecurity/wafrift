@@ -60,7 +60,12 @@ pub fn run_seed(args: SeedArgs) -> ExitCode {
             ExitCode::from(1)
         }
         (Some(waf), None) => seed_waf(waf, &args.technique, args.dry_run),
-        (None, Some(host)) => seed_host(host, &args.technique, args.proxy_bank.as_deref(), args.dry_run),
+        (None, Some(host)) => seed_host(
+            host,
+            &args.technique,
+            args.proxy_bank.as_deref(),
+            args.dry_run,
+        ),
         (None, None) => {
             eprintln!(
                 "error: pick a destination — `--waf <name>` (per-WAF GeneBank) or \
@@ -91,10 +96,8 @@ fn seed_waf(waf_name: &str, techniques: &[String], dry_run: bool) -> ExitCode {
     // synthesise (1, 1) to record one successful run with the seeded
     // technique — that's enough to bring it above the min_attempts
     // threshold and into the seed_winners() set.
-    let stats: Vec<(String, u32, u32)> = techniques
-        .iter()
-        .map(|t| (t.clone(), 1u32, 1u32))
-        .collect();
+    let stats: Vec<(String, u32, u32)> =
+        techniques.iter().map(|t| (t.clone(), 1u32, 1u32)).collect();
     if let Err(e) = bank.merge_and_save(waf_name, &stats) {
         eprintln!("error: merge_and_save({waf_name}): {e}");
         return ExitCode::from(1);
@@ -280,7 +283,11 @@ mod tests {
         let bank2: PersistedGeneBank = serde_json::from_str(&raw2).unwrap();
         let entry2 = bank2.hosts.get("api.example.com").unwrap();
         assert_eq!(entry2.proven_winners.len(), 3, "should dedupe EncodingUrl");
-        assert!(entry2.proven_winners.contains(&"SmugglingClTeBasic".to_string()));
+        assert!(
+            entry2
+                .proven_winners
+                .contains(&"SmugglingClTeBasic".to_string())
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -289,8 +296,8 @@ mod tests {
     fn seed_host_round_trips_through_proxy_bank_format() {
         // Sanity: the JSON we emit deserialises back into the same
         // PersistedGeneBank shape the proxy uses for restore_gene_bank.
-        let dir = std::env::temp_dir()
-            .join(format!("wafrift-seed-test-rtproxy-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("wafrift-seed-test-rtproxy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let bank_path = dir.join("gene-bank.json");
@@ -320,7 +327,8 @@ mod tests {
         // Without a custom path AND with HOME unset, the function should error.
         // We can't easily mutate HOME safely in tests; test the explicit
         // path branch instead and rely on integration to cover HOME.
-        let dir = std::env::temp_dir().join(format!("wafrift-seed-test-noh-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("wafrift-seed-test-noh-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let code = seed_host(

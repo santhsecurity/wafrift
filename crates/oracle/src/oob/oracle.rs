@@ -48,8 +48,7 @@ impl OobOracle {
         _payload_type: &str,
     ) -> Result<OobConfirmation, OobError> {
         let canary = self.provider.register().await?;
-        let deadline = std::time::Instant::now()
-            + Duration::from_secs(self.config.timeout_secs);
+        let deadline = std::time::Instant::now() + Duration::from_secs(self.config.timeout_secs);
         let interval = Duration::from_secs(self.config.poll_interval_secs.max(1));
         loop {
             match self.provider.poll(&canary).await {
@@ -75,13 +74,7 @@ impl OobOracle {
     /// — otherwise the canary will time out.
     pub async fn confirm_background(
         &self,
-    ) -> Result<
-        (
-            OobCanary,
-            tokio::sync::mpsc::Receiver<OobConfirmation>,
-        ),
-        OobError,
-    > {
+    ) -> Result<(OobCanary, tokio::sync::mpsc::Receiver<OobConfirmation>), OobError> {
         let canary = self.provider.register().await?;
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         // Note: spawning requires the provider be Clone-able. Trait
@@ -155,10 +148,7 @@ mod tests {
                 created_at: None,
             })
         }
-        async fn poll(
-            &self,
-            _canary: &OobCanary,
-        ) -> Result<Vec<OobInteraction>, OobError> {
+        async fn poll(&self, _canary: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
             let n = self.polls.fetch_add(1, Ordering::Relaxed);
             if n >= self.confirm_after {
                 Ok(vec![OobInteraction::DnsQuery {
@@ -240,10 +230,7 @@ mod tests {
             async fn register(&self) -> Result<OobCanary, OobError> {
                 self.0.register().await
             }
-            async fn poll(
-                &self,
-                c: &OobCanary,
-            ) -> Result<Vec<OobInteraction>, OobError> {
+            async fn poll(&self, c: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
                 self.0.poll(c).await
             }
         }
@@ -252,10 +239,7 @@ mod tests {
                 self.0.fmt(f)
             }
         }
-        let oracle = OobOracle::new(
-            Box::new(ArcProvider(provider_arc.clone())),
-            fast_config(),
-        );
+        let oracle = OobOracle::new(Box::new(ArcProvider(provider_arc.clone())), fast_config());
         let result = oracle.confirm("x", "Sql").await.unwrap();
         assert_eq!(result, OobConfirmation::Confirmed);
         assert!(provider_arc.polls.load(Ordering::Relaxed) >= 3);

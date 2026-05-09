@@ -141,10 +141,7 @@ fn shell_tokenize(input: &str) -> Result<Vec<String>, String> {
         return Err("empty curl invocation".to_string());
     }
     if out[0] != "curl" {
-        return Err(format!(
-            "first token must be `curl`, got {:?}",
-            out[0]
-        ));
+        return Err(format!("first token must be `curl`, got {:?}", out[0]));
     }
     Ok(out)
 }
@@ -205,9 +202,9 @@ fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                 body.push_str(v);
             }
             // Common no-op flags from Burp's "Copy as cURL" — accept and ignore.
-            "-i" | "--include" | "-k" | "--insecure" | "--compressed" | "-s"
-            | "--silent" | "-v" | "--verbose" | "-L" | "--location" | "-o"
-            | "--output" | "-O" | "--remote-name" => {
+            "-i" | "--include" | "-k" | "--insecure" | "--compressed" | "-s" | "--silent"
+            | "-v" | "--verbose" | "-L" | "--location" | "-o" | "--output" | "-O"
+            | "--remote-name" => {
                 if matches!(tok.as_str(), "-o" | "--output") {
                     i += 1; // skip the file argument too
                 }
@@ -280,10 +277,14 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     };
 
     let target = parsed.url.expect("checked in parse_curl");
-    eprintln!("import-curl: parsed {} headers, body {} bytes, method {} → target {}",
+    eprintln!(
+        "import-curl: parsed {} headers, body {} bytes, method {} → target {}",
         parsed.headers.len(),
         parsed.body.as_ref().map(|s| s.len()).unwrap_or(0),
-        parsed.method.as_deref().unwrap_or(if parsed.body.is_some() { "POST" } else { "GET" }),
+        parsed
+            .method
+            .as_deref()
+            .unwrap_or(if parsed.body.is_some() { "POST" } else { "GET" }),
         target,
     );
 
@@ -357,8 +358,7 @@ mod tests {
 
     #[test]
     fn tokenize_single_quoted_value() {
-        let toks =
-            shell_tokenize("curl 'https://x/y?z=1&a=2' -H 'User-Agent: x'").unwrap();
+        let toks = shell_tokenize("curl 'https://x/y?z=1&a=2' -H 'User-Agent: x'").unwrap();
         assert_eq!(toks[1], "https://x/y?z=1&a=2");
         assert_eq!(toks[3], "User-Agent: x");
     }
@@ -404,7 +404,13 @@ mod tests {
         let p = parse_curl(&toks).unwrap();
         assert_eq!(p.url.as_deref(), Some("https://api.target/login"));
         assert_eq!(p.headers.len(), 2);
-        assert_eq!(p.headers[0], ("Content-Type".into(), "application/x-www-form-urlencoded".into()));
+        assert_eq!(
+            p.headers[0],
+            (
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into()
+            )
+        );
         assert_eq!(p.headers[1], ("Cookie".into(), "sess=abc".into()));
         assert_eq!(p.body.as_deref(), Some("user=admin&pass=test"));
     }

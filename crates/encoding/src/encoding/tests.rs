@@ -137,8 +137,14 @@ fn all_strategies_ordered() {
 #[test]
 fn empty_payload_all_strategies() {
     for strategy in all_strategies() {
-        let result = encode("", strategy).unwrap();
-        assert!(result.is_empty() || !result.is_empty());
+        // Every strategy must handle empty input without erroring.
+        let result = encode("", strategy);
+        assert!(
+            result.is_ok(),
+            "strategy {:?} failed on empty input: {:?}",
+            strategy,
+            result
+        );
     }
 }
 

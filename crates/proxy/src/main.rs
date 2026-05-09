@@ -86,8 +86,12 @@ impl RequestLogger {
         let now = time::OffsetDateTime::now_utc();
         let ts = format!(
             "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
-            now.year(), now.month() as u8, now.day(),
-            now.hour(), now.minute(), now.second(),
+            now.year(),
+            now.month() as u8,
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second(),
         );
         let path = dir.join(format!("wafrift-proxy-{ts}.ndjson"));
         let file = std::fs::OpenOptions::new()
@@ -285,8 +289,7 @@ static STEALTH_POOL: std::sync::OnceLock<StealthPool> = std::sync::OnceLock::new
 /// Process-wide body-padding bytes. Read at every request to decide
 /// whether to invoke `wafrift_evolution::body_padding::pad`. Set once
 /// at startup from `--body-padding-bytes`.
-static BODY_PADDING_BYTES: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+static BODY_PADDING_BYTES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Process-wide TUI event channel. `Some` when `--tui` is set; the
 /// dashboard task drains it. Senders just `try_send` and ignore errors
@@ -350,9 +353,10 @@ impl WarnThrottle {
         };
         let now = Instant::now();
         if let Some(last) = map.get(key)
-            && now.duration_since(*last) < self.cooldown {
-                return false;
-            }
+            && now.duration_since(*last) < self.cooldown
+        {
+            return false;
+        }
         map.insert(key.to_string(), now);
         true
     }
@@ -498,9 +502,10 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
     std::fs::rename(&tmp, path)?;
     // Fsync parent directory so the rename is durable.
     if let Some(parent) = path.parent()
-        && let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent) {
-            let _ = dir.sync_all();
-        }
+        && let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent)
+    {
+        let _ = dir.sync_all();
+    }
     Ok(())
 }
 
@@ -565,12 +570,13 @@ fn validate_args(args: &Args) -> Result<(), String> {
         ));
     }
     if let Some(esc) = &args.escalation
-        && !matches!(esc.as_str(), "light" | "medium" | "heavy") {
-            return Err(format!(
-                "--escalation must be one of: light, medium, heavy. Got: {}",
-                esc
-            ));
-        }
+        && !matches!(esc.as_str(), "light" | "medium" | "heavy")
+    {
+        return Err(format!(
+            "--escalation must be one of: light, medium, heavy. Got: {}",
+            esc
+        ));
+    }
     Ok(())
 }
 
@@ -582,8 +588,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Args::parse();
 
     use tracing_subscriber::EnvFilter;
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     if args.tui {
         // Redirect logs to a file so the TUI owns the terminal. Default
         // to /tmp/wafrift-proxy.log; honour --log-dir if set.
@@ -704,7 +709,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Listening on http://{}", addr);
     let expose_wafrift_status = addr.ip().is_loopback();
     if !expose_wafrift_status {
-        warn!("--listen is bound to a non-loopback address ({}). /_wafrift/status and /_wafrift/findings.md are disabled to prevent information leakage.", addr);
+        warn!(
+            "--listen is bound to a non-loopback address ({}). /_wafrift/status and /_wafrift/findings.md are disabled to prevent information leakage.",
+            addr
+        );
         if args.mitm {
             // The proxy will accept CONNECT from any client reachable
             // on the LAN and re-sign upstream certs with the local CA
@@ -779,7 +787,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = WARN_THROTTLE.set(WarnThrottle::new(5));
 
     if args.insecure_open_upstream && args.allow_private_upstream {
-        warn!("--insecure-open-upstream makes --allow-private-upstream redundant; all upstream checks are disabled");
+        warn!(
+            "--insecure-open-upstream makes --allow-private-upstream redundant; all upstream checks are disabled"
+        );
     }
 
     // ── Optional stealth (browser-identical TLS ClientHello) ──────────
@@ -1626,15 +1636,10 @@ async fn forward_wafrift_request(
     // These are visible in Burp, browser devtools, and curl -v so the
     // practitioner immediately knows what WafRift did to this request.
     if !technique_keys.is_empty() {
-        response_builder = response_builder.header(
-            X_WAFRIFT_TECHNIQUES,
-            technique_keys.join(", "),
-        );
+        response_builder = response_builder.header(X_WAFRIFT_TECHNIQUES, technique_keys.join(", "));
     }
-    response_builder = response_builder.header(
-        X_WAFRIFT_BLOCKED,
-        if is_block { "true" } else { "false" },
-    );
+    response_builder =
+        response_builder.header(X_WAFRIFT_BLOCKED, if is_block { "true" } else { "false" });
 
     // Emit a TUI event so the dashboard can update — skipped silently
     // when --tui isn't on (TUI_TX is None). The send is non-blocking
@@ -1723,9 +1728,10 @@ async fn mitm_plaintext_request(
         Ok(b) => b.to_bytes().to_vec(),
         Err(_) => {
             if let Some(throttle) = WARN_THROTTLE.get()
-                && throttle.should_warn(&format!("body-limit:{host}")) {
-                    warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
-                }
+                && throttle.should_warn(&format!("body-limit:{host}"))
+            {
+                warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
+            }
             return Ok(error_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request body too large",
@@ -1931,13 +1937,14 @@ async fn proxy(
                 // so the practitioner notices the gap without spamming
                 // every CONNECT (each tunnel hits this branch once).
                 if let Some(throttle) = WARN_THROTTLE.get()
-                    && throttle.should_warn(&format!("connect-passthrough:{addr}")) {
-                        info!(
-                            target = %addr,
-                            "CONNECT pass-through (no MITM): bytes are TLS-encrypted, evasion engine inactive. \
-                             Pass `--mitm` to terminate TLS and apply evasion to HTTPS request bodies."
-                        );
-                    }
+                    && throttle.should_warn(&format!("connect-passthrough:{addr}"))
+                {
+                    info!(
+                        target = %addr,
+                        "CONNECT pass-through (no MITM): bytes are TLS-encrypted, evasion engine inactive. \
+                         Pass `--mitm` to terminate TLS and apply evasion to HTTPS request bodies."
+                    );
+                }
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(req).await {
                         Ok(upgraded) => {
@@ -2035,9 +2042,10 @@ async fn proxy(
         Ok(b) => b.to_bytes().to_vec(),
         Err(_) => {
             if let Some(throttle) = WARN_THROTTLE.get()
-                && throttle.should_warn(&format!("body-limit:{host}")) {
-                    warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
-                }
+                && throttle.should_warn(&format!("body-limit:{host}"))
+            {
+                warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
+            }
             return Ok(error_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request body too large",
@@ -2379,9 +2387,7 @@ fn render_live_findings(state: &ProxyState) -> String {
 fn sanitize_for_markdown(s: &str) -> String {
     s.chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric()
-                || matches!(c, '.' | '-' | '_' | ':' | '/' | '+' | '@')
-            {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '/' | '+' | '@') {
                 c
             } else {
                 '_'

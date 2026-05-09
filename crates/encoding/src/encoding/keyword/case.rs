@@ -95,7 +95,10 @@ mod tests {
     fn case_alternate_idempotent_after_first() {
         let once = case_alternate("select");
         let twice = case_alternate(&once);
-        assert_eq!(once, twice, "case_alternate must be idempotent after first application");
+        assert_eq!(
+            once, twice,
+            "case_alternate must be idempotent after first application"
+        );
         assert_eq!(once, "SeLeCt");
     }
 
@@ -104,6 +107,9 @@ mod tests {
         let a = random_case_alternate("SELECT");
         let b = random_case_alternate(&a);
         // Statistically almost certain to differ.
-        assert_ne!(a, b, "random_case should re-randomise on second application");
+        assert_ne!(
+            a, b,
+            "random_case should re-randomise on second application"
+        );
     }
 }

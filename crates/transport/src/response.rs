@@ -289,10 +289,19 @@ mod tests {
         // Directory bruteforcing produces many 404s whose bodies may
         // contain "forbidden", "access denied", etc. These must NOT be
         // misclassified as WAF blocks.
-        assert!(!is_waf_block(404, b"Forbidden - you cannot access this resource"));
+        assert!(!is_waf_block(
+            404,
+            b"Forbidden - you cannot access this resource"
+        ));
         assert!(!is_waf_block(404, b"Access Denied - page not found"));
-        assert!(!is_waf_block(404, b"Request blocked - this path does not exist"));
-        assert!(!is_waf_block(404, b"<html><h1>Not Found</h1><p>Access to /admin is forbidden</p></html>"));
+        assert!(!is_waf_block(
+            404,
+            b"Request blocked - this path does not exist"
+        ));
+        assert!(!is_waf_block(
+            404,
+            b"<html><h1>Not Found</h1><p>Access to /admin is forbidden</p></html>"
+        ));
     }
 
     #[test]

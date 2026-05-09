@@ -307,7 +307,7 @@ fn is_valid_xxe(_original: &str, transformed: &str) -> bool {
 fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
     let lower = transformed.to_ascii_lowercase();
     // Direct or partially-obfuscated forms.
-    
+
     lower.contains("${jndi:")
         || lower.contains("ndi:ldap")
         || lower.contains("ndi:rmi")
@@ -326,7 +326,10 @@ pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{} failed to start tokio runtime: {e}", "error:".red().bold());
+            eprintln!(
+                "{} failed to start tokio runtime: {e}",
+                "error:".red().bold()
+            );
             return ExitCode::from(1);
         }
     };
@@ -351,8 +354,17 @@ fn resolve_base_url(args: &BenchWafArgs) -> String {
 /// Static set of attack classes accepted in the bench corpus. Anything else
 /// is treated as a typo (better to fail loud than silently miscategorize).
 const KNOWN_CLASSES: &[&str] = &[
-    "sql", "xss", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql", "xxe",
-    "log4shell", "cve_pocs",
+    "sql",
+    "xss",
+    "cmdi",
+    "ssti",
+    "path",
+    "ldap",
+    "ssrf",
+    "nosql",
+    "xxe",
+    "log4shell",
+    "cve_pocs",
 ];
 
 fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
@@ -617,7 +629,8 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
 
     // Bypass corpus: collected when --lineage-output is set. Flushed once at
     // end of bench so a partial-run kill still loses only the in-flight case.
-    let mut bypass_corpus: Option<BypassCorpus> = args.lineage_output.as_ref().map(|_| BypassCorpus::new());
+    let mut bypass_corpus: Option<BypassCorpus> =
+        args.lineage_output.as_ref().map(|_| BypassCorpus::new());
 
     use std::sync::atomic::Ordering;
 
@@ -673,7 +686,10 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // atomic write at end so a torn run never leaves a half-corpus on disk.
     if let (Some(path), Some(corpus)) = (args.lineage_output.as_ref(), bypass_corpus.as_ref()) {
         if let Err(e) = corpus.save(path) {
-            eprintln!("warn: lineage corpus write to {} failed: {e:?}", path.display());
+            eprintln!(
+                "warn: lineage corpus write to {} failed: {e:?}",
+                path.display()
+            );
         } else {
             eprintln!(
                 "wrote {} bypass entries (lineage-traced) to {}",
@@ -1563,9 +1579,10 @@ mod tests {
         );
         // Negative — sql probe set must NOT contain xss or cmd probes.
         assert!(
-            !probes
-                .iter()
-                .any(|p| matches!(p.tests, ProbeTarget::XssTag(_) | ProbeTarget::CmdSeparator(_))),
+            !probes.iter().any(|p| matches!(
+                p.tests,
+                ProbeTarget::XssTag(_) | ProbeTarget::CmdSeparator(_)
+            )),
             "sql probe set must not bleed xss/cmd families"
         );
     }
@@ -1626,10 +1643,7 @@ mod tests {
 
     #[test]
     fn validate_corpus_flags_duplicate_id() {
-        let cases = vec![
-            case("a", "sql", "1=1"),
-            case("a", "xss", "<script>"),
-        ];
+        let cases = vec![case("a", "sql", "1=1"), case("a", "xss", "<script>")];
         let code = validate_corpus_and_exit(&cases).unwrap();
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
     }

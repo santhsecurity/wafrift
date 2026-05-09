@@ -293,16 +293,14 @@ fn build_mcts_result(env: WafRiftEnv, config: &EvasionConfig) -> Option<EvasionR
     }
 
     // Filter techniques according to config flags
-    techniques.retain(|t| {
-        match t {
-            Technique::PayloadEncoding(_) if !config.encoding_enabled => false,
-            Technique::GrammarMutation(_) if !config.grammar_mutations => false,
-            Technique::HeaderObfuscation(_) if !config.header_obfuscation => false,
-            Technique::ContentTypeSwitch(_) if !config.content_type_switching => false,
-            Technique::RequestSmuggling(_) if !config.smuggling_enabled => false,
-            Technique::H2Evasion(_) if !config.h2_evasion_enabled => false,
-            _ => true,
-        }
+    techniques.retain(|t| match t {
+        Technique::PayloadEncoding(_) if !config.encoding_enabled => false,
+        Technique::GrammarMutation(_) if !config.grammar_mutations => false,
+        Technique::HeaderObfuscation(_) if !config.header_obfuscation => false,
+        Technique::ContentTypeSwitch(_) if !config.content_type_switching => false,
+        Technique::RequestSmuggling(_) if !config.smuggling_enabled => false,
+        Technique::H2Evasion(_) if !config.h2_evasion_enabled => false,
+        _ => true,
     });
 
     if techniques.is_empty() {
@@ -531,12 +529,8 @@ pub fn evade_intelligent<'a>(
 /// param; multipart: leading junk part). Records `Technique::BodyPadding`
 /// on success so the gene-bank can credit padding-as-winner like any
 /// other technique.
-fn apply_body_padding(
-    req: &mut Request,
-    techniques: &mut Vec<Technique>,
-    config: &EvasionConfig,
-) {
-    use wafrift_evolution::body_padding::{pad, PadOutcome, MIN_USEFUL_PAD};
+fn apply_body_padding(req: &mut Request, techniques: &mut Vec<Technique>, config: &EvasionConfig) {
+    use wafrift_evolution::body_padding::{MIN_USEFUL_PAD, PadOutcome, pad};
     if config.body_padding_bytes < MIN_USEFUL_PAD {
         return;
     }

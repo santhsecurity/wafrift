@@ -1,3 +1,3 @@
-pub mod provider;
-pub mod oracle;
 pub mod embed;
+pub mod oracle;
+pub mod provider;

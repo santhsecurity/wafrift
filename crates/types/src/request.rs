@@ -400,8 +400,8 @@ mod tests {
 
     #[test]
     fn request_accessors() {
-        let req = Request::post("https://example.com", b"test".to_vec())
-            .header("Host", "example.com");
+        let req =
+            Request::post("https://example.com", b"test".to_vec()).header("Host", "example.com");
         assert_eq!(req.url(), "https://example.com");
         assert_eq!(*req.method(), Method::Post);
         assert_eq!(req.headers().len(), 1);

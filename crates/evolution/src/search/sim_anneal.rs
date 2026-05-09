@@ -86,7 +86,8 @@ impl SearchAlgorithm for SimulatedAnnealing {
         for (_id, verdict) in results {
             let mut candidate = self.current.clone();
             candidate.record_verdict(&verdict);
-            let delta = comparable_fitness(candidate.fitness) - comparable_fitness(self.current.fitness);
+            let delta =
+                comparable_fitness(candidate.fitness) - comparable_fitness(self.current.fitness);
             let accepted = if delta > 0.0 {
                 true
             } else {
@@ -97,7 +98,8 @@ impl SearchAlgorithm for SimulatedAnnealing {
             };
             if accepted {
                 self.current = candidate;
-                if comparable_fitness(self.current.fitness) > comparable_fitness(self.best.fitness) {
+                if comparable_fitness(self.current.fitness) > comparable_fitness(self.best.fitness)
+                {
                     self.best = self.current.clone();
                 }
             }

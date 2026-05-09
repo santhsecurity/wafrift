@@ -115,7 +115,8 @@ impl SearchAlgorithm for TabuSearch {
             self.add_tabu(candidate.hash());
             if comparable_fitness(candidate.fitness) >= comparable_fitness(self.current.fitness) {
                 self.current = candidate;
-                if comparable_fitness(self.current.fitness) > comparable_fitness(self.best.fitness) {
+                if comparable_fitness(self.current.fitness) > comparable_fitness(self.best.fitness)
+                {
                     self.best = self.current.clone();
                 }
             }

@@ -1,8 +1,8 @@
-use std::path::Path;
 use reqwest::cookie::Jar;
+use std::path::Path;
 use thiserror::Error;
-use wafrift_types::session::CsrfInjectionLocation;
 use wafrift_types::Request;
+use wafrift_types::session::CsrfInjectionLocation;
 
 #[derive(Debug, Error)]
 pub enum SessionError {
@@ -37,12 +37,14 @@ pub fn load_jar(path: &Path) -> Result<Jar, SessionError> {
         return Ok(jar);
     }
     let contents = std::fs::read_to_string(path).map_err(|e| {
-        SessionError::CookieJarCorrupt {
-            path: path.display().to_string(),
-            line: 0,
+        {
+            SessionError::CookieJarCorrupt {
+                path: path.display().to_string(),
+                line: 0,
+            }
         }
-    }
-    .map_io(e))?;
+        .map_io(e)
+    })?;
     for (lineno, line) in contents.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -116,17 +118,25 @@ pub fn extract_csrf(response_body: &str, regex: &regex::Regex) -> Result<String,
             }
         }
     }
-    Err(SessionError::CsrfTokenNotFound { url: "unknown".into() })
+    Err(SessionError::CsrfTokenNotFound {
+        url: "unknown".into(),
+    })
 }
 
 pub fn inject_csrf(request: &mut Request, token: &str, location: CsrfInjectionLocation) {
     match location {
         CsrfInjectionLocation::Header => {
-            request.headers.push(("X-CSRF-Token".to_string(), token.to_string()));
+            request
+                .headers
+                .push(("X-CSRF-Token".to_string(), token.to_string()));
         }
         CsrfInjectionLocation::Query => {
             let sep = if request.url.contains('?') { "&" } else { "?" };
-            request.url = format!("{}{sep}csrf_token={}", request.url, urlencoding::encode(token));
+            request.url = format!(
+                "{}{sep}csrf_token={}",
+                request.url,
+                urlencoding::encode(token)
+            );
         }
         CsrfInjectionLocation::Body => {
             if let Some(ref mut body) = request.body {

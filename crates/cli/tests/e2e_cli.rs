@@ -249,7 +249,8 @@ fn bench_waf_validate_only_emits_schema_versioned_json() {
 id = "smoke_select"
 class = "sql"
 payload = "' OR 1=1--""#
-        ).unwrap();
+        )
+        .unwrap();
     }
     let (code, _stdout, _stderr) = wafrift(&[
         "bench-waf",
@@ -258,7 +259,10 @@ payload = "' OR 1=1--""#
         corpus.to_str().unwrap(),
     ]);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(code, 0, "validate-only on a clean 1-case corpus should exit 0");
+    assert_eq!(
+        code, 0,
+        "validate-only on a clean 1-case corpus should exit 0"
+    );
 }
 
 #[test]
@@ -307,7 +311,14 @@ fn invalid_level_fails() {
 fn replay_help_lists_source_flags() {
     let (code, stdout, _) = wafrift(&["replay", "--help"]);
     assert_eq!(code, 0, "replay --help should exit 0");
-    for keyword in &["--target", "--param", "--payload", "--from-host", "--from-waf", "--technique"] {
+    for keyword in &[
+        "--target",
+        "--param",
+        "--payload",
+        "--from-host",
+        "--from-waf",
+        "--technique",
+    ] {
         assert!(
             stdout.contains(keyword),
             "replay --help missing flag {keyword:?}: {stdout}"
@@ -321,12 +332,16 @@ fn replay_without_techniques_errors_actionable() {
     // message that names the missing flags, not a generic "no input".
     let (code, _stdout, stderr) = wafrift(&[
         "replay",
-        "--target", "https://example.com/x",
-        "--payload", "test",
+        "--target",
+        "https://example.com/x",
+        "--payload",
+        "test",
     ]);
     assert_ne!(code, 0, "replay with no source flag should fail");
     assert!(
-        stderr.contains("--technique") || stderr.contains("--from-host") || stderr.contains("--from-waf"),
+        stderr.contains("--technique")
+            || stderr.contains("--from-host")
+            || stderr.contains("--from-waf"),
         "error must name the missing source flags: {stderr}"
     );
 }
@@ -335,9 +350,18 @@ fn replay_without_techniques_errors_actionable() {
 fn report_help_documents_format_options() {
     let (code, stdout, _) = wafrift(&["report", "--help"]);
     assert_eq!(code, 0, "report --help should exit 0");
-    assert!(stdout.contains("markdown"), "report --help missing markdown format: {stdout}");
-    assert!(stdout.contains("json"), "report --help missing json format: {stdout}");
-    assert!(stdout.contains("--proxy-bank"), "report --help missing --proxy-bank: {stdout}");
+    assert!(
+        stdout.contains("markdown"),
+        "report --help missing markdown format: {stdout}"
+    );
+    assert!(
+        stdout.contains("json"),
+        "report --help missing json format: {stdout}"
+    );
+    assert!(
+        stdout.contains("--proxy-bank"),
+        "report --help missing --proxy-bank: {stdout}"
+    );
 }
 
 #[test]
@@ -375,20 +399,12 @@ fn init_creates_scaffold_then_refuses_overwrite() {
     std::fs::create_dir_all(&dir).expect("mkdir tempdir");
     let target = dir.join(".wafrift.toml");
 
-    let (code, _stdout, _stderr) = wafrift(&[
-        "init",
-        "--output",
-        target.to_str().unwrap(),
-    ]);
+    let (code, _stdout, _stderr) = wafrift(&["init", "--output", target.to_str().unwrap()]);
     assert_eq!(code, 0, "first init should succeed");
     assert!(target.exists(), "scaffold file must be created");
 
     // Second init without --force must refuse.
-    let (code2, _stdout2, stderr2) = wafrift(&[
-        "init",
-        "--output",
-        target.to_str().unwrap(),
-    ]);
+    let (code2, _stdout2, stderr2) = wafrift(&["init", "--output", target.to_str().unwrap()]);
     assert_ne!(code2, 0, "second init without --force should fail");
     assert!(
         stderr2.contains("--force"),
@@ -396,12 +412,8 @@ fn init_creates_scaffold_then_refuses_overwrite() {
     );
 
     // Third init WITH --force must succeed.
-    let (code3, _stdout3, _stderr3) = wafrift(&[
-        "init",
-        "--output",
-        target.to_str().unwrap(),
-        "--force",
-    ]);
+    let (code3, _stdout3, _stderr3) =
+        wafrift(&["init", "--output", target.to_str().unwrap(), "--force"]);
     assert_eq!(code3, 0, "third init with --force should succeed");
 
     let _ = std::fs::remove_dir_all(&dir);
