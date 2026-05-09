@@ -1,0 +1,45 @@
+# BunkerWeb — modsec-based all-in-one WAF/reverse-proxy. Different rule
+# pipeline from CRS-vanilla (modsec-pl{1..4}) and Coraza, even though
+# modsec sits underneath, because BunkerWeb adds its own rule packs and
+# anti-bot/blacklist plugins on top.
+#
+# Public image: bunkerity/bunkerweb (Docker Hub).
+# Naxsi was the original plan but no public image exists for naxsi
+# without building from source; BunkerWeb is the substitute. naxsi
+# Dockerfile is a follow-up if we want true positive-security model.
+services:
+  wafrift-bunkerweb:
+    image: bunkerity/bunkerweb:1.6.0
+    container_name: wafrift-bunkerweb
+    ports:
+      - "18086:8080"
+    environment:
+      SERVER_NAME: "wafrift-bench"
+      MULTISITE: "no"
+      USE_REVERSE_PROXY: "yes"
+      REVERSE_PROXY_HOST: "http://backend:80"
+      REVERSE_PROXY_URL: "/"
+      USE_MODSECURITY: "yes"
+      USE_MODSECURITY_CRS: "yes"
+      USE_BAD_BEHAVIOR: "no"
+      USE_LIMIT_REQ: "no"
+      USE_LIMIT_CONN: "no"
+      USE_DNSBL: "no"
+      USE_REAL_IP: "no"
+      DISABLE_DEFAULT_SERVER: "no"
+      AUTOCONF_MODE: "no"
+      KUBERNETES_MODE: "no"
+      SWARM_MODE: "no"
+      LISTEN_HTTP: "yes"
+      HTTP_PORT: "8080"
+      USE_HTTPS: "no"
+    depends_on:
+      - backend
+    networks:
+      - wafrift-bunkerweb
+  backend:
+    image: kennethreitz/httpbin
+    networks:
+      - wafrift-bunkerweb
+networks:
+  wafrift-bunkerweb:

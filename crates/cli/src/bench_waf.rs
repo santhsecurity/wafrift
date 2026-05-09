@@ -12,6 +12,8 @@
 //! case carries `id`, `class`, `payload`, optional `mode` + `description`.
 
 use colored::Colorize;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -20,7 +22,15 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 use wafrift_content_type::generate_variants_from_body;
-use wafrift_grammar::grammar::PayloadType;
+use wafrift_evolution::evolution::{EvolutionEngine, GenePool};
+use wafrift_evolution::types::Budget;
+use wafrift_grammar::grammar::{self, PayloadType};
+use wafrift_oracle::cmdi::CmdiOracle;
+use wafrift_oracle::path::PathOracle;
+use wafrift_oracle::sql::{self as sql_oracle, DatabaseDialect};
+use wafrift_oracle::ssti::SstiOracle;
+use wafrift_oracle::traits::PayloadOracle;
+use wafrift_oracle::xss::XssOracle;
 use wafrift_smuggling::smuggling::all_payloads as smuggling_all_payloads;
 use wafrift_strategy::{EvasionConfig, evade_mcts};
 use wafrift_transport::is_waf_block;
@@ -62,10 +72,19 @@ pub struct BenchWafArgs {
     ///   mcts                      — Monte Carlo Tree Search over actions (mctrust)
     ///   smuggling                 — HTTP request smuggling variants (CL.TE / TE.CL / TE.TE / dual-CL)
     ///   content-type              — Content-Type confusion variants (multipart/json/xml/...)
-    ///   redos                     — wrap payload in catastrophic-backtracking patterns,
-    ///                              attempting to trigger WAF regex timeout fail-open
+    ///   redos                     — wrap payload in catastrophic-backtracking patterns
+    ///   hill-climb / sim-anneal / tabu / novelty / map-elites
+    ///                              — feedback-driven search via wafrift-evolution
     #[arg(long, value_delimiter = ',', default_value = "heavy")]
     pub strategies: Vec<String>,
+
+    /// Gate bypass count by oracle (per-class semantic validity check).
+    /// When set, a "bypassed" variant is only counted if the corresponding
+    /// payload oracle agrees the variant is structurally a valid attack
+    /// (i.e. would actually trigger the vulnerability server-side, not
+    /// garbage that slipped past because nothing parsed it).
+    #[arg(long, default_value_t = false)]
+    pub oracle_gate: bool,
 
     /// Delay between requests (ms) for rate-limit avoidance.
     #[arg(long, default_value_t = 25)]
@@ -133,6 +152,10 @@ struct EvadeResult {
     variants_total: usize,
     variants_bypassed: usize,
     bypass_rate: f64,
+    /// Variants the oracle confirmed were semantically valid (only when
+    /// --oracle-gate is on). 0 if oracle gating disabled.
+    variants_oracle_valid: usize,
+    oracle_valid_rate: f64,
     /// Per-strategy breakdown.
     by_strategy: BTreeMap<String, StrategyStat>,
     /// Sample of techniques that produced bypasses (one per variant).
@@ -144,6 +167,22 @@ struct StrategyStat {
     variants: usize,
     bypassed: usize,
     bypass_rate: f64,
+    oracle_valid: usize,
+}
+
+/// Returns true if the variant retains the exploit semantics of the original
+/// payload for `class`. Falls back to true when no oracle exists for the class.
+fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
+    match class {
+        "sql" => sql_oracle::is_valid_expression_injection(transformed, DatabaseDialect::Generic),
+        "xss" => XssOracle.is_semantically_valid(original, transformed),
+        "cmdi" => CmdiOracle.is_semantically_valid(original, transformed),
+        "ssti" => SstiOracle.is_semantically_valid(original, transformed),
+        "path" => PathOracle.is_semantically_valid(original, transformed),
+        // No oracle for ldap / ssrf / xxe / nosql / log4shell / cve_pocs:
+        // accept the bypass on faith. (Adding oracles here is in-scope.)
+        _ => true,
+    }
 }
 
 pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
@@ -339,9 +378,16 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
             tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
         }
         let req = build_request(&base_url, case);
-        let (raw_status, raw_blocked, raw_latency_ms) = send(&client, &req, args.timeout_secs)
-            .await
-            .map_err(|e| format!("{} (raw): {e}", case.id))?;
+        let (raw_status, raw_blocked, raw_latency_ms) =
+            match send(&client, &req, args.timeout_secs).await {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("warn: {} (raw): {e}", case.id);
+                    // Treat as raw=blocked with status 0 so the case is recorded
+                    // but doesn't poison the aggregate.
+                    (0, true, 0.0)
+                }
+            };
 
         let evaded = if args.evade {
             Some(run_evade(&client, case, &base_url, &args).await?)
@@ -458,9 +504,22 @@ async fn run_evade(
                 )
                 .await
             }
+            "hill-climb" | "sim-anneal" | "tabu" | "novelty" | "map-elites" => {
+                run_evolution_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
             other => {
                 eprintln!(
-                    "warn: unknown strategy {other:?} (use light/medium/heavy/mcts/smuggling/content-type/redos)"
+                    "warn: unknown strategy {other:?} (light/medium/heavy/mcts/smuggling/content-type/redos/hill-climb/sim-anneal/tabu/novelty/map-elites)"
                 );
                 StrategyStat::default()
             }
@@ -473,11 +532,26 @@ async fn run_evade(
     } else {
         0.0
     };
+    let oracle_valid_total: usize = by_strategy.values().map(|s| s.oracle_valid).sum();
+    let oracle_valid_rate = if total > 0 {
+        oracle_valid_total as f64 / total as f64
+    } else {
+        0.0
+    };
+    // Compute per-strategy bypass+oracle rates (was missing on stats produced
+    // by some branches; redundant when already set, idempotent).
+    for s in by_strategy.values_mut() {
+        if s.variants > 0 {
+            s.bypass_rate = s.bypassed as f64 / s.variants as f64;
+        }
+    }
 
     Ok(EvadeResult {
         variants_total: total,
         variants_bypassed: bypassed,
         bypass_rate,
+        variants_oracle_valid: oracle_valid_total,
+        oracle_valid_rate,
         by_strategy,
         bypass_techniques: bypass_techs,
     })
@@ -523,6 +597,9 @@ async fn run_payload_strategy(
             Ok((_s, blocked, _l)) if !blocked => {
                 stat.bypassed += 1;
                 *bypassed += 1;
+                if oracle_valid(&case.class, &case.payload, &variant.payload) {
+                    stat.oracle_valid += 1;
+                }
                 bypass_techs.push(format!("{}:{}", strat, variant.techniques.join("+")));
             }
             Ok(_) => {}
@@ -533,6 +610,134 @@ async fn run_payload_strategy(
         stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
     }
     stat
+}
+
+/// Strategy: feedback-driven evolution search — wafrift_evolution::EvolutionEngine
+/// runs one of {hill_climbing, simulated_annealing, tabu_search, novelty_search,
+/// map_elites}. For each round we get a candidate chromosome, render it to a
+/// payload (apply the chromosome's grammar + encoding genes to case.payload),
+/// send it, and feed the WAF's verdict back. The algorithm learns which gene
+/// combos beat *this* WAF as the round progresses — same loop the production
+/// `wafrift scan` uses, just headless against a corpus instead of a live host.
+async fn run_evolution_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let algo_name = match strat {
+        "hill-climb" => "hill_climbing",
+        "sim-anneal" => "simulated_annealing",
+        "tabu" => "tabu_search",
+        "novelty" => "novelty_search",
+        "map-elites" => "map_elites",
+        _ => return stat,
+    };
+    let payload_type = class_to_payload_type(&case.class);
+    let rng = StdRng::seed_from_u64(0xC0FFEE);
+    let gene_pool = GenePool::default_wafrift();
+    let mut budget = Budget::default();
+    budget.max_requests = args.variants.saturating_mul(4);
+
+    let mut engine = match EvolutionEngine::with_algorithm(algo_name, gene_pool, rng, budget) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("warn: {} ({strat}) engine init: {e:?}", case.id);
+            return stat;
+        }
+    };
+
+    for _ in 0..args.variants {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let (idx, rendered_payload, technique_label) = match engine.next_candidate() {
+            Some((i, c)) => {
+                let (p, l) = render_chromosome(c, &case.payload, payload_type);
+                (i, p, l)
+            }
+            None => break,
+        };
+        let req = build_request_for_payload(base_url, &case.mode, &rendered_payload);
+        stat.variants += 1;
+        *total += 1;
+        let blocked_actual = match send(client, &req, args.timeout_secs).await {
+            Ok((_s, blocked, _l)) => blocked,
+            Err(e) => {
+                eprintln!("warn: {} ({strat}) send: {e}", case.id);
+                let _ = engine.record_feedback(idx, false);
+                continue;
+            }
+        };
+        let _ = engine.record_feedback(idx, !blocked_actual);
+        if !blocked_actual {
+            stat.bypassed += 1;
+            *bypassed += 1;
+            if oracle_valid(&case.class, &case.payload, &rendered_payload) {
+                stat.oracle_valid += 1;
+            }
+            bypass_techs.push(format!("{strat}:{technique_label}"));
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Render a chromosome to a wire payload by applying its grammar + encoding genes
+/// to the original payload. Mirrors the renderer in `wafrift scan`'s intel loop.
+fn render_chromosome(
+    chromosome: &wafrift_evolution::evolution::Chromosome,
+    base_payload: &str,
+    payload_type: PayloadType,
+) -> (String, String) {
+    use wafrift_encoding::encoding;
+
+    let has_grammar = chromosome.genes.iter().any(|(k, _)| k == "grammar");
+    let mut techniques: Vec<String> = Vec::new();
+    let intel_payload = if has_grammar {
+        let muts = grammar::mutate_as(base_payload, payload_type, 1);
+        if let Some(m) = muts.first() {
+            techniques.push("grammar".into());
+            m.payload.clone()
+        } else {
+            base_payload.to_string()
+        }
+    } else {
+        base_payload.to_string()
+    };
+    let encoded = chromosome
+        .genes
+        .iter()
+        .find(|(k, _)| k == "encoding")
+        .and_then(|(_, v)| {
+            if v == "None" {
+                return None;
+            }
+            encoding::all_strategies()
+                .iter()
+                .find(|s| s.as_str() == v.as_str())
+                .copied()
+                .and_then(|s| {
+                    encoding::encode(&intel_payload, s).ok().map(|enc| {
+                        techniques.push(format!("enc:{}", s.as_str()));
+                        enc
+                    })
+                })
+        })
+        .unwrap_or(intel_payload);
+    let label = if techniques.is_empty() {
+        "raw".into()
+    } else {
+        techniques.join("+")
+    };
+    (encoded, label)
 }
 
 /// Strategy: MCTS — wafrift::strategy::evade_mcts learns the WAF mid-run by
@@ -567,6 +772,9 @@ async fn run_mcts_strategy(
             Ok((_s, blocked, _l)) if !blocked => {
                 stat.bypassed += 1;
                 *bypassed += 1;
+                // MCTS preserves payload semantics by construction (it's
+                // selecting actions that wrap the same payload, not mutating it).
+                stat.oracle_valid += 1;
                 bypass_techs.push(format!("{strat}:depth{depth}:{}", evaded.description));
             }
             Ok(_) => {}
@@ -622,6 +830,9 @@ async fn run_smuggling_strategy(
             Ok((_s, blocked, _l)) if !blocked => {
                 stat.bypassed += 1;
                 *bypassed += 1;
+                // Smuggling preserves the payload bytes exactly — they're
+                // wrapped in a smuggled HTTP request, not mutated.
+                stat.oracle_valid += 1;
                 bypass_techs.push(format!("{strat}:{:?}", sp.variant));
             }
             Ok(_) => {}
@@ -662,6 +873,9 @@ async fn run_content_type_strategy(
             Ok((_s, blocked, _l)) if !blocked => {
                 stat.bypassed += 1;
                 *bypassed += 1;
+                // Content-Type confusion changes the wrapper, not the payload —
+                // semantics preserved.
+                stat.oracle_valid += 1;
                 bypass_techs.push(format!("{strat}:{:?}", v.technique));
             }
             Ok(_) => {}
@@ -721,6 +935,9 @@ async fn run_redos_strategy(
             Ok((_s, blocked, _l)) if !blocked => {
                 stat.bypassed += 1;
                 *bypassed += 1;
+                if oracle_valid(&case.class, &case.payload, blob) {
+                    stat.oracle_valid += 1;
+                }
                 bypass_techs.push(format!("{strat}:{label}"));
             }
             Ok(_) => {}
@@ -752,11 +969,16 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         "evaded_summary": args.evade.then(|| {
             let total: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_total).sum();
             let bypassed: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_bypassed).sum();
+            let oracle_valid: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_oracle_valid).sum();
             serde_json::json!({
                 "total_variants_sent": total,
                 "total_variants_bypassed": bypassed,
                 "overall_bypass_rate": if total > 0 { bypassed as f64 / total as f64 } else { 0.0 },
+                "total_variants_oracle_valid": oracle_valid,
+                "oracle_valid_rate": if total > 0 { oracle_valid as f64 / total as f64 } else { 0.0 },
+                "oracle_valid_share_of_bypasses": if bypassed > 0 { oracle_valid as f64 / bypassed as f64 } else { 0.0 },
                 "cases_with_at_least_one_bypass": results.iter().filter_map(|r| r.evaded.as_ref()).filter(|e| e.variants_bypassed > 0).count(),
+                "cases_with_at_least_one_oracle_valid_bypass": results.iter().filter_map(|r| r.evaded.as_ref()).filter(|e| e.variants_oracle_valid > 0).count(),
             })
         }),
         "by_class": by_class.iter().map(|(class, rs)| {

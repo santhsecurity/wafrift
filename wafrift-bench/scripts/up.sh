@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGETS_DIR="$ROOT/wafrift-bench/targets"
-STACKS=( modsec-pl1 modsec-pl2 modsec-pl3 modsec-pl4 coraza naxsi )
+STACKS=( modsec-pl1 modsec-pl2 modsec-pl3 modsec-pl4 coraza bunkerweb )
 
 if [ $# -gt 0 ]; then
   STACKS=( "$@" )
@@ -21,7 +21,7 @@ done
 
 echo
 echo "Health probe (waiting up to 60s per port)..."
-declare -A PORT=( [modsec-pl1]=18081 [modsec-pl2]=18082 [modsec-pl3]=18083 [modsec-pl4]=18084 [coraza]=18085 [naxsi]=18086 )
+declare -A PORT=( [modsec-pl1]=18081 [modsec-pl2]=18082 [modsec-pl3]=18083 [modsec-pl4]=18084 [coraza]=18085 [bunkerweb]=18086 )
 for stack in "${STACKS[@]}"; do
   port="${PORT[$stack]:-}"
   [ -z "$port" ] && continue

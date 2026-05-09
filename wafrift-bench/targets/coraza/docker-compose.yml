@@ -3,7 +3,7 @@
 # fixed to CRS default (PL1) — extend Caddyfile to override if needed.
 services:
   wafrift-coraza:
-    image: corazawaf/coraza-caddy:latest
+    image: jptosso/coraza-caddy:latest
     container_name: wafrift-coraza
     ports:
       - "18085:80"
