@@ -285,18 +285,31 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
 
     #[cfg(target_os = "linux")]
     {
+        // sudo without cached creds prompts on stdin and would hang in a
+        // CI/headless context. Probe non-interactively first.
+        let sudo_available = std::process::Command::new("sudo")
+            .args(["-n", "true"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
         // Try Debian/Ubuntu path first.
         let debian_dir = std::path::Path::new("/usr/local/share/ca-certificates");
-        if debian_dir.is_dir() {
+        if sudo_available && debian_dir.is_dir() {
             let dest = debian_dir.join("wafrift-mitm-ca.crt");
             let cp = std::process::Command::new("sudo")
-                .args(["cp", &cert_display, &dest.display().to_string()])
+                .args(["-n", "cp", &cert_display, &dest.display().to_string()])
+                .stdin(std::process::Stdio::null())
                 .status();
             if let Ok(status) = cp
                 && status.success()
             {
                 let update = std::process::Command::new("sudo")
-                    .args(["update-ca-certificates"])
+                    .args(["-n", "update-ca-certificates"])
+                    .stdin(std::process::Stdio::null())
                     .status();
                 if let Ok(s) = update
                     && s.success()
@@ -309,9 +322,10 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
             // Fall through to manual.
         }
 
-        // Try Fedora/RHEL trust(1).
+        // Try Fedora/RHEL trust(1) — does NOT need sudo, can run as user.
         if let Ok(status) = std::process::Command::new("trust")
             .args(["anchor", "--store", &cert_display])
+            .stdin(std::process::Stdio::null())
             .status()
             && status.success()
         {
