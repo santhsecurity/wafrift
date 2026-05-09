@@ -9,6 +9,7 @@ pub mod hop_by_hop;
 pub mod mitm;
 pub mod rate_limit;
 pub mod scope;
+pub mod tui;
 pub mod upstream;
 pub mod upstream_policy;
 

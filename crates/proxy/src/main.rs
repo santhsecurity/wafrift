@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::{Bytes, Incoming};
@@ -220,8 +220,49 @@ struct Args {
     /// `tls-impersonate` cargo feature (pulls in boring-sys); without
     /// it, this flag errors at startup with an actionable message.
     /// See docs/TLS_PARITY.md.
-    #[arg(long = "tls-impersonate")]
+    #[arg(long = "tls-impersonate", conflicts_with = "tls_impersonate_rotate")]
     tls_impersonate: Option<String>,
+
+    /// Rotate the TLS ClientHello fingerprint per upstream request,
+    /// drawn round-robin from this comma-separated profile list (e.g.
+    /// `chrome131,firefox133,safari18`). Defeats per-fingerprint rate
+    /// limits and reputation systems (Cloudflare bot-management,
+    /// Akamai BMP, PerimeterX) that group requests by JA3 hash.
+    /// Mutually exclusive with --tls-impersonate. REQUIRES
+    /// `tls-impersonate` cargo feature.
+    #[arg(long = "tls-impersonate-rotate", num_args = 1.., value_delimiter = ',')]
+    tls_impersonate_rotate: Vec<String>,
+
+    /// Pad request bodies with N bytes of inert ASCII filler before the
+    /// real payload. Cloud WAFs only inspect the first 8 KB
+    /// (Cloudflare Pro / Akamai default) or 16 KB (AWS WAF default) of
+    /// a request body — pushing the malicious payload past that
+    /// inspection window makes the WAF rule engine miss it entirely
+    /// while the origin still parses the body correctly. Content-type
+    /// aware: JSON gets a leading `_wafrift_pad` field, form-urlencoded
+    /// gets `_wafrift_pad=<bytes>&...`, multipart gets a junk leading
+    /// part. Default 0 (off). Recommended values: 8192 (Cloudflare
+    /// Pro), 16384 (AWS WAF default), 65536 (Naxsi default), 131072
+    /// (Cloudflare Enterprise / ModSecurity default).
+    #[arg(long = "body-padding-bytes", default_value_t = 0)]
+    body_padding_bytes: usize,
+
+    /// Disable HTTP connection re-use. Every upstream request opens a
+    /// fresh TCP connection — the kernel picks a new ephemeral source
+    /// port, defeating per-source-port rate limits and any heuristic
+    /// that groups requests by 5-tuple. Costs ~one TCP+TLS handshake
+    /// per request. Combine with --tls-impersonate-rotate for full
+    /// per-request fingerprint rotation.
+    #[arg(long = "no-conn-reuse", default_value_t = false)]
+    no_conn_reuse: bool,
+
+    /// Run a real-time terminal dashboard alongside the proxy. Shows
+    /// per-host bypass rate, TLS profile rotation distribution, body
+    /// padding hits, and a live request stream. Press 'q' or Ctrl-C
+    /// for graceful shutdown. Requires a TTY; if stdout is not a
+    /// terminal the proxy starts without the TUI and logs a warning.
+    #[arg(long = "tui", default_value_t = false)]
+    tui: bool,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
@@ -235,8 +276,52 @@ type SharedState = Arc<Mutex<ProxyState>>;
 static STEALTH_CLIENT: std::sync::OnceLock<wafrift_transport::stealth::StealthClient> =
     std::sync::OnceLock::new();
 
+/// Process-wide rotating stealth pool. When set (via
+/// `--tls-impersonate-rotate p1,p2,p3`), every upstream forward picks
+/// the next client in round-robin. Mutually exclusive with
+/// `STEALTH_CLIENT` — only one of the two is ever populated.
+static STEALTH_POOL: std::sync::OnceLock<StealthPool> = std::sync::OnceLock::new();
+
+/// Process-wide body-padding bytes. Read at every request to decide
+/// whether to invoke `wafrift_evolution::body_padding::pad`. Set once
+/// at startup from `--body-padding-bytes`.
+static BODY_PADDING_BYTES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Process-wide TUI event channel. `Some` when `--tui` is set; the
+/// dashboard task drains it. Senders just `try_send` and ignore errors
+/// (a slow drain shouldn't slow the proxy hot path).
+static TUI_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<wafrift_proxy::tui::Event>> =
+    std::sync::OnceLock::new();
+
+#[inline]
+fn emit_tui(ev: wafrift_proxy::tui::Event) {
+    if let Some(tx) = TUI_TX.get() {
+        let _ = tx.send(ev);
+    }
+}
+
+/// Round-robin pool of stealth clients with an atomic cursor.
+struct StealthPool {
+    clients: Vec<wafrift_transport::stealth::StealthClient>,
+    cursor: std::sync::atomic::AtomicUsize,
+}
+
+impl StealthPool {
+    fn pick(&self) -> &wafrift_transport::stealth::StealthClient {
+        let i = self
+            .cursor
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            % self.clients.len();
+        &self.clients[i]
+    }
+}
+
 #[inline]
 fn stealth() -> Option<&'static wafrift_transport::stealth::StealthClient> {
+    if let Some(pool) = STEALTH_POOL.get() {
+        return Some(pool.pick());
+    }
     STEALTH_CLIENT.get()
 }
 
@@ -491,17 +576,50 @@ fn validate_args(args: &Args) -> Result<(), String> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Honor RUST_LOG so operators can dial verbosity without recompiling.
-    // Default: `info,wafrift_proxy=info` — quiet enough for production
-    // logs, loud enough for first-run debugging. `RUST_LOG=debug` for
-    // deep inspection.
-    use tracing_subscriber::EnvFilter;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    // Parse args FIRST so we can route logs to a file when --tui is on
+    // (otherwise the tracing subscriber would write to stdout and tear
+    // up the TUI's alternate-screen rendering).
     let mut args = Args::parse();
+
+    use tracing_subscriber::EnvFilter;
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    if args.tui {
+        // Redirect logs to a file so the TUI owns the terminal. Default
+        // to /tmp/wafrift-proxy.log; honour --log-dir if set.
+        let log_path = match &args.log_dir {
+            Some(dir) => {
+                std::fs::create_dir_all(dir).ok();
+                dir.join("wafrift-proxy-tui.log")
+            }
+            None => std::path::PathBuf::from("/tmp/wafrift-proxy-tui.log"),
+        };
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(f) => {
+                tracing_subscriber::fmt()
+                    .with_env_filter(env_filter)
+                    .with_writer(std::sync::Mutex::new(f))
+                    .with_ansi(false)
+                    .init();
+                eprintln!("(--tui) logs writing to {}", log_path.display());
+            }
+            Err(e) => {
+                eprintln!(
+                    "(--tui) could not open log file {}: {} — disabling --tui to keep stdout logs",
+                    log_path.display(),
+                    e
+                );
+                args.tui = false;
+                tracing_subscriber::fmt().with_env_filter(env_filter).init();
+            }
+        }
+    } else {
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    }
 
     if let Err(msg) = validate_args(&args) {
         error!("{msg}");
@@ -705,25 +823,108 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // Per-request rotation pool. Built only when --tls-impersonate-rotate
+    // is set; mutually exclusive with --tls-impersonate (clap enforces).
+    if !args.tls_impersonate_rotate.is_empty() {
+        use wafrift_transport::stealth::{ImpersonateProfile, StealthClient};
+        let mut clients = Vec::with_capacity(args.tls_impersonate_rotate.len());
+        let mut names = Vec::with_capacity(args.tls_impersonate_rotate.len());
+        for raw in &args.tls_impersonate_rotate {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                continue;
+            }
+            let profile = match ImpersonateProfile::parse(raw) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("--tls-impersonate-rotate: {}", e);
+                    std::process::exit(2);
+                }
+            };
+            let c = match StealthClient::with_timeout(
+                profile,
+                std::time::Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS),
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(
+                        "--tls-impersonate-rotate {}: {}\nhint: rebuild with `cargo build --features wafrift-transport/tls-impersonate`",
+                        profile.name(),
+                        e
+                    );
+                    std::process::exit(2);
+                }
+            };
+            clients.push(c);
+            names.push(profile.name());
+        }
+        if clients.is_empty() {
+            error!("--tls-impersonate-rotate: empty profile list after trimming");
+            std::process::exit(2);
+        }
+        let pool = StealthPool {
+            clients,
+            cursor: std::sync::atomic::AtomicUsize::new(0),
+        };
+        if STEALTH_POOL.set(pool).is_err() {
+            warn!("STEALTH_POOL was already initialised; ignoring duplicate set");
+        }
+        info!(
+            "TLS impersonation rotation active: every upstream forward picks round-robin from {:?}",
+            names
+        );
+    }
+
+    // Body padding — applied per request, controlled by an atomic so
+    // there's no per-request lock contention on the hot path.
+    if args.body_padding_bytes > 0 {
+        BODY_PADDING_BYTES.store(
+            args.body_padding_bytes,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        if args.body_padding_bytes < wafrift_evolution::body_padding::MIN_USEFUL_PAD {
+            warn!(
+                "--body-padding-bytes {} is below the {}-byte useful minimum; padding will be skipped",
+                args.body_padding_bytes,
+                wafrift_evolution::body_padding::MIN_USEFUL_PAD
+            );
+        } else {
+            info!(
+                "Body padding active: every JSON / form / multipart request body gets {} bytes of inert leading filler",
+                args.body_padding_bytes
+            );
+        }
+    }
+
     // Single global client. Custom resolver re-runs the bogon filter on
     // every connection-time DNS lookup, closing the DNS-rebinding TOCTOU
     // between the policy check and reqwest's own resolution. Without
     // this, attacker-controlled DNS could return a public IP at the
     // policy check then 169.254.169.254 / 127.0.0.1 / RFC1918 at fetch
     // time.
-    let global_client = reqwest::Client::builder()
+    let mut client_builder = reqwest::Client::builder()
         .danger_accept_invalid_certs(config.insecure_tls)
         .timeout(std::time::Duration::from_secs(
             wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
         ))
         .dns_resolver(Arc::new(BogonFilteringResolver {
             policy: policy.clone(),
-        }))
-        .build()
-        .unwrap_or_else(|e| {
-            error!("reqwest client build failed: {e}");
-            std::process::exit(1);
-        });
+        }));
+    if args.no_conn_reuse {
+        // Force a fresh TCP connection per request. Kernel chooses a
+        // new ephemeral source port each time, defeating per-source-
+        // port rate limits and any 5-tuple-based reputation system.
+        // Costs ~one handshake per request — set explicitly, not the
+        // default.
+        client_builder = client_builder.pool_max_idle_per_host(0);
+        info!(
+            "Connection re-use disabled: every upstream forward opens a fresh TCP connection (new source port per request)"
+        );
+    }
+    let global_client = client_builder.build().unwrap_or_else(|e| {
+        error!("reqwest client build failed: {e}");
+        std::process::exit(1);
+    });
     let limits = Arc::new(ProxyLimits {
         max_upstream_response_bytes: args.max_upstream_response_bytes,
         max_evade_retries: args.max_evade_retries,
@@ -842,6 +1043,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("shutting down");
         std::process::exit(0);
     });
+
+    // ── Optional TUI dashboard ──────────────────────────────────────
+    if args.tui {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        if TUI_TX.set(tx).is_err() {
+            warn!("TUI_TX was already initialised; skipping TUI startup");
+        } else {
+            let tls_label = if !args.tls_impersonate_rotate.is_empty() {
+                format!("rotate({})", args.tls_impersonate_rotate.join(","))
+            } else if let Some(p) = &args.tls_impersonate {
+                format!("single({p})")
+            } else {
+                "off".to_string()
+            };
+            let cfg = wafrift_proxy::tui::DashboardConfig {
+                bind_addr: addr.to_string(),
+                mode: default_escalation
+                    .clone()
+                    .unwrap_or_else(|| "evade".to_string()),
+                tls_stack_label: tls_label,
+                body_padding_bytes: args.body_padding_bytes,
+                conn_reuse: !args.no_conn_reuse,
+            };
+            let (quit_tx, quit_rx) = tokio::sync::oneshot::channel();
+            // Dashboard lives in a blocking-friendly task so it can do
+            // its terminal I/O without starving the runtime.
+            tokio::spawn(async move {
+                if let Err(e) = wafrift_proxy::tui::run(cfg, rx, quit_tx).await {
+                    eprintln!("TUI exited with error: {e}");
+                }
+            });
+            // 'q' inside the TUI fires this oneshot — translate to a
+            // graceful shutdown on the same code path SIGINT uses.
+            let quit_state = shared_state.clone();
+            let quit_path = gene_bank_path.clone();
+            tokio::spawn(async move {
+                if quit_rx.await.is_ok() {
+                    if let Some(path) = &quit_path {
+                        let st = quit_state.lock().await;
+                        if let Err(e) = save_gene_bank(&st, path) {
+                            warn!(path = %path.display(), error = %e, "gene bank flush from TUI quit failed");
+                        }
+                    }
+                    std::process::exit(0);
+                }
+            });
+        }
+    }
 
     loop {
         let permit = match conn_sem.clone().acquire_owned().await {
@@ -991,7 +1240,7 @@ async fn forward_wafrift_request(
     response_profiles: Arc<ResponseProfileDb>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // Determine evasion strategy: winner rotation vs. discovery.
-    let (evasion_result, technique_keys) = {
+    let (mut evasion_result, technique_keys) = {
         let mut st = state.lock().await;
         st.total_scanned = st.total_scanned.saturating_add(1);
 
@@ -1080,6 +1329,41 @@ async fn forward_wafrift_request(
         return Ok(error_response(StatusCode::FORBIDDEN, &msg));
     }
 
+    // ── Body padding (8KB/16KB cloud-WAF inspection bypass) ─────────
+    // Applied AFTER URL validation but BEFORE the upstream fetch so
+    // SSRF policy still gates the unmodified URL and the WAF sees the
+    // padded body on the wire. Skipped when the configured size is
+    // below the useful threshold (small pads can't push payload past
+    // any real WAF window) or when the content-type is opaque.
+    let pad_target = BODY_PADDING_BYTES.load(std::sync::atomic::Ordering::Relaxed);
+    if pad_target >= wafrift_evolution::body_padding::MIN_USEFUL_PAD {
+        let ct = evasion_result
+            .request
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let original = evasion_result.request.body.clone().unwrap_or_default();
+        match wafrift_evolution::body_padding::pad(&original, &ct, pad_target) {
+            wafrift_evolution::body_padding::PadOutcome::Padded { bytes, added } => {
+                evasion_result.request.body = Some(bytes);
+                debug!(
+                    host = %host,
+                    added,
+                    target = pad_target,
+                    "body padding applied"
+                );
+            }
+            wafrift_evolution::body_padding::PadOutcome::SkippedOpaque => {
+                trace!(host = %host, content_type = %ct, "body padding skipped: opaque content-type");
+            }
+            wafrift_evolution::body_padding::PadOutcome::SkippedTooSmall => {
+                // Already warned at startup; nothing to do per-request.
+            }
+        }
+    }
+
     // ── Upstream fetch ──────────────────────────────────────────────
     // Two paths: default rustls via reqwest, or stealth (browser-
     // identical TLS) via wafrift_transport::stealth::StealthClient
@@ -1090,6 +1374,7 @@ async fn forward_wafrift_request(
     let conn_fwd = collect_connection_header_names(&evasion_result.request.headers);
     let max = limits.max_upstream_response_bytes;
 
+    let mut status_code: u16 = 0;
     let (mut response_builder, buf) = if let Some(sc) = stealth() {
         let mut filtered_headers = Vec::with_capacity(evasion_result.request.headers.len());
         for (k, v) in &evasion_result.request.headers {
@@ -1121,6 +1406,7 @@ async fn forward_wafrift_request(
                 return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
             }
         };
+        status_code = stealth_resp.status;
         let mut response_builder = Response::builder().status(stealth_resp.status);
         // Build a HashSet view of Connection header tokens for stripping.
         let conn_resp: std::collections::HashSet<String> = stealth_resp
@@ -1184,6 +1470,7 @@ async fn forward_wafrift_request(
             }
         };
         let status = resp.status();
+        status_code = status.as_u16();
         let conn_resp = collect_connection_header_names_hyper(resp.headers());
         let mut response_builder = Response::builder().status(status.as_u16());
         for (k, v) in resp.headers().iter() {
@@ -1235,7 +1522,7 @@ async fn forward_wafrift_request(
                 .collect()
         })
         .unwrap_or_default();
-    let signal = response_profiles.classify(status.as_u16(), &header_pairs, &buf);
+    let signal = response_profiles.classify(status_code, &header_pairs, &buf);
     let is_block = signal.classification.is_blocked();
 
     // ── WAF identification: which product is in front of us? ────────
@@ -1261,7 +1548,7 @@ async fn forward_wafrift_request(
         } else {
             let body_slice = &buf[..buf.len().min(8192)];
             let detections =
-                wafrift_detect::waf_detect::detect(status.as_u16(), &header_pairs, body_slice);
+                wafrift_detect::waf_detect::detect(status_code, &header_pairs, body_slice);
             if let Some(top) = detections.first()
                 && top.confidence >= wafrift_detect::waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD
             {
@@ -1348,6 +1635,35 @@ async fn forward_wafrift_request(
         X_WAFRIFT_BLOCKED,
         if is_block { "true" } else { "false" },
     );
+
+    // Emit a TUI event so the dashboard can update — skipped silently
+    // when --tui isn't on (TUI_TX is None). The send is non-blocking
+    // and ignores backpressure: a full-channel failure must not slow
+    // the proxy hot path.
+    {
+        let path_only = request_log_uri
+            .splitn(2, '?')
+            .next()
+            .unwrap_or(&request_log_uri)
+            .to_string();
+        let body_padded = wafrift_evolution::body_padding::looks_padded(
+            evasion_result.request.body.as_deref().unwrap_or(&[]),
+        );
+        let tls_profile = stealth().map(|sc| sc.profile().name().to_string());
+        let bypassed = !is_block && !evasion_result.techniques.is_empty();
+        emit_tui(wafrift_proxy::tui::Event::Request {
+            host: host.clone(),
+            method: evasion_result.request.method.as_str().to_string(),
+            path: path_only,
+            status: status_code,
+            bypassed,
+            blocked: is_block,
+            techniques: technique_keys.join(", "),
+            tls_profile,
+            body_padded,
+            upstream_latency_ms: 0,
+        });
+    }
 
     Ok(response_builder
         .body(Full::new(Bytes::from(buf)))
