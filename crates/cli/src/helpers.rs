@@ -15,7 +15,7 @@ pub(crate) const HEAVY_VARIANTS: usize = 50;
 
 /// Evasion variant produced by the variant builder.
 #[derive(Debug)]
-pub(crate) struct Variant {
+pub struct Variant {
     pub payload: String,
     pub techniques: Vec<String>,
     pub confidence: f64,
@@ -41,7 +41,7 @@ pub(crate) fn parse_headers(raw_headers: &[String]) -> Result<Vec<(String, Strin
         .collect()
 }
 
-pub(crate) fn strategies_for_level(level: Level) -> Vec<Strategy> {
+pub fn strategies_for_level(level: Level) -> Vec<Strategy> {
     let all = encoding::all_strategies();
     match level {
         Level::Light => all.into_iter().take(3).collect(),
@@ -50,7 +50,7 @@ pub(crate) fn strategies_for_level(level: Level) -> Vec<Strategy> {
     }
 }
 
-pub(crate) fn max_mutations_for_level(level: Level) -> usize {
+pub fn max_mutations_for_level(level: Level) -> usize {
     match level {
         Level::Light => LIGHT_VARIANTS,
         Level::Medium => MEDIUM_VARIANTS,
@@ -144,7 +144,7 @@ pub(crate) fn probe_target_label(target: &ProbeTarget) -> String {
 }
 
 /// Build encoding × grammar variants for a given payload.
-pub(crate) fn build_variants(
+pub fn build_variants(
     payload: &str,
     payload_type: PayloadType,
     encoding_only: bool,

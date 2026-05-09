@@ -1,0 +1,41 @@
+schema = 1
+
+[[case]]
+id = "shell_id"
+class = "cmdi"
+payload = "; id"
+
+[[case]]
+id = "shell_pipe_id"
+class = "cmdi"
+payload = "| id"
+
+[[case]]
+id = "shell_backtick"
+class = "cmdi"
+payload = "`id`"
+
+[[case]]
+id = "shell_subshell"
+class = "cmdi"
+payload = "$(id)"
+
+[[case]]
+id = "shell_amp_amp"
+class = "cmdi"
+payload = "&& id"
+
+[[case]]
+id = "shell_newline"
+class = "cmdi"
+payload = "\nid\n"
+
+[[case]]
+id = "windows_amp"
+class = "cmdi"
+payload = "& whoami"
+
+[[case]]
+id = "windows_pipe"
+class = "cmdi"
+payload = "| whoami"

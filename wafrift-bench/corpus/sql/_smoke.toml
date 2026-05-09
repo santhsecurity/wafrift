@@ -1,0 +1,77 @@
+schema = 1
+
+# Smoke-test corpus: 12 hand-picked SQLi shapes covering tautology,
+# UNION, blind, error-based, and stacked. Real benchmark corpus
+# (~500+ per class) is loaded from sibling files.
+
+[[case]]
+id = "tautology_or_1_eq_1"
+class = "sql"
+payload = "' OR 1=1--"
+description = "Classic tautology with line comment"
+
+[[case]]
+id = "tautology_or_a_eq_a"
+class = "sql"
+payload = "' OR 'a'='a"
+description = "String tautology"
+
+[[case]]
+id = "tautology_admin"
+class = "sql"
+payload = "admin' --"
+description = "Username tautology with comment"
+
+[[case]]
+id = "union_select_null"
+class = "sql"
+payload = "' UNION SELECT NULL,NULL,NULL--"
+description = "UNION with NULL columns"
+
+[[case]]
+id = "union_information_schema"
+class = "sql"
+payload = "' UNION SELECT table_name,NULL FROM information_schema.tables--"
+description = "UNION leaking table names"
+
+[[case]]
+id = "blind_boolean_substr"
+class = "sql"
+payload = "' AND SUBSTRING(version(),1,1)='5"
+description = "Boolean blind substring probe"
+
+[[case]]
+id = "blind_time_sleep"
+class = "sql"
+payload = "' AND SLEEP(5)--"
+description = "Time-based blind via SLEEP"
+
+[[case]]
+id = "blind_time_pg_sleep"
+class = "sql"
+payload = "'; SELECT pg_sleep(5)--"
+description = "PostgreSQL pg_sleep"
+
+[[case]]
+id = "error_extractvalue"
+class = "sql"
+payload = "' AND EXTRACTVALUE(1,CONCAT(0x5c,(SELECT version())))--"
+description = "MySQL XML error extraction"
+
+[[case]]
+id = "stacked_drop"
+class = "sql"
+payload = "'; DROP TABLE users--"
+description = "Stacked DROP statement"
+
+[[case]]
+id = "comment_inline"
+class = "sql"
+payload = "' /*!OR*/ 1=1--"
+description = "MySQL versioned comment evasion"
+
+[[case]]
+id = "case_alternation"
+class = "sql"
+payload = "' Or 1=1--"
+description = "Case-mixed OR keyword"
