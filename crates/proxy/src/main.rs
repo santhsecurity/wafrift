@@ -914,7 +914,7 @@ async fn forward_wafrift_request(
     // Determine evasion strategy: winner rotation vs. discovery.
     let (evasion_result, technique_keys) = {
         let mut st = state.lock().await;
-        st.total_scanned += 1;
+        st.total_scanned = st.total_scanned.saturating_add(1);
 
         // Prevent unbounded memory growth from arbitrary Host headers (DoS vector).
         // Evict the oldest host (FIFO) rather than an arbitrary HashMap bucket.
@@ -1189,7 +1189,7 @@ async fn forward_wafrift_request(
             }
         }
         if is_block {
-            st.total_blocks += 1;
+            st.total_blocks = st.total_blocks.saturating_add(1);
         } else {
             for t in &evasion_result.techniques {
                 let name = t.to_string();

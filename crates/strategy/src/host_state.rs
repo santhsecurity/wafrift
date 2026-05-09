@@ -84,7 +84,7 @@ pub struct HostState {
 impl HostState {
     /// Record a blocked response (no technique tracking).
     pub fn record_block(&mut self) {
-        self.blocks += 1;
+        self.blocks = self.blocks.saturating_add(1);
     }
 
     fn bump_block_attempt_for_technique(&mut self, technique_name: &str) {
@@ -118,14 +118,14 @@ impl HostState {
     /// Updates per-technique stats and triggers drift detection if the
     /// technique was previously in the winner pool.
     pub fn record_block_for(&mut self, technique_name: &str) {
-        self.blocks += 1;
+        self.blocks = self.blocks.saturating_add(1);
         self.bump_block_attempt_for_technique(technique_name);
         self.prune();
     }
 
     /// One blocked HTTP response attributed to several active techniques (compound evasion).
     pub fn record_block_for_many(&mut self, technique_names: &[String]) {
-        self.blocks += 1;
+        self.blocks = self.blocks.saturating_add(1);
         for name in technique_names {
             self.bump_block_attempt_for_technique(name);
         }
@@ -163,7 +163,7 @@ impl HostState {
         if techniques.is_empty() {
             return;
         }
-        self.successes += 1;
+        self.successes = self.successes.saturating_add(1);
         for technique in techniques {
             self.bump_success_for_technique(technique);
         }
@@ -396,21 +396,21 @@ impl HostState {
             // Rate limit is NOT a technique failure. Don't penalize
             // the current technique — the WAF is telling us to slow
             // down, not that our payload was caught.
-            self.rate_limits += 1;
+            self.rate_limits = self.rate_limits.saturating_add(1);
         } else if is_challenge {
             // JS challenge (e.g. Cloudflare captcha). Same logic:
             // this isn't a technique failure, it's a bot detection.
-            self.challenges += 1;
+            self.challenges = self.challenges.saturating_add(1);
         } else if is_hard_block || is_soft_block {
             // Real technique failure — the WAF caught the payload.
-            self.blocks += 1;
+            self.blocks = self.blocks.saturating_add(1);
             for name in technique_keys {
                 self.bump_block_attempt_for_technique(name);
             }
             self.prune();
         } else {
             // Pass — bypass confirmed.
-            self.successes += 1;
+            self.successes = self.successes.saturating_add(1);
             // Success attribution is handled by the caller via
             // record_success_for_many() since it needs the full
             // Technique objects, not just string keys.

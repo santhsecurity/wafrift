@@ -117,8 +117,8 @@ impl LearningCache {
                 attempts: 0,
                 last_success_epoch: 0,
             });
-        entry.successes += 1;
-        entry.attempts += 1;
+        entry.successes = entry.successes.saturating_add(1);
+        entry.attempts = entry.attempts.saturating_add(1);
         entry.last_success_epoch = now;
     }
 
@@ -133,7 +133,7 @@ impl LearningCache {
                 attempts: 0,
                 last_success_epoch: 0,
             });
-        entry.attempts += 1;
+        entry.attempts = entry.attempts.saturating_add(1);
     }
 
     /// Persist the cache to disk.
@@ -183,6 +183,7 @@ fn current_epoch() -> u64 {
 mod tests {
     use super::*;
     use wafrift_types::Technique;
+    use crate::pipeline::EvasionStage;
 
     #[test]
     fn cache_roundtrip() {
@@ -190,7 +191,7 @@ mod tests {
         let _ = fs::remove_file(&tmp);
 
         let mut cache = LearningCache::open(&tmp).unwrap();
-        let pipeline = EvasionPipeline::new("test", vec![Technique::UserAgentRotation], 1);
+        let pipeline = EvasionPipeline::new("test", vec![EvasionStage { technique: Technique::UserAgentRotation, context: None }], 1);
         cache.record_success(CacheKey::new("cloudflare", "sql"), pipeline);
         cache.save().unwrap();
 
@@ -211,7 +212,7 @@ mod tests {
         {
             let mut cache = LearningCache::open(&tmp).unwrap();
             let pipeline =
-                EvasionPipeline::new("win", vec![Technique::GrammarMutation("sql".into())], 2);
+                EvasionPipeline::new("win", vec![EvasionStage { technique: Technique::GrammarMutation("sql".into()), context: None }], 2);
             cache.record_success(CacheKey::new("aws_waf", "xss"), pipeline);
             cache.save().unwrap();
         }
