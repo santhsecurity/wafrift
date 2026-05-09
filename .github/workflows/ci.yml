@@ -134,6 +134,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ninja-build
       - run: cargo build -p wafrift-transport --features tls-impersonate
-      - run: cargo test  -p wafrift-transport stealth:: --features tls-impersonate
+      - run: "cargo test  -p wafrift-transport stealth:: --features tls-impersonate"
       - run: cargo build -p wafrift-proxy --features tls-impersonate
       - run: cargo test  -p wafrift-proxy   --features tls-impersonate
