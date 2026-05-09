@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn and_injection_uses_AND() {
+    fn and_injection_uses_and_keyword() {
         let out = mutations("1' AND 1=1--", 20);
         assert!(out.iter().any(|m| m.payload.contains(" AND ")));
     }
