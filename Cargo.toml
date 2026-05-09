@@ -75,6 +75,12 @@ anyhow = "1"
 
 # HTTP
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream", "json"] }
+# Browser-impersonating HTTP client for the optional `tls-impersonate`
+# feature. Closes the JA3 / h2 SETTINGS gap vs EvilWAF — Chrome /
+# Firefox / Safari / Edge ClientHello bytes-for-bytes via BoringSSL.
+# Default builds do NOT pull this in (no boring-sys); only consumers
+# that enable `tls-impersonate` pay the dep cost.
+rquest = { version = "5", default-features = false, features = ["impersonate"] }
 http = "1"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

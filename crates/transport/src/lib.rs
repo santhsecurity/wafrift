@@ -19,12 +19,14 @@
 mod client;
 mod response;
 pub mod signal;
+pub mod stealth;
 
 pub use client::EvasionClient;
 pub use client::EvasionError;
 pub use response::EvasionResponse;
 pub use response::{is_waf_block, is_waf_block_status};
 pub use signal::{BlockClass, ResponseProfileDb, ResponseSignal};
+pub use stealth::{ImpersonateProfile, StealthClient, StealthError, StealthResponse};
 
 pub mod session;
 pub mod jwt;

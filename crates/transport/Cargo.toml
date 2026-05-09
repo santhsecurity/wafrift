@@ -26,12 +26,19 @@ thiserror = { workspace = true }
 regex = { workspace = true }
 urlencoding = { workspace = true }
 wafrift-pool = { workspace = true, optional = true }
+rquest = { workspace = true, optional = true }
 # gossan-origin = { path = "../../../gossan/crates/origin", optional = true }
 
 [features]
 proxy-pool = ["dep:wafrift-pool"]
 # origin-bypass = ["dep:gossan-origin"]
 origin-bypass = []
+# Wire-identical browser TLS ClientHello via rquest + BoringSSL.
+# When enabled, `transport::stealth::StealthClient` is available and
+# `--tls-impersonate chrome131` (et al.) on scan/proxy paths produces
+# a ClientHello that JA3-matches a real Chrome 131. Pulls in boring-sys
+# (C build); not on by default. See docs/TLS_PARITY.md.
+tls-impersonate = ["dep:rquest"]
 
 [dev-dependencies]
 proptest = { workspace = true }

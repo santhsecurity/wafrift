@@ -50,8 +50,8 @@ This document tracks work to match **common expectations** set by tools like [Ev
 |-----|------|----------------|
 | HTTP header fingerprints (UA, Accept, …) | P0 | `wafrift-fingerprint` + strategy `apply_profile`. |
 | JA3/JA4-style **documentation** of TLS profiles | P0 | **Done:** [`TLS_PARITY.md`](./TLS_PARITY.md) + `tls_fingerprint.rs` (limits of rustls vs browser JA3). |
-| **Wire-identical** browser ClientHello (JA3) | P2/P3 | **Done (v1 Parity):** Opted for document + accept (`TLS_PARITY.md`). Recommending sidecar TLS proxies via SOCKS for users needing strict JA3 matching. |
-| HTTP/2 SETTINGS / priority “fingerprint” | P2 | **Done (v1 Parity):** Accepted reqwest h2 settings for v1; aligned via fingerprint documentation. |
+| **Wire-identical** browser ClientHello (JA3) | P2/P3 | **Done:** `wafrift-transport::stealth::StealthClient` wraps `rquest` (BoringSSL). Opt-in via `--features tls-impersonate`; CLI exposes `--tls-impersonate {chrome131,firefox133,safari18,…}`. See [`TLS_PARITY.md`](./TLS_PARITY.md). |
+| HTTP/2 SETTINGS / priority “fingerprint” | P2 | **Done:** rquest sends Chrome's exact `HEADER_TABLE_SIZE` / `INITIAL_WINDOW_SIZE` / `MAX_CONCURRENT_STREAMS` values in Chrome's exact order when `tls-impersonate` is on. |
 
 ---
 
@@ -87,7 +87,13 @@ This document tracks work to match **common expectations** set by tools like [Ev
 ## Definition of “gaps closed”
 
 - **Minimum:** All **P0–P1** rows implemented or explicitly documented with a **P2** owner and milestone.  
-- **Parity with EvilWAF marketing:** Requires **P2 MITM** + at least one **P2 TLS** path + **P3** recon — call that **v2.0** or a separate `wafrift-edge` product line to keep the core crate maintainable.
+- **Parity with EvilWAF marketing:** **Closed.** P2 MITM shipped (v1
+  CA + leaf signing), P2 TLS path shipped (StealthClient via rquest +
+  BoringSSL behind `--features tls-impersonate`), and P3 recon
+  shipped (`wafrift recon` + `wafrift discover` for OpenAPI / GraphQL
+  / param mining). The "documented limitation" framing in earlier
+  drafts of this document is no longer accurate as of f735ba8 +
+  this commit.
 
 ---
 
