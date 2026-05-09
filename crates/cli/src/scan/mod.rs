@@ -56,6 +56,20 @@ pub(crate) async fn run_scan(
     cancel: tokio_util::sync::CancellationToken,
 ) -> ExitCode {
     let target = args.target.trim_end_matches('/');
+    if target.is_empty() {
+        eprintln!(
+            "{} --target must be a valid URL (e.g. https://example.com/search)",
+            "Input error:".red().bold()
+        );
+        return ExitCode::from(1);
+    }
+    if args.payload.is_empty() {
+        eprintln!(
+            "{} --payload must not be empty (e.g. \"' OR 1=1--\")",
+            "Input error:".red().bold()
+        );
+        return ExitCode::from(1);
+    }
     let filter = match crate::TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,
         Err(msg) => {

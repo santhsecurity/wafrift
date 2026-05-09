@@ -106,6 +106,17 @@ pub fn run_report(args: ReportArgs) -> ExitCode {
     };
     let raw = match fs::read_to_string(&path) {
         Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!(
+                "error: gene bank not found: {}\n\n\
+                 hint: the gene bank is created automatically by wafrift-proxy.\n\
+                 Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and browse\n\
+                 through it, then re-run `wafrift report`.\n\
+                 Or pass `--proxy-bank <path>` to use a specific file.",
+                path.display()
+            );
+            return ExitCode::from(1);
+        }
         Err(e) => {
             eprintln!("error: read {}: {e}", path.display());
             return ExitCode::from(1);

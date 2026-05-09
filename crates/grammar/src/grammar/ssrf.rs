@@ -32,20 +32,7 @@ pub fn get_oob_domain() -> &'static str {
     })
 }
 
-/// Set a custom OOB domain programmatically (mainly for testing).
-/// Note: This only affects the current process and is used primarily in tests.
-///
-/// # Safety
-/// This function uses `set_var` which is unsafe in Rust 2024 edition.
-/// It should only be used in single-threaded test contexts.
-#[cfg(test)]
-pub unsafe fn set_oob_domain_for_test(domain: &str) {
-    // In tests, we can't easily modify static OnceLock, but we can
-    // verify the environment variable approach works
-    unsafe {
-        std::env::set_var(OOB_DOMAIN_ENV, domain);
-    }
-}
+
 
 /// Cloud metadata endpoints for SSRF testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
