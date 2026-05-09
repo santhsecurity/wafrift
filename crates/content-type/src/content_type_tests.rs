@@ -3,7 +3,7 @@
 mod tests {
     use crate::content_type::{
         ContentTypeTechnique, MAX_FORM_BODY_SIZE, generate_variants, generate_variants_from_body,
-        parse_form_body, xml_safe_name,
+        parse_form_body, unique_boundary, xml_safe_name,
     };
 
     #[test]
@@ -980,5 +980,35 @@ mod tests {
             body_str.contains(r#"name="a\"b""#),
             "embedded quote must be escaped, body = {body_str}"
         );
+    }
+
+    #[test]
+    fn unique_boundary_avoids_collision_with_payload_content() {
+        // unique_boundary's contract: never return a value that already
+        // appears (preceded by --) in any of the supplied strings, so a
+        // multipart parser cannot mis-frame on attacker-controlled input.
+        let candidate = unique_boundary(&["benign content with no boundary"]);
+        assert!(candidate.starts_with("----WafriftBoundary"));
+
+        // Adversarial: feed the just-issued boundary back in. The helper
+        // must produce a different value (or at least one whose framing
+        // marker is not in the input).
+        let payload = format!("--{candidate}");
+        let fresh = unique_boundary(&[&payload]);
+        let fresh_needle = format!("--{fresh}");
+        assert!(
+            !payload.contains(&fresh_needle),
+            "unique_boundary returned {fresh:?} which collides with input {payload:?}"
+        );
+    }
+
+    #[test]
+    fn unique_boundary_two_calls_differ() {
+        // Independent calls return distinct boundaries — important so a
+        // future caller that cached one boundary across requests would
+        // not silently make framing predictable.
+        let a = unique_boundary(&["x"]);
+        let b = unique_boundary(&["x"]);
+        assert_ne!(a, b);
     }
 }

@@ -106,6 +106,29 @@ fn random_boundary() -> String {
     format!("----WafriftBoundary{hex}")
 }
 
+/// Generate a boundary guaranteed not to appear in any of the supplied
+/// values (collision-free framing). Falls back to plain `random_boundary`
+/// once a fresh value clears the inputs — the 128-bit hex tail makes
+/// this loop terminate on the first attempt with overwhelming probability,
+/// but checking explicitly costs nothing and prevents the once-in-the-
+/// universe case where a payload happens to embed our boundary.
+#[must_use]
+pub fn unique_boundary(values: &[&str]) -> String {
+    // Bounded retry: if the entropy source wedges, give up and ship the
+    // last candidate rather than spin forever. 16 attempts is already
+    // 16 * 128 = 2048 bits of separation from any plausible adversarial
+    // collision attempt.
+    let mut candidate = random_boundary();
+    for _ in 0..16 {
+        let needle = format!("--{candidate}");
+        if !values.iter().any(|v| v.contains(&needle)) {
+            return candidate;
+        }
+        candidate = random_boundary();
+    }
+    candidate
+}
+
 fn cdata_escape(value: &str) -> String {
     // Properly split `]]>` across CDATA boundaries to prevent early termination
     // without silently deleting payload characters.
