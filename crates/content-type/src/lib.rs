@@ -10,5 +10,5 @@ mod content_type;
 
 pub use content_type::{
     ContentTypeTechnique, ContentTypeVariant, generate_variants, generate_variants_from_body,
-    parse_form_body, xml_safe_name,
+    parse_form_body, unique_boundary, xml_safe_name,
 };
