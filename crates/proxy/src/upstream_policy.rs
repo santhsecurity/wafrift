@@ -36,6 +36,26 @@ pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
             if let Some(compat) = v.to_ipv4() {
                 return ip_addr_is_bogon(IpAddr::V4(compat));
             }
+            // 6to4 (RFC 3056) embeds an IPv4 in `2002:WWXX:YYZZ::/48`.
+            // If the embedded V4 is a bogon, the V6 transitively is —
+            // an attacker that controls a 6to4 gateway could otherwise
+            // route us to RFC1918 space.
+            let segs = v.segments();
+            if segs[0] == 0x2002 {
+                let v4 = std::net::Ipv4Addr::new(
+                    (segs[1] >> 8) as u8,
+                    (segs[1] & 0xff) as u8,
+                    (segs[2] >> 8) as u8,
+                    (segs[2] & 0xff) as u8,
+                );
+                if ip_addr_is_bogon(IpAddr::V4(v4)) {
+                    return true;
+                }
+            }
+            // RFC 3849 documentation prefix.
+            if segs[0] == 0x2001 && segs[1] == 0x0db8 {
+                return true;
+            }
             v.is_loopback()
                 || v.is_multicast()
                 || v.is_unspecified()
@@ -209,5 +229,36 @@ mod tests {
     fn ipv4_mapped_v6_public_ok() {
         // Sanity — mapped form of a public address must NOT be flagged.
         assert!(!ip_addr_is_bogon("::ffff:8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn rfc3849_documentation_v6_is_bogon() {
+        // 2001:db8::/32 is the IPv6 documentation prefix. Real upstream
+        // services should never live there; if a target's DNS returned
+        // it, that's almost certainly a misconfiguration we want to refuse.
+        assert!(ip_addr_is_bogon("2001:db8::1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("2001:db8:cafe::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn six_to_four_with_private_v4_is_bogon() {
+        // 6to4 (RFC 3056) embeds an IPv4 in 2002:WWXX:YYZZ::/48.
+        // 2002:7f00:0001:: -> 127.0.0.1 over 6to4.
+        assert!(ip_addr_is_bogon("2002:7f00:1::".parse().unwrap()));
+        // 2002:c0a8:0101:: -> 192.168.1.1 over 6to4.
+        assert!(ip_addr_is_bogon("2002:c0a8:101::".parse().unwrap()));
+        // 2002:a9fe:a9fe:: -> 169.254.169.254 over 6to4 (AWS IMDS).
+        assert!(ip_addr_is_bogon("2002:a9fe:a9fe::".parse().unwrap()));
+    }
+
+    #[test]
+    fn six_to_four_with_public_v4_ok() {
+        // 2002:0808:0808:: -> 8.8.8.8 over 6to4. Not a bogon.
+        assert!(!ip_addr_is_bogon("2002:808:808::".parse().unwrap()));
+    }
+
+    #[test]
+    fn public_v6_google_dns_ok() {
+        assert!(!ip_addr_is_bogon("2001:4860:4860::8888".parse().unwrap()));
     }
 }

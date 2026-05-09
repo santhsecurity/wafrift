@@ -1365,6 +1365,11 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         .collect();
 
     let aggregate = serde_json::json!({
+        // Schema version for downstream consumers (bench-diff, dashboards,
+        // CI parsers). Bump when the JSON shape changes incompatibly so
+        // tooling can detect drift instead of silently mis-reading.
+        "schema_version": 1u32,
+        "wafrift_version": env!("CARGO_PKG_VERSION"),
         "base_url": base_url,
         "evade_mode": args.evade,
         "strategies": args.strategies,
