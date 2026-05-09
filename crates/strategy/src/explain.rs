@@ -43,8 +43,7 @@ pub fn explain_bypass(
         .collect();
 
     let diff = textual_diff(original, bypass);
-    let human_summary =
-        build_summary(&original_rules, &bypassed_rule_ids, techniques, waf, mode);
+    let human_summary = build_summary(&original_rules, &bypassed_rule_ids, techniques, waf, mode);
 
     Explanation {
         original_payload: original.to_string(),
@@ -86,8 +85,10 @@ fn build_summary(
             "Original payload did not match any tracked rule classes for {}. ",
             waf.name
         ));
-        out.push_str("Either the payload is benign or it triggers a vendor-private rule \
-                      class wafrift does not yet have a public template for.");
+        out.push_str(
+            "Either the payload is benign or it triggers a vendor-private rule \
+                      class wafrift does not yet have a public template for.",
+        );
         return out;
     }
 
@@ -343,13 +344,7 @@ mod tests {
 
     #[test]
     fn benign_payload_explanation_says_so() {
-        let exp = explain_bypass(
-            "hello",
-            "hello",
-            &[],
-            &cf_waf(),
-            ExplanationMode::Standard,
-        );
+        let exp = explain_bypass("hello", "hello", &[], &cf_waf(), ExplanationMode::Standard);
         assert!(exp.human_summary.contains("did not match any tracked rule"));
     }
 
@@ -392,12 +387,16 @@ mod tests {
         // Should be Equal("a"), Delete("b"), Insert("x"), Equal("c")
         // Ordering of Delete/Insert when they coexist is up to the algorithm;
         // we just assert that one delete and one insert of the right chars exist.
-        assert!(hunks
-            .iter()
-            .any(|h| matches!(h, DiffHunk::Delete(s) if s == "b")));
-        assert!(hunks
-            .iter()
-            .any(|h| matches!(h, DiffHunk::Insert(s) if s == "x")));
+        assert!(
+            hunks
+                .iter()
+                .any(|h| matches!(h, DiffHunk::Delete(s) if s == "b"))
+        );
+        assert!(
+            hunks
+                .iter()
+                .any(|h| matches!(h, DiffHunk::Insert(s) if s == "x"))
+        );
     }
 
     #[test]

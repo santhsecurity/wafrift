@@ -202,14 +202,14 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         }
     };
 
-    let reqwest_method = match reqwest::Method::from_bytes(evasion.request.method.as_str().as_bytes())
-    {
-        Ok(m) => m,
-        Err(_) => {
-            eprintln!("{} invalid HTTP method", "error:".red().bold());
-            return ExitCode::from(1);
-        }
-    };
+    let reqwest_method =
+        match reqwest::Method::from_bytes(evasion.request.method.as_str().as_bytes()) {
+            Ok(m) => m,
+            Err(_) => {
+                eprintln!("{} invalid HTTP method", "error:".red().bold());
+                return ExitCode::from(1);
+            }
+        };
     let mut builder = client.request(reqwest_method, &evasion.request.url);
     if !host_header.is_empty() {
         builder = builder.header("Host", &host_header);
@@ -228,10 +228,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     let resp = match builder.send().await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!(
-                "{} request failed: {e}",
-                "error:".red().bold()
-            );
+            eprintln!("{} request failed: {e}", "error:".red().bold());
             return ExitCode::from(1);
         }
     };
@@ -256,7 +253,10 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     };
 
     if args.format == "json" {
-        println!("{}", serde_json::to_string_pretty(&json!(result)).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!(result)).unwrap_or_default()
+        );
     } else {
         let verdict = if blocked {
             format!("{} (status {status})", "BLOCKED".red().bold())
@@ -274,7 +274,11 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
             "techniques:".bold(),
             result.techniques.join(" → ").yellow()
         );
-        println!("  {} {}", "final URL:".bold(), result.final_url.bright_black());
+        println!(
+            "  {} {}",
+            "final URL:".bold(),
+            result.final_url.bright_black()
+        );
         println!(
             "  {} {} ({} bytes, {} ms)",
             "verdict:".bold(),
@@ -328,8 +332,8 @@ fn load_from_proxy_bank(host: &str, custom_path: Option<&PathBuf>) -> Result<Vec
     };
     let raw = fs::read_to_string(&path)
         .map_err(|e| format!("read proxy gene bank {}: {e}", path.display()))?;
-    let bank: PersistedGeneBank = serde_json::from_str(&raw)
-        .map_err(|e| format!("parse proxy gene bank: {e}"))?;
+    let bank: PersistedGeneBank =
+        serde_json::from_str(&raw).map_err(|e| format!("parse proxy gene bank: {e}"))?;
     let host_entry = bank
         .hosts
         .get(host)
@@ -383,7 +387,9 @@ fn build_url_with_param(base: &str, param: &str, payload: &str) -> Result<String
                 continue;
             }
             let key = pair.split('=').next().unwrap_or("");
-            let key_decoded = urlencoding::decode(key).unwrap_or_else(|_| key.into()).into_owned();
+            let key_decoded = urlencoding::decode(key)
+                .unwrap_or_else(|_| key.into())
+                .into_owned();
             if key_decoded == param {
                 continue;
             }
@@ -400,12 +406,10 @@ fn build_url_with_param(base: &str, param: &str, payload: &str) -> Result<String
 }
 
 fn extract_host_from_url(s: &str) -> Option<String> {
-    let after_scheme = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://"))?;
-    let host = after_scheme
-        .split('/')
-        .next()?
-        .split('?')
-        .next()?;
+    let after_scheme = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))?;
+    let host = after_scheme.split('/').next()?.split('?').next()?;
     // Drop port if present.
     let host_only = host.split(':').next()?;
     if host_only.is_empty() {
@@ -450,7 +454,10 @@ mod tests {
     #[test]
     fn build_url_encodes_utf8_payload() {
         let u = build_url_with_param("https://x/y", "q", "パイロード").unwrap();
-        assert_eq!(u, "https://x/y?q=%E3%83%91%E3%82%A4%E3%83%AD%E3%83%BC%E3%83%89");
+        assert_eq!(
+            u,
+            "https://x/y?q=%E3%83%91%E3%82%A4%E3%83%AD%E3%83%BC%E3%83%89"
+        );
     }
 
     #[test]

@@ -28,8 +28,7 @@ use std::hash::{Hash, Hasher};
 /// hot path runs once per upstream response, so the per-call cost
 /// scaled linearly with traffic.
 static TITLE_RE: Lazy<regex::Regex> = Lazy::new(|| {
-    regex::Regex::new(r"<title\b[^>]*>(.*?)</title>")
-        .expect("hardcoded title regex must compile")
+    regex::Regex::new(r"<title\b[^>]*>(.*?)</title>").expect("hardcoded title regex must compile")
 });
 
 /// A compact fingerprint of an HTTP response.

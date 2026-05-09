@@ -23,6 +23,7 @@
 //! by the kernel on process exit; a stale `.lock` file on disk is
 //! harmless and is cleaned up on successful write.
 
+use fs4::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -324,10 +325,7 @@ impl GeneBank {
     ///
     /// Returns the locked file handle and the lock file path.
     /// The caller must drop the handle to release the lock.
-    fn acquire_lock(
-        &self,
-        path: &std::path::Path,
-    ) -> Result<(fs::File, PathBuf), GeneBankError> {
+    fn acquire_lock(&self, path: &std::path::Path) -> Result<(fs::File, PathBuf), GeneBankError> {
         let lock_path = path.with_extension("lock");
         let lock_file = fs::OpenOptions::new()
             .create(true)
@@ -338,7 +336,10 @@ impl GeneBank {
                 path: lock_path.clone(),
                 source: e,
             })?;
-        lock_file.lock().map_err(|e| GeneBankError::Io {
+        // Advisory lock via fs4 (works on stable Rust). std::fs::File::lock
+        // is gated behind unstable `file_lock` (Rust 1.89+) which our
+        // workspace MSRV (1.85) doesn't have.
+        FileExt::lock(&lock_file).map_err(|e| GeneBankError::Io {
             path: lock_path.clone(),
             source: e,
         })?;
@@ -363,10 +364,11 @@ impl GeneBank {
             path: tmp_path.clone(),
             source: e,
         })?;
-        file.write_all(json.as_bytes()).map_err(|e| GeneBankError::Io {
-            path: tmp_path.clone(),
-            source: e,
-        })?;
+        file.write_all(json.as_bytes())
+            .map_err(|e| GeneBankError::Io {
+                path: tmp_path.clone(),
+                source: e,
+            })?;
         file.sync_all().map_err(|e| GeneBankError::Io {
             path: tmp_path.clone(),
             source: e,
@@ -383,9 +385,10 @@ impl GeneBank {
 
         // Ensure the directory entry is durable.
         if let Some(parent) = path.parent()
-            && let Ok(dir) = fs::OpenOptions::new().read(true).open(parent) {
-                let _ = dir.sync_all();
-            }
+            && let Ok(dir) = fs::OpenOptions::new().read(true).open(parent)
+        {
+            let _ = dir.sync_all();
+        }
 
         Ok(())
     }

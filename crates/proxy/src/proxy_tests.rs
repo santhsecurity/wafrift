@@ -521,7 +521,6 @@ fn load_gene_bank_missing_file_returns_default() {
     assert!(bank.hosts.is_empty());
 }
 
-
 fn default_args() -> Args {
     Args {
         listen: "127.0.0.1:8080".into(),
@@ -760,7 +759,10 @@ fn burp_x_forwarded_for_is_hop_by_hop() {
 #[test]
 fn burp_connection_header_triggers_strip() {
     let headers = vec![
-        ("Connection".to_string(), "keep-alive, X-Custom-Hop".to_string()),
+        (
+            "Connection".to_string(),
+            "keep-alive, X-Custom-Hop".to_string(),
+        ),
         ("X-Custom-Hop".to_string(), "value".to_string()),
         ("Content-Type".to_string(), "text/html".to_string()),
     ];
@@ -834,10 +836,18 @@ fn proxy_state_fifo_eviction_is_deterministic() {
 #[test]
 fn proxy_state_host_isolation_no_leak() {
     let mut state = ProxyState::default();
-    state.hosts.entry("host-a.com".into()).or_default().record_block();
-    state.hosts.entry("host-b.com".into()).or_default().record_success(
-        wafrift_types::Technique::PayloadEncoding("UrlEncode".into()),
-    );
+    state
+        .hosts
+        .entry("host-a.com".into())
+        .or_default()
+        .record_block();
+    state
+        .hosts
+        .entry("host-b.com".into())
+        .or_default()
+        .record_success(wafrift_types::Technique::PayloadEncoding(
+            "UrlEncode".into(),
+        ));
     assert_eq!(state.hosts.get("host-a.com").unwrap().blocks, 1);
     assert_eq!(state.hosts.get("host-b.com").unwrap().blocks, 0);
     assert_eq!(state.hosts.get("host-b.com").unwrap().successes, 1);
@@ -848,9 +858,15 @@ fn proxy_state_host_isolation_no_leak() {
 #[test]
 fn ffuf_404_forbidden_body_not_waf_block() {
     // Custom 404 pages often say "forbidden" or "access denied".
-    assert!(!is_waf_block(404, b"Forbidden - you cannot access this resource"));
+    assert!(!is_waf_block(
+        404,
+        b"Forbidden - you cannot access this resource"
+    ));
     assert!(!is_waf_block(404, b"Access Denied - page not found"));
-    assert!(!is_waf_block(404, b"Request blocked - this path does not exist"));
+    assert!(!is_waf_block(
+        404,
+        b"Request blocked - this path does not exist"
+    ));
 }
 
 #[test]
@@ -861,7 +877,10 @@ fn ffuf_404_with_akamai_reference_not_blocked() {
 #[test]
 fn ffuf_200_with_same_body_is_blocked() {
     // Same body on 200 SHOULD still be flagged (real WAF block page).
-    assert!(is_waf_block(200, b"Forbidden - you cannot access this resource"));
+    assert!(is_waf_block(
+        200,
+        b"Forbidden - you cannot access this resource"
+    ));
 }
 
 // ── 4. curl --resolve literal IP in Host ──────────────────────────────────
@@ -877,7 +896,10 @@ fn curl_literal_ipv4_host_header() {
 fn curl_literal_ipv6_host_header() {
     assert_eq!(extract_host_from_header("[::1]"), "::1");
     assert_eq!(extract_host_from_header("[::1]:443"), "::1");
-    assert_eq!(extract_host_from_header("[2001:db8::1]:8080"), "2001:db8::1");
+    assert_eq!(
+        extract_host_from_header("[2001:db8::1]:8080"),
+        "2001:db8::1"
+    );
     assert_eq!(extract_host_from_header("2001:db8::1"), "2001:db8::1");
 }
 
@@ -895,17 +917,33 @@ fn pipeline_state_per_host_isolated() {
     // Simulate two requests on the same TCP connection to different hosts.
     let mut state = ProxyState::default();
     state.host_fifo.push_back("api.example.com".into());
-    state.hosts.entry("api.example.com".into()).or_default().blocks = 3;
+    state
+        .hosts
+        .entry("api.example.com".into())
+        .or_default()
+        .blocks = 3;
 
     state.host_fifo.push_back("cdn.example.com".into());
-    state.hosts.entry("cdn.example.com".into()).or_default().blocks = 0;
+    state
+        .hosts
+        .entry("cdn.example.com".into())
+        .or_default()
+        .blocks = 0;
 
     assert_eq!(
-        state.hosts.get("api.example.com").unwrap().escalation_level(),
+        state
+            .hosts
+            .get("api.example.com")
+            .unwrap()
+            .escalation_level(),
         wafrift_strategy::EscalationLevel::Medium
     );
     assert_eq!(
-        state.hosts.get("cdn.example.com").unwrap().escalation_level(),
+        state
+            .hosts
+            .get("cdn.example.com")
+            .unwrap()
+            .escalation_level(),
         wafrift_strategy::EscalationLevel::None
     );
 }
@@ -997,5 +1035,8 @@ fn render_live_findings_does_not_render_attacker_markdown() {
         "attacker waf-name backtick survived:\n{md}"
     );
     // Sanity — sanitised form should still be present.
-    assert!(md.contains("evil_alert_1__.com"), "sanitised host missing:\n{md}");
+    assert!(
+        md.contains("evil_alert_1__.com"),
+        "sanitised host missing:\n{md}"
+    );
 }

@@ -205,8 +205,7 @@ impl UpstreamClient {
                 let mut stream = resp.bytes_stream();
                 use futures_util::StreamExt;
                 while let Some(chunk) = stream.next().await {
-                    let chunk = chunk
-                        .map_err(|e| UpstreamError::Request(e.to_string()))?;
+                    let chunk = chunk.map_err(|e| UpstreamError::Request(e.to_string()))?;
                     let remaining = max_body.saturating_sub(buf.len());
                     if remaining == 0 {
                         break;
@@ -229,9 +228,7 @@ impl UpstreamClient {
             }
             #[cfg(feature = "tls-impersonate")]
             Self::StealthPool { clients, cursor } => {
-                let idx = cursor
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                    % clients.len();
+                let idx = cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
                 let client = clients[idx].clone();
                 Self::send_via_stealth(&client, method, url, headers, body, max_body).await
             }
@@ -347,14 +344,10 @@ mod tests {
         // index calculation.
         if let UpstreamClient::StealthPool { clients, cursor } = &pool {
             assert_eq!(clients.len(), 3);
-            let first =
-                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
-            let second =
-                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
-            let third =
-                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
-            let fourth =
-                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            let first = cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            let second = cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            let third = cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            let fourth = cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
             assert_eq!((first, second, third, fourth), (0, 1, 2, 0));
         } else {
             panic!("expected StealthPool variant");

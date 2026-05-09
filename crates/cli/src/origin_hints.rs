@@ -78,7 +78,10 @@ pub fn run_origin_hints(args: OriginHintsArgs) -> ExitCode {
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{} failed to start tokio runtime: {e}", "error:".red().bold());
+            eprintln!(
+                "{} failed to start tokio runtime: {e}",
+                "error:".red().bold()
+            );
             return ExitCode::from(1);
         }
     };

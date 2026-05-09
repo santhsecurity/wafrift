@@ -202,7 +202,11 @@ fn request_body_to_points(rb: &Value) -> Vec<InjectionPoint> {
         let required_set: std::collections::HashSet<String> = schema
             .get("required")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         for (prop_name, _) in properties {
             out.push(InjectionPoint {
@@ -339,12 +343,23 @@ mod tests {
         let endpoints = from_openapi(spec).unwrap();
         let ep = &endpoints[0];
         assert_eq!(ep.injection_points.len(), 2);
-        let name_point = ep.injection_points.iter().find(|p| p.name == "name").unwrap();
+        let name_point = ep
+            .injection_points
+            .iter()
+            .find(|p| p.name == "name")
+            .unwrap();
         assert!(name_point.required);
         assert_eq!(name_point.location, ParameterLocation::Body);
         assert_eq!(name_point.context, InjectionContext::JsonString);
-        assert_eq!(name_point.content_type_hint.as_deref(), Some("application/json"));
-        let email_point = ep.injection_points.iter().find(|p| p.name == "email").unwrap();
+        assert_eq!(
+            name_point.content_type_hint.as_deref(),
+            Some("application/json")
+        );
+        let email_point = ep
+            .injection_points
+            .iter()
+            .find(|p| p.name == "email")
+            .unwrap();
         assert!(!email_point.required);
     }
 
@@ -385,7 +400,11 @@ mod tests {
         let endpoints = from_openapi(spec).unwrap();
         let ep = &endpoints[0];
         assert_eq!(ep.url, "/api/v1/users");
-        let body = ep.injection_points.iter().find(|p| p.name == "user").unwrap();
+        let body = ep
+            .injection_points
+            .iter()
+            .find(|p| p.name == "user")
+            .unwrap();
         assert_eq!(body.location, ParameterLocation::Body);
         assert!(body.required);
     }

@@ -68,17 +68,13 @@ impl ScopeFilter {
         if !self.only_methods.is_empty() && !self.only_methods.contains(method) {
             return false;
         }
-        if !self.only_hosts.is_empty()
-            && !self.only_hosts.iter().any(|p| glob_match(p, host))
-        {
+        if !self.only_hosts.is_empty() && !self.only_hosts.iter().any(|p| glob_match(p, host)) {
             return false;
         }
         if self.skip_hosts.iter().any(|p| glob_match(p, host)) {
             return false;
         }
-        if !self.only_paths.is_empty()
-            && !self.only_paths.iter().any(|p| glob_match(p, path))
-        {
+        if !self.only_paths.is_empty() && !self.only_paths.iter().any(|p| glob_match(p, path)) {
             return false;
         }
         if self.skip_paths.iter().any(|p| glob_match(p, path)) {
@@ -104,9 +100,7 @@ fn glob_recurse(p: &[u8], s: &[u8]) -> bool {
             glob_recurse(&p[1..], s) || (!s.is_empty() && glob_recurse(p, &s[1..]))
         }
         (Some(b'?'), Some(_)) => glob_recurse(&p[1..], &s[1..]),
-        (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => {
-            glob_recurse(&p[1..], &s[1..])
-        }
+        (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => glob_recurse(&p[1..], &s[1..]),
         _ => false,
     }
 }
@@ -225,13 +219,7 @@ mod tests {
     fn only_host_does_not_match_substring_smuggling() {
         // Defends against "evil-api.example.com.attacker.tld" sneaking
         // through "*.example.com" — the glob anchors the whole string.
-        let f = ScopeFilter::new(
-            vec!["*.example.com".into()],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        );
+        let f = ScopeFilter::new(vec!["*.example.com".into()], vec![], vec![], vec![], vec![]);
         assert!(!f.allows("api.example.com.attacker.tld", "/", &Method::from("GET")));
     }
 }

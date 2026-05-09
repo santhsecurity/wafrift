@@ -563,8 +563,8 @@ fn evade_content_type_case_variations() {
         "CONTENT-TYPE",
         "CoNtEnT-TyPe",
     ] {
-        let req = Request::post("https://example.com", b"test".to_vec())
-            .header(ct, "application/json");
+        let req =
+            Request::post("https://example.com", b"test".to_vec()).header(ct, "application/json");
         let mut state = HostState::default();
         state.record_block();
         let config = EvasionConfig::default();

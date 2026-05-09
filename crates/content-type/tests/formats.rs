@@ -55,7 +55,12 @@ fn protobuf_empty_string() {
 #[test]
 fn messagepack_roundtrip_ascii() {
     let payload = "hello world";
-    let bytes = serialize(payload, BodyFormat::MessagePack, InjectionContext::PlainBody).unwrap();
+    let bytes = serialize(
+        payload,
+        BodyFormat::MessagePack,
+        InjectionContext::PlainBody,
+    )
+    .unwrap();
     let back = deserialize(&bytes, BodyFormat::MessagePack).unwrap();
     assert_eq!(back, payload);
 }
@@ -63,7 +68,12 @@ fn messagepack_roundtrip_ascii() {
 #[test]
 fn messagepack_roundtrip_unicode() {
     let payload = "Hello 世界 👋";
-    let bytes = serialize(payload, BodyFormat::MessagePack, InjectionContext::PlainBody).unwrap();
+    let bytes = serialize(
+        payload,
+        BodyFormat::MessagePack,
+        InjectionContext::PlainBody,
+    )
+    .unwrap();
     let back = deserialize(&bytes, BodyFormat::MessagePack).unwrap();
     assert_eq!(back, payload);
 }
@@ -71,7 +81,12 @@ fn messagepack_roundtrip_unicode() {
 #[test]
 fn messagepack_is_binary_not_text() {
     let payload = "hello";
-    let bytes = serialize(payload, BodyFormat::MessagePack, InjectionContext::PlainBody).unwrap();
+    let bytes = serialize(
+        payload,
+        BodyFormat::MessagePack,
+        InjectionContext::PlainBody,
+    )
+    .unwrap();
     // MessagePack encoding of a string is not plain text
     assert_ne!(bytes, payload.as_bytes());
 }
@@ -147,7 +162,12 @@ fn json_serialize_unsupported() {
 fn same_payload_different_formats() {
     let payload = "attack payload";
     let proto = serialize(payload, BodyFormat::Protobuf, InjectionContext::PlainBody).unwrap();
-    let mp = serialize(payload, BodyFormat::MessagePack, InjectionContext::PlainBody).unwrap();
+    let mp = serialize(
+        payload,
+        BodyFormat::MessagePack,
+        InjectionContext::PlainBody,
+    )
+    .unwrap();
     let raw = serialize(payload, BodyFormat::Raw, InjectionContext::PlainBody).unwrap();
 
     // All should produce different byte representations

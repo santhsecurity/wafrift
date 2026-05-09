@@ -360,9 +360,7 @@ fn glob_match(pattern: &str, s: &str) -> bool {
 fn glob_recurse(p: &[u8], s: &[u8]) -> bool {
     match (p.first(), s.first()) {
         (None, None) => true,
-        (Some(b'*'), _) => {
-            glob_recurse(&p[1..], s) || (!s.is_empty() && glob_recurse(p, &s[1..]))
-        }
+        (Some(b'*'), _) => glob_recurse(&p[1..], s) || (!s.is_empty() && glob_recurse(p, &s[1..])),
         (Some(b'?'), Some(_)) => glob_recurse(&p[1..], &s[1..]),
         (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => glob_recurse(&p[1..], &s[1..]),
         _ => false,
@@ -478,7 +476,10 @@ mod tests {
 
     #[test]
     fn report_with_no_findings_uses_friendly_empty_state() {
-        let bank = PersistedGeneBank { schema: 1, hosts: HashMap::new() };
+        let bank = PersistedGeneBank {
+            schema: 1,
+            hosts: HashMap::new(),
+        };
         let args = ReportArgs {
             proxy_bank: vec![],
             only_host: vec![],
@@ -535,7 +536,10 @@ mod tests {
     fn json_format_serializes_empty_findings_array() {
         // No bypasses: findings must be [], not null. Downstream tooling
         // that does `len(findings)` would crash on null.
-        let bank = PersistedGeneBank { schema: 1, hosts: HashMap::new() };
+        let bank = PersistedGeneBank {
+            schema: 1,
+            hosts: HashMap::new(),
+        };
         let args = ReportArgs {
             proxy_bank: vec![],
             only_host: vec![],

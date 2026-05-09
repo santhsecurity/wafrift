@@ -90,9 +90,7 @@ impl ImpersonateProfile {
     ///   - exact names: `chrome131`, `firefox133`, etc.
     pub fn parse(raw: &str) -> Result<Self, StealthError> {
         match raw.to_ascii_lowercase().as_str() {
-            "chrome" | "chrome-latest" | "chrome131" | "chrome131_0_0_0" => {
-                Ok(Self::Chrome131)
-            }
+            "chrome" | "chrome-latest" | "chrome131" | "chrome131_0_0_0" => Ok(Self::Chrome131),
             "chrome120" | "chrome120_0_0_0" => Ok(Self::Chrome120),
             "edge" | "edge-latest" | "edge131" => Ok(Self::Edge131),
             "firefox" | "firefox-latest" | "firefox133" | "ff" => Ok(Self::Firefox133),
@@ -396,8 +394,9 @@ mod tests {
     #[test]
     fn name_round_trip() {
         for raw in supported_profiles() {
-            let parsed = ImpersonateProfile::parse(raw)
-                .unwrap_or_else(|_| panic!("supported_profiles() listed {raw:?} but parse rejected it"));
+            let parsed = ImpersonateProfile::parse(raw).unwrap_or_else(|_| {
+                panic!("supported_profiles() listed {raw:?} but parse rejected it")
+            });
             assert_eq!(parsed.name(), raw, "name() must round-trip with parse()");
         }
     }
@@ -421,8 +420,7 @@ mod tests {
         // (see `crates/transport/tests/stealth_integration.rs`).
         for raw in supported_profiles() {
             let profile = ImpersonateProfile::parse(raw).unwrap();
-            let client = StealthClient::new(profile)
-                .unwrap_or_else(|e| panic!("build {raw}: {e}"));
+            let client = StealthClient::new(profile).unwrap_or_else(|e| panic!("build {raw}: {e}"));
             assert_eq!(client.profile(), profile);
         }
     }

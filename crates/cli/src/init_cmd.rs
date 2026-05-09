@@ -50,7 +50,9 @@ pub fn run_init(args: InitArgs) -> ExitCode {
     );
     eprintln!("Next steps:");
     eprintln!("  1. Edit the file — uncomment the keys you want to override.");
-    eprintln!("  2. Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and point your client at it.");
+    eprintln!(
+        "  2. Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and point your client at it."
+    );
     eprintln!("  3. Run `wafrift report` after you have findings.");
     ExitCode::SUCCESS
 }

@@ -29,7 +29,9 @@ impl Default for InjectionContext {
 
 #[derive(Debug, Error, Serialize, Deserialize, Clone, PartialEq)]
 pub enum ContextualEncodeError {
-    #[error("strategy {strategy:?} produced output incompatible with context {context:?}: {reason}")]
+    #[error(
+        "strategy {strategy:?} produced output incompatible with context {context:?}: {reason}"
+    )]
     ContextIncompatible {
         strategy: String,
         context: InjectionContext,

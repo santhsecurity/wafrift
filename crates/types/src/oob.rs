@@ -27,8 +27,15 @@ pub struct OobCanary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OobInteraction {
-    DnsQuery { query: String, source_ip: String },
-    HttpRequest { path: String, headers: Vec<(String, String)>, body: Option<String> },
+    DnsQuery {
+        query: String,
+        source_ip: String,
+    },
+    HttpRequest {
+        path: String,
+        headers: Vec<(String, String)>,
+        body: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

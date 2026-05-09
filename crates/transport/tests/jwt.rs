@@ -1,27 +1,30 @@
 //! JWT manipulation tests — alg:none, HS256 confusion, JWK embed.
 
 use base64::Engine;
-use wafrift_transport::jwt::{manipulate, JwtError};
+use wafrift_transport::jwt::{JwtError, manipulate};
 use wafrift_types::session::JwtManipulation;
 
 fn valid_rs256_jwt() -> String {
     // header: {"alg":"RS256","typ":"JWT"}
     // payload: {"sub":"123"}
     // signature: dummy
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
+    let header =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
     format!("{}.{}.sig", header, payload)
 }
 
 #[allow(dead_code)]
 fn valid_hs256_jwt() -> String {
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
+    let header =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
     format!("{}.{}.sig", header, payload)
 }
 
 fn alg_none_jwt() -> String {
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
+    let header =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
     format!("{}.{}.sig", header, payload)
 }
@@ -36,7 +39,9 @@ fn strip_alg_changes_alg_to_none() {
     assert_eq!(parts.len(), 3);
     assert!(parts[2].is_empty()); // signature removed
 
-    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
+    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[0])
+        .unwrap();
     let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
     assert_eq!(header["alg"], "none");
 }
@@ -55,7 +60,9 @@ fn strip_alg_on_already_none_jwt() {
     let token = alg_none_jwt();
     let result = manipulate(&token, &JwtManipulation::StripAlg, None).unwrap();
     let parts: Vec<&str> = result.split('.').collect();
-    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
+    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[0])
+        .unwrap();
     let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
     assert_eq!(header["alg"], "none");
 }
@@ -70,7 +77,9 @@ fn hs256_changes_alg() {
     let parts: Vec<&str> = result.split('.').collect();
     assert_eq!(parts.len(), 3);
 
-    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
+    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[0])
+        .unwrap();
     let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
     assert_eq!(header["alg"], "HS256");
 }
@@ -99,7 +108,9 @@ fn jwk_embed_adds_jwk_to_header() {
     let result = manipulate(&token, &JwtManipulation::JwkEmbed { jwk: jwk.into() }, None).unwrap();
     let parts: Vec<&str> = result.split('.').collect();
 
-    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
+    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[0])
+        .unwrap();
     let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
     assert!(header["jwk"].is_object());
     assert_eq!(header["jwk"]["kty"], "RSA");
@@ -122,7 +133,9 @@ fn jwk_embed_invalid_json_graceful() {
     let result = manipulate(&token, &JwtManipulation::JwkEmbed { jwk: jwk.into() }, None).unwrap();
     let parts: Vec<&str> = result.split('.').collect();
 
-    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
+    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[0])
+        .unwrap();
     let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
     // Should set jwk to Null instead of panicking
     assert!(header["jwk"].is_null());

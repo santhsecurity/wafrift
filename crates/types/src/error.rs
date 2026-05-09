@@ -3,8 +3,6 @@
 //! A single error enum covers all evasion failures. Each variant carries
 //! a descriptive, lowercase, actionable message string.
 
-
-
 /// Errors that can occur during evasion operations.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]

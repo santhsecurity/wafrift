@@ -94,12 +94,7 @@ pub fn pad(body: &[u8], content_type: &str, requested_bytes: usize) -> PadOutcom
     }
 
     let ct_lower = content_type.to_ascii_lowercase();
-    let main_type = ct_lower
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let main_type = ct_lower.split(';').next().unwrap_or("").trim().to_string();
 
     if main_type == "application/json" || main_type.ends_with("+json") {
         return pad_json(body, requested_bytes);
@@ -175,8 +170,7 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
                 } else {
                     ","
                 };
-                let new_body =
-                    format!("{{\"{PAD_KEY}\":\"{pad_str}\"{glue}{after}").into_bytes();
+                let new_body = format!("{{\"{PAD_KEY}\":\"{pad_str}\"{glue}{after}").into_bytes();
                 let added = new_body.len().saturating_sub(body.len());
                 if added >= requested_bytes && map.contains_key(PAD_KEY) {
                     // A malicious user could pre-set _wafrift_pad to
@@ -242,7 +236,9 @@ fn pad_multipart(body: &[u8], boundary: &str, requested_bytes: usize) -> PadOutc
     let pad = fill(requested_bytes);
     let mut leading = Vec::with_capacity(requested_bytes + boundary.len() + 128);
     leading.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
-    leading.extend_from_slice(format!("Content-Disposition: form-data; name=\"{PAD_KEY}\"\r\n").as_bytes());
+    leading.extend_from_slice(
+        format!("Content-Disposition: form-data; name=\"{PAD_KEY}\"\r\n").as_bytes(),
+    );
     leading.extend_from_slice(b"\r\n");
     leading.extend_from_slice(&pad);
     leading.extend_from_slice(b"\r\n");
@@ -433,11 +429,7 @@ mod tests {
 
     #[test]
     fn json_with_charset_param() {
-        let out = pad(
-            br#"{"a":1}"#,
-            "application/json; charset=utf-8",
-            8 * 1024,
-        );
+        let out = pad(br#"{"a":1}"#, "application/json; charset=utf-8", 8 * 1024);
         assert!(matches!(out, PadOutcome::Padded { .. }));
     }
 

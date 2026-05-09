@@ -4088,6 +4088,7 @@ dependencies = [
  "sqlparser",
  "toml",
  "tracing",
+ "urlencoding",
  "wafrift-types",
 ]
 

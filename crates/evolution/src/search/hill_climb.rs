@@ -88,7 +88,8 @@ impl SearchAlgorithm for HillClimbing {
             next.record_verdict(&verdict);
             if comparable_fitness(next.fitness) >= comparable_fitness(self.current.fitness) {
                 self.current = next;
-                if comparable_fitness(self.current.fitness) > comparable_fitness(self.best.fitness) {
+                if comparable_fitness(self.current.fitness) > comparable_fitness(self.best.fitness)
+                {
                     self.best = self.current.clone();
                 }
             }

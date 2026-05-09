@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use crate::injection_context::InjectionContext;
 use crate::Method;
+use crate::injection_context::InjectionContext;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiscoveredEndpoint {

@@ -6,10 +6,7 @@ use wafrift_strategy::{HostState, evade_smart};
 use wafrift_types::{EvasionConfig, Request};
 
 fn sample_request() -> Request {
-    Request::post(
-        "https://target.example/post",
-        b"q=admin' OR 1=1--".to_vec(),
-    )
+    Request::post("https://target.example/post", b"q=admin' OR 1=1--".to_vec())
 }
 
 #[test]

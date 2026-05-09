@@ -1,8 +1,8 @@
 //! Session handling tests — cookie jars, CSRF extraction, injection.
 
-use wafrift_transport::session::{extract_csrf, inject_csrf, load_jar, save_jar, SessionError};
-use wafrift_types::session::CsrfInjectionLocation;
+use wafrift_transport::session::{SessionError, extract_csrf, inject_csrf, load_jar, save_jar};
 use wafrift_types::Request;
+use wafrift_types::session::CsrfInjectionLocation;
 
 // ── CSRF extraction ────────────────────────────────────────────────────────
 
@@ -60,7 +60,11 @@ fn extract_csrf_first_match_only() {
 fn inject_csrf_header() {
     let mut req = Request::get("https://example.com/api");
     inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Header);
-    assert!(req.headers.iter().any(|(k, v)| k == "X-CSRF-Token" && v == "tok123"));
+    assert!(
+        req.headers
+            .iter()
+            .any(|(k, v)| k == "X-CSRF-Token" && v == "tok123")
+    );
 }
 
 #[test]

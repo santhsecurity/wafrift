@@ -1,8 +1,8 @@
 //! Out-of-band confirmation tests.
 
+use uuid::Uuid;
 use wafrift_oracle::oob::embed::embed_canary;
 use wafrift_types::oob::OobCanary;
-use uuid::Uuid;
 
 fn make_canary() -> OobCanary {
     OobCanary {

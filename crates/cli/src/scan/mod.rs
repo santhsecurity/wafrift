@@ -1868,13 +1868,25 @@ pub(crate) async fn run_scan(
                     .iter()
                     .map(|t| {
                         if t.starts_with("encoding::") {
-                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::PayloadEncoding(t.clone()), context: None }
+                            wafrift_strategy::pipeline::EvasionStage {
+                                technique: wafrift_types::Technique::PayloadEncoding(t.clone()),
+                                context: None,
+                            }
                         } else if t.starts_with("tamper::") {
-                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::GrammarMutation(t.clone()), context: None }
+                            wafrift_strategy::pipeline::EvasionStage {
+                                technique: wafrift_types::Technique::GrammarMutation(t.clone()),
+                                context: None,
+                            }
                         } else if t.starts_with("vector::") {
-                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::ContentTypeSwitch(t.clone()), context: None }
+                            wafrift_strategy::pipeline::EvasionStage {
+                                technique: wafrift_types::Technique::ContentTypeSwitch(t.clone()),
+                                context: None,
+                            }
                         } else {
-                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::GrammarMutation(t.clone()), context: None }
+                            wafrift_strategy::pipeline::EvasionStage {
+                                technique: wafrift_types::Technique::GrammarMutation(t.clone()),
+                                context: None,
+                            }
                         }
                     })
                     .collect()
@@ -1896,7 +1908,10 @@ pub(crate) async fn run_scan(
             .collect();
         let valid_order = composition::is_valid_sequence(&layers);
 
-        let techniques_for_cost: Vec<_> = best_techniques.iter().map(|s| s.technique.clone()).collect();
+        let techniques_for_cost: Vec<_> = best_techniques
+            .iter()
+            .map(|s| s.technique.clone())
+            .collect();
         let pipeline_cost = cost::pipeline_cost(&techniques_for_cost);
         let pipeline = EvasionPipeline::new(
             format!("auto_{waf_name}_{payload_type_str}"),

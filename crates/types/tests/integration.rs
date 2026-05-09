@@ -1,6 +1,8 @@
 //! Integration tests for wafrift-types — new modules added in features 1-6.
 
-use wafrift_types::discovery::{DiscoveredEndpoint, DiscoverySource, InjectionPoint, ParameterLocation};
+use wafrift_types::discovery::{
+    DiscoveredEndpoint, DiscoverySource, InjectionPoint, ParameterLocation,
+};
 use wafrift_types::explanation::{DiffHunk, Explanation, ExplanationMode, RuleAttribution};
 use wafrift_types::format::BodyFormat;
 use wafrift_types::injection_context::{ContextualEncodeError, InjectionContext};
@@ -27,9 +29,21 @@ fn injection_context_roundtrip_serde() {
 fn all_injection_contexts_serializable() {
     use InjectionContext::*;
     for ctx in [
-        JsonString, JsonNumber, XmlAttribute, XmlCdata, XmlText,
-        HtmlAttribute, HtmlText, UrlQuery, UrlPath, UrlFragment,
-        HeaderValue, CookieValue, MultipartField, MultipartFileName, PlainBody,
+        JsonString,
+        JsonNumber,
+        XmlAttribute,
+        XmlCdata,
+        XmlText,
+        HtmlAttribute,
+        HtmlText,
+        UrlQuery,
+        UrlPath,
+        UrlFragment,
+        HeaderValue,
+        CookieValue,
+        MultipartField,
+        MultipartFileName,
+        PlainBody,
     ] {
         let json = serde_json::to_string(&ctx).unwrap();
         let back: InjectionContext = serde_json::from_str(&json).unwrap();
@@ -101,7 +115,9 @@ fn jwt_manipulation_variants_serde() {
     for manipulation in [
         JwtManipulation::StripAlg,
         JwtManipulation::Hs256WithKey,
-        JwtManipulation::JwkEmbed { jwk: r#"{"kty":"RSA"}"#.into() },
+        JwtManipulation::JwkEmbed {
+            jwk: r#"{"kty":"RSA"}"#.into(),
+        },
     ] {
         let json = serde_json::to_string(&manipulation).unwrap();
         let back: JwtManipulation = serde_json::from_str(&json).unwrap();
@@ -114,9 +130,15 @@ fn jwt_manipulation_variants_serde() {
 #[test]
 fn oob_provider_serde_roundtrip() {
     let providers = [
-        OobProvider::Interactsh { server: "oast.pro".into() },
-        OobProvider::BurpCollaborator { url: "https://collab".into() },
-        OobProvider::CustomDns { pattern: "$(uuid).cb.example.com".into() },
+        OobProvider::Interactsh {
+            server: "oast.pro".into(),
+        },
+        OobProvider::BurpCollaborator {
+            url: "https://collab".into(),
+        },
+        OobProvider::CustomDns {
+            pattern: "$(uuid).cb.example.com".into(),
+        },
     ];
     for provider in providers {
         let json = serde_json::to_string(&provider).unwrap();
@@ -150,8 +172,15 @@ fn oob_canary_serde_without_created_at() {
 #[test]
 fn oob_interaction_serde() {
     let interactions = [
-        OobInteraction::DnsQuery { query: "test.oast.pro".into(), source_ip: "1.2.3.4".into() },
-        OobInteraction::HttpRequest { path: "/oob/123".into(), headers: vec![("User-Agent".into(), "curl".into())], body: Some("body".into()) },
+        OobInteraction::DnsQuery {
+            query: "test.oast.pro".into(),
+            source_ip: "1.2.3.4".into(),
+        },
+        OobInteraction::HttpRequest {
+            path: "/oob/123".into(),
+            headers: vec![("User-Agent".into(), "curl".into())],
+            body: Some("body".into()),
+        },
     ];
     for interaction in interactions {
         let json = serde_json::to_string(&interaction).unwrap();
@@ -167,15 +196,13 @@ fn discovered_endpoint_serde() {
     let endpoint = DiscoveredEndpoint {
         url: "https://api.example.com/users".into(),
         method: Method::Post,
-        injection_points: vec![
-            InjectionPoint {
-                name: "username".into(),
-                location: ParameterLocation::Body,
-                context: InjectionContext::JsonString,
-                content_type_hint: Some("application/json".into()),
-                required: true,
-            },
-        ],
+        injection_points: vec![InjectionPoint {
+            name: "username".into(),
+            location: ParameterLocation::Body,
+            context: InjectionContext::JsonString,
+            content_type_hint: Some("application/json".into()),
+            required: true,
+        }],
         source: DiscoverySource::OpenApi,
     };
     let json = serde_json::to_string(&endpoint).unwrap();
@@ -258,7 +285,10 @@ fn explanation_full_serde_roundtrip() {
     let json = serde_json::to_string(&explanation).unwrap();
     let back: Explanation = serde_json::from_str(&json).unwrap();
     assert_eq!(explanation.original_payload, back.original_payload);
-    assert_eq!(explanation.technique_chain.len(), back.technique_chain.len());
+    assert_eq!(
+        explanation.technique_chain.len(),
+        back.technique_chain.len()
+    );
 }
 
 // ── BodyFormat ─────────────────────────────────────────────────────────────

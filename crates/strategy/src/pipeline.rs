@@ -100,7 +100,14 @@ mod tests {
 
     #[test]
     fn pipeline_cost_tracking() {
-        let p = EvasionPipeline::new("test", vec![EvasionStage { technique: Technique::UserAgentRotation, context: None }], 3);
+        let p = EvasionPipeline::new(
+            "test",
+            vec![EvasionStage {
+                technique: Technique::UserAgentRotation,
+                context: None,
+            }],
+            3,
+        );
         assert_eq!(p.cost, 3);
     }
 

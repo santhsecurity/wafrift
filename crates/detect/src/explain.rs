@@ -35,17 +35,27 @@ const RULE_CATEGORIES: &[(&str, &str, &[&str])] = &[
         "SQLI-001",
         "SQL keyword presence",
         &[
-            "select ", "union ", "insert ", "update ", "delete ", "drop ",
-            " from ", " where ", "order by", "group by", " having ",
-            " sleep(", " benchmark(", " waitfor delay",
+            "select ",
+            "union ",
+            "insert ",
+            "update ",
+            "delete ",
+            "drop ",
+            " from ",
+            " where ",
+            "order by",
+            "group by",
+            " having ",
+            " sleep(",
+            " benchmark(",
+            " waitfor delay",
         ],
     ),
     (
         "SQLI-002",
         "SQL tautology / boolean blind",
         &[
-            "1=1", "1 = 1", "'a'='a'", " or 1=1", " and 1=1", " or true",
-            "' or '",
+            "1=1", "1 = 1", "'a'='a'", " or 1=1", " and 1=1", " or true", "' or '",
         ],
     ),
     (
@@ -62,24 +72,35 @@ const RULE_CATEGORIES: &[(&str, &str, &[&str])] = &[
         "XSS-001",
         "HTML script/iframe/object tag",
         &[
-            "<script", "<iframe", "<object", "<embed", "<applet",
-            "<svg", "<math",
+            "<script", "<iframe", "<object", "<embed", "<applet", "<svg", "<math",
         ],
     ),
     (
         "XSS-002",
         "JS event handler attribute",
         &[
-            "onerror=", "onload=", "onclick=", "onfocus=", "onmouseover=",
-            "ontoggle=", "onbegin=", "onstart=", "onsubmit=",
+            "onerror=",
+            "onload=",
+            "onclick=",
+            "onfocus=",
+            "onmouseover=",
+            "ontoggle=",
+            "onbegin=",
+            "onstart=",
+            "onsubmit=",
         ],
     ),
     (
         "XSS-003",
         "JS execution function",
         &[
-            "alert(", "eval(", "function(", "settimeout(", "setinterval(",
-            "constructor(", "new function",
+            "alert(",
+            "eval(",
+            "function(",
+            "settimeout(",
+            "setinterval(",
+            "constructor(",
+            "new function",
         ],
     ),
     (
@@ -96,8 +117,7 @@ const RULE_CATEGORIES: &[(&str, &str, &[&str])] = &[
         "CMDI-002",
         "Common shell command",
         &[
-            "cat ", "ls ", "id;", "id|", " whoami", "wget ", "curl ",
-            "ping ", " nc ",
+            "cat ", "ls ", "id;", "id|", " whoami", "wget ", "curl ", "ping ", " nc ",
         ],
     ),
     (
@@ -109,8 +129,12 @@ const RULE_CATEGORIES: &[(&str, &str, &[&str])] = &[
         "LFI-002",
         "Sensitive system path",
         &[
-            "/etc/passwd", "/etc/shadow", "/proc/self/environ",
-            "/proc/self/cmdline", "/bin/sh", "c:\\windows\\system32",
+            "/etc/passwd",
+            "/etc/shadow",
+            "/proc/self/environ",
+            "/proc/self/cmdline",
+            "/bin/sh",
+            "c:\\windows\\system32",
         ],
     ),
     (
@@ -127,7 +151,9 @@ const RULE_CATEGORIES: &[(&str, &str, &[&str])] = &[
         "SSRF-001",
         "Cloud metadata endpoint",
         &[
-            "169.254.169.254", "metadata.google.internal", "metadata.azure.com",
+            "169.254.169.254",
+            "metadata.google.internal",
+            "metadata.azure.com",
         ],
     ),
     (
@@ -188,10 +214,7 @@ pub fn explain_block(payload: &str, waf: &DetectedWaf) -> Vec<RuleAttribution> {
 ///     have no signal whether the WAF in front actually inspects it.
 fn inspection_model_bias(waf_name: &str) -> f64 {
     let lower = waf_name.to_ascii_lowercase();
-    if lower.contains("cloudflare")
-        || lower.contains("imperva")
-        || lower.contains("akamai")
-    {
+    if lower.contains("cloudflare") || lower.contains("imperva") || lower.contains("akamai") {
         0.95
     } else if lower.contains("aws") || lower.contains("modsec") {
         0.85

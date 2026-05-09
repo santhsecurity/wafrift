@@ -358,8 +358,6 @@ impl EvasionClient {
     }
 }
 
-
-
 impl Default for EvasionClient {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| {

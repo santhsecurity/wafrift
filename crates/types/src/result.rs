@@ -262,11 +262,8 @@ mod tests {
 
     #[test]
     fn set_confidence_clamps() {
-        let mut result = EvasionResult::new(
-            Request::get("https://example.com"),
-            vec![],
-            "test".into(),
-        );
+        let mut result =
+            EvasionResult::new(Request::get("https://example.com"), vec![], "test".into());
         result.set_confidence(2.0);
         assert_eq!(result.confidence(), 1.0);
         result.set_confidence(-1.0);

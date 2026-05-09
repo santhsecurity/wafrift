@@ -78,10 +78,7 @@ pub fn mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         || lower.starts_with("or ")
     {
         Some("OR")
-    } else if lower.contains("' and ")
-        || lower.contains("\" and ")
-        || lower.contains(" and 1=1")
-    {
+    } else if lower.contains("' and ") || lower.contains("\" and ") || lower.contains(" and 1=1") {
         Some("AND")
     } else {
         None
@@ -102,11 +99,11 @@ pub fn mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     // Strategy 2: terminator-comment payloads (`'--`, `'#`, `'/*…*/`).
     // Drop the leading literal entirely; the upstream SQL still
     // interprets a numeric leading token as the column value.
-    if lower.contains("--")
-        || lower.contains('#')
-        || lower.contains("/*")
-    {
-        for taut in QUOTE_FREE_TAUTOLOGIES.iter().take(max_mutations.saturating_sub(out.len())) {
+    if lower.contains("--") || lower.contains('#') || lower.contains("/*") {
+        for taut in QUOTE_FREE_TAUTOLOGIES
+            .iter()
+            .take(max_mutations.saturating_sub(out.len()))
+        {
             if out.len() >= max_mutations {
                 break;
             }
@@ -179,7 +176,10 @@ mod tests {
             assert!(!v.contains("/*"), "still has block-comment: {v}");
         }
         // Must contain at least one tautology shape.
-        assert!(p.iter().any(|v| v.contains("1=1") || v.contains("IS NOT NULL")));
+        assert!(
+            p.iter()
+                .any(|v| v.contains("1=1") || v.contains("IS NOT NULL"))
+        );
     }
 
     #[test]
@@ -214,7 +214,10 @@ mod tests {
     fn unparen_emits_paren_free() {
         let out = mutations("(1) OR (1=1)", 20);
         let p = payloads(&out);
-        assert!(p.iter().any(|v| v == &"1 OR 1=1" || (!v.contains('(') && v.contains("OR"))));
+        assert!(
+            p.iter()
+                .any(|v| v == &"1 OR 1=1" || (!v.contains('(') && v.contains("OR")))
+        );
     }
 
     #[test]

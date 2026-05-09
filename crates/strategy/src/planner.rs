@@ -5,10 +5,10 @@
 
 use crate::cost::{pipeline_cost, within_budget};
 use crate::learning_cache::{CacheKey, LearningCache};
+use crate::pipeline::EvasionStage;
 use crate::pipeline::{EvasionPipeline, EvasionPlanOutput};
 use wafrift_encoding::encoding;
 use wafrift_types::{Technique, Verdict};
-use crate::pipeline::EvasionStage;
 
 /// Plan evasion pipelines for a request.
 ///
@@ -45,9 +45,20 @@ pub fn plan_pipelines(
     let light = EvasionPipeline::new(
         "light",
         vec![
-            EvasionStage { technique: Technique::UserAgentRotation, context: None },
-            EvasionStage { technique: Technique::PayloadEncoding(encoding::Strategy::CaseAlternation.as_str().to_string()), context: None },
-            EvasionStage { technique: Technique::HeaderObfuscation("CaseMixing".into()), context: None },
+            EvasionStage {
+                technique: Technique::UserAgentRotation,
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::PayloadEncoding(
+                    encoding::Strategy::CaseAlternation.as_str().to_string(),
+                ),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::HeaderObfuscation("CaseMixing".into()),
+                context: None,
+            },
         ],
         pipeline_cost(&[
             Technique::UserAgentRotation,
@@ -60,10 +71,24 @@ pub fn plan_pipelines(
     let medium = EvasionPipeline::new(
         "medium",
         vec![
-            EvasionStage { technique: Technique::UserAgentRotation, context: None },
-            EvasionStage { technique: Technique::GrammarMutation("auto".into()), context: None },
-            EvasionStage { technique: Technique::PayloadEncoding(encoding::Strategy::DoubleUrlEncode.as_str().to_string()), context: None },
-            EvasionStage { technique: Technique::HeaderObfuscation("CaseMixing".into()), context: None },
+            EvasionStage {
+                technique: Technique::UserAgentRotation,
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::GrammarMutation("auto".into()),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::PayloadEncoding(
+                    encoding::Strategy::DoubleUrlEncode.as_str().to_string(),
+                ),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::HeaderObfuscation("CaseMixing".into()),
+                context: None,
+            },
         ],
         pipeline_cost(&[
             Technique::UserAgentRotation,
@@ -77,13 +102,36 @@ pub fn plan_pipelines(
     let heavy = EvasionPipeline::new(
         "heavy",
         vec![
-            EvasionStage { technique: Technique::UserAgentRotation, context: None },
-            EvasionStage { technique: Technique::GrammarMutation("auto".into()), context: None },
-            EvasionStage { technique: Technique::PayloadEncoding(encoding::Strategy::DoubleUrlEncode.as_str().to_string()), context: None },
-            EvasionStage { technique: Technique::ContentTypeSwitch("Multipart".into()), context: None },
-            EvasionStage { technique: Technique::HeaderObfuscation("CaseMixing".into()), context: None },
-            EvasionStage { technique: Technique::RequestSmuggling("CL.TE".into()), context: None },
-            EvasionStage { technique: Technique::H2Evasion("MixedCaseHeaders".into()), context: None },
+            EvasionStage {
+                technique: Technique::UserAgentRotation,
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::GrammarMutation("auto".into()),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::PayloadEncoding(
+                    encoding::Strategy::DoubleUrlEncode.as_str().to_string(),
+                ),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::ContentTypeSwitch("Multipart".into()),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::HeaderObfuscation("CaseMixing".into()),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::RequestSmuggling("CL.TE".into()),
+                context: None,
+            },
+            EvasionStage {
+                technique: Technique::H2Evasion("MixedCaseHeaders".into()),
+                context: None,
+            },
         ],
         pipeline_cost(&[
             Technique::UserAgentRotation,
@@ -152,8 +200,15 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
 
         let mut cache = LearningCache::open(&tmp).unwrap();
-        let pipeline = EvasionPipeline::new("cached", vec![EvasionStage { technique: Technique::UserAgentRotation, context: None }], 1)
-            .with_success_rate(9900);
+        let pipeline = EvasionPipeline::new(
+            "cached",
+            vec![EvasionStage {
+                technique: Technique::UserAgentRotation,
+                context: None,
+            }],
+            1,
+        )
+        .with_success_rate(9900);
         cache.record_success(CacheKey::new("cloudflare", "sql"), pipeline);
         cache.save().unwrap();
 
