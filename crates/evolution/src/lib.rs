@@ -4,6 +4,7 @@
 //! evolve technique populations → recommend optimal evasion strategies.
 
 pub mod advisor;
+pub mod body_padding;
 pub mod custom_rules;
 pub mod differential;
 pub mod evolution;

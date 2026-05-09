@@ -39,6 +39,11 @@ pub enum Technique {
     H2Evasion(String),
     /// WAF rule differential analysis probe.
     DifferentialProbe,
+    /// Body-size inspection bypass: pad the request body with `usize`
+    /// bytes of inert junk before the real payload so cloud WAFs that
+    /// only inspect the first 8 KB (Cloudflare Pro) or 16 KB (AWS WAF)
+    /// see only padding and forward the real payload unmodified.
+    BodyPadding(usize),
 }
 
 impl Technique {
@@ -66,6 +71,9 @@ impl Technique {
         if let Some(rest) = s.strip_prefix("h2:") {
             return Some(Self::H2Evasion(rest.to_string()));
         }
+        if let Some(rest) = s.strip_prefix("body-padding:") {
+            return rest.parse::<usize>().ok().map(Self::BodyPadding);
+        }
         match s {
             "boundary-manipulation" => Some(Self::BoundaryManipulation),
             "json-unicode-escape" => Some(Self::JsonUnicodeEscape),
@@ -92,6 +100,7 @@ impl fmt::Display for Technique {
             Self::RequestSmuggling(s) => write!(f, "smuggling:{s}"),
             Self::H2Evasion(s) => write!(f, "h2:{s}"),
             Self::DifferentialProbe => f.write_str("differential-probe"),
+            Self::BodyPadding(n) => write!(f, "body-padding:{n}"),
         }
     }
 }
@@ -116,6 +125,14 @@ mod tests {
             Technique::RequestSmuggling("CL.TE".into()).to_string(),
             "smuggling:CL.TE"
         );
+    }
+
+    #[test]
+    fn body_padding_roundtrip() {
+        let t = Technique::BodyPadding(16384);
+        assert_eq!(t.to_string(), "body-padding:16384");
+        assert_eq!(Technique::from_pool_key("body-padding:16384"), Some(t));
+        assert_eq!(Technique::from_pool_key("body-padding:not-a-number"), None);
     }
 
     #[test]
