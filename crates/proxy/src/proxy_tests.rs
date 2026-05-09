@@ -456,7 +456,10 @@ fn tls_tunnel_addr_format_variations() {
 // TEST 51-55: Gene bank persistence
 #[test]
 fn load_gene_bank_valid_v1() {
-    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_v1.json");
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gene_bank_v1_{}.json",
+        std::process::id()
+    ));
     let json = r#"{"schema":1,"hosts":{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":null}}}"#;
     std::fs::write(&tmp, json).unwrap();
     let bank = load_gene_bank(&tmp);
@@ -467,7 +470,10 @@ fn load_gene_bank_valid_v1() {
 
 #[test]
 fn load_gene_bank_future_schema_loads_but_warns() {
-    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_v2.json");
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gene_bank_v2_{}.json",
+        std::process::id()
+    ));
     let json = r#"{"schema":2,"hosts":{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":"FutureWAF"}}}"#;
     std::fs::write(&tmp, json).unwrap();
     let bank = load_gene_bank(&tmp);
@@ -479,7 +485,10 @@ fn load_gene_bank_future_schema_loads_but_warns() {
 
 #[test]
 fn load_gene_bank_empty_file_returns_default() {
-    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_empty.json");
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gene_bank_empty_{}.json",
+        std::process::id()
+    ));
     std::fs::write(&tmp, "   ").unwrap();
     let bank = load_gene_bank(&tmp);
     assert_eq!(bank.schema, 0);
@@ -489,7 +498,10 @@ fn load_gene_bank_empty_file_returns_default() {
 
 #[test]
 fn load_gene_bank_malformed_json_returns_default() {
-    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_bad.json");
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gene_bank_bad_{}.json",
+        std::process::id()
+    ));
     std::fs::write(&tmp, "not json").unwrap();
     let bank = load_gene_bank(&tmp);
     assert_eq!(bank.schema, 0);
@@ -499,7 +511,10 @@ fn load_gene_bank_malformed_json_returns_default() {
 
 #[test]
 fn load_gene_bank_missing_file_returns_default() {
-    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_missing.json");
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gene_bank_missing_{}.json",
+        std::process::id()
+    ));
     let _ = std::fs::remove_file(&tmp);
     let bank = load_gene_bank(&tmp);
     assert_eq!(bank.schema, 0);
@@ -953,8 +968,10 @@ fn render_live_findings_does_not_render_attacker_markdown() {
     // the backtick / asterisk / bracket payload does not survive into
     // the output. Defends against /_wafrift/findings.md being a stored
     // markdown-injection sink reachable via crafted Host headers.
-    let mut state = ProxyState::default();
-    state.total_scanned = 1;
+    let mut state = ProxyState {
+        total_scanned: 1,
+        ..Default::default()
+    };
     let hs = HostState {
         proven_winners: vec!["EncodingUrl".into()],
         waf_name: Some("Cloud`Flare`".into()),

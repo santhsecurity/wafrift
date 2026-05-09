@@ -93,7 +93,19 @@ fn gene_bank_roundtrip() {
 
 #[test]
 fn gene_bank_list_wafs() {
-    let tmp = std::env::temp_dir().join("wafrift_test_list");
+    // PID + nanos suffix so concurrent test runs (`cargo test` with the
+    // default thread pool) don't trample each other's tmp dir. The
+    // earlier `wafrift_test_list` static-name version flaked under
+    // load — two threads racing on the same directory would unwrap()
+    // a `NotFound` between one's remove_dir_all and another's save.
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_list_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     let _ = fs::remove_dir_all(&tmp);
     let mut bank = GeneBank::open(tmp.clone()).unwrap();
 
