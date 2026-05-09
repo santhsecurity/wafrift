@@ -4,7 +4,7 @@
 //! malformed headers, and re-use of successful techniques.
 
 use wafrift_core::{
-    EscalationLevel, EvasionConfig, HostState, Method, Request, Technique,
+    EscalationLevel, EvasionConfig, HostState, Request, Technique,
     strategy::{self, CalibrationResult},
 };
 
@@ -316,12 +316,7 @@ fn evade_delete_request_no_body() {
 
 #[test]
 fn evade_no_headers() {
-    let req = Request {
-        method: Method::Post,
-        url: "https://example.com".to_string(),
-        headers: vec![],
-        body: Some(b"test".to_vec()),
-    };
+    let req = Request::post("https://example.com", b"test".to_vec());
     let mut state = HostState::default();
     state.record_block();
     let config = EvasionConfig::default();
@@ -485,16 +480,10 @@ fn evade_binary_body() {
 
 #[test]
 fn evade_malformed_header_names() {
-    let req = Request {
-        method: Method::Post,
-        url: "https://example.com".to_string(),
-        headers: vec![
-            (String::new(), "empty-name".to_string()),
-            ("\n\r".to_string(), "crlf-name".to_string()),
-            ("Normal-Header".to_string(), "value".to_string()),
-        ],
-        body: Some(b"test".to_vec()),
-    };
+    let req = Request::post("https://example.com", b"test".to_vec())
+        .header("", "empty-name")
+        .header("\n\r", "crlf-name")
+        .header("Normal-Header", "value");
     let mut state = HostState::default();
     state.record_block();
     let config = EvasionConfig::default();
@@ -506,16 +495,10 @@ fn evade_malformed_header_names() {
 
 #[test]
 fn evade_malformed_header_values() {
-    let req = Request {
-        method: Method::Post,
-        url: "https://example.com".to_string(),
-        headers: vec![
-            ("Content-Type".to_string(), String::new()),
-            ("X-Test".to_string(), "\x00\x01\x02".to_string()),
-            ("X-Unicode".to_string(), "日本語".to_string()),
-        ],
-        body: Some(b"test".to_vec()),
-    };
+    let req = Request::post("https://example.com", b"test".to_vec())
+        .header("Content-Type", "")
+        .header("X-Test", "\x00\x01\x02")
+        .header("X-Unicode", "日本語");
     let mut state = HostState::default();
     state.record_block();
     let config = EvasionConfig::default();
@@ -527,16 +510,10 @@ fn evade_malformed_header_values() {
 
 #[test]
 fn evade_duplicate_headers() {
-    let req = Request {
-        method: Method::Post,
-        url: "https://example.com".to_string(),
-        headers: vec![
-            ("X-Custom".to_string(), "value1".to_string()),
-            ("X-Custom".to_string(), "value2".to_string()),
-            ("X-Custom".to_string(), "value3".to_string()),
-        ],
-        body: Some(b"test".to_vec()),
-    };
+    let req = Request::post("https://example.com", b"test".to_vec())
+        .header("X-Custom", "value1")
+        .header("X-Custom", "value2")
+        .header("X-Custom", "value3");
     let mut state = HostState::default();
     state.record_block();
     let config = EvasionConfig::default();
@@ -566,12 +543,8 @@ fn evade_many_headers() {
     for i in 0..100 {
         headers.push((format!("X-Header-{i}"), format!("value{i}")));
     }
-    let req = Request {
-        method: Method::Post,
-        url: "https://example.com".to_string(),
-        headers,
-        body: Some(b"test".to_vec()),
-    };
+    let mut req = Request::post("https://example.com", b"test".to_vec());
+    req.headers = headers;
     let mut state = HostState::default();
     state.record_block();
     let config = EvasionConfig::default();
@@ -589,12 +562,8 @@ fn evade_content_type_case_variations() {
         "CONTENT-TYPE",
         "CoNtEnT-TyPe",
     ] {
-        let req = Request {
-            method: Method::Post,
-            url: "https://example.com".to_string(),
-            headers: vec![(ct.to_string(), "application/json".to_string())],
-            body: Some(b"test".to_vec()),
-        };
+        let req = Request::post("https://example.com", b"test".to_vec())
+            .header(ct, "application/json");
         let mut state = HostState::default();
         state.record_block();
         let config = EvasionConfig::default();

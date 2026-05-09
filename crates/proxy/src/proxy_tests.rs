@@ -676,8 +676,10 @@ fn render_findings_zero_requests() {
 
 #[test]
 fn render_findings_hosts_but_no_winners() {
-    let mut state = ProxyState::default();
-    state.total_scanned = 5;
+    let mut state = ProxyState {
+        total_scanned: 5,
+        ..Default::default()
+    };
     let hs = state.hosts.entry("example.com".into()).or_default();
     hs.record_block();
     let md = render_live_findings(&state);
@@ -688,8 +690,10 @@ fn render_findings_hosts_but_no_winners() {
 
 #[test]
 fn render_findings_with_winners() {
-    let mut state = ProxyState::default();
-    state.total_scanned = 10;
+    let mut state = ProxyState {
+        total_scanned: 10,
+        ..Default::default()
+    };
     let hs = state.hosts.entry("example.com".into()).or_default();
     hs.proven_winners.push("UrlEncode".into());
     hs.waf_name = Some("Cloudflare".into());
@@ -951,9 +955,11 @@ fn render_live_findings_does_not_render_attacker_markdown() {
     // markdown-injection sink reachable via crafted Host headers.
     let mut state = ProxyState::default();
     state.total_scanned = 1;
-    let mut hs = HostState::default();
-    hs.proven_winners = vec!["EncodingUrl".into()];
-    hs.waf_name = Some("Cloud`Flare`".into()); // backtick in WAF name too
+    let hs = HostState {
+        proven_winners: vec!["EncodingUrl".into()],
+        waf_name: Some("Cloud`Flare`".into()),
+        ..Default::default()
+    }; // backtick in WAF name too
     state.hosts.insert("evil`alert(1)`.com".into(), hs);
 
     let md = render_live_findings(&state);

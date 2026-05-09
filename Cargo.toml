@@ -96,6 +96,9 @@ base64 = "0.22.1"
 hex = "0.4.3"
 colored = "2"
 rcgen = { version = "0.14.7", features = ["pem", "x509-parser"] }
+# rcgen takes time::OffsetDateTime for not_before/not_after; expose
+# the same major-version transitive so we can set bounded validity.
+time = { version = "0.3", default-features = false, features = ["std"] }
 sqlparser = "0.61.0"
 wiremock = "0.6.5"
 async-trait = "0.1.89"

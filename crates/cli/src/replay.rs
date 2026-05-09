@@ -164,18 +164,12 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         .or_else(|| extract_host_from_url(&args.target))
         .unwrap_or_default();
 
-    let req = Request {
-        method: method.clone(),
-        url: target_url,
-        headers: vec![
-            (
-                "User-Agent".into(),
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36".into(),
-            ),
-            ("Accept".into(), "*/*".into()),
-        ],
-        body: None,
-    };
+    let req = Request::with_method(method.clone(), target_url)
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        )
+        .header("Accept", "*/*");
 
     // Drive the existing evasion engine in "rotation" mode by stamping
     // the saved keys onto a fresh HostState as proven winners. This is

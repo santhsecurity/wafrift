@@ -41,6 +41,16 @@ impl CertificateAuthority {
             KeyUsagePurpose::KeyCertSign,
             KeyUsagePurpose::CrlSign,
         ];
+        // Bounded CA validity (397 days, the CA/B forum max for leafs
+        // — conservative even for a root). A locally-issued MITM CA
+        // is a network-wide trust root for any client that imports
+        // it, so a security-tool-shipped CA must not default to the
+        // 10-year-root rcgen default. Practitioners regenerate per
+        // engagement via `wafrift-proxy --write-mitm-ca-dir`.
+        let now = time::OffsetDateTime::now_utc();
+        ca_params.not_before = now - time::Duration::minutes(5);
+        ca_params.not_after = now + time::Duration::days(397);
+
         let ca_key =
             KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate CA key")?;
         let ca_cert = ca_params.self_signed(&ca_key).context("self_signed CA")?;

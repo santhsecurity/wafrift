@@ -29,6 +29,7 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 rcgen = { workspace = true }
+time = { workspace = true }
 tokio-rustls.workspace = true
 rustls.workspace = true
 rustls-pki-types = { workspace = true }

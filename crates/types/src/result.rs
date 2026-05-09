@@ -16,7 +16,13 @@ use crate::Technique;
 /// Carries the mutated request, which techniques were applied, a
 /// human-readable description, and a confidence score estimating
 /// how likely this is to bypass the WAF.
+///
+/// # Construction
+///
+/// Use [`EvasionResult::new`] or [`EvasionResult::with_confidence`].
+/// Direct struct construction is prevented by `#[non_exhaustive]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct EvasionResult {
     /// The transformed request with evasion techniques applied.
     pub request: Request,
@@ -59,6 +65,44 @@ impl EvasionResult {
             confidence: confidence.clamp(0.0, 1.0),
         }
     }
+
+    // ── Accessors ────────────────────────────────────────────────
+
+    /// Returns a reference to the transformed request.
+    #[must_use]
+    pub fn request(&self) -> &Request {
+        &self.request
+    }
+
+    /// Returns a mutable reference to the transformed request.
+    pub fn request_mut(&mut self) -> &mut Request {
+        &mut self.request
+    }
+
+    /// Returns a slice of the techniques applied.
+    #[must_use]
+    pub fn techniques(&self) -> &[Technique] {
+        &self.techniques
+    }
+
+    /// Returns the description of what was done.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the bypass confidence score (0.0–1.0).
+    #[must_use]
+    pub fn confidence(&self) -> f64 {
+        self.confidence
+    }
+
+    /// Update the confidence score (used by evolution feedback loop).
+    pub fn set_confidence(&mut self, confidence: f64) {
+        self.confidence = confidence.clamp(0.0, 1.0);
+    }
+
+    // ── Internals ────────────────────────────────────────────────
 
     /// Heuristic confidence estimation based on technique composition.
     ///
@@ -200,5 +244,31 @@ mod tests {
             -0.5,
         );
         assert_eq!(result2.confidence, 0.0);
+    }
+
+    #[test]
+    fn accessor_methods() {
+        let result = EvasionResult::new(
+            Request::get("https://example.com"),
+            vec![Technique::GrammarMutation("sql".into())],
+            "test desc".into(),
+        );
+        assert_eq!(result.request().url(), "https://example.com");
+        assert_eq!(result.techniques().len(), 1);
+        assert_eq!(result.description(), "test desc");
+        assert!(result.confidence() > 0.0);
+    }
+
+    #[test]
+    fn set_confidence_clamps() {
+        let mut result = EvasionResult::new(
+            Request::get("https://example.com"),
+            vec![],
+            "test".into(),
+        );
+        result.set_confidence(2.0);
+        assert_eq!(result.confidence(), 1.0);
+        result.set_confidence(-1.0);
+        assert_eq!(result.confidence(), 0.0);
     }
 }

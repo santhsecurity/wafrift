@@ -355,7 +355,8 @@ fn run_man(args: ManArgs) -> ExitCode {
         {
             Some(c) => c,
             None => {
-                let names: Vec<&str> = Cli::command()
+                let cmd = Cli::command();
+                let names: Vec<&str> = cmd
                     .get_subcommands()
                     .map(|c| c.get_name())
                     .collect();

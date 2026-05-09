@@ -382,11 +382,10 @@ impl GeneBank {
         })?;
 
         // Ensure the directory entry is durable.
-        if let Some(parent) = path.parent() {
-            if let Ok(dir) = fs::OpenOptions::new().read(true).open(parent) {
+        if let Some(parent) = path.parent()
+            && let Ok(dir) = fs::OpenOptions::new().read(true).open(parent) {
                 let _ = dir.sync_all();
             }
-        }
 
         Ok(())
     }

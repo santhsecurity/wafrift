@@ -176,9 +176,8 @@ pub(crate) async fn run_scan(
         Ok(client) => client,
         Err(e) => {
             eprintln!(
-                "  {} {} ({})\n    {}",
+                "  {} reqwest builder error ({})\n    {}",
                 "✗ Failed to create HTTP client:".red().bold(),
-                "reqwest builder error",
                 e,
                 "hint: this usually means a TLS backend (rustls / native-tls) failed to initialise — check OS root certs are present".bright_black()
             );

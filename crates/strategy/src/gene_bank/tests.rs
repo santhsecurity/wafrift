@@ -285,6 +285,7 @@ fn advisory_lock_blocks_concurrent_writers() {
 
     let f1 = fs::OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(&lock_path)
         .unwrap();
@@ -292,6 +293,7 @@ fn advisory_lock_blocks_concurrent_writers() {
 
     let f2 = fs::OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(&lock_path)
         .unwrap();

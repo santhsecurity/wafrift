@@ -246,7 +246,7 @@ fn run_list(args: BankListArgs) -> ExitCode {
     if waf_genomes.is_empty() {
         println!("  (no per-WAF genomes recorded)");
     } else {
-        for (waf, _) in &waf_genomes {
+        for waf in waf_genomes.keys() {
             println!("  {waf}");
         }
     }
@@ -455,9 +455,11 @@ mod tests {
     use super::*;
 
     fn fixture_envelope() -> String {
-        let mut hs = PersistedHostState::default();
-        hs.proven_winners = vec!["EncodingUrl".into()];
-        hs.waf_name = Some("ModSec".into());
+        let hs = PersistedHostState {
+            proven_winners: vec!["EncodingUrl".into()],
+            waf_name: Some("ModSec".into()),
+            ..Default::default()
+        };
         let mut hosts = BTreeMap::new();
         hosts.insert("api.example.com".to_string(), hs);
 
@@ -510,8 +512,10 @@ mod tests {
             schema: 1,
             hosts: {
                 let mut m = BTreeMap::new();
-                let mut hs = PersistedHostState::default();
-                hs.proven_winners = vec!["EncodingUrl".into(), "GrammarTautology".into()];
+                let hs = PersistedHostState {
+                    proven_winners: vec!["EncodingUrl".into(), "GrammarTautology".into()],
+                    ..Default::default()
+                };
                 m.insert("api.example.com".into(), hs);
                 m
             },
@@ -554,8 +558,10 @@ mod tests {
             schema: 1,
             hosts: {
                 let mut m = BTreeMap::new();
-                let mut hs = PersistedHostState::default();
-                hs.proven_winners = vec!["LocalOnly".into()];
+                let hs = PersistedHostState {
+                    proven_winners: vec!["LocalOnly".into()],
+                    ..Default::default()
+                };
                 m.insert("api.example.com".into(), hs);
                 m
             },
@@ -592,9 +598,11 @@ mod tests {
             schema: 1,
             hosts: {
                 let mut m = BTreeMap::new();
-                let mut hs = PersistedHostState::default();
-                hs.proven_winners = vec!["A".into(), "B".into()];
-                hs.waf_name = Some("Cloudflare".into());
+                let hs = PersistedHostState {
+                    proven_winners: vec!["A".into(), "B".into()],
+                    waf_name: Some("Cloudflare".into()),
+                    ..Default::default()
+                };
                 m.insert("h1.example.com".into(), hs);
                 m
             },

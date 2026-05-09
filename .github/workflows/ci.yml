@@ -50,6 +50,52 @@ jobs:
       - run: cargo test --workspace --all-features
       - name: bench corpus integrity
         run: cargo run --release -p wafrift-cli -- bench-waf --validate-only --corpus wafrift-bench/corpus
+      - name: bench corpus pinned hash matches wafrift-bench/CORPUS.SHA256
+        run: |
+          # Recompute the hash and assert it matches the pinned value.
+          # This stops anyone from quietly editing corpus TOML files
+          # while keeping the published bypass-rate numbers — those
+          # numbers depend on this exact corpus.
+          set -euo pipefail
+          actual=$(find wafrift-bench/corpus -type f -name '*.toml' | sort | xargs sha256sum | sha256sum | awk '{print $1}')
+          pinned=$(grep -vE '^\s*(#|$)' wafrift-bench/CORPUS.SHA256 | head -1 | awk '{print $1}')
+          if [ "$actual" != "$pinned" ]; then
+            echo "::error::Corpus hash drift!"
+            echo "  pinned: $pinned"
+            echo "  actual: $actual"
+            echo "  Update wafrift-bench/CORPUS.SHA256 + re-run any published bench results in the same commit."
+            exit 1
+          fi
+          echo "Corpus pinned hash OK ($actual)"
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+  docker:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: wafrift-ci-smoke:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test — wafrift --help
+        run: docker run --rm wafrift-ci-smoke:latest wafrift --help
+      - name: Smoke test — wafrift evade
+        run: docker run --rm wafrift-ci-smoke:latest wafrift evade --payload "' OR 1=1--" --level light
+      - name: Smoke test — wafrift-proxy --help
+        run: docker run --rm wafrift-ci-smoke:latest wafrift-proxy --help
+      - name: Smoke test — wafrift man emits troff
+        run: |
+          # Stage 1: emit, capture stdout, expect troff macros + non-empty.
+          out=$(docker run --rm wafrift-ci-smoke:latest wafrift man)
+          test -n "$out"
+          echo "$out" | grep -q '\.SH NAME'
+          echo "$out" | grep -q 'wafrift'

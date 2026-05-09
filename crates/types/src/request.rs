@@ -94,7 +94,14 @@ impl From<String> for Method {
 ///
 /// Intentionally simple — no HTTP library dependency. The transport
 /// layer converts to/from `reqwest::Request` or raw bytes as needed.
+///
+/// # Construction
+///
+/// Use the provided constructors ([`Request::get`], [`Request::post`], etc.)
+/// and builder methods ([`Request::header`], [`Request::with_body`]).
+/// Direct struct construction is prevented by `#[non_exhaustive]`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Request {
     /// HTTP method.
     pub method: Method,
@@ -157,6 +164,59 @@ impl Request {
         }
     }
 
+    // ── Accessors ────────────────────────────────────────────────
+
+    /// Returns a reference to the HTTP method.
+    #[must_use]
+    pub fn method(&self) -> &Method {
+        &self.method
+    }
+
+    /// Returns a mutable reference to the HTTP method.
+    pub fn method_mut(&mut self) -> &mut Method {
+        &mut self.method
+    }
+
+    /// Returns the URL as a string slice.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Returns a mutable reference to the URL.
+    pub fn url_mut(&mut self) -> &mut String {
+        &mut self.url
+    }
+
+    /// Returns a slice of the header pairs.
+    #[must_use]
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
+    /// Returns a mutable reference to the headers vec.
+    pub fn headers_mut(&mut self) -> &mut Vec<(String, String)> {
+        &mut self.headers
+    }
+
+    /// Returns a reference to the body, if present.
+    #[must_use]
+    pub fn body_bytes(&self) -> Option<&[u8]> {
+        self.body.as_deref()
+    }
+
+    /// Sets the body, replacing any existing body.
+    pub fn set_body(&mut self, body: impl Into<Vec<u8>>) {
+        self.body = Some(body.into());
+    }
+
+    /// Clears the body.
+    pub fn clear_body(&mut self) {
+        self.body = None;
+    }
+
+    // ── Builder methods ──────────────────────────────────────────
+
     /// Add a header to the request (builder pattern).
     #[must_use]
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
@@ -175,6 +235,8 @@ impl Request {
         self.body = Some(body.into());
         self
     }
+
+    // ── Query methods ────────────────────────────────────────────
 
     /// Get the value of a header by name (case-insensitive).
     #[must_use]
@@ -334,5 +396,27 @@ mod tests {
         let json = serde_json::to_string(&req).expect("serialize");
         let deserialized: Request = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(req, deserialized);
+    }
+
+    #[test]
+    fn request_accessors() {
+        let req = Request::post("https://example.com", b"test".to_vec())
+            .header("Host", "example.com");
+        assert_eq!(req.url(), "https://example.com");
+        assert_eq!(*req.method(), Method::Post);
+        assert_eq!(req.headers().len(), 1);
+        assert_eq!(req.body_bytes(), Some(b"test".as_slice()));
+    }
+
+    #[test]
+    fn request_mutators() {
+        let mut req = Request::get("https://example.com");
+        req.set_body(b"new body");
+        assert!(req.has_body());
+        assert_eq!(req.body_str(), Some("new body"));
+        req.clear_body();
+        assert!(!req.has_body());
+        *req.url_mut() = "https://other.com".to_string();
+        assert_eq!(req.url(), "https://other.com");
     }
 }

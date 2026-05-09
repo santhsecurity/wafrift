@@ -109,9 +109,11 @@ pub async fn assert_forward_url_allowed(url: &str, policy: &UpstreamPolicy) -> R
         return Ok(());
     }
     if upstream_literal_ip_forbidden(url) {
-        return Err(
-            "upstream URL uses a disallowed literal IP (private/link-local/etc.)".to_string(),
-        );
+        return Err(format!(
+            "upstream URL uses a disallowed literal IP (private / loopback / link-local / RFC1918): {url}. \
+             If you're intentionally targeting localhost or RFC1918 lab infrastructure, \
+             restart wafrift-proxy with `--allow-private-upstream`."
+        ));
     }
     let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
     let Some(host) = u.host_str() else {
@@ -142,7 +144,11 @@ pub async fn assert_connect_target_allowed(
     let port = authority.port_u16().unwrap_or(443);
     if let Ok(ip) = host.parse::<IpAddr>() {
         if ip_addr_is_bogon(ip) {
-            return Err(format!("refusing CONNECT to non-public literal IP {ip}"));
+            return Err(format!(
+                "refusing CONNECT to non-public literal IP {ip}. \
+                 If you're targeting a localhost or RFC1918 lab service, \
+                 restart wafrift-proxy with `--allow-private-upstream`."
+            ));
         }
         return Ok(());
     }

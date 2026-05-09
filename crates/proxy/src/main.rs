@@ -176,11 +176,10 @@ impl WarnThrottle {
             Err(e) => e.into_inner(),
         };
         let now = Instant::now();
-        if let Some(last) = map.get(key) {
-            if now.duration_since(*last) < self.cooldown {
+        if let Some(last) = map.get(key)
+            && now.duration_since(*last) < self.cooldown {
                 return false;
             }
-        }
         map.insert(key.to_string(), now);
         true
     }
@@ -325,11 +324,10 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
     }
     std::fs::rename(&tmp, path)?;
     // Fsync parent directory so the rename is durable.
-    if let Some(parent) = path.parent() {
-        if let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent) {
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent) {
             let _ = dir.sync_all();
         }
-    }
     Ok(())
 }
 
@@ -393,14 +391,13 @@ fn validate_args(args: &Args) -> Result<(), String> {
             args.max_rps_per_host_burst
         ));
     }
-    if let Some(esc) = &args.escalation {
-        if !matches!(esc.as_str(), "light" | "medium" | "heavy") {
+    if let Some(esc) = &args.escalation
+        && !matches!(esc.as_str(), "light" | "medium" | "heavy") {
             return Err(format!(
                 "--escalation must be one of: light, medium, heavy. Got: {}",
                 esc
             ));
         }
-    }
     Ok(())
 }
 
@@ -937,11 +934,10 @@ async fn forward_wafrift_request(
     let resp = match builder.send().await {
         Ok(r) => r,
         Err(e) => {
-            if let Some(throttle) = WARN_THROTTLE.get() {
-                if throttle.should_warn(&format!("forward:{host}")) {
+            if let Some(throttle) = WARN_THROTTLE.get()
+                && throttle.should_warn(&format!("forward:{host}")) {
                     warn!(host = %host, error = %e, "forwarding failed");
                 }
-            }
             // S3 fix: Do not leak internal errors to external callers
             return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
         }
@@ -1116,11 +1112,10 @@ async fn mitm_plaintext_request(
     let body_bytes = match limited.collect().await {
         Ok(b) => b.to_bytes().to_vec(),
         Err(_) => {
-            if let Some(throttle) = WARN_THROTTLE.get() {
-                if throttle.should_warn(&format!("body-limit:{host}")) {
+            if let Some(throttle) = WARN_THROTTLE.get()
+                && throttle.should_warn(&format!("body-limit:{host}")) {
                     warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
                 }
-            }
             return Ok(error_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request body too large",
@@ -1316,15 +1311,14 @@ async fn proxy(
                 // and CANNOT apply evasion. Throttled per-host info log
                 // so the practitioner notices the gap without spamming
                 // every CONNECT (each tunnel hits this branch once).
-                if let Some(throttle) = WARN_THROTTLE.get() {
-                    if throttle.should_warn(&format!("connect-passthrough:{addr}")) {
+                if let Some(throttle) = WARN_THROTTLE.get()
+                    && throttle.should_warn(&format!("connect-passthrough:{addr}")) {
                         info!(
                             target = %addr,
                             "CONNECT pass-through (no MITM): bytes are TLS-encrypted, evasion engine inactive. \
                              Pass `--mitm` to terminate TLS and apply evasion to HTTPS request bodies."
                         );
                     }
-                }
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(req).await {
                         Ok(upgraded) => {
@@ -1421,11 +1415,10 @@ async fn proxy(
     let body_bytes = match limited.collect().await {
         Ok(b) => b.to_bytes().to_vec(),
         Err(_) => {
-            if let Some(throttle) = WARN_THROTTLE.get() {
-                if throttle.should_warn(&format!("body-limit:{host}")) {
+            if let Some(throttle) = WARN_THROTTLE.get()
+                && throttle.should_warn(&format!("body-limit:{host}")) {
                     warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
                 }
-            }
             return Ok(error_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request body too large",
@@ -1531,11 +1524,10 @@ async fn forward_passthrough(
     let resp = match builder.send().await {
         Ok(r) => r,
         Err(e) => {
-            if let Some(throttle) = WARN_THROTTLE.get() {
-                if throttle.should_warn(&format!("passthrough:{host}")) {
+            if let Some(throttle) = WARN_THROTTLE.get()
+                && throttle.should_warn(&format!("passthrough:{host}")) {
                     warn!(host = %host, error = %e, "passthrough forwarding failed");
                 }
-            }
             return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
         }
     };
