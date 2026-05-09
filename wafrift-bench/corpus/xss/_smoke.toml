@@ -1,0 +1,41 @@
+schema = 1
+
+[[case]]
+id = "script_alert"
+class = "xss"
+payload = "<script>alert(1)</script>"
+
+[[case]]
+id = "img_onerror"
+class = "xss"
+payload = "<img src=x onerror=alert(1)>"
+
+[[case]]
+id = "svg_onload"
+class = "xss"
+payload = "<svg/onload=alert(1)>"
+
+[[case]]
+id = "javascript_uri"
+class = "xss"
+payload = "javascript:alert(1)"
+
+[[case]]
+id = "iframe_srcdoc"
+class = "xss"
+payload = "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe>"
+
+[[case]]
+id = "body_onload"
+class = "xss"
+payload = "<body onload=alert(1)>"
+
+[[case]]
+id = "details_ontoggle"
+class = "xss"
+payload = "<details open ontoggle=alert(1)>"
+
+[[case]]
+id = "polyglot_ova"
+class = "xss"
+payload = "javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/\"/+/onmouseover=1/+/[*/[]/+alert(1)//'>"

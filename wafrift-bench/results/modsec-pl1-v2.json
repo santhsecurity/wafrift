@@ -1,0 +1,2487 @@
+{
+  "base_url": "http://127.0.0.1:18081",
+  "by_class": {
+    "cmdi": {
+      "bypass_rate": 0.49,
+      "cases": 8,
+      "evaded_bypassed": 196,
+      "evaded_total": 400,
+      "raw_block_rate": 0.375,
+      "raw_blocked": 3
+    },
+    "ldap": {
+      "bypass_rate": 0.64,
+      "cases": 4,
+      "evaded_bypassed": 128,
+      "evaded_total": 200,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 4
+    },
+    "log4shell": {
+      "bypass_rate": 0.44370860927152317,
+      "cases": 6,
+      "evaded_bypassed": 67,
+      "evaded_total": 151,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 6
+    },
+    "nosql": {
+      "bypass_rate": 0.5031446540880503,
+      "cases": 6,
+      "evaded_bypassed": 80,
+      "evaded_total": 159,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 6
+    },
+    "path": {
+      "bypass_rate": 0.3441295546558704,
+      "cases": 6,
+      "evaded_bypassed": 85,
+      "evaded_total": 247,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 6
+    },
+    "sql": {
+      "bypass_rate": 0.13,
+      "cases": 12,
+      "evaded_bypassed": 78,
+      "evaded_total": 600,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 12
+    },
+    "ssrf": {
+      "bypass_rate": 0.312,
+      "cases": 10,
+      "evaded_bypassed": 156,
+      "evaded_total": 500,
+      "raw_block_rate": 0.8,
+      "raw_blocked": 8
+    },
+    "ssti": {
+      "bypass_rate": 0.24,
+      "cases": 8,
+      "evaded_bypassed": 96,
+      "evaded_total": 400,
+      "raw_block_rate": 0.625,
+      "raw_blocked": 5
+    },
+    "xss": {
+      "bypass_rate": 0.0,
+      "cases": 8,
+      "evaded_bypassed": 0,
+      "evaded_total": 400,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 8
+    },
+    "xxe": {
+      "bypass_rate": 0.0,
+      "cases": 4,
+      "evaded_bypassed": 0,
+      "evaded_total": 132,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 4
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 60,
+    "overall_bypass_rate": 0.2778300407651301,
+    "total_variants_bypassed": 886,
+    "total_variants_sent": 3189
+  },
+  "raw_block_rate": 0.8611111111111112,
+  "raw_blocked": 62,
+  "results": [
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "aws_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.58448,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation+encoding::UrlEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "gcp_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.17491,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "azure_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.703963,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "localhost_redis",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.661083,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "file_uri",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.682523,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 30,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation+encoding::CaseAlternation"
+        ],
+        "variants_bypassed": 30,
+        "variants_total": 50
+      },
+      "id": "gopher_smtp",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.6717230000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "decimal_localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7733040000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "ipv6_localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7334890000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "url_at_bypass",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.682314,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "dns_rebinding_pin",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.428797,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 30,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:space_swap",
+          "heavy:separator_swap+encoding::RandomCase",
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::WhitespaceInsertion",
+          "heavy:separator_swap+encoding::SqlCommentInsertion",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToRandomBlank",
+          "heavy:separator_swap+encoding::SpaceToDash",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode",
+          "heavy:separator_swap+encoding::FullwidthEncode"
+        ],
+        "variants_bypassed": 30,
+        "variants_total": 50
+      },
+      "id": "shell_id",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.261793,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 30,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:space_swap",
+          "heavy:separator_swap+encoding::CaseAlternation",
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::WhitespaceInsertion",
+          "heavy:separator_swap+encoding::SqlCommentInsertion",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToDash",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode",
+          "heavy:separator_swap+encoding::FullwidthEncode",
+          "heavy:separator_swap+encoding::HomoglyphEncode"
+        ],
+        "variants_bypassed": 30,
+        "variants_total": 50
+      },
+      "id": "shell_pipe_id",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.0677379999999999,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.74,
+            "bypassed": 37,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.74,
+        "bypass_techniques": [
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:separator_swap+encoding::CaseAlternation",
+          "heavy:separator_swap+encoding::RandomCase",
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::WhitespaceInsertion",
+          "heavy:separator_swap+encoding::SqlCommentInsertion",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToRandomBlank",
+          "heavy:separator_swap+encoding::SpaceToDash",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 37,
+        "variants_total": 50
+      },
+      "id": "shell_backtick",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.545176,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.12,
+            "bypassed": 6,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.12,
+        "bypass_techniques": [
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 50
+      },
+      "id": "shell_subshell",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.888691,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 30,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:space_swap",
+          "heavy:separator_swap+encoding::CaseAlternation",
+          "heavy:separator_swap+encoding::RandomCase",
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::WhitespaceInsertion",
+          "heavy:separator_swap+encoding::SqlCommentInsertion",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToRandomBlank",
+          "heavy:separator_swap+encoding::SpaceToDash",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 30,
+        "variants_total": 50
+      },
+      "id": "shell_amp_amp",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.180029,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 30,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:separator_swap",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:space_swap",
+          "heavy:separator_swap+encoding::CaseAlternation",
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::WhitespaceInsertion",
+          "heavy:separator_swap+encoding::SqlCommentInsertion",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToRandomBlank",
+          "heavy:separator_swap+encoding::SpaceToDash",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode",
+          "heavy:separator_swap+encoding::FullwidthEncode"
+        ],
+        "variants_bypassed": 30,
+        "variants_total": 50
+      },
+      "id": "shell_newline",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.2128510000000001,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:space_swap",
+          "heavy:space_swap",
+          "heavy:space_swap",
+          "heavy:space_swap",
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "windows_amp",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.697612,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.38,
+            "bypassed": 19,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.38,
+        "bypass_techniques": [
+          "heavy:separator_swap",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:separator_swap+encoding::UrlEncode",
+          "heavy:separator_swap+encoding::UrlEncodeLower",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::HtmlEntityEncode",
+          "heavy:separator_swap+encoding::HtmlEntityDecimalEncode",
+          "heavy:separator_swap+encoding::DoubleUrlEncode",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 19,
+        "variants_total": 50
+      },
+      "id": "windows_pipe",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.814612,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:path_traversal_mutation+encoding::PercentagePrefix",
+          "heavy:path_traversal_mutation+encoding::TripleUrlEncode",
+          "heavy:path_traversal_mutation+encoding::Base64Encode",
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8More",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "linux_etc_passwd",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.717579,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:path_traversal_mutation+encoding::PercentagePrefix",
+          "heavy:path_traversal_mutation+encoding::TripleUrlEncode",
+          "heavy:path_traversal_mutation+encoding::Base64Encode",
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8More",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "linux_double_dot",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.689466,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.5652173913043478,
+            "bypassed": 13,
+            "variants": 23
+          }
+        },
+        "bypass_rate": 0.5652173913043478,
+        "bypass_techniques": [
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::IisUnicodeEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 13,
+        "variants_total": 23
+      },
+      "id": "url_encoded",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.626097,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6666666666666666,
+            "bypassed": 16,
+            "variants": 24
+          }
+        },
+        "bypass_rate": 0.6666666666666666,
+        "bypass_techniques": [
+          "heavy:encoding::UrlEncode",
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::IisUnicodeEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 16,
+        "variants_total": 24
+      },
+      "id": "double_url_encoded",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.711258,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:path_traversal_mutation+encoding::PercentagePrefix",
+          "heavy:path_traversal_mutation+encoding::TripleUrlEncode",
+          "heavy:path_traversal_mutation+encoding::Base64Encode",
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8More",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "windows_boot_ini",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.725384,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:path_traversal_mutation+encoding::PercentagePrefix",
+          "heavy:path_traversal_mutation+encoding::TripleUrlEncode",
+          "heavy:path_traversal_mutation+encoding::Base64Encode",
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8",
+          "heavy:path_traversal_mutation+encoding::OverlongUtf8More",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityEncode",
+          "heavy:path_traversal_mutation+encoding::HtmlEntityDecimalEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "null_byte_truncation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7062080000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "external_entity_passwd",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.566396,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "parameter_entity",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.5162209999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "billion_laughs",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.5047889999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "external_xinclude",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.556126,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "script_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.740112,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "img_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.930239,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "svg_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.753467,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "javascript_uri",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.647227,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "iframe_srcdoc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.716608,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "body_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8009459999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "details_ontoggle",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.788613,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "polyglot_ova",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.945298,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.44,
+            "bypassed": 11,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.44,
+        "bypass_techniques": [
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 11,
+        "variants_total": 25
+      },
+      "id": "jndi_ldap_basic",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.779676,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.46153846153846156,
+            "bypassed": 12,
+            "variants": 26
+          }
+        },
+        "bypass_rate": 0.46153846153846156,
+        "bypass_techniques": [
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 26
+      },
+      "id": "jndi_rmi",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.005571,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.44,
+            "bypassed": 11,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.44,
+        "bypass_techniques": [
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 11,
+        "variants_total": 25
+      },
+      "id": "jndi_dns",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7635059999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.44,
+            "bypassed": 11,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.44,
+        "bypass_techniques": [
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 11,
+        "variants_total": 25
+      },
+      "id": "jndi_lower_obfuscation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.766011,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.44,
+            "bypassed": 11,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.44,
+        "bypass_techniques": [
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 11,
+        "variants_total": 25
+      },
+      "id": "jndi_double_dollar",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.843185,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.44,
+            "bypassed": 11,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.44,
+        "bypass_techniques": [
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 11,
+        "variants_total": 25
+      },
+      "id": "jndi_envvar_default",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7169690000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.12,
+            "bypassed": 6,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.12,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot",
+          "heavy:whitespace_swap"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 50
+      },
+      "id": "tautology_or_1_eq_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.656504,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.22,
+            "bypassed": 11,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.22,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot",
+          "heavy:whitespace_swap",
+          "heavy:string_split",
+          "heavy:string_split",
+          "heavy:mysql_conditional",
+          "heavy:string_split+combined_whitespace",
+          "heavy:string_split+combined_whitespace"
+        ],
+        "variants_bypassed": 11,
+        "variants_total": 50
+      },
+      "id": "tautology_or_a_eq_a",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.6514850000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.28,
+            "bypassed": 14,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.28,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot",
+          "heavy:comment_swap",
+          "heavy:comment_swap",
+          "heavy:comment_swap",
+          "heavy:comment_swap",
+          "heavy:whitespace_swap",
+          "heavy:comment_swap+combined_whitespace",
+          "heavy:time_blind+mssql_waitfor_time",
+          "heavy:time_blind+oracle_dbms_pipe",
+          "heavy:time_blind+oracle_utl_inaddr"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 50
+      },
+      "id": "tautology_admin",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.705207,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.12,
+            "bypassed": 6,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.12,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot",
+          "heavy:union_swap"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 50
+      },
+      "id": "union_select_null",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.727808,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "union_information_schema",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.793302,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "blind_boolean_substr",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8397600000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "blind_time_sleep",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.787922,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "blind_time_pg_sleep",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8115060000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "error_extractvalue",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.677214,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "stacked_drop",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.737657,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "comment_inline",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.658389,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.12,
+            "bypassed": 6,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.12,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:keywordless+numeric_bitnot",
+          "heavy:whitespace_swap"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 50
+      },
+      "id": "case_alternation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.681241,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "jinja2_arith",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.710948,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "jinja2_subprocess",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.837375,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "twig_arith",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.115507,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "twig_filter",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.307409,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "freemarker_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.695478,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "velocity_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.404491,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "erb_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.68608,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.24,
+            "bypassed": 12,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.24,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 50
+      },
+      "id": "smarty_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.614636,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.5185185185185185,
+            "bypassed": 14,
+            "variants": 27
+          }
+        },
+        "bypass_rate": 0.5185185185185185,
+        "bypass_techniques": [
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 27
+      },
+      "id": "mongo_ne",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.609186,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.52,
+            "bypassed": 13,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.52,
+        "bypass_techniques": [
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 13,
+        "variants_total": 25
+      },
+      "id": "mongo_gt",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.669609,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.5185185185185185,
+            "bypassed": 14,
+            "variants": 27
+          }
+        },
+        "bypass_rate": 0.5185185185185185,
+        "bypass_techniques": [
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 27
+      },
+      "id": "mongo_regex",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.689016,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.48148148148148145,
+            "bypassed": 13,
+            "variants": 27
+          }
+        },
+        "bypass_rate": 0.48148148148148145,
+        "bypass_techniques": [
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 13,
+        "variants_total": 27
+      },
+      "id": "mongo_where_true",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.63767,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.5185185185185185,
+            "bypassed": 14,
+            "variants": 27
+          }
+        },
+        "bypass_rate": 0.5185185185185185,
+        "bypass_techniques": [
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 14,
+        "variants_total": 27
+      },
+      "id": "mongo_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.669018,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.46153846153846156,
+            "bypassed": 12,
+            "variants": 26
+          }
+        },
+        "bypass_rate": 0.46153846153846156,
+        "bypass_techniques": [
+          "heavy:encoding::HtmlEntityEncode",
+          "heavy:encoding::HtmlEntityDecimalEncode",
+          "heavy:encoding::DoubleUrlEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::TripleUrlEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::OverlongUtf8",
+          "heavy:encoding::OverlongUtf8More",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 12,
+        "variants_total": 26
+      },
+      "id": "couch_inject",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.981806,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.64,
+            "bypassed": 32,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.64,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::CaseAlternation",
+          "heavy:ldap_mutation+encoding::RandomCase",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::HtmlEntityEncode",
+          "heavy:ldap_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::JsonEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::ParameterPollution",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode",
+          "heavy:ldap_mutation+encoding::Base64Encode",
+          "heavy:ldap_mutation+encoding::OverlongUtf8",
+          "heavy:ldap_mutation+encoding::OverlongUtf8More",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::BetweenObfuscation",
+          "heavy:ldap_mutation+encoding::ChunkedSplit",
+          "heavy:ldap_mutation+encoding::GzipEncode",
+          "heavy:ldap_mutation+encoding::DeflateEncode",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode"
+        ],
+        "variants_bypassed": 32,
+        "variants_total": 50
+      },
+      "id": "tautology_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7421660000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.64,
+            "bypassed": 32,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.64,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::CaseAlternation",
+          "heavy:ldap_mutation+encoding::RandomCase",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::HtmlEntityEncode",
+          "heavy:ldap_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::JsonEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::ParameterPollution",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode",
+          "heavy:ldap_mutation+encoding::Base64Encode",
+          "heavy:ldap_mutation+encoding::OverlongUtf8",
+          "heavy:ldap_mutation+encoding::OverlongUtf8More",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::BetweenObfuscation",
+          "heavy:ldap_mutation+encoding::ChunkedSplit",
+          "heavy:ldap_mutation+encoding::GzipEncode",
+          "heavy:ldap_mutation+encoding::DeflateEncode",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode"
+        ],
+        "variants_bypassed": 32,
+        "variants_total": 50
+      },
+      "id": "tautology_and",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.89845,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.64,
+            "bypassed": 32,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.64,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::CaseAlternation",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::HtmlEntityEncode",
+          "heavy:ldap_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::JsonEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::ParameterPollution",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode",
+          "heavy:ldap_mutation+encoding::Base64Encode",
+          "heavy:ldap_mutation+encoding::Base64UrlEncode",
+          "heavy:ldap_mutation+encoding::OverlongUtf8",
+          "heavy:ldap_mutation+encoding::OverlongUtf8More",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::BetweenObfuscation",
+          "heavy:ldap_mutation+encoding::ChunkedSplit",
+          "heavy:ldap_mutation+encoding::GzipEncode",
+          "heavy:ldap_mutation+encoding::DeflateEncode",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode"
+        ],
+        "variants_bypassed": 32,
+        "variants_total": 50
+      },
+      "id": "wildcard_anon",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.843907,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.64,
+            "bypassed": 32,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.64,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::CaseAlternation",
+          "heavy:ldap_mutation+encoding::RandomCase",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::HtmlEntityEncode",
+          "heavy:ldap_mutation+encoding::HtmlEntityDecimalEncode",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::JsonEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::ParameterPollution",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode",
+          "heavy:ldap_mutation+encoding::Base64Encode",
+          "heavy:ldap_mutation+encoding::OverlongUtf8",
+          "heavy:ldap_mutation+encoding::OverlongUtf8More",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::BetweenObfuscation",
+          "heavy:ldap_mutation+encoding::ChunkedSplit",
+          "heavy:ldap_mutation+encoding::GzipEncode",
+          "heavy:ldap_mutation+encoding::DeflateEncode",
+          "heavy:ldap_mutation+encoding::UrlEncode",
+          "heavy:ldap_mutation+encoding::UrlEncodeLower",
+          "heavy:ldap_mutation+encoding::DoubleUrlEncode",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::PercentagePrefix",
+          "heavy:ldap_mutation+encoding::TripleUrlEncode"
+        ],
+        "variants_bypassed": 32,
+        "variants_total": 50
+      },
+      "id": "boolean_filter",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.70706,
+      "raw_status": 403
+    }
+  ],
+  "strategies": [
+    "heavy"
+  ],
+  "total_cases": 72,
+  "variants_per_case_per_strategy": 50
+}

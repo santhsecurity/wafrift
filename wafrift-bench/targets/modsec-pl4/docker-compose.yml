@@ -1,6 +1,6 @@
 services:
   wafrift-pl4:
-    image: owasp/modsecurity-crs:4.7.0-apache-alpine-202411240603
+    image: owasp/modsecurity-crs:4-apache-202604040104
     container_name: wafrift-pl4
     environment:
       PARANOIA: "4"

@@ -1,0 +1,31 @@
+schema = 1
+
+[[case]]
+id = "mongo_ne"
+class = "nosql"
+payload = "[$ne]=1"
+
+[[case]]
+id = "mongo_gt"
+class = "nosql"
+payload = "[$gt]="
+
+[[case]]
+id = "mongo_regex"
+class = "nosql"
+payload = "[$regex]=.*"
+
+[[case]]
+id = "mongo_where_true"
+class = "nosql"
+payload = "[$where]=this.a%3D%3Dthis.a"
+
+[[case]]
+id = "mongo_or"
+class = "nosql"
+payload = "[$or]=[{}]"
+
+[[case]]
+id = "couch_inject"
+class = "nosql"
+payload = "{\"selector\":{\"_id\":{\"$gt\":null}}}"

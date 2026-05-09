@@ -1,69 +1,78 @@
-name: Nightly Benchmark
+name: Nightly WAF Benchmark
 
 on:
   workflow_dispatch:
     inputs:
-      test_duration:
-        description: 'Duration for the benchmark tests (in seconds)'
+      stack:
+        description: 'WAF stack to bench (modsec-pl1, modsec-pl2, modsec-pl3, modsec-pl4, coraza, naxsi)'
         required: false
-        default: '600'
+        default: 'modsec-pl1'
+      strategies:
+        description: 'Comma-separated evasion strategies (light,medium,heavy,mcts)'
+        required: false
+        default: 'heavy'
+      variants:
+        description: 'Variants per case per strategy'
+        required: false
+        default: '5'
   schedule:
-    - cron: '0 2 * * *' # Run at 2 AM UTC daily
+    # 02:00 UTC daily — only fires from main branch.
+    - cron: '0 2 * * *'
 
 jobs:
-  bench-waf:
-    name: Nightly WAF Benchmark
+  bench:
+    name: Bench WAF stacks
     runs-on: ubuntu-latest
-    
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [modsec-pl1, modsec-pl2, modsec-pl3, modsec-pl4, coraza, naxsi]
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo Registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Install ModSecurity testbed (docker-compose)
+      - name: Build wafrift-cli (release)
+        run: cargo build --release -p wafrift-cli
+
+      - name: Bring up ${{ matrix.stack }}
+        run: bash wafrift-bench/scripts/up.sh ${{ matrix.stack }}
+
+      - name: Determine port
+        id: port
         run: |
-          # Requires docker-compose to spin up the local CRS ModSecurity environment
-          cd bench-waf
-          # Expected that bench-waf/docker-compose.yml sets up a local apache/modsec
-          docker-compose up -d
-          # Wait for the ModSecurity container to be ready
-          sleep 15
+          case "${{ matrix.stack }}" in
+            modsec-pl1) echo "p=18081" >> "$GITHUB_OUTPUT" ;;
+            modsec-pl2) echo "p=18082" >> "$GITHUB_OUTPUT" ;;
+            modsec-pl3) echo "p=18083" >> "$GITHUB_OUTPUT" ;;
+            modsec-pl4) echo "p=18084" >> "$GITHUB_OUTPUT" ;;
+            coraza)     echo "p=18085" >> "$GITHUB_OUTPUT" ;;
+            naxsi)      echo "p=18086" >> "$GITHUB_OUTPUT" ;;
+          esac
 
-      - name: Build wafrift
-        run: cargo build --release
-
-      - name: Run Evasion Benchmarks
+      - name: Run wafrift bench-waf with --evade
         run: |
-          echo "Running ModSecurity Benchmarks for ${{ github.event.inputs.test_duration || '600' }} seconds"
-          ./run-waf-bench.sh --target http://localhost:8080 --duration ${{ github.event.inputs.test_duration || '600' }}
-          
-      - name: Archive Benchmark Results
+          mkdir -p wafrift-bench/results
+          ./target/release/wafrift bench-waf \
+            --base-url http://127.0.0.1:${{ steps.port.outputs.p }} \
+            --corpus wafrift-bench/corpus \
+            --evade \
+            --strategies ${{ inputs.strategies || 'heavy' }} \
+            --variants ${{ inputs.variants || '5' }} \
+            --format json \
+            --output wafrift-bench/results/${{ matrix.stack }}-$(date -u +%Y%m%d).json
+        env:
+          RUST_LOG: warn
+
+      - name: Tear down ${{ matrix.stack }}
+        if: always()
+        run: bash wafrift-bench/scripts/down.sh ${{ matrix.stack }}
+
+      - name: Upload results
+        if: always()
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: bench-results
-          path: bench-waf/results/
-          
-      - name: Tear Down Testbed
-        if: always()
-        run: |
-          cd bench-waf
-          docker-compose down
+          name: bench-${{ matrix.stack }}
+          path: wafrift-bench/results/
