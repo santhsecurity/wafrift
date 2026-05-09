@@ -58,7 +58,15 @@ pub fn mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         return out;
     }
 
-    let lower = payload.to_ascii_lowercase();
+    // URL-decode first so the shape detection works on payloads
+    // delivered as URL-encoded query/form values. `1%27+OR+%271%27%3D
+    // %271` should be recognised as a boolean-OR injection just like
+    // the literal `1' OR '1'='1`. Falls back to the raw string when
+    // decoding fails (e.g. percent-mangled).
+    let decoded = urlencoding::decode(payload)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| payload.to_string());
+    let lower = decoded.to_ascii_lowercase();
 
     // Strategy 1: pure tautology rewrite for boolean injections.
     //   `<anything>' OR <whatever>` → `1 OR <quote-free tautology>`
