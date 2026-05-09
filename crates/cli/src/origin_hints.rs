@@ -75,7 +75,13 @@ async fn resolve_ips(hostname: &str) -> Result<Vec<IpAddr>, String> {
 }
 
 pub fn run_origin_hints(args: OriginHintsArgs) -> ExitCode {
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{} failed to start tokio runtime: {e}", "error:".red().bold());
+            return ExitCode::from(1);
+        }
+    };
     match rt.block_on(run_async(&args)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
