@@ -8,13 +8,19 @@ ARG NGINX_VERSION
 ARG NAXSI_VERSION
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates curl libpcre3-dev libssl-dev \
+        build-essential ca-certificates curl git libpcre3-dev libssl-dev \
         zlib1g-dev libxml2-dev libxslt1-dev libgeoip-dev libpcre2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 RUN curl -fsSL https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz | tar xz
-RUN curl -fsSL https://github.com/wargio/naxsi/archive/refs/tags/${NAXSI_VERSION}.tar.gz | tar xz
+# wargio/naxsi pulls libinjection in as a git submodule. The release
+# tarball ships an empty libinjection/ directory, which makes the
+# nginx ./configure step fail (no libinjection sources to compile in).
+# Clone with --recurse-submodules instead so libinjection is populated.
+RUN git clone --depth 1 --branch ${NAXSI_VERSION} --recurse-submodules \
+        --shallow-submodules https://github.com/wargio/naxsi.git \
+        naxsi-${NAXSI_VERSION}
 
 WORKDIR /src/nginx-${NGINX_VERSION}
 RUN ./configure \
