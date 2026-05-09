@@ -1,0 +1,124 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  # Manual trigger so the maintainer can dry-run the workflow without
+  # cutting a tag (artifacts are uploaded to the workflow run, not the
+  # release).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to attach binaries to (leave empty for workflow-only build)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: '-D warnings'
+  # Both binaries practitioners install:
+  BINARIES: 'wafrift wafrift-proxy'
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+            cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross (linux/aarch64 only)
+        if: matrix.cross == true
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+
+      - name: Build (cross)
+        if: matrix.cross == true
+        run: cross build --release --target ${{ matrix.target }} -p wafrift-cli -p wafrift-proxy
+
+      - name: Build (cargo)
+        if: matrix.cross != true
+        run: cargo build --release --target ${{ matrix.target }} -p wafrift-cli -p wafrift-proxy
+
+      - name: Stage release artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="wafrift-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$stage"
+          # The wafrift-cli crate produces a binary named `wafrift`.
+          for bin in wafrift wafrift-proxy; do
+            if [ "${{ matrix.os }}" = "windows-latest" ]; then
+              cp "target/${{ matrix.target }}/release/${bin}.exe" "$stage/"
+            else
+              cp "target/${{ matrix.target }}/release/${bin}" "$stage/"
+            fi
+          done
+          cp README.md LICENSE-MIT LICENSE-APACHE 2>/dev/null "$stage/" || true
+          cp CHANGELOG.md "$stage/" || true
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a -tzip "${stage}.zip" "$stage"
+            echo "ASSET=${stage}.zip" >> $GITHUB_ENV
+          else
+            tar czf "${stage}.tar.gz" "$stage"
+            echo "ASSET=${stage}.tar.gz" >> $GITHUB_ENV
+          fi
+
+      - name: SHA-256 checksum
+        shell: bash
+        run: |
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$ASSET" > "${ASSET}.sha256"
+          else
+            shasum -a 256 "$ASSET" > "${ASSET}.sha256"
+          fi
+          cat "${ASSET}.sha256"
+
+      - name: Upload as workflow artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true

