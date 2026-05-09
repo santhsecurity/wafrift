@@ -81,12 +81,16 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Default builds do NOT pull this in (no boring-sys); only consumers
 # that enable `tls-impersonate` pay the dep cost.
 #
-# Note: rquest 5.x removed the standalone `impersonate` feature gate —
-# browser impersonation is built into the default feature set. We list
-# only what StealthClient actually needs (cookies + common encodings +
-# stream) so we don't drag in async-WebSocket/socks/etc. on the hot
-# path.
+# rquest 5.x split the impersonation profiles into a companion crate
+# (`rquest-util`) and renamed the API: `Impersonate::Chrome131` became
+# `rquest_util::Emulation::Chrome131`, and `ClientBuilder::impersonate(imp)`
+# became `ClientBuilder::emulation(emu)`. We pin both crates here.
+#
+# All rquest 4.x and earlier are yanked from crates.io, so 5.x is the
+# only path forward.
 rquest = { version = "5", default-features = false, features = ["cookies", "gzip", "brotli", "json", "charset", "stream"] }
+# Browser-emulation profile companion to rquest 5.x.
+rquest-util = { version = "2", default-features = false, features = ["emulation"] }
 http = "1"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
