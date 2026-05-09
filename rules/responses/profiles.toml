@@ -1,0 +1,188 @@
+# WAF Response Profiles
+#
+# Community-contributed. Each profile maps a specific WAF's response
+# characteristics to strategy recommendations. The proxy uses these
+# to make intelligent decisions about which evasion techniques to
+# prioritize after the FIRST block — instead of blind escalation.
+#
+# How to contribute a new profile:
+#   1. Copy this file and name it after the WAF (e.g. cloudflare.toml)
+#   2. Fill in the response fingerprint (status codes, body markers, headers)
+#   3. List which techniques work and which to avoid
+#   4. Submit a PR
+#
+# The proxy loads all .toml files in this directory at startup.
+# Adding a profile = zero Rust knowledge required.
+
+[[response_profile]]
+name = "Cloudflare"
+# Status codes this WAF returns when blocking
+block_status_codes = [403, 503]
+# Strings found in the block page body (case-insensitive, checked first 4KB)
+body_markers = [
+    "Attention Required",
+    "error code: 1020",
+    "Cloudflare Ray ID",
+    "challenge-platform",
+]
+# Response header patterns
+header_markers = [
+    { name = "Server", contains = "cloudflare" },
+    { name = "CF-RAY", exists = true },
+]
+# What Cloudflare DOES when inspecting: single-pass URL decode, case-sensitive
+# keyword regex, no deep protocol parsing. This tells the engine what to exploit.
+inspection_model = "single_pass_url_decode"
+# Techniques to try FIRST (ordered by historical bypass rate)
+prioritize = [
+    "DoubleUrlEncode",     # bypasses single-pass decode
+    "UnicodeHomoglyph",    # bypasses character-class checks
+    "OverlongUtf8",        # bypasses byte-level pattern matching
+    "ContentTypeSwitch",   # moves payload out of inspected positions
+]
+# Techniques known to WASTE requests against this WAF
+avoid = [
+    "CaseAlternation",     # Cloudflare normalizes case before regex
+    "CommentObfuscation",  # CF handles SQL inline comments
+]
+# When the WAF returns 429 specifically, it means rate limiting not rule block
+rate_limit_status = [429]
+# Notes for the practitioner (shown in reports)
+notes = "Cloudflare inspects decoded payload once. Double-encoding bypasses the single-pass decode. Unicode homoglyphs bypass character-class checks. 503+challenge-platform means JS challenge, not a rule block — back off."
+
+[[response_profile]]
+name = "ModSecurity CRS"
+block_status_codes = [403]
+body_markers = [
+    "ModSecurity",
+    "You don't have permission",
+    "not acceptable",
+    "mod_security",
+]
+header_markers = [
+    { name = "Server", contains = "Apache" },
+    { name = "Server", contains = "nginx" },
+]
+inspection_model = "multi_regex_scoring"
+prioritize = [
+    "CommentObfuscation",  # inline comments split keywords across regexes
+    "CaseMixing",          # older PL1-PL2 rules are case-sensitive
+    "UrlEncode",           # single-layer encoding bypasses older CRS
+    "GrammarMutation",     # semantic transforms avoid keyword matching entirely
+]
+avoid = []
+rate_limit_status = [429]
+notes = "ModSecurity CRS uses anomaly scoring with regex rules. Each rule contributes points; the block fires when the score exceeds a threshold. Splitting keywords across inline comments defeats individual regex patterns. Higher paranoia levels (PL3+) require multi-dimensional attacks."
+
+[[response_profile]]
+name = "AWS WAF"
+block_status_codes = [403]
+body_markers = [
+    "Request blocked",
+    "automated request",
+    "AWS WAF",
+]
+header_markers = [
+    { name = "x-amzn-RequestId", exists = true },
+]
+inspection_model = "single_pass_url_decode"
+prioritize = [
+    "DoubleUrlEncode",
+    "Utf8Encode",
+    "CaseMixing",
+    "ContentTypeSwitch",
+]
+avoid = []
+rate_limit_status = [429]
+notes = "AWS WAF managed rules have single-pass URL decoding. Double-encoding is the most reliable bypass. Case mixing evades the default SQL injection rule group."
+
+[[response_profile]]
+name = "Imperva"
+block_status_codes = [403]
+body_markers = [
+    "Incapsula",
+    "Imperva",
+    "_Incapsula_Resource",
+    "Request unsuccessful",
+]
+header_markers = [
+    { name = "X-CDN", contains = "Imperva" },
+    { name = "X-Iinfo", exists = true },
+]
+inspection_model = "multi_layer_decode"
+prioritize = [
+    "UnicodeHomoglyph",    # gaps in Unicode handling
+    "Base64Encode",        # base64 in parameter values
+    "OverlongUtf8",        # byte-level bypass
+    "GrammarMutation",     # keywordless arithmetic ('+0+', '-0-')
+]
+avoid = [
+    "UrlEncode",           # Imperva handles URL encoding well
+]
+rate_limit_status = [429]
+notes = "Imperva/Incapsula inspects multiple encoding layers but has gaps in Unicode handling. Homoglyph substitution is effective. Keywordless arithmetic bypasses ('+0+', '-0-') are highly reliable because they contain no SQL keywords at all."
+
+[[response_profile]]
+name = "F5 BIG-IP ASM"
+block_status_codes = [403]
+body_markers = [
+    "The requested URL was rejected",
+    "support ID",
+    "Your support ID is",
+]
+header_markers = []
+inspection_model = "strict_regex_decode"
+prioritize = [
+    "CommentObfuscation",
+    "DoubleUrlEncode",
+    "CaseMixing",
+    "GrammarMutation",
+]
+avoid = []
+rate_limit_status = [429]
+notes = "F5 ASM uses strict regex with some payload decoding. Comment-based splitting works well. mXSS vectors exploiting parser differentials between WAF and browser are effective for XSS."
+
+[[response_profile]]
+name = "Akamai Kona"
+block_status_codes = [403]
+body_markers = [
+    "Access Denied",
+    "Reference #",
+    "akamai",
+]
+header_markers = [
+    { name = "Server", contains = "AkamaiGHost" },
+]
+inspection_model = "sophisticated_decode"
+prioritize = [
+    "UrlEncode",
+    "CaseMixing",
+    "UnicodeHomoglyph",
+    "ContentTypeSwitch",    # multipart boundaries
+]
+avoid = []
+rate_limit_status = [429]
+notes = "Akamai Kona has sophisticated decoding but gaps in MySQL version-comment handling (/*!50000OR*/). Chunked transfer encoding splits payloads across TCP segments."
+
+[[response_profile]]
+name = "Sucuri"
+block_status_codes = [403]
+body_markers = [
+    "Sucuri",
+    "Access Denied - Sucuri",
+    "WebSite Firewall",
+]
+header_markers = [
+    { name = "X-Sucuri-ID", exists = true },
+    { name = "Server", contains = "Sucuri" },
+]
+inspection_model = "basic_keyword"
+prioritize = [
+    "DoubleUrlEncode",
+    "CaseMixing",
+    "CommentObfuscation",
+    "UrlEncode",
+]
+avoid = []
+rate_limit_status = [429]
+notes = "Sucuri has basic keyword filtering. Case mixing and comment splitting bypass most rules. This is one of the easier WAFs to evade."

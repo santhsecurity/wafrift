@@ -18,8 +18,13 @@
 
 mod client;
 mod response;
+pub mod signal;
 
 pub use client::EvasionClient;
 pub use client::EvasionError;
 pub use response::EvasionResponse;
 pub use response::{is_waf_block, is_waf_block_status};
+pub use signal::{BlockClass, ResponseProfileDb, ResponseSignal};
+
+pub mod session;
+pub mod jwt;

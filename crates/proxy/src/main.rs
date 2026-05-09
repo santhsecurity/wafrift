@@ -37,7 +37,7 @@ use wafrift_proxy::upstream_policy::{
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
-use wafrift_transport::is_waf_block;
+use wafrift_transport::signal::{BlockClass, ResponseProfileDb};
 
 /// Maximum request body buffered per message (plain HTTP + MITM plaintext).
 const MAX_PROXY_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -592,6 +592,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let default_escalation = args.escalation.clone();
     let mitm_enabled = args.mitm;
 
+    // ── Load WAF response profiles for intelligent feedback ─────────
+    // The proxy reads `*.toml` files from `rules/responses/` next to
+    // the binary or in the cwd, and uses them to classify upstream
+    // responses into HardBlock/SoftBlock/RateLimit/Challenge/Pass —
+    // each gets different treatment by `HostState::record_signal`.
+    // No directory found ⇒ legacy block detection (status + body keywords).
+    let response_profiles = {
+        let next_to_binary = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("rules/responses")))
+            .filter(|d| d.is_dir());
+        let cwd_dir = std::path::Path::new("rules/responses");
+        if let Some(dir) = next_to_binary {
+            ResponseProfileDb::load_dir(&dir)
+        } else if cwd_dir.is_dir() {
+            ResponseProfileDb::load_dir(cwd_dir)
+        } else {
+            info!("no rules/responses/ directory found — using legacy block detection");
+            ResponseProfileDb::empty()
+        }
+    };
+    let response_profiles = Arc::new(response_profiles);
+
     let policy = Arc::new(UpstreamPolicy {
         allow_private_upstream: args.allow_private_upstream,
         insecure_open_upstream: args.insecure_open_upstream,
@@ -757,6 +780,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let limits = limits.clone();
         let scope = scope.clone();
         let rate_limiter = rate_limiter.clone();
+        let response_profiles = response_profiles.clone();
 
         // Per-connection peer-loopback gate for /_wafrift/status. The
         // bind-address check (expose_wafrift_status) is necessary but
@@ -789,6 +813,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             rate_limiter.clone(),
                             expose_status_per_conn,
                             logger.clone(),
+                            response_profiles.clone(),
                         )
                     }),
                 )
@@ -833,6 +858,7 @@ async fn forward_with_evade_retry(
     client: &reqwest::Client,
     policy: Arc<UpstreamPolicy>,
     limits: Arc<ProxyLimits>,
+    response_profiles: Arc<ResponseProfileDb>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let max = limits.max_evade_retries;
     let mut last: Option<Response<Full<Bytes>>> = None;
@@ -847,6 +873,7 @@ async fn forward_with_evade_retry(
             client,
             Arc::clone(&policy),
             Arc::clone(&limits),
+            Arc::clone(&response_profiles),
         )
         .await?;
         let status = resp.status().as_u16();
@@ -882,6 +909,7 @@ async fn forward_wafrift_request(
     client: &reqwest::Client,
     policy: Arc<UpstreamPolicy>,
     limits: Arc<ProxyLimits>,
+    response_profiles: Arc<ResponseProfileDb>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // Determine evasion strategy: winner rotation vs. discovery.
     let (evasion_result, technique_keys) = {
@@ -1051,39 +1079,55 @@ async fn forward_wafrift_request(
         buf.extend_from_slice(&chunk);
     }
 
-    let is_block = is_waf_block(status.as_u16(), &buf);
+    // ── Rich response classification ────────────────────────────────
+    // Classify the upstream response through loaded WAF profiles
+    // (rules/responses/*.toml). The signal distinguishes hard blocks,
+    // soft blocks (200+block-page), rate limits, and JS challenges —
+    // each gets different treatment by record_signal below. This
+    // replaces the binary is_waf_block check.
+    let header_pairs: Vec<(String, String)> = response_builder
+        .headers_ref()
+        .map(|hm| {
+            hm.iter()
+                .map(|(k, v)| {
+                    (
+                        k.as_str().to_string(),
+                        v.to_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let signal = response_profiles.classify(status.as_u16(), &header_pairs, &buf);
+    let is_block = signal.classification.is_blocked();
 
     // ── WAF identification: which product is in front of us? ────────
-    // Run wafrift-detect against the full upstream response (status +
-    // headers + body slice). On a high-confidence hit, persist the
-    // name to host state so the gene bank can carry it across
-    // restarts and downstream tooling can route to WAF-specific
-    // evasion strategies. Only runs if waf_name isn't already set.
+    // The response signal may have already identified the WAF from a
+    // loaded profile. If not, fall back to wafrift-detect's
+    // header/body fingerprint database (160+ vendor rules).
     let detected_waf = {
         let st = state.lock().await;
         st.hosts.get(&host).and_then(|h| h.waf_name.clone())
     };
     if detected_waf.is_none() {
-        let header_pairs: Vec<(String, String)> = response_builder
-            .headers_ref()
-            .map(|hm| {
-                hm.iter()
-                    .map(|(k, v)| {
-                        (
-                            k.as_str().to_string(),
-                            v.to_str().unwrap_or_default().to_string(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let body_slice = &buf[..buf.len().min(8192)];
-        let detections =
-            wafrift_detect::waf_detect::detect(status.as_u16(), &header_pairs, body_slice);
-        if let Some(top) = detections.first() {
-            // Threshold: require high confidence to commit. Anything
-            // less is a guess and we'd rather stay in discovery.
-            if top.confidence >= wafrift_detect::waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD {
+        if let Some(ref waf_name) = signal.matched_waf {
+            let mut st = state.lock().await;
+            if let Some(hs) = st.hosts.get_mut(&host) {
+                hs.confirm_waf(Some(waf_name.clone()));
+                info!(
+                    host = %host,
+                    waf = %waf_name,
+                    source = "response_profile",
+                    "WAF identified"
+                );
+            }
+        } else {
+            let body_slice = &buf[..buf.len().min(8192)];
+            let detections =
+                wafrift_detect::waf_detect::detect(status.as_u16(), &header_pairs, body_slice);
+            if let Some(top) = detections.first()
+                && top.confidence >= wafrift_detect::waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD
+            {
                 let mut st = state.lock().await;
                 if let Some(hs) = st.hosts.get_mut(&host) {
                     hs.confirm_waf(Some(top.name.clone()));
@@ -1091,6 +1135,7 @@ async fn forward_wafrift_request(
                         host = %host,
                         waf = %top.name,
                         confidence = top.confidence,
+                        source = "wafrift_detect",
                         "WAF identified"
                     );
                 }
@@ -1098,20 +1143,30 @@ async fn forward_wafrift_request(
         }
     }
 
-    // ── Feedback loop: attribute result to the active technique(s) ───
+    // ── Feedback loop: rich signal replaces binary block/pass ────────
+    // Key insight: a 429 (rate limit) is NOT a technique failure —
+    // the WAF is saying "slow down," not "I caught your payload."
+    // Same for JS challenges. Only HardBlock and SoftBlock penalize
+    // the current evasion technique. record_signal also ingests the
+    // matched profile's prioritize/avoid lists so future requests
+    // bias toward techniques known to bypass this WAF.
     {
         let mut st = state.lock().await;
-        if is_block {
-            st.total_blocks += 1;
-            if let Some(hs) = st.hosts.get_mut(&host) {
-                if technique_keys.is_empty() {
-                    hs.record_block();
-                } else {
-                    hs.record_block_for_many(&technique_keys);
-                }
-            }
-        } else {
-            if let Some(hs) = st.hosts.get_mut(&host) {
+        if let Some(hs) = st.hosts.get_mut(&host) {
+            hs.record_signal(
+                signal.classification == BlockClass::HardBlock,
+                signal.classification == BlockClass::SoftBlock,
+                signal.classification == BlockClass::RateLimit,
+                signal.classification == BlockClass::Challenge,
+                signal.matched_waf.as_deref(),
+                &signal.prioritize,
+                &signal.avoid,
+                signal.inspection_model.as_deref(),
+                &technique_keys,
+            );
+
+            // Success attribution: on Pass, credit the active technique(s).
+            if signal.classification == BlockClass::Pass {
                 if !evasion_result.techniques.is_empty() {
                     hs.record_success_for_many(&evasion_result.techniques);
                 } else {
@@ -1124,6 +1179,18 @@ async fn forward_wafrift_request(
                     }
                 }
             }
+
+            if signal.classification.should_backoff() {
+                info!(
+                    host = %host,
+                    classification = ?signal.classification,
+                    "WAF rate limit / challenge — backing off, not changing technique"
+                );
+            }
+        }
+        if is_block {
+            st.total_blocks += 1;
+        } else {
             for t in &evasion_result.techniques {
                 let name = t.to_string();
                 *st.techniques_used.entry(name).or_insert(0) += 1;
@@ -1167,6 +1234,7 @@ async fn mitm_plaintext_request(
     limits: Arc<ProxyLimits>,
     scope: Arc<ScopeFilter>,
     rate_limiter: Arc<RateLimiter>,
+    response_profiles: Arc<ResponseProfileDb>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // Pin upstream to the CONNECT target; do not follow a different inner `Host:`.
     let sni_host = tls_server_name_from_authority(&connect_authority);
@@ -1262,6 +1330,7 @@ async fn mitm_plaintext_request(
         &client,
         policy,
         limits,
+        response_profiles,
     )
     .await
 }
@@ -1279,6 +1348,7 @@ async fn mitm_https_session(
     limits: Arc<ProxyLimits>,
     scope: Arc<ScopeFilter>,
     rate_limiter: Arc<RateLimiter>,
+    response_profiles: Arc<ResponseProfileDb>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tls_name = tls_server_name_from_authority(&connect_authority);
     let acceptor = ca.create_tls_acceptor(&tls_name)?;
@@ -1294,6 +1364,7 @@ async fn mitm_https_session(
     let svc_limits = limits.clone();
     let svc_scope = scope.clone();
     let svc_rl = rate_limiter.clone();
+    let svc_profiles = response_profiles.clone();
     let cauth = connect_authority.clone();
 
     let service = service_fn(move |req: Request<Incoming>| {
@@ -1305,6 +1376,7 @@ async fn mitm_https_session(
         let limits = svc_limits.clone();
         let scope = svc_scope.clone();
         let rate_limiter = svc_rl.clone();
+        let response_profiles = svc_profiles.clone();
         let connect_authority = cauth.clone();
         async move {
             mitm_plaintext_request(
@@ -1318,6 +1390,7 @@ async fn mitm_https_session(
                 limits,
                 scope,
                 rate_limiter,
+                response_profiles,
             )
             .await
         }
@@ -1354,6 +1427,7 @@ async fn proxy(
     rate_limiter: Arc<RateLimiter>,
     expose_wafrift_status: bool,
     logger: SharedLogger,
+    response_profiles: Arc<ResponseProfileDb>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // CONNECT: optional TLS MITM (terminate client TLS, evade, forward via HTTPS).
     if req.method() == Method::CONNECT {
@@ -1372,6 +1446,7 @@ async fn proxy(
                 let limits = limits.clone();
                 let scope = scope.clone();
                 let rate_limiter = rate_limiter.clone();
+                let response_profiles = response_profiles.clone();
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(req).await {
                         Ok(upgraded) => {
@@ -1387,6 +1462,7 @@ async fn proxy(
                                 limits,
                                 scope,
                                 rate_limiter,
+                                response_profiles,
                             )
                             .await
                             {
@@ -1599,6 +1675,7 @@ async fn proxy(
         &client,
         policy,
         limits,
+        response_profiles,
     )
     .await;
 

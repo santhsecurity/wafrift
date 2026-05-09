@@ -125,6 +125,19 @@ pub fn evade(request: &Request, state: &HostState, config: &EvasionConfig) -> Ev
         return EvasionResult::new(req, techniques, description);
     }
 
+    // ── Step 0c: Try profile-suggested techniques (community knowledge) ─
+    // If a WAF response profile matched and recommended a technique
+    // (e.g. Cloudflare → DoubleUrlEncode), try those before falling
+    // back to escalation defaults. The first suggestion that survives
+    // the should_skip_technique filter is applied. Empirical local
+    // success (Step 0 / 0b above) still beats community priors.
+    for suggestion in state.suggested_techniques() {
+        if apply_named_technique(&mut req, &mut techniques, config, state, &suggestion) {
+            let description = build_description(&techniques);
+            return EvasionResult::new(req, techniques, description);
+        }
+    }
+
     // ── Step 1: Fingerprint rotation (every request) ────────────────
     if config.fingerprint_rotation
         && let Some(profile) = fingerprint::random_profile()

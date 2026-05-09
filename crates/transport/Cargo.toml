@@ -11,6 +11,10 @@ keywords = ["waf", "transport", "reqwest", "http", "evasion"]
 categories = ["network-programming", "web-programming::http-client"]
 
 [dependencies]
+serde_json = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+base64 = { workspace = true }
 wafrift-types = { workspace = true }
 wafrift-strategy = { workspace = true }
 reqwest = { workspace = true }
@@ -19,6 +23,8 @@ tracing = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
+regex = { workspace = true }
+urlencoding = { workspace = true }
 wafrift-pool = { workspace = true, optional = true }
 # gossan-origin = { path = "../../../gossan/crates/origin", optional = true }
 
@@ -34,3 +40,4 @@ wiremock = { workspace = true }
 
 [lints]
 workspace = true
+
