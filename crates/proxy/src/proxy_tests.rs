@@ -548,6 +548,10 @@ fn default_args() -> Args {
         max_rps_per_host_burst: 0.0,
         log_dir: None,
         tls_impersonate: None,
+        tls_impersonate_rotate: vec![],
+        body_padding_bytes: 0,
+        no_conn_reuse: false,
+        tui: false,
     }
 }
 
