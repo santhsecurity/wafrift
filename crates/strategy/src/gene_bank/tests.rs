@@ -230,6 +230,7 @@ fn forward_compatible_unknown_fields_ignored() {
     let _ = fs::create_dir_all(&tmp);
 
     // JSON with a field that doesn't exist in the current struct.
+    // File must be at <normalize_name(waf_name)>.json — i.e. lowercased.
     let json = r#"{
         "waf_name": "FutureWAF",
         "techniques": [],
@@ -237,7 +238,7 @@ fn forward_compatible_unknown_fields_ignored() {
         "updated_at": 12345,
         "future_field_we_do_not_know_yet": true
     }"#;
-    fs::write(tmp.join("future.json"), json).unwrap();
+    fs::write(tmp.join("futurewaf.json"), json).unwrap();
 
     let mut bank = GeneBank::open(tmp.clone()).unwrap();
     let loaded = bank
@@ -256,8 +257,9 @@ fn backward_compatible_missing_fields_defaulted() {
     let _ = fs::create_dir_all(&tmp);
 
     // JSON missing some fields — they should default to zero/empty.
+    // File must be at <normalize_name(waf_name)>.json — i.e. lowercased.
     let json = r#"{"waf_name": "OldWAF"}"#;
-    fs::write(tmp.join("old.json"), json).unwrap();
+    fs::write(tmp.join("oldwaf.json"), json).unwrap();
 
     let mut bank = GeneBank::open(tmp.clone()).unwrap();
     let loaded = bank
