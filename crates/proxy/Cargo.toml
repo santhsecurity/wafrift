@@ -39,5 +39,15 @@ futures-util = { workspace = true }
 moka = { workspace = true }
 dirs = { workspace = true }
 
+[features]
+default = []
+# Forwards the wafrift-transport `tls-impersonate` feature so that
+# `wafrift-proxy --tls-impersonate <profile>` actually engages the
+# StealthClient (rquest + BoringSSL) instead of erroring at startup.
+# Without this feature, the CLI flag is accepted (clap parses it) but
+# StealthClient::new() returns the actionable "rebuild with feature"
+# error and the proxy exits cleanly. See docs/TLS_PARITY.md.
+tls-impersonate = ["wafrift-transport/tls-impersonate"]
+
 [lints]
 workspace = true

@@ -547,6 +547,7 @@ fn default_args() -> Args {
         max_rps_per_host: 0.0,
         max_rps_per_host_burst: 0.0,
         log_dir: None,
+        tls_impersonate: None,
     }
 }
 

@@ -208,9 +208,37 @@ struct Args {
     /// upstream status, and whether the WAF blocked. Essential for pentest engagement reports.
     #[arg(long = "log-dir")]
     log_dir: Option<PathBuf>,
+
+    /// Wear a real browser's TLS ClientHello on every upstream forward.
+    /// Closes the JA3/JA4 fingerprint gap vs Cloudflare / Akamai /
+    /// Fastly Sigsci / Imperva Bot Protection — which classify the
+    /// inbound TLS connection as "non-browser" before they ever look
+    /// at HTTP. Supported profiles: chrome131, chrome120, edge131,
+    /// firefox133, safari18, safari17_5, okhttp5; aliases `chrome`,
+    /// `firefox`, `safari`, `edge` resolve to the latest in each
+    /// family. REQUIRES the binary to be built with the
+    /// `tls-impersonate` cargo feature (pulls in boring-sys); without
+    /// it, this flag errors at startup with an actionable message.
+    /// See docs/TLS_PARITY.md.
+    #[arg(long = "tls-impersonate")]
+    tls_impersonate: Option<String>,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
+
+/// Process-wide stealth client. `OnceLock` because we want the upstream
+/// forward sites to dispatch through it without every function in the
+/// chain having to thread an extra parameter — initialised once at
+/// startup if `--tls-impersonate <profile>` was passed, never touched
+/// again. `None` (uninitialised) ⇒ all upstream forwards use the
+/// default reqwest+rustls client.
+static STEALTH_CLIENT: std::sync::OnceLock<wafrift_transport::stealth::StealthClient> =
+    std::sync::OnceLock::new();
+
+#[inline]
+fn stealth() -> Option<&'static wafrift_transport::stealth::StealthClient> {
+    STEALTH_CLIENT.get()
+}
 
 /// Simple per-key warning throttle so high-rate scanners (sqlmap,
 /// ffuf) don't flood the logs with identical messages.
@@ -636,6 +664,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!("--insecure-open-upstream makes --allow-private-upstream redundant; all upstream checks are disabled");
     }
 
+    // ── Optional stealth (browser-identical TLS ClientHello) ──────────
+    // When `--tls-impersonate <profile>` is set, build a `StealthClient`
+    // and stash it in `STEALTH_CLIENT` so the upstream-forward sites
+    // (forward_wafrift_request + forward_passthrough) dispatch through
+    // it instead of the default reqwest+rustls client. This closes the
+    // JA3/JA4 fingerprint gap vs Cloudflare / Akamai / Sigsci /
+    // Imperva-Bot at the cost of a `boring-sys` build dep — gated on
+    // the `tls-impersonate` cargo feature. See docs/TLS_PARITY.md.
+    if let Some(profile_str) = &args.tls_impersonate {
+        use wafrift_transport::stealth::{ImpersonateProfile, StealthClient};
+        let profile = match ImpersonateProfile::parse(profile_str) {
+            Ok(p) => p,
+            Err(e) => {
+                error!("--tls-impersonate: {}", e);
+                std::process::exit(2);
+            }
+        };
+        let client = match StealthClient::with_timeout(
+            profile,
+            std::time::Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS),
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                error!(
+                    "--tls-impersonate {}: {}\nhint: rebuild with `cargo build --features wafrift-transport/tls-impersonate` (pulls in boring-sys)",
+                    profile.name(),
+                    e
+                );
+                std::process::exit(2);
+            }
+        };
+        if STEALTH_CLIENT.set(client).is_err() {
+            // Unreachable in practice — main runs once per process.
+            warn!("STEALTH_CLIENT was already initialised; ignoring duplicate set");
+        }
+        info!(
+            "TLS impersonation active: every upstream forward will wear {}'s ClientHello",
+            profile.name()
+        );
+    }
+
     // Single global client. Custom resolver re-runs the bogon filter on
     // every connection-time DNS lookup, closing the DNS-rebinding TOCTOU
     // between the policy check and reqwest's own resolution. Without
@@ -1011,83 +1080,141 @@ async fn forward_wafrift_request(
         return Ok(error_response(StatusCode::FORBIDDEN, &msg));
     }
 
-    // Build forward request using reqwest.
-    let method = match reqwest::Method::from_bytes(
-        evasion_result.request.method.as_str().as_bytes(),
-    ) {
-        Ok(m) => m,
-        Err(e) => {
-            warn!(host = %host, error = %e, method = %evasion_result.request.method.as_str(), "invalid HTTP method");
-            return Ok(error_response(
-                StatusCode::BAD_REQUEST,
-                "invalid HTTP method",
-            ));
-        }
-    };
-    let mut builder = client.request(method, &evasion_result.request.url);
-
+    // ── Upstream fetch ──────────────────────────────────────────────
+    // Two paths: default rustls via reqwest, or stealth (browser-
+    // identical TLS) via wafrift_transport::stealth::StealthClient
+    // when `--tls-impersonate <profile>` was set at startup.
+    // Both paths converge on (response_builder, buf) so the rest of
+    // this function (signal classification, header tagging, body
+    // re-emit) stays unified.
     let conn_fwd = collect_connection_header_names(&evasion_result.request.headers);
-    for (k, v) in &evasion_result.request.headers {
-        if k.eq_ignore_ascii_case("host")
-            // Strip Content-Length: evasion may have mutated the body. Reqwest
-            // recalculates the correct length from the body bytes; a stale
-            // CL header would mismatch and either smuggle or truncate.
-            || k.eq_ignore_ascii_case("content-length")
-            || should_strip_proxy_header(k, &conn_fwd)
-        {
-            continue;
-        }
-        builder = builder.header(k.as_str(), v.as_str());
-    }
-
-    if let Some(b) = evasion_result.request.body.clone() {
-        builder = builder.body(b);
-    }
-
-    let resp = match builder.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            if let Some(throttle) = WARN_THROTTLE.get()
-                && throttle.should_warn(&format!("forward:{host}")) {
-                    warn!(host = %host, error = %e, "forwarding failed");
-                }
-            // S3 fix: Do not leak internal errors to external callers
-            return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
-        }
-    };
-
-    let status = resp.status();
-    let conn_resp = collect_connection_header_names_hyper(resp.headers());
-    let mut response_builder = Response::builder().status(status.as_u16());
-    for (k, v) in resp.headers().iter() {
-        if should_strip_proxy_header(k.as_str(), &conn_resp) {
-            continue;
-        }
-        response_builder = response_builder.header(k, v);
-    }
-
     let max = limits.max_upstream_response_bytes;
-    let mut stream = resp.bytes_stream();
-    let mut buf = Vec::new();
-    while let Some(item) = stream.next().await {
-        let chunk = match item {
-            Ok(c) => c,
+
+    let (mut response_builder, buf) = if let Some(sc) = stealth() {
+        let mut filtered_headers = Vec::with_capacity(evasion_result.request.headers.len());
+        for (k, v) in &evasion_result.request.headers {
+            if k.eq_ignore_ascii_case("host")
+                || k.eq_ignore_ascii_case("content-length")
+                || should_strip_proxy_header(k, &conn_fwd)
+            {
+                continue;
+            }
+            filtered_headers.push((k.clone(), v.clone()));
+        }
+        let stealth_resp = match sc
+            .send(
+                evasion_result.request.method.as_str(),
+                &evasion_result.request.url,
+                &filtered_headers,
+                evasion_result.request.body.as_deref(),
+                max,
+            )
+            .await
+        {
+            Ok(r) => r,
             Err(e) => {
-                warn!(host = %host, error = %e, "upstream body read failed");
+                if let Some(throttle) = WARN_THROTTLE.get()
+                    && throttle.should_warn(&format!("forward:{host}"))
+                {
+                    warn!(host = %host, error = %e, stack = "stealth", "forwarding failed");
+                }
+                return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
+            }
+        };
+        let mut response_builder = Response::builder().status(stealth_resp.status);
+        // Build a HashSet view of Connection header tokens for stripping.
+        let conn_resp: std::collections::HashSet<String> = stealth_resp
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("connection"))
+            .map(|(_, v)| {
+                v.split(',')
+                    .map(|t| t.trim().to_ascii_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (k, v) in &stealth_resp.headers {
+            if should_strip_proxy_header(k, &conn_resp) {
+                continue;
+            }
+            response_builder = response_builder.header(k.as_str(), v.as_str());
+        }
+        (response_builder, stealth_resp.body.to_vec())
+    } else {
+        // Existing reqwest path (default).
+        let method = match reqwest::Method::from_bytes(
+            evasion_result.request.method.as_str().as_bytes(),
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(host = %host, error = %e, method = %evasion_result.request.method.as_str(), "invalid HTTP method");
                 return Ok(error_response(
-                    StatusCode::BAD_GATEWAY,
-                    "upstream read error",
+                    StatusCode::BAD_REQUEST,
+                    "invalid HTTP method",
                 ));
             }
         };
-        if buf.len().saturating_add(chunk.len()) > max {
-            return Ok(error_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "upstream response too large",
-            ));
+        let mut builder = client.request(method, &evasion_result.request.url);
+        for (k, v) in &evasion_result.request.headers {
+            if k.eq_ignore_ascii_case("host")
+                // Strip Content-Length: evasion may have mutated the body. Reqwest
+                // recalculates the correct length from the body bytes; a stale
+                // CL header would mismatch and either smuggle or truncate.
+                || k.eq_ignore_ascii_case("content-length")
+                || should_strip_proxy_header(k, &conn_fwd)
+            {
+                continue;
+            }
+            builder = builder.header(k.as_str(), v.as_str());
         }
-        buf.extend_from_slice(&chunk);
-    }
+        if let Some(b) = evasion_result.request.body.clone() {
+            builder = builder.body(b);
+        }
+        let resp = match builder.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                if let Some(throttle) = WARN_THROTTLE.get()
+                    && throttle.should_warn(&format!("forward:{host}"))
+                {
+                    warn!(host = %host, error = %e, "forwarding failed");
+                }
+                // S3 fix: Do not leak internal errors to external callers
+                return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
+            }
+        };
+        let status = resp.status();
+        let conn_resp = collect_connection_header_names_hyper(resp.headers());
+        let mut response_builder = Response::builder().status(status.as_u16());
+        for (k, v) in resp.headers().iter() {
+            if should_strip_proxy_header(k.as_str(), &conn_resp) {
+                continue;
+            }
+            response_builder = response_builder.header(k, v);
+        }
+        let mut stream = resp.bytes_stream();
+        let mut buf = Vec::new();
+        while let Some(item) = stream.next().await {
+            let chunk = match item {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(host = %host, error = %e, "upstream body read failed");
+                    return Ok(error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "upstream read error",
+                    ));
+                }
+            };
+            if buf.len().saturating_add(chunk.len()) > max {
+                return Ok(error_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "upstream response too large",
+                ));
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        (response_builder, buf)
+    };
 
     // ── Rich response classification ────────────────────────────────
     // Classify the upstream response through loaded WAF profiles
@@ -1739,73 +1866,128 @@ async fn forward_passthrough(
         return Ok(error_response(StatusCode::FORBIDDEN, &msg));
     }
 
-    let method = match reqwest::Method::from_bytes(req.method.as_str().as_bytes()) {
-        Ok(m) => m,
-        Err(_) => {
-            return Ok(error_response(
-                StatusCode::BAD_REQUEST,
-                "invalid HTTP method",
-            ));
-        }
-    };
-    let mut builder = client.request(method, &req.url);
+    // Same dual-path fetch as forward_wafrift_request: stealth via
+    // `STEALTH_CLIENT` if `--tls-impersonate <profile>` was set,
+    // else default reqwest path.
     let conn_fwd = collect_connection_header_names(&req.headers);
-    for (k, v) in &req.headers {
-        if k.eq_ignore_ascii_case("host")
-            || k.eq_ignore_ascii_case("content-length")
-            || should_strip_proxy_header(k, &conn_fwd)
-        {
-            continue;
-        }
-        builder = builder.header(k.as_str(), v.as_str());
-    }
-    if let Some(b) = req.body {
-        builder = builder.body(b);
-    }
-
-    let resp = match builder.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            if let Some(throttle) = WARN_THROTTLE.get()
-                && throttle.should_warn(&format!("passthrough:{host}")) {
-                    warn!(host = %host, error = %e, "passthrough forwarding failed");
-                }
-            return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
-        }
-    };
-
-    let status = resp.status();
-    let conn_resp = collect_connection_header_names_hyper(resp.headers());
-    let mut response_builder = Response::builder().status(status.as_u16());
-    for (k, v) in resp.headers().iter() {
-        if should_strip_proxy_header(k.as_str(), &conn_resp) {
-            continue;
-        }
-        response_builder = response_builder.header(k, v);
-    }
-
     let max = limits.max_upstream_response_bytes;
-    let mut stream = resp.bytes_stream();
-    let mut buf = Vec::new();
-    while let Some(item) = stream.next().await {
-        let chunk = match item {
-            Ok(c) => c,
+
+    let (response_builder, buf) = if let Some(sc) = stealth() {
+        let mut filtered_headers = Vec::with_capacity(req.headers.len());
+        for (k, v) in &req.headers {
+            if k.eq_ignore_ascii_case("host")
+                || k.eq_ignore_ascii_case("content-length")
+                || should_strip_proxy_header(k, &conn_fwd)
+            {
+                continue;
+            }
+            filtered_headers.push((k.clone(), v.clone()));
+        }
+        let stealth_resp = match sc
+            .send(
+                req.method.as_str(),
+                &req.url,
+                &filtered_headers,
+                req.body.as_deref(),
+                max,
+            )
+            .await
+        {
+            Ok(r) => r,
             Err(e) => {
-                warn!(host = %host, error = %e, "upstream body read failed");
+                if let Some(throttle) = WARN_THROTTLE.get()
+                    && throttle.should_warn(&format!("passthrough:{host}"))
+                {
+                    warn!(host = %host, error = %e, stack = "stealth", "passthrough forwarding failed");
+                }
+                return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
+            }
+        };
+        let mut response_builder = Response::builder().status(stealth_resp.status);
+        let conn_resp: std::collections::HashSet<String> = stealth_resp
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("connection"))
+            .map(|(_, v)| {
+                v.split(',')
+                    .map(|t| t.trim().to_ascii_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (k, v) in &stealth_resp.headers {
+            if should_strip_proxy_header(k, &conn_resp) {
+                continue;
+            }
+            response_builder = response_builder.header(k.as_str(), v.as_str());
+        }
+        (response_builder, stealth_resp.body.to_vec())
+    } else {
+        let method = match reqwest::Method::from_bytes(req.method.as_str().as_bytes()) {
+            Ok(m) => m,
+            Err(_) => {
                 return Ok(error_response(
-                    StatusCode::BAD_GATEWAY,
-                    "upstream read error",
+                    StatusCode::BAD_REQUEST,
+                    "invalid HTTP method",
                 ));
             }
         };
-        if buf.len().saturating_add(chunk.len()) > max {
-            return Ok(error_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "upstream response too large",
-            ));
+        let mut builder = client.request(method, &req.url);
+        for (k, v) in &req.headers {
+            if k.eq_ignore_ascii_case("host")
+                || k.eq_ignore_ascii_case("content-length")
+                || should_strip_proxy_header(k, &conn_fwd)
+            {
+                continue;
+            }
+            builder = builder.header(k.as_str(), v.as_str());
         }
-        buf.extend_from_slice(&chunk);
-    }
+        if let Some(b) = req.body {
+            builder = builder.body(b);
+        }
+        let resp = match builder.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                if let Some(throttle) = WARN_THROTTLE.get()
+                    && throttle.should_warn(&format!("passthrough:{host}"))
+                {
+                    warn!(host = %host, error = %e, "passthrough forwarding failed");
+                }
+                return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
+            }
+        };
+        let status = resp.status();
+        let conn_resp = collect_connection_header_names_hyper(resp.headers());
+        let mut response_builder = Response::builder().status(status.as_u16());
+        for (k, v) in resp.headers().iter() {
+            if should_strip_proxy_header(k.as_str(), &conn_resp) {
+                continue;
+            }
+            response_builder = response_builder.header(k, v);
+        }
+        let mut stream = resp.bytes_stream();
+        let mut buf = Vec::new();
+        while let Some(item) = stream.next().await {
+            let chunk = match item {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(host = %host, error = %e, "upstream body read failed");
+                    return Ok(error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "upstream read error",
+                    ));
+                }
+            };
+            if buf.len().saturating_add(chunk.len()) > max {
+                return Ok(error_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "upstream response too large",
+                ));
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        (response_builder, buf)
+    };
 
     Ok(response_builder
         .body(Full::new(Bytes::from(buf)))
