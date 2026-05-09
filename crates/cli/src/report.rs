@@ -18,9 +18,13 @@ use std::process::ExitCode;
 
 #[derive(Args, Debug)]
 pub struct ReportArgs {
-    /// Path to the proxy gene bank JSON. Default `~/.wafrift/gene-bank.json`.
+    /// Path to the proxy gene bank JSON. Repeatable: pass `--proxy-bank a.json
+    /// --proxy-bank b.json` to merge multiple banks (engagement teams running
+    /// several wafrift-proxies). Hosts are unioned; per-host proven_winners /
+    /// blocklisted are unioned; the first non-null waf_name wins.
+    /// Default (no flag) `~/.wafrift/gene-bank.json`.
     #[arg(long)]
-    pub proxy_bank: Option<PathBuf>,
+    pub proxy_bank: Vec<PathBuf>,
 
     /// Restrict the report to hosts matching this glob (`*.example.com`).
     /// Repeatable / comma-separated. Empty = all hosts.
@@ -78,7 +82,7 @@ struct JsonFinding<'a> {
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 struct PersistedHostState {
     #[serde(default)]
     proven_winners: Vec<String>,
@@ -88,7 +92,7 @@ struct PersistedHostState {
     waf_name: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 struct PersistedGeneBank {
     #[serde(default)]
     schema: u32,
@@ -96,39 +100,72 @@ struct PersistedGeneBank {
     hosts: HashMap<String, PersistedHostState>,
 }
 
+/// Union two banks: `dst` is mutated in place with the host union from `src`.
+/// Per host: proven_winners and blocklisted are union-merged (preserving
+/// dst's order, then appending unseen entries from src). The first non-null
+/// waf_name wins. Schema becomes max(dst, src).
+fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
+    dst.schema = dst.schema.max(src.schema);
+    for (host, src_state) in src.hosts {
+        let entry = dst
+            .hosts
+            .entry(host)
+            .or_insert_with(PersistedHostState::default);
+        for w in src_state.proven_winners {
+            if !entry.proven_winners.contains(&w) {
+                entry.proven_winners.push(w);
+            }
+        }
+        for b in src_state.blocklisted {
+            if !entry.blocklisted.contains(&b) {
+                entry.blocklisted.push(b);
+            }
+        }
+        if entry.waf_name.is_none() {
+            entry.waf_name = src_state.waf_name;
+        }
+    }
+}
+
 pub fn run_report(args: ReportArgs) -> ExitCode {
-    let path = match resolve_path(args.proxy_bank.clone()) {
+    let paths = match resolve_paths(&args.proxy_bank) {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("error: {msg}");
             return ExitCode::from(1);
         }
     };
-    let raw = match fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!(
-                "error: gene bank not found: {}\n\n\
-                 hint: the gene bank is created automatically by wafrift-proxy.\n\
-                 Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and browse\n\
-                 through it, then re-run `wafrift report`.\n\
-                 Or pass `--proxy-bank <path>` to use a specific file.",
-                path.display()
-            );
-            return ExitCode::from(1);
-        }
-        Err(e) => {
-            eprintln!("error: read {}: {e}", path.display());
-            return ExitCode::from(1);
-        }
-    };
-    let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("error: parse gene bank: {e}");
-            return ExitCode::from(1);
-        }
-    };
+
+    let mut merged = PersistedGeneBank::default();
+    for path in &paths {
+        let raw = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!(
+                    "error: gene bank not found: {}\n\n\
+                     hint: the gene bank is created automatically by wafrift-proxy.\n\
+                     Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and browse\n\
+                     through it, then re-run `wafrift report`.\n\
+                     Or pass `--proxy-bank <path>` to use a specific file.",
+                    path.display()
+                );
+                return ExitCode::from(1);
+            }
+            Err(e) => {
+                eprintln!("error: read {}: {e}", path.display());
+                return ExitCode::from(1);
+            }
+        };
+        let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("error: parse {}: {e}", path.display());
+                return ExitCode::from(1);
+            }
+        };
+        merge_banks(&mut merged, bank);
+    }
+    let bank = merged;
 
     let mut hosts: Vec<(&String, &PersistedHostState)> = bank
         .hosts
@@ -337,15 +374,15 @@ fn shell_escape(s: &str) -> String {
     s.replace('\'', "'\\''")
 }
 
-fn resolve_path(custom: Option<PathBuf>) -> Result<PathBuf, String> {
-    match custom {
-        Some(p) => Ok(p),
-        None => {
-            let home = std::env::var_os("HOME")
-                .ok_or_else(|| "$HOME not set; pass --proxy-bank explicitly".to_string())?;
-            Ok(PathBuf::from(home).join(".wafrift").join("gene-bank.json"))
-        }
+fn resolve_paths(custom: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    if !custom.is_empty() {
+        return Ok(custom.to_vec());
     }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "$HOME not set; pass --proxy-bank explicitly".to_string())?;
+    Ok(vec![
+        PathBuf::from(home).join(".wafrift").join("gene-bank.json"),
+    ])
 }
 
 #[cfg(test)]
@@ -382,7 +419,7 @@ mod tests {
             .filter(|(_, hs)| !hs.proven_winners.is_empty())
             .collect();
         let args = ReportArgs {
-            proxy_bank: None,
+            proxy_bank: vec![],
             only_host: vec![],
             output: None,
             target_template: None,
@@ -443,7 +480,7 @@ mod tests {
     fn report_with_no_findings_uses_friendly_empty_state() {
         let bank = PersistedGeneBank { schema: 1, hosts: HashMap::new() };
         let args = ReportArgs {
-            proxy_bank: None,
+            proxy_bank: vec![],
             only_host: vec![],
             output: None,
             target_template: None,
@@ -465,7 +502,7 @@ mod tests {
             .collect();
         hosts.sort_by(|a, b| a.0.cmp(b.0));
         let args = ReportArgs {
-            proxy_bank: None,
+            proxy_bank: vec![],
             only_host: vec![],
             output: None,
             target_template: None,
@@ -500,7 +537,7 @@ mod tests {
         // that does `len(findings)` would crash on null.
         let bank = PersistedGeneBank { schema: 1, hosts: HashMap::new() };
         let args = ReportArgs {
-            proxy_bank: None,
+            proxy_bank: vec![],
             only_host: vec![],
             output: None,
             target_template: None,
@@ -512,5 +549,69 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         assert!(parsed["findings"].is_array());
         assert_eq!(parsed["findings"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn merge_banks_unions_hosts_and_techniques() {
+        // bank A: api.example.com with WAF + one winner
+        let mut a_hosts = HashMap::new();
+        a_hosts.insert(
+            "api.example.com".into(),
+            PersistedHostState {
+                proven_winners: vec!["EncodingUrl".into()],
+                blocklisted: vec!["XssTagScript".into()],
+                waf_name: Some("ModSecurity".into()),
+            },
+        );
+        let mut a = PersistedGeneBank {
+            schema: 1,
+            hosts: a_hosts,
+        };
+
+        // bank B: same host with a different winner + new host
+        let mut b_hosts = HashMap::new();
+        b_hosts.insert(
+            "api.example.com".into(),
+            PersistedHostState {
+                proven_winners: vec!["EncodingUrl".into(), "GrammarTautology".into()],
+                blocklisted: vec!["CmdSubshell".into()],
+                waf_name: None,
+            },
+        );
+        b_hosts.insert(
+            "edge.example.com".into(),
+            PersistedHostState {
+                proven_winners: vec!["HeaderHostShard".into()],
+                blocklisted: vec![],
+                waf_name: Some("Cloudflare".into()),
+            },
+        );
+        let b = PersistedGeneBank {
+            schema: 2,
+            hosts: b_hosts,
+        };
+
+        merge_banks(&mut a, b);
+
+        // schema becomes max
+        assert_eq!(a.schema, 2);
+        // host union
+        assert_eq!(a.hosts.len(), 2);
+        assert!(a.hosts.contains_key("edge.example.com"));
+        // techniques unioned + dedup'd, dst order preserved then src appended
+        let api = a.hosts.get("api.example.com").unwrap();
+        assert_eq!(
+            api.proven_winners,
+            vec!["EncodingUrl".to_string(), "GrammarTautology".to_string()]
+        );
+        assert_eq!(
+            api.blocklisted,
+            vec!["XssTagScript".to_string(), "CmdSubshell".to_string()]
+        );
+        // first non-null waf_name wins (dst's ModSecurity beats src's None)
+        assert_eq!(api.waf_name.as_deref(), Some("ModSecurity"));
+        // edge picked up Cloudflare from src since dst had no entry
+        let edge = a.hosts.get("edge.example.com").unwrap();
+        assert_eq!(edge.waf_name.as_deref(), Some("Cloudflare"));
     }
 }
