@@ -4,6 +4,43 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — EvilWAF JA3/JA4 parity (closed previously-documented gap)
+
+- **`wafrift_transport::stealth::StealthClient`** wraps `rquest`
+  (forked BoringSSL) behind the `tls-impersonate` cargo feature.
+  Wire-identical Chrome / Firefox / Safari / Edge ClientHello bytes
+  on every upstream forward — closes the JA3/JA4 + h2 SETTINGS gap
+  vs Cloudflare / Akamai / Sigsci / Imperva-Bot. 7 profiles plus
+  `chrome` / `firefox` / `safari` / `edge` "latest of family"
+  aliases. Default builds are unaffected (no boring-sys); opt-in
+  via `cargo install wafrift-proxy --features tls-impersonate`.
+
+- **`wafrift-proxy --tls-impersonate <profile>`** — practitioner-
+  facing CLI flag. Process-wide `OnceLock<StealthClient>` set at
+  startup; `forward_wafrift_request` and `forward_passthrough` each
+  branch on it, so the existing reqwest path runs unchanged when the
+  flag is absent. Without the cargo feature, the flag is parsed but
+  exits cleanly at startup with an actionable rebuild-instructions
+  error (no silent half-works).
+
+- **`crates/proxy/src/upstream.rs` — `UpstreamClient` enum**: typed
+  wrapper exposed for library consumers building their own
+  forwarders. `from_reqwest()` / `stealth(profile)` constructors,
+  unified `send()` API, `tls_stack_name()` for log lines and
+  `/_wafrift/status` output.
+
+- **CI**: dedicated `tls-impersonate` job (`continue-on-error: true`
+  — boring-sys C build is brittle across runner images, so the
+  default lane stays green even if this one churns). Installs
+  `ninja-build` + uses ubuntu-latest's bundled cmake/clang/golang.
+  Default `ci` job no longer passes `--all-features` (would have
+  required boring-sys deps for non-stealth users).
+
+- **`docs/TLS_PARITY.md`** rewritten side-by-side comparing the two
+  transports; **`docs/GAP_CLOSURE_ROADMAP.md`** definition-of-done
+  updated to reflect that EvilWAF parity is implemented, not
+  aspirational.
+
 ### Added — intelligence loops + audit-grade explanations
 
 - **Rich response classification (H1).** New `wafrift_transport::signal`

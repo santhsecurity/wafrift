@@ -1,0 +1,73 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH discover 1  "discover "
+.SH NAME
+discover \- Endpoint discovery: parse OpenAPI/Swagger, run GraphQL introspection, or fire differential parameter mining
+.SH SYNOPSIS
+\fBdiscover\fR [\fB\-\-target\fR] [\fB\-\-spec\fR] [\fB\-\-introspect\fR] [\fB\-\-mine\-params\fR] [\fB\-\-wordlist\fR] [\fB\-\-concurrency\fR] [\fB\-\-delay\-ms\fR] [\fB\-\-baseline\-requests\fR] [\fB\-\-format\fR] [\fB\-\-output\fR] [\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIPTION
+Endpoint discovery from one of three sources, output as JSON pipeable into `wafrift scan \-\-from\-discovery`. All three modes can run together; results are concatenated and deduplicated by (method, url).
+.SH OPTIONS
+.TP
+\fB\-\-target\fR \fI<TARGET>\fR
+Target URL (used by \-\-introspect and \-\-mine\-params). Required when either of those modes is enabled. Ignored by \-\-spec
+.TP
+\fB\-\-spec\fR \fI<SPEC>\fR
+Path to an OpenAPI 2.0 (Swagger) or 3.x JSON spec file. The spec's `paths.<path>.<method>` entries become discovered endpoints; parameters become injection points (Query / Path / Header / Cookie / Body, with media\-type\-aware context inference for request bodies)
+.TP
+\fB\-\-introspect\fR
+POST a GraphQL introspection query to \-\-target and emit one endpoint per top\-level field on Query / Mutation / Subscription. Returns IntrospectionDisabled if the server blocks introspection
+.TP
+\fB\-\-mine\-params\fR
+Differential parameter mining: collect a baseline, then probe each candidate from \-\-wordlist. Hits are flagged when the response status / body length / latency diverges from the baseline beyond the configured thresholds
+.TP
+\fB\-\-wordlist\fR \fI<WORDLIST>\fR
+Newline\-delimited wordlist file for \-\-mine\-params. Required when that mode is enabled. Common picks: SecLists' burp\-parameter\-names
+.TP
+\fB\-\-concurrency\fR \fI<CONCURRENCY>\fR [default: 8]
+Concurrency cap for \-\-mine\-params probes
+.TP
+\fB\-\-delay\-ms\fR \fI<DELAY_MS>\fR [default: 50]
+Per\-worker delay between consecutive \-\-mine\-params probes (ms)
+.TP
+\fB\-\-baseline\-requests\fR \fI<BASELINE_REQUESTS>\fR [default: 5]
+Number of baseline requests for \-\-mine\-params. More = tighter envelope, slower start
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR [default: text]
+Output format. `text` (default) is human\-friendly; `json` is a stable, machine\-parseable surface piped into `wafrift scan \-\-from\-discovery`
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+text
+.IP \(bu 2
+json
+.RE
+.TP
+\fB\-\-output\fR \fI<OUTPUT>\fR
+Write JSON output to this file instead of stdout
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH EXAMPLES
+.TP
+Parse an OpenAPI 3.x spec:
+.nf
+wafrift discover \-\-spec api.json \-\-format json \-\-output endpoints.json
+.fi
+.TP
+Probe a GraphQL endpoint:
+.nf
+wafrift discover \-\-target https://api.example.com/graphql \-\-introspect
+.fi
+.TP
+Differential parameter mining:
+.nf
+wafrift discover \-\-target https://app.example.com/search \\
+    \-\-mine\-params \-\-wordlist /path/to/burp\-parameter\-names.txt
+.fi
+.SH SEE ALSO
+.BR wafrift-scan (1),
+.BR wafrift-recon (1)

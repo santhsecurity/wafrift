@@ -193,6 +193,29 @@ Header / Cookie / Body), `InjectionContext` (`JsonString` /
 spec's media type, and a `required` flag — letting `wafrift scan`
 pick context-aware encodings instead of guessing.
 
+### 🛡️ Stealth — "Cloudflare/Akamai blocks me on JA3 before I can even probe"
+
+```bash
+# One-time: build with the BoringSSL impersonation feature.
+cargo install wafrift-proxy --features tls-impersonate
+
+# Run the proxy wearing a real Chrome 131 ClientHello on every
+# upstream forward. JA3 / JA4 / h2 SETTINGS all match a real browser
+# bytes-for-bytes — edge WAFs that classify on TLS fingerprint
+# (Cloudflare bot management, Akamai, Sigsci, Imperva Bot Protection)
+# see "browser" instead of "rustls" and let the connection through to
+# inspection, where wafrift's HTTP-level evasion takes over.
+wafrift-proxy --listen 127.0.0.1:8080 --tls-impersonate chrome131
+
+# Profiles: chrome131, chrome120, edge131, firefox133, safari18,
+# safari17_5, okhttp5; aliases `chrome`, `firefox`, `safari`, `edge`
+# resolve to the latest-of-family. See docs/TLS_PARITY.md.
+
+# Now sqlmap / ffuf / curl through this proxy gets through edge TLS
+# fingerprinting without any extra config.
+sqlmap -u "https://target.cloudflare-protected.com/x?id=1" --proxy=http://127.0.0.1:8080
+```
+
 ### 🔴 Red Team — "Persistent evasion against the same WAF"
 
 ```bash

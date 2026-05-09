@@ -25,6 +25,15 @@ use wafrift_types::injection_context::InjectionContext;
 
 const CANARY: &str = "wafrift_canary_x9k2";
 
+/// Hard cap on body bytes read per probe.
+///
+/// Without this, a target returning a multi-gigabyte response would
+/// OOM the miner. 4 MiB is well above any realistic web page (the
+/// 95th percentile is ~3 MB per HTTPArchive 2026) yet small enough
+/// that 100 candidate probes won't combined-OOM the process even on
+/// a small workstation.
+const MAX_PROBE_BODY_BYTES: usize = 4 * 1024 * 1024;
+
 /// Configuration for parameter mining.
 #[derive(Debug, Clone)]
 pub struct MiningConfig {
@@ -151,9 +160,9 @@ async fn collect_baseline(
             }
         })?;
         let status = resp.status().as_u16();
-        let body = resp.bytes().await.unwrap_or_default();
+        let body_len = read_bounded_len(resp).await;
         statuses.push(status);
-        lens.push(body.len());
+        lens.push(body_len);
         lats.push(start.elapsed().as_millis() as u64);
     }
     let mean_body_len = lens.iter().copied().sum::<usize>() as f64 / lens.len().max(1) as f64;
@@ -177,13 +186,41 @@ async fn probe_one(
     let start = Instant::now();
     let resp = client.get(&url).send().await.ok()?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.ok()?;
+    let body_len = read_bounded_len(resp).await;
     Some(ProbeResult {
         word: word.to_string(),
         status,
-        body_len: body.len(),
+        body_len,
         latency_ms: start.elapsed().as_millis() as u64,
     })
+}
+
+/// Stream a response body and return ONLY the byte count, capped at
+/// [`MAX_PROBE_BODY_BYTES`]. We don't keep the bytes — only the length
+/// is consumed by the differential signal — so streaming + dropping
+/// chunks gives us a fixed memory ceiling regardless of upstream size.
+///
+/// Returns the bounded count (matches actual bytes received up to the
+/// cap; capped responses report exactly `MAX_PROBE_BODY_BYTES` rather
+/// than the true upstream length, which is fine for differential
+/// detection — the divergence still fires).
+async fn read_bounded_len(resp: reqwest::Response) -> usize {
+    use futures_util::StreamExt;
+    let mut len = 0usize;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else { break };
+        let remaining = MAX_PROBE_BODY_BYTES.saturating_sub(len);
+        if remaining == 0 {
+            break;
+        }
+        let take = chunk.len().min(remaining);
+        len = len.saturating_add(take);
+        if chunk.len() > remaining {
+            break;
+        }
+    }
+    len
 }
 
 fn is_hit(probe: &ProbeResult, baseline: &BaselineEnvelope, config: &MiningConfig) -> bool {

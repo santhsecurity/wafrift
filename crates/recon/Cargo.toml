@@ -17,6 +17,8 @@ serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+# Needed by discovery::param_miner::read_bounded_len's bytes_stream loop.
+futures-util.workspace = true
 wafrift-types = { workspace = true }
 
 [lints]
