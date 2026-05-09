@@ -1,3 +1,10 @@
+//! Library surface for `wafrift-proxy`.
+//!
+//! The binary entry point lives in `main.rs`; this lib module exposes
+//! the building blocks downstream consumers (the bench harness,
+//! integration tests, third-party Rust code that wants the
+//! evasion proxy as a library) need.
+
 pub mod hop_by_hop;
 pub mod mitm;
 pub mod rate_limit;
