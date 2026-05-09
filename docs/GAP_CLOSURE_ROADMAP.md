@@ -52,6 +52,11 @@ This document tracks work to match **common expectations** set by tools like [Ev
 | JA3/JA4-style **documentation** of TLS profiles | P0 | **Done:** [`TLS_PARITY.md`](./TLS_PARITY.md) + `tls_fingerprint.rs` (limits of rustls vs browser JA3). |
 | **Wire-identical** browser ClientHello (JA3) | P2/P3 | **Done:** `wafrift-transport::stealth::StealthClient` wraps `rquest` (BoringSSL). Opt-in via `--features tls-impersonate`; CLI exposes `--tls-impersonate {chrome131,firefox133,safari18,…}`. See [`TLS_PARITY.md`](./TLS_PARITY.md). |
 | HTTP/2 SETTINGS / priority “fingerprint” | P2 | **Done:** rquest sends Chrome's exact `HEADER_TABLE_SIZE` / `INITIAL_WINDOW_SIZE` / `MAX_CONCURRENT_STREAMS` values in Chrome's exact order when `tls-impersonate` is on. |
+| **Per-request** TLS fingerprint rotation | P1 | **Done (v0.2.2):** `wafrift-proxy --tls-impersonate-rotate chrome131,firefox133,safari18` round-robins a `StealthPool` per upstream request. Defeats per-fingerprint reputation (Cloudflare bot-management, Akamai BMP, PerimeterX). |
+| Per-request **TCP source-port rotation** | P1 | **Done (v0.2.2):** `wafrift-proxy --no-conn-reuse` flips `pool_max_idle_per_host(0)`. Kernel picks a fresh ephemeral source port per upstream request. |
+| TCP **raw-options** rotation (MSS, window scale, timestamp, SACK) | P3 | **Open.** Needs `CAP_NET_RAW` and a custom connector replacing the kernel's TCP stack. WafRift uses pure userspace networking; no plan to add raw sockets. Filed honestly, not silently shipped. |
+| Body-size **inspection-window bypass** (Cloudflare 8KB / AWS WAF 16KB / Akamai 8KB caps) | P1 | **Done (v0.2.2):** `wafrift_evolution::body_padding` content-type-aware padder + `wafrift-proxy --body-padding-bytes <N>` + wired into `EvasionConfig::maximum()` so `wafrift scan` and `bench-waf` use it automatically. Closes nowafplsV2's primary advantage. |
+| **Real-time TUI dashboard** | P1 | **Done (v0.2.2):** `wafrift-proxy --tui` ships a ratatui/crossterm dashboard (per-host counters, TLS rotation distribution, padded-body counter, live request stream). Closes EvilWAF's TUI gap. |
 
 ---
 
