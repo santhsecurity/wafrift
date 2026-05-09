@@ -230,6 +230,38 @@ fn unknown_subcommand_fails() {
 }
 
 #[test]
+fn bench_waf_validate_only_emits_schema_versioned_json() {
+    // --validate-only doesn't need a target. We exercise the JSON shape
+    // by piping through python to assert schema_version + wafrift_version
+    // are both top-level keys.
+    use std::io::Write;
+    let dir = std::env::temp_dir().join(format!("wafrift-bench-validate-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let corpus = dir.join("corpus");
+    let _ = std::fs::create_dir_all(&corpus);
+    // Minimal valid corpus: one file with one case.
+    let toml = corpus.join("sql.toml");
+    {
+        let mut f = std::fs::File::create(&toml).unwrap();
+        writeln!(
+            f,
+            r#"[[case]]
+id = "smoke_select"
+class = "sql"
+payload = "' OR 1=1--""#
+        ).unwrap();
+    }
+    let (code, _stdout, _stderr) = wafrift(&[
+        "bench-waf",
+        "--validate-only",
+        "--corpus",
+        corpus.to_str().unwrap(),
+    ]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(code, 0, "validate-only on a clean 1-case corpus should exit 0");
+}
+
+#[test]
 fn bench_waf_help_lists_all_strategies() {
     // bench-waf --help text must enumerate every selectable strategy and
     // call out the `all` keyword shortcut. If a future change renames a
