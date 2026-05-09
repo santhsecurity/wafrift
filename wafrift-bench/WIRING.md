@@ -73,22 +73,43 @@ sqlmap's payloads get evade-wrapped on the fly.
 
 ## Gaps — what's NOT wired (yet)
 
-**[CLOSED 2026-05-08 evening]**
+**[CLOSED 2026-05-08]**
 
 1. ✅ **MAP-Elites + sim-anneal + hill-climb + tabu + novelty in bench** —
    `--strategies hill-climb,sim-anneal,tabu,novelty,map-elites` wired.
    `run_evolution_strategy` runs an `EvolutionEngine` per case, gets
    chromosomes, renders via grammar+encoding genes, sends, feeds
    verdict back. Algorithms learn what beats the WAF as they go.
-2. ✅ **AST metamorphism (#5)** — `crates/grammar/src/grammar/sql/ast_metamorph.rs`
+2. ✅ **AST metamorphism** — `crates/grammar/src/grammar/sql/ast_metamorph.rs`
    lifts via sqlparser, applies 7 transforms, lowers back. Wired
    through `sql::mutate` so AST variants flow through `build_variants`
    automatically.
-3. ✅ **Oracle semantic-validity** — `--oracle-gate` flag wires
-   per-class oracle dispatch (sql / xss / cmdi / ssti / path).
-   Per-strategy `oracle_valid` counter; aggregate
-   `total_variants_oracle_valid` + `oracle_valid_share_of_bypasses`
-   in JSON output.
+3. ✅ **Oracle semantic-validity** — `--oracle-gate` wires per-class
+   oracle dispatch (sql / xss / cmdi / ssti / path / ldap / ssrf /
+   nosql / xxe / log4shell). All 10 attack classes covered. NoSQL,
+   XXE, log4shell use new structural-validity checks (Mongo operator
+   markers; XML/DOCTYPE/ENTITY markers; JNDI lookup shapes incl.
+   percent-encoded). Aggregate `total_variants_oracle_valid` +
+   `oracle_valid_share_of_bypasses` in JSON output.
+4. ✅ **Proxy multi-variant retry** — `wafrift-proxy
+   --max-evade-retries N` wraps each request in a retry loop. Each
+   retry's recorded block bumps escalation so successive attempts
+   pick heavier evade shapes.
+5. ✅ **Wafrift-fingerprint in CLI / wafrift-recon module / proxy-pool
+   default-on / wafrift-core re-exports / MCTS as default in
+   strategy active loop (evade_smart)** — all 5 user-flagged
+   wiring gaps closed.
+6. ✅ **Bench-waf production hardening** — `--skip-healthcheck` (off
+   by default; pings target before queueing N variants),
+   `--adaptive-pause-after-errors N` (auto-throttle on
+   connection-storm), `--summary-only` (CI-friendly JSON),
+   per-strategy text output, default UA from
+   `wafrift_fingerprint::random_profile()`.
+7. ✅ **cve_pocs/ corpus** — held-out test set per methodology;
+   22 real CVE PoC payloads (log4shell, struts2, weblogic, gitlab,
+   confluence, spring4shell, follina, apache traversal, etc.).
+8. ✅ **BunkerWeb compose** — added `bunkerity/scheduler` +
+   `redis:7-alpine` companion services so modsec actually engages.
 
 **Open / next-step**
 
@@ -102,24 +123,19 @@ sqlmap's payloads get evade-wrapped on the fly.
   chains. Bench logs `bypass_techniques` summary but doesn't persist
   the full lineage tree (would let users replay any single bypass
   exactly from the JSON).
-- **Proxy multi-variant retry** — `wafrift-proxy` applies one
-  `strategy::evade` per intercepted request. Bench achieves much
-  higher bypass by trying 20 variants per case. Open: add a proxy
-  retry mode that cycles strategies/variants until a non-403, then
-  caches the winner per host.
-- **More attack-class oracles** — `oracle_valid()` falls through to
-  `true` for `ldap / ssrf / xxe / nosql / log4shell / cve_pocs`
-  (no per-class oracle yet). Adding LDAP/NoSQL/XXE oracles would
-  tighten the gating across the corpus.
-- **Naxsi from source** — replaced with BunkerWeb (modsec-based)
-  because no public naxsi docker image exists. BunkerWeb v1.6.0
-  also requires the `bunkerity/scheduler` companion to actually
-  engage modsec — env-var-only setup is pass-through. Open: build
-  naxsi-from-source Dockerfile for true positive-security model
-  coverage.
-- **Transport feature gates** — `proxy-pool`, `origin-bypass`,
-  `gossan-integration` off by default in `wafrift-cli`. Decision
-  on enabling them in shipped binaries.
+- **Persistent gene bank in proxy** — `wafrift-proxy` HostState lives
+  only in-memory; restart loses winner pool. Add JSON checkpoint to
+  `~/.wafrift/gene-bank.json`, load on start, save on signal-or-tick.
+- **Wafrift-proxy graceful shutdown** — SIGTERM/SIGINT today drops
+  pool + state. Add signal handler that flushes gene bank, drains
+  in-flight requests, exits cleanly.
+- **Naxsi from source** — replaced with BunkerWeb because no public
+  naxsi docker image exists. naxsi-from-source Dockerfile remains
+  open for true positive-security model coverage.
+- **Transport feature gates** — `origin-bypass`, `gossan-integration`
+  off by default in `wafrift-cli`. (proxy-pool now on by default —
+  see closed item #5.) Decision on enabling the others depends on
+  whether shipped binaries should pull in the gossan workspace dep.
 
 ## What's intentionally not in the bench
 

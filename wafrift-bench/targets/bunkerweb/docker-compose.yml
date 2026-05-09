@@ -1,12 +1,13 @@
 # BunkerWeb — modsec-based all-in-one WAF/reverse-proxy. Different rule
 # pipeline from CRS-vanilla (modsec-pl{1..4}) and Coraza, even though
-# modsec sits underneath, because BunkerWeb adds its own rule packs and
+# modsec sits underneath: BunkerWeb adds its own rule packs and
 # anti-bot/blacklist plugins on top.
 #
-# Public image: bunkerity/bunkerweb (Docker Hub).
-# Naxsi was the original plan but no public image exists for naxsi
-# without building from source; BunkerWeb is the substitute. naxsi
-# Dockerfile is a follow-up if we want true positive-security model.
+# v1.6 needs three services for env-var-only setup to actually engage
+# modsec: the bunkerweb proxy, the bunkerweb-scheduler that pushes
+# config + the redis storage backing them. (Without the scheduler
+# the proxy starts but never receives the modsec config and falls
+# through to a permissive default.)
 services:
   wafrift-bunkerweb:
     image: bunkerity/bunkerweb:1.6.0
@@ -15,7 +16,23 @@ services:
       - "18086:8080"
     environment:
       SERVER_NAME: "wafrift-bench"
+      API_WHITELIST_IP: "127.0.0.0/8 10.20.30.0/24 172.16.0.0/12 192.168.0.0/16"
+    depends_on:
+      - backend
+      - bw-scheduler
+    networks:
+      - wafrift-bunkerweb
+  bw-scheduler:
+    image: bunkerity/bunkerweb-scheduler:1.6.0
+    container_name: wafrift-bunkerweb-scheduler
+    depends_on:
+      - bw-redis
+    environment:
+      DATABASE_URI: "sqlite:////data/db.sqlite3"
+      BUNKERWEB_INSTANCES: "wafrift-bunkerweb"
+      SERVER_NAME: "wafrift-bench"
       MULTISITE: "no"
+      LOG_LEVEL: "warning"
       USE_REVERSE_PROXY: "yes"
       REVERSE_PROXY_HOST: "http://backend:80"
       REVERSE_PROXY_URL: "/"
@@ -33,13 +50,22 @@ services:
       LISTEN_HTTP: "yes"
       HTTP_PORT: "8080"
       USE_HTTPS: "no"
-    depends_on:
-      - backend
+      USE_REDIS: "yes"
+      REDIS_HOST: "bw-redis"
+    volumes:
+      - bw-data:/data
+    networks:
+      - wafrift-bunkerweb
+  bw-redis:
+    image: redis:7-alpine
+    container_name: wafrift-bunkerweb-redis
     networks:
       - wafrift-bunkerweb
   backend:
     image: kennethreitz/httpbin
     networks:
       - wafrift-bunkerweb
+volumes:
+  bw-data:
 networks:
   wafrift-bunkerweb:
