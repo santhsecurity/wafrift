@@ -15,8 +15,8 @@ wafrift-types = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
+sqlparser = { workspace = true }
 
 [dev-dependencies]
-sqlparser = { workspace = true }
 wafrift-oracle = { workspace = true }
 proptest = { workspace = true }
