@@ -20,8 +20,11 @@ pub fn run_egress_example(args: EgressExampleArgs) -> ExitCode {
                 "proxies": ["socks5h://127.0.0.1:9050"],
             })
         }
-        _ => {
-            eprintln!("unknown preset");
+        other => {
+            eprintln!(
+                "unknown egress preset {other:?}. Available: tor. \
+                 (Run `wafrift egress-example --help` for the canonical list.)"
+            );
             return ExitCode::from(2);
         }
     };
