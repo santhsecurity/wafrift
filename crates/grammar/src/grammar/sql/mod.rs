@@ -25,6 +25,9 @@ pub mod operators;
 pub mod oracle;
 /// PostgreSQL dialect mutations.
 pub mod postgres;
+/// Quote-free / comment-free rewrites for high-paranoia WAFs (Naxsi,
+/// AWS WAF managed, modsec PL3+).
+pub mod quote_free;
 /// SQLite dialect mutations.
 pub mod sqlite;
 /// String and whitespace SQL mutation helpers.
@@ -77,6 +80,19 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         &mut results,
         max_mutations,
         keywordless_mutations(payload, max_mutations / 4),
+    );
+
+    // Quote-free / comment-free rewrites (Naxsi, AWS WAF managed,
+    // modsec PL3+ — anything that flags any quote / comment / hex /
+    // parenthesised SQL keyword). These typically slip past the
+    // toughest pattern-only WAFs because the resulting SQL looks like
+    // benign integer-comparison queries. See `quote_free.rs` for
+    // confirmed pass-through evidence against the wafrift-bench
+    // naxsi container.
+    extend_until_limit(
+        &mut results,
+        max_mutations,
+        quote_free::mutations(payload, max_mutations / 4),
     );
 
     // AST-level metamorphism: lift -> transform -> lower via sqlparser.
