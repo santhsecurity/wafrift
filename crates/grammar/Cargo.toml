@@ -17,6 +17,9 @@ serde = { workspace = true }
 toml = { workspace = true }
 sqlparser = { workspace = true }
 tracing = { workspace = true }
+# Quote-free SQL mutator URL-decodes incoming payloads so its shape
+# detection works on encoded forms (1%27+OR+%271%27%3D%271).
+urlencoding = { workspace = true }
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }
