@@ -201,7 +201,10 @@ pub(crate) async fn run_scan(
     let body_bytes = baseline_response.bytes().await.unwrap_or_default();
 
     let detected = waf_detect::detect(baseline_status, &headers_vec, &body_bytes);
-    let waf_name = if let Some(result) = detected.first() {
+    let top_detection = detected
+        .first()
+        .filter(|result| result.confidence >= waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD);
+    let waf_name = if let Some(result) = top_detection {
         if scan_text {
             println!(
                 "  {} {} ({:.0}% confidence)",
@@ -224,7 +227,7 @@ pub(crate) async fn run_scan(
     };
 
     // Advisor: generate WAF-specific evasion plan.
-    let detected_waf_obj = detected.first().cloned();
+    let detected_waf_obj = top_detection.cloned();
     let evasion_plan = advisor::advise(
         detected_waf_obj.as_ref(),
         None, // No fingerprint drift yet

@@ -850,9 +850,9 @@ async fn forward_wafrift_request(
         let detections =
             wafrift_detect::waf_detect::detect(status.as_u16(), &header_pairs, body_slice);
         if let Some(top) = detections.first() {
-            // Threshold: require >=0.5 confidence to commit. Anything
+            // Threshold: require high confidence to commit. Anything
             // less is a guess and we'd rather stay in discovery.
-            if top.confidence >= 0.5 {
+            if top.confidence >= wafrift_detect::waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD {
                 let mut st = state.lock().await;
                 if let Some(hs) = st.hosts.get_mut(&host) {
                     hs.confirm_waf(Some(top.name.clone()));

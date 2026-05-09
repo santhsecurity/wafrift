@@ -68,7 +68,7 @@ async fn e2e_cloudflare_challenge_detected() {
     assert!(!wafs.is_empty(), "should detect Cloudflare");
     assert_eq!(wafs[0].name, "Cloudflare");
     assert!(
-        wafs[0].confidence >= 0.5,
+        wafs[0].confidence >= waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD,
         "confidence should be high: {}",
         wafs[0].confidence
     );
