@@ -1,0 +1,13 @@
+# Header names that ONLY appear when a WAF actively blocks a request.
+#
+# Presence of any of these is a strong block signal even when the response
+# status is 200 (some WAFs return 200 with a block header rather than 403).
+
+names = [
+    "x-amzn-waf-action",
+    "cf-mitigated",
+    "x-blocked-by",
+    "x-waf-event-info",
+    "x-mod-security",
+    "x-waf-status",
+]

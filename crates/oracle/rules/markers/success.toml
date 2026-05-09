@@ -1,0 +1,12 @@
+# Body substrings that indicate a request succeeded against the protected
+# application (not the WAF passing through, but the app actually responding
+# to authenticated/successful operations).
+
+patterns = [
+    "welcome",
+    "login successful",
+    "success",
+    "authenticated",
+    "dashboard",
+    "home",
+]

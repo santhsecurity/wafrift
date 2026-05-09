@@ -1,0 +1,12 @@
+# Body substrings that indicate a WAF rate-limit response.
+#
+# Distinguished from a "block" because the appropriate strategy is to back off
+# and retry, not to escalate evasion.
+
+patterns = [
+    "rate limit",
+    "too many requests",
+    "slow down",
+    "throttled",
+    "quota exceeded",
+]

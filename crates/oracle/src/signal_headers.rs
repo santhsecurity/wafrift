@@ -6,57 +6,17 @@
 //!    select targeted bypass strategies.
 //! 2. **Block signal** — some headers only appear on blocked requests,
 //!    providing a strong classification signal even with 200 status.
+//!
+//! `WAF_HEADERS` and `BLOCK_HEADER_NAMES` come from
+//! `crates/oracle/rules/markers/{waf_headers,block_headers}.toml` via
+//! `build.rs` — adding a header is a one-line PR with no Rust knowledge.
 
 use wafrift_types::Signal;
 
-/// Known WAF response headers and their significance.
-///
-/// Format: (header_name_lowercase, value_pattern, signal_description)
-const WAF_HEADERS: &[(&str, &str, &str)] = &[
-    // Cloudflare
-    ("cf-ray", "", "cloudflare_ray_id"),
-    ("cf-mitigated", "", "cloudflare_mitigated"),
-    ("cf-cache-status", "", "cloudflare_cache"),
-    // Akamai
-    ("x-akamai-transformed", "", "akamai_transformed"),
-    ("akamai-grn", "", "akamai_grn"),
-    // AWS WAF / CloudFront
-    ("x-amzn-requestid", "", "aws_request_id"),
-    ("x-amzn-waf-action", "block", "aws_waf_block"),
-    ("x-amzn-waf-action", "allow", "aws_waf_allow"),
-    // Imperva / Incapsula
-    ("x-iinfo", "", "imperva_incapsula"),
-    ("x-cdn", "Incapsula", "imperva_incapsula_cdn"),
-    // ModSecurity
-    ("x-mod-security", "", "modsecurity"),
-    ("server", "ModSecurity", "modsecurity_server"),
-    // Sucuri
-    ("x-sucuri-id", "", "sucuri_waf"),
-    ("x-sucuri-cache", "", "sucuri_cache"),
-    // F5 BIG-IP ASM
-    ("x-waf-status", "", "f5_bigip_waf"),
-    ("ts", "", "f5_bigip_cookie"),
-    // Barracuda
-    ("barra_counter_session", "", "barracuda_waf"),
-    // Fortinet / FortiWeb
-    ("fortiwafd", "", "fortiweb"),
-    // DDoS-GUARD
-    ("server", "ddos-guard", "ddos_guard"),
-    // Generic block indicators
-    ("x-blocked-by", "", "generic_blocked_by"),
-    ("x-waf-event-info", "", "generic_waf_event"),
-    ("x-firewall-protection", "", "generic_firewall"),
-];
-
-/// Block-specific headers — these ONLY appear when the WAF blocks a request.
-const BLOCK_HEADERS: &[&str] = &[
-    "x-amzn-waf-action",
-    "cf-mitigated",
-    "x-blocked-by",
-    "x-waf-event-info",
-    "x-mod-security",
-    "x-waf-status",
-];
+// `WAF_HEADERS` and `BLOCK_HEADER_NAMES` are emitted by build.rs into
+// markers_data.rs, which is included by signal_body_marker.rs. Re-import
+// here via the parent crate path.
+use crate::signal_body_marker::{BLOCK_HEADER_NAMES, WAF_HEADERS};
 
 /// Classify response headers for WAF signals.
 ///
@@ -78,7 +38,7 @@ pub fn classify_headers(headers: &[(String, String)]) -> Vec<Signal> {
         }
 
         // Check for explicit block headers
-        if BLOCK_HEADERS.contains(&name_lower.as_str()) {
+        if BLOCK_HEADER_NAMES.contains(&name_lower.as_str()) {
             signals.push(Signal::BodyMarker(format!(
                 "waf_block_header:{}={}",
                 name_lower,

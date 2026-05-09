@@ -1,0 +1,161 @@
+# Differential WAF probes — payloads sent to a target to determine which
+# constructs the WAF blocks vs allows. Aggregated into a fingerprint that
+# informs strategy choice.
+#
+# # SAFETY / authorization contract
+#
+# These payloads are NOT inert. They contain genuinely exploitable strings
+# (`alert(1)`, `eval('x')`, `1=1`, `/etc/passwd`, `;`, `|`, `||`) — that is
+# the point: a WAF that doesn't block them is the signal we're measuring.
+# If the WAF fails to block AND the upstream application is vulnerable, the
+# probe IS the attack. Inert markers (e.g. `wafrift_probe_xyz`) don't trigger
+# any WAF rule and would defeat the purpose.
+#
+# **Caller responsibility.** Only run differential probing against:
+#   1. A WAF in front of a known-non-vulnerable backend you control, OR
+#   2. A target you have explicit written authorization to attack.
+#
+# # Adding probes
+#
+# Each scalar list (sql_keywords, command_names, etc.) is a flat array — append
+# a string and rebuild. Table arrays ([[xss_tag]] / [[xss_function]]) carry a
+# per-entry expected_blocked flag because some payloads are universally allowed.
+#
+# All scalar keys MUST appear before the first table-array section to avoid
+# being parsed as a member of the preceding table.
+
+baseline_payload = "test_value_12345"
+baseline_description = "baseline benign value"
+
+# ── SQL ──
+sql_keywords = [
+    "SELECT", "UNION", "INSERT", "UPDATE", "DELETE", "DROP", "FROM",
+    "WHERE", "ORDER BY", "GROUP BY", "HAVING", "SLEEP", "BENCHMARK", "WAITFOR",
+]
+
+sql_operators = [
+    "=", "!=", "<>", "LIKE", "IN(", "BETWEEN", "IS NULL", "REGEXP",
+]
+
+sql_comments = ["--", "#", "/***/", "-- -", "--+"]
+
+sql_tautologies = [
+    "1=1",
+    "1 LIKE 1",
+    "'a'='a'",
+    "1 BETWEEN 0 AND 2",
+    "1 IN(1)",
+    "true",
+]
+
+# ── XSS ──
+xss_events = [
+    "onerror", "onload", "onclick", "onfocus", "onmouseover",
+    "ontoggle", "onbegin", "onstart", "onsubmit",
+]
+
+# ── CMD ──
+command_separators = [";", "|", "||", "&&", "`", "$("]
+command_names = ["cat", "ls", "id", "whoami", "wget", "curl", "ping", "nc"]
+command_paths = ["/etc/passwd", "/etc/shadow", "/proc/self/environ", "/bin/sh"]
+
+# ── Table-array sections (MUST be at the end — see note above) ──
+
+# XSS tags carry per-entry expected_blocked because some tags (svg, img, etc.)
+# are commonly allowed in user content even by strict WAFs.
+[[xss_tag]]
+name = "script"
+payload = "<script>"
+expected_blocked = true
+
+[[xss_tag]]
+name = "img"
+payload = "<img src=x>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "svg"
+payload = "<svg>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "iframe"
+payload = "<iframe>"
+expected_blocked = true
+
+[[xss_tag]]
+name = "body"
+payload = "<body>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "details"
+payload = "<details>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "input"
+payload = "<input>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "marquee"
+payload = "<marquee>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "video"
+payload = "<video>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "object"
+payload = "<object>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "math"
+payload = "<math>"
+expected_blocked = false
+
+[[xss_tag]]
+name = "style"
+payload = "<style>"
+expected_blocked = false
+
+# JS execution functions — `alert` and `eval` are universally blocked;
+# others depend on the WAF's behavioural ruleset.
+[[xss_function]]
+name = "alert"
+payload = "alert(1)"
+expected_blocked = true
+
+[[xss_function]]
+name = "confirm"
+payload = "confirm(1)"
+expected_blocked = false
+
+[[xss_function]]
+name = "prompt"
+payload = "prompt(1)"
+expected_blocked = false
+
+[[xss_function]]
+name = "eval"
+payload = "eval('x')"
+expected_blocked = true
+
+[[xss_function]]
+name = "Function"
+payload = "Function('x')()"
+expected_blocked = false
+
+[[xss_function]]
+name = "constructor"
+payload = "[].constructor.constructor('x')()"
+expected_blocked = false
+
+[[xss_function]]
+name = "setTimeout"
+payload = "setTimeout('x')"
+expected_blocked = false

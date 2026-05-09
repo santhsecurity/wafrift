@@ -1,0 +1,12 @@
+# Substrings that prefix a WAF rule ID in error pages.
+#
+# When a marker matches, the engine extracts the trailing digits as the rule ID
+# (e.g. "Rule ID: 942100" -> rule_id="942100"). Add new prefixes here when you
+# encounter a WAF that emits rule IDs in a different shape.
+
+prefixes = [
+    "rule id:",
+    "rule_id",
+    "ruleid",
+    " incident id:",
+]

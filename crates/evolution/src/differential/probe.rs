@@ -1,3 +1,8 @@
+// Probe data is community-contributed via
+// `crates/evolution/rules/probes/differential.toml` and compiled in by build.rs.
+// Adding a new SQL keyword / XSS tag / command name is a one-line PR with no Rust.
+include!(concat!(env!("OUT_DIR"), "/differential_data.rs"));
+
 /// A single probe in the differential analysis.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Probe {
@@ -62,7 +67,7 @@ pub enum ProbeTarget {
 #[must_use]
 pub fn generate_probes() -> Vec<Probe> {
     let mut probes = Vec::new();
-    probes.push(baseline_probe("test_value_12345", "baseline benign value"));
+    probes.push(baseline_probe(BASELINE_PAYLOAD, BASELINE_DESCRIPTION));
     probes.extend(sql_keyword_probes());
     probes.extend(sql_operator_probes());
     probes.extend(sql_comment_probes());
@@ -92,185 +97,123 @@ pub(crate) fn baseline_probe(payload: &str, description: &str) -> Probe {
 }
 
 pub(crate) fn sql_keyword_probes() -> Vec<Probe> {
-    build_probes(
-        &[
-            "SELECT",
-            "UNION",
-            "INSERT",
-            "UPDATE",
-            "DELETE",
-            "DROP",
-            "FROM",
-            "WHERE",
-            "ORDER BY",
-            "GROUP BY",
-            "HAVING",
-            "SLEEP",
-            "BENCHMARK",
-            "WAITFOR",
-        ],
-        |keyword| Probe {
+    SQL_KEYWORDS
+        .iter()
+        .map(|&keyword| Probe {
             payload: format!("test {keyword} value"),
             tests: ProbeTarget::SqlKeyword(keyword.to_string()),
             description: format!("SQL keyword: {keyword}"),
             expected_blocked: true,
-        },
-    )
+        })
+        .collect()
 }
 
 pub(crate) fn sql_operator_probes() -> Vec<Probe> {
-    build_probes(
-        &[
-            "=", "!=", "<>", "LIKE", "IN(", "BETWEEN", "IS NULL", "REGEXP",
-        ],
-        |operator| Probe {
+    SQL_OPERATORS
+        .iter()
+        .map(|&operator| Probe {
             payload: format!("test{operator}test"),
             tests: ProbeTarget::SqlOperator(operator.to_string()),
             description: format!("SQL operator: {operator}"),
             expected_blocked: true,
-        },
-    )
+        })
+        .collect()
 }
 
 pub(crate) fn sql_comment_probes() -> Vec<Probe> {
-    build_probes(&["--", "#", "/***/", "-- -", "--+"], |comment| Probe {
-        payload: format!("test{comment}test"),
-        tests: ProbeTarget::SqlComment(comment.to_string()),
-        description: format!("SQL comment: {comment}"),
-        expected_blocked: true,
-    })
+    SQL_COMMENTS
+        .iter()
+        .map(|&comment| Probe {
+            payload: format!("test{comment}test"),
+            tests: ProbeTarget::SqlComment(comment.to_string()),
+            description: format!("SQL comment: {comment}"),
+            expected_blocked: true,
+        })
+        .collect()
 }
 
 pub(crate) fn sql_tautology_probes() -> Vec<Probe> {
-    build_probes(
-        &[
-            "1=1",
-            "1 LIKE 1",
-            "'a'='a'",
-            "1 BETWEEN 0 AND 2",
-            "1 IN(1)",
-            "true",
-        ],
-        |tautology| Probe {
+    SQL_TAUTOLOGIES
+        .iter()
+        .map(|&tautology| Probe {
             payload: tautology.to_string(),
             tests: ProbeTarget::SqlTautology(tautology.to_string()),
             description: format!("SQL tautology: {tautology}"),
             expected_blocked: true,
-        },
-    )
+        })
+        .collect()
 }
 
 pub(crate) fn xss_tag_probes() -> Vec<Probe> {
-    [
-        ("script", "<script>", true),
-        ("img", "<img src=x>", false),
-        ("svg", "<svg>", false),
-        ("iframe", "<iframe>", true),
-        ("body", "<body>", false),
-        ("details", "<details>", false),
-        ("input", "<input>", false),
-        ("marquee", "<marquee>", false),
-        ("video", "<video>", false),
-        ("object", "<object>", false),
-        ("math", "<math>", false),
-        ("style", "<style>", false),
-    ]
-    .into_iter()
-    .map(|(name, payload, expected_blocked)| Probe {
-        payload: payload.into(),
-        tests: ProbeTarget::XssTag(name.into()),
-        description: format!("XSS tag: {name}"),
-        expected_blocked,
-    })
-    .collect()
+    XSS_TAGS
+        .iter()
+        .map(|&(name, payload, expected_blocked)| Probe {
+            payload: payload.into(),
+            tests: ProbeTarget::XssTag(name.into()),
+            description: format!("XSS tag: {name}"),
+            expected_blocked,
+        })
+        .collect()
 }
 
 pub(crate) fn xss_event_probes() -> Vec<Probe> {
-    build_probes(
-        &[
-            "onerror",
-            "onload",
-            "onclick",
-            "onfocus",
-            "onmouseover",
-            "ontoggle",
-            "onbegin",
-            "onstart",
-            "onsubmit",
-        ],
-        |event| Probe {
+    XSS_EVENTS
+        .iter()
+        .map(|&event| Probe {
             payload: format!("<x {event}=1>"),
             tests: ProbeTarget::XssEvent(event.to_string()),
             description: format!("XSS event: {event}"),
             expected_blocked: true,
-        },
-    )
+        })
+        .collect()
 }
 
 pub(crate) fn xss_function_probes() -> Vec<Probe> {
-    [
-        ("alert", "alert(1)", true),
-        ("confirm", "confirm(1)", false),
-        ("prompt", "prompt(1)", false),
-        ("eval", "eval('x')", true),
-        ("Function", "Function('x')()", false),
-        ("constructor", "[].constructor.constructor('x')()", false),
-        ("setTimeout", "setTimeout('x')", false),
-    ]
-    .into_iter()
-    .map(|(name, payload, expected_blocked)| Probe {
-        payload: payload.into(),
-        tests: ProbeTarget::XssExecFunction(name.into()),
-        description: format!("XSS function: {name}"),
-        expected_blocked,
-    })
-    .collect()
+    XSS_FUNCTIONS
+        .iter()
+        .map(|&(name, payload, expected_blocked)| Probe {
+            payload: payload.into(),
+            tests: ProbeTarget::XssExecFunction(name.into()),
+            description: format!("XSS function: {name}"),
+            expected_blocked,
+        })
+        .collect()
 }
 
 pub(crate) fn command_separator_probes() -> Vec<Probe> {
-    build_probes(&[";", "|", "||", "&&", "`", "$("], |separator| Probe {
-        payload: format!("test{separator}test"),
-        tests: ProbeTarget::CmdSeparator(separator.to_string()),
-        description: format!("CMD separator: {separator}"),
-        expected_blocked: true,
-    })
+    COMMAND_SEPARATORS
+        .iter()
+        .map(|&separator| Probe {
+            payload: format!("test{separator}test"),
+            tests: ProbeTarget::CmdSeparator(separator.to_string()),
+            description: format!("CMD separator: {separator}"),
+            expected_blocked: true,
+        })
+        .collect()
 }
 
 pub(crate) fn command_name_probes() -> Vec<Probe> {
-    build_probes(
-        &["cat", "ls", "id", "whoami", "wget", "curl", "ping", "nc"],
-        |command| Probe {
+    COMMAND_NAMES
+        .iter()
+        .map(|&command| Probe {
             payload: command.to_string(),
             tests: ProbeTarget::CmdCommand(command.to_string()),
             description: format!("CMD command: {command}"),
             expected_blocked: false,
-        },
-    )
+        })
+        .collect()
 }
 
 pub(crate) fn command_path_probes() -> Vec<Probe> {
-    build_probes(
-        &[
-            "/etc/passwd",
-            "/etc/shadow",
-            "/proc/self/environ",
-            "/bin/sh",
-        ],
-        |path| Probe {
+    COMMAND_PATHS
+        .iter()
+        .map(|&path| Probe {
             payload: path.to_string(),
             tests: ProbeTarget::CmdPath(path.to_string()),
             description: format!("CMD path: {path}"),
             expected_blocked: true,
-        },
-    )
-}
-
-fn build_probes<T, F>(items: &[T], builder: F) -> Vec<Probe>
-where
-    T: Copy,
-    F: Fn(T) -> Probe,
-{
-    items.iter().copied().map(builder).collect()
+        })
+        .collect()
 }
 
 #[cfg(test)]

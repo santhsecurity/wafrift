@@ -1,0 +1,18 @@
+# Body substrings that indicate a WAF challenge page (CAPTCHA / JS challenge / browser check).
+#
+# Distinct from a hard block — challenges can sometimes be solved (e.g. via headless browser),
+# whereas a block is terminal for that request shape.
+
+patterns = [
+    "challenge-platform",
+    "cf-im-under-attack",
+    "jschl_vc",
+    "js_challenge",
+    "recaptcha",
+    "g-recaptcha",
+    "hcaptcha",
+    "turnstile",
+    "checking your browser",
+    "ddos-guard",
+    "please wait",
+]
