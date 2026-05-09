@@ -199,6 +199,13 @@ pub fn evade(request: &Request, state: &HostState, config: &EvasionConfig) -> Ev
         }
     }
 
+    // ── Step 3: Body padding (LAST — operates on assembled body) ─────
+    // Cloud-WAF inspection-window bypass. Runs after every other body-
+    // mutating layer so encoding / content-type / smuggling rebuilds
+    // don't wipe the padding. No-op if config.body_padding_bytes is 0
+    // or below MIN_USEFUL_PAD, or if the content-type is opaque.
+    apply_body_padding(&mut req, &mut techniques, config);
+
     let description = build_description(&techniques);
     EvasionResult::new(req, techniques, description)
 }
@@ -495,6 +502,38 @@ pub fn evade_intelligent<'a>(
     // Step 4: MCTS found no valid path — fall back to advisor playbook
     let state = HostState::default();
     evade_adaptive(request, config, &plan, &state)
+}
+
+/// Apply body padding (cloud-WAF inspection-window bypass).
+///
+/// Pre-pends `config.body_padding_bytes` of inert filler to the
+/// request body, structured per content-type so the body stays valid
+/// (JSON: leading `_wafrift_pad` field; form: leading `_wafrift_pad=`
+/// param; multipart: leading junk part). Records `Technique::BodyPadding`
+/// on success so the gene-bank can credit padding-as-winner like any
+/// other technique.
+fn apply_body_padding(
+    req: &mut Request,
+    techniques: &mut Vec<Technique>,
+    config: &EvasionConfig,
+) {
+    use wafrift_evolution::body_padding::{pad, PadOutcome, MIN_USEFUL_PAD};
+    if config.body_padding_bytes < MIN_USEFUL_PAD {
+        return;
+    }
+    let ct = req
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let original = req.body.clone().unwrap_or_default();
+    if let PadOutcome::Padded { bytes, added } = pad(&original, &ct, config.body_padding_bytes) {
+        req.body = Some(bytes);
+        techniques.push(Technique::BodyPadding(added));
+    }
+    // SkippedOpaque + SkippedTooSmall are silent — caller already
+    // chose the bytes value; per-request warnings would spam logs.
 }
 
 /// Apply a single encoding strategy to the request body.
