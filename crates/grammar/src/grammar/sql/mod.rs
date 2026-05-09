@@ -75,24 +75,23 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     let mut rng = rand::thread_rng();
     let lower = payload.to_ascii_lowercase();
 
-    // Priority: keyword-free mutations first (bypass PL2+ WAFs).
+    // Priority 1: quote-free / comment-free rewrites (Naxsi, AWS WAF
+    // managed, modsec PL3+). Promoted ABOVE keywordless because high-
+    // paranoia WAFs flag the math-only operator forms keywordless emits
+    // (`1-1`, `+1+`) just as aggressively as quoted SQL — but they
+    // pass clean integer-comparison forms (`1 OR 1=1`, `1 IS NOT NULL`)
+    // through. Live-confirmed against wafrift-bench naxsi.
+    extend_until_limit(
+        &mut results,
+        max_mutations,
+        quote_free::mutations(payload, max_mutations / 3),
+    );
+
+    // Priority 2: keyword-free mutations (bypass PL2 WAFs).
     extend_until_limit(
         &mut results,
         max_mutations,
         keywordless_mutations(payload, max_mutations / 4),
-    );
-
-    // Quote-free / comment-free rewrites (Naxsi, AWS WAF managed,
-    // modsec PL3+ — anything that flags any quote / comment / hex /
-    // parenthesised SQL keyword). These typically slip past the
-    // toughest pattern-only WAFs because the resulting SQL looks like
-    // benign integer-comparison queries. See `quote_free.rs` for
-    // confirmed pass-through evidence against the wafrift-bench
-    // naxsi container.
-    extend_until_limit(
-        &mut results,
-        max_mutations,
-        quote_free::mutations(payload, max_mutations / 4),
     );
 
     // AST-level metamorphism: lift -> transform -> lower via sqlparser.

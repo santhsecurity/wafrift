@@ -248,4 +248,28 @@ mod tests {
         let out = mutations("hello world", 10);
         assert!(out.is_empty(), "expected empty for non-SQL, got {out:?}");
     }
+
+    #[test]
+    fn dump_for_real_corpus_payloads() {
+        // Sanity-check against actual bench corpus shapes. Run via:
+        //   cargo test -p wafrift-grammar dump_for_real_corpus_payloads -- --nocapture
+        let payloads = [
+            "1' OR '1'='1",
+            "' AND 1=1--",
+            "1' UNION SELECT 1--",
+            "admin'--",
+            // URL-encoded form (what bench-waf delivers)
+            "1%27%20OR%20%271%27%3D%271",
+        ];
+        for p in payloads {
+            eprintln!("--- input: {p} ---");
+            let muts = mutations(p, 10);
+            for m in &muts {
+                eprintln!("  -> {} | {}", m.payload, m.description);
+            }
+            if muts.is_empty() {
+                eprintln!("  (no quote_free mutations)");
+            }
+        }
+    }
 }

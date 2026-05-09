@@ -1,0 +1,5759 @@
+{
+  "base_url": "http://127.0.0.1:18087",
+  "by_class": {
+    "sql": {
+      "bypass_rate": 0.3,
+      "cases": 173,
+      "evaded_bypassed": 519,
+      "evaded_total": 1730,
+      "raw_block_rate": 0.9942196531791907,
+      "raw_blocked": 172
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 0.5965317919075145,
+      "bypassed": 516,
+      "oracle_valid": 516,
+      "variants": 865
+    },
+    "mcts": {
+      "bypass_rate": 0.003468208092485549,
+      "bypassed": 3,
+      "oracle_valid": 3,
+      "variants": 865
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 172,
+    "cases_with_at_least_one_oracle_valid_bypass": 172,
+    "oracle_valid_rate": 0.3,
+    "oracle_valid_share_of_bypasses": 1.0,
+    "overall_bypass_rate": 0.3,
+    "total_variants_bypassed": 519,
+    "total_variants_oracle_valid": 519,
+    "total_variants_sent": 1730
+  },
+  "lineage_output": null,
+  "raw_block_rate": 0.9942196531791907,
+  "raw_blocked": 172,
+  "results": [
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_1_eq_1_dash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.703562,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_1_eq_1_hash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.14366800000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_1_eq_1_semi",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.2411,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_str_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.246319,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_str_tautology_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.290321,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "and_1_eq_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.25207,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_true",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.297264,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_2_gt_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.317702,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_1_lt_2",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.248773,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_neq_self",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.244236,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_like_self",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.223406,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_in_self",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26174800000000004,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_between",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.198871,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_is_not_null",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.18683799999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_not_false",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.190154,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "username_admin_dash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17238099999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "username_admin_hash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.2197,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "username_admin_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21629299999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "username_admin_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22364699999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "double_quote_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24179099999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "no_quote_tautology",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.229031,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "having_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.214369,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "group_by_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15571000000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "exists_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.195684,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "any_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.162383,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "ascii_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.156873,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "hex_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.171249,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "char_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.165429,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "concat_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.111789,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "case_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.210803,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "if_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.183983,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "iif_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.13708599999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "decode_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21074299999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "coalesce_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.201375,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "nullif_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23910599999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "isnull_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.188422,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "regexp_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.175878,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "rlike_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.222284,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "soundex_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.215923,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "least_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.25990399999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_drop",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.252231,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_create",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.197839,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_insert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.203509,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_update",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.190125,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_delete",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.11533500000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_alter_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.179856,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_grant",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.252861,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_revoke",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22794499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_truncate",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24850300000000003,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_set",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.232724,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_select",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.192579,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_call_proc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.31689100000000003,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_exec_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.18911199999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_pg_copy",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.287005,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_pg_lo",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17030800000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_use_mysql_priv",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.253502,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_load_data",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.209711,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_with_recursive_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22956800000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_two_statements",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24490599999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "stacked_chain_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.322812,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "extractvalue_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.249986,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "extractvalue_database",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24048799999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "updatexml_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.223267,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "updatexml_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23592,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "exp_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.181509,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "geometrycollection_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.219459,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "polygon_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.2631,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "multipoint_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.231843,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "linestring_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23562999999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "name_const_collision",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23645,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "duplicate_group_count",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.213808,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "rand_floor_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26842,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "convert_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23419700000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "cast_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.271797,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "ctxsys_drithsx_oracle",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.236401,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "utl_inaddr_oracle",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.33878199999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "ora_dml_lock",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21986,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "xmltype_oracle",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.334063,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "convert_to_int_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.200233,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "to_char_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.236962,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "json_each_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.234347,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "implicit_conversion_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.263401,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "openrowset_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.214309,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "row_number_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.270144,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_substring_eq",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21958899999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_substring_lt",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26136699999999996,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_ascii",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.195785,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_left",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21334699999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_right",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22672299999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_mid",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22151300000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_length",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22775399999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_count_users",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.223687,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_exists_table",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22302499999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_subquery_eq",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.230881,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_case_when",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.274321,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_if_mysql",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.237202,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_is_null_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.309517,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_regex",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.3434,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_like",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.345454,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_sleep_5",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.326168,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_sleep_5_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.39111,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_pg_sleep",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.368127,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_waitfor_delay",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.40302099999999996,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_benchmark",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9842040000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_dbms_pipe",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.33630699999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_heavy_query",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28841799999999995,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_sleep_in_if",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17327299999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_pg_sleep_case",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.123801,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "mcts:depth5:Applied 5 technique(s): encoding:IisUnicodeEncode, grammar:mysql, header:CaseMixing, encoding:ChunkedSplit, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "time_mssql_waitfor",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.116066,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_sleep_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.134752,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_sleep_double_quote",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.256408,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_oracle_dbms_lock",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.240348,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_mysql_get_lock",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.193701,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "time_pg_sleep_with_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.232243,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "inline_comment_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20144600000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "inline_comment_select",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.224959,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "padded_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.224078,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "padded_union",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22618200000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "mcts:depth6:Applied 6 technique(s): encoding:OverlongUtf8, header:CaseMixing, grammar:separator_swap, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "case_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.181869,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "case_select",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.259534,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "double_select",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.218718,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "tab_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.211084,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "newline_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.239656,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "vertical_tab_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.232663,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "form_feed_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.256128,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "url_encoded_keyword",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.249815,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "double_url_encoded",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.216003,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "mixed_case_url_enc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.27374000000000004,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "char_function",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.224588,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "concat_keyword",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.234818,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "hex_keyword",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.294209,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "scientific_notation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.238374,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "unicode_zero_width",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.14964899999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "no_space_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.370251,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "extra_keyword_padding",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.178763,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "outer_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.259073,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "concat_op",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.213588,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "ternary_op",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.277076,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "all_caps",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.255016,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "all_lower",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.205243,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "comment_only_dash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.129632,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "comment_only_hash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.144469,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology",
+          "heavy:quote_free_tautology"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "block_comment_close",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.136655,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_null_3",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.12840900000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_null_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.270515,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_null_5",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15303499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_all_select_null",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.156371,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_int",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.221393,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_str",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.18909299999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_version",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.199322,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_db_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26015499999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_information_schema",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.215813,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_columns",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.251639,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.251659,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_group_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.235418,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_pg_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.255446,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_mssql_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20349899999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_oracle_dual",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.207126,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_distinct",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.228646,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_padded",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.203289,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_newline",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.206354,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "mcts:depth4:Applied 4 technique(s): encoding:UnicodeEncode, header:CaseMixing, grammar:mysql, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "union_select_tab",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17974500000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_versioned_comment",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.246229,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22544,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_with_order_by",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.211474,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_load_file",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.249205,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_outfile",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21917799999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_extractvalue",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22515,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_hex",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.27658499999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_unhex",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.217756,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_select_null_alias",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.234798,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_with_limit",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.218247,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment",
+          "heavy:quote_free_strip_comment"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "union_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22494,
+      "raw_status": 403
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 173,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}
