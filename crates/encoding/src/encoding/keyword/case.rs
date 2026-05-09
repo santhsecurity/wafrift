@@ -25,9 +25,9 @@ pub fn alternating_case(payload: &str, start_upper: bool) -> String {
 
 /// Case alternation — deterministic alternating upper/lower.
 ///
-/// **Idempotency.** NOT idempotent. Applying twice to the same payload
-/// flips every alphabetic character again, producing a different pattern
-/// (e.g., `select` → `SeLeCt` → `sElEcT`).
+/// **Idempotency.** Idempotent after the first application. The output
+/// always follows the fixed positional pattern `SeLeCt` regardless of
+/// input case, so re-applying leaves the result unchanged.
 pub fn case_alternate(payload: &str) -> String {
     alternating_case(payload, true)
 }
@@ -92,12 +92,11 @@ mod tests {
     }
 
     #[test]
-    fn case_alternate_not_idempotent() {
+    fn case_alternate_idempotent_after_first() {
         let once = case_alternate("select");
         let twice = case_alternate(&once);
-        assert_ne!(once, twice, "case_alternate must not be idempotent");
+        assert_eq!(once, twice, "case_alternate must be idempotent after first application");
         assert_eq!(once, "SeLeCt");
-        assert_eq!(twice, "sElEcT");
     }
 
     #[test]

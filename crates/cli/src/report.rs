@@ -10,7 +10,7 @@
 //! shot — no manual transcription.
 
 use clap::Args;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -46,7 +46,36 @@ pub struct ReportArgs {
     /// Suggested payload for replay commands. Quote-escape carefully.
     #[arg(long, default_value = "PAYLOAD-HERE")]
     pub payload: String,
+
+    /// Output format. `markdown` (default) is the pentest-shaped writeup;
+    /// `json` is a stable, machine-parseable surface for CI gating and
+    /// downstream report tooling. Both honour `--only-host`.
+    #[arg(long, default_value = "markdown", value_parser = ["markdown", "json"])]
+    pub format: String,
 }
+
+/// Stable JSON shape for `--format json`. The schema_version field
+/// mirrors `_wafrift/status` and lets downstream tools detect format
+/// drift across wafrift releases.
+#[derive(Serialize)]
+struct JsonReport<'a> {
+    schema_version: u32,
+    source_schema: u32,
+    total_hosts: usize,
+    hosts_with_bypasses: usize,
+    findings: Vec<JsonFinding<'a>>,
+}
+
+#[derive(Serialize)]
+struct JsonFinding<'a> {
+    host: &'a str,
+    waf: Option<&'a str>,
+    proven_techniques: &'a [String],
+    blocklisted_techniques: &'a [String],
+    replay_command: String,
+}
+
+const REPORT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Deserialize, Debug)]
 struct PersistedHostState {
@@ -100,15 +129,25 @@ pub fn run_report(args: ReportArgs) -> ExitCode {
         .collect();
     hosts.sort_by(|a, b| a.0.cmp(b.0));
 
-    let md = render_markdown(&bank, &hosts, &args);
+    let body = match args.format.as_str() {
+        "json" => match render_json(&bank, &hosts, &args) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: serialize json: {e}");
+                return ExitCode::from(1);
+            }
+        },
+        _ => render_markdown(&bank, &hosts, &args),
+    };
 
     match args.output.as_ref() {
-        Some(p) => match fs::write(p, &md) {
+        Some(p) => match fs::write(p, &body) {
             Ok(()) => {
                 eprintln!(
-                    "wrote report ({} hosts, {} bytes) → {}",
+                    "wrote {} report ({} hosts, {} bytes) → {}",
+                    args.format,
                     hosts.len(),
-                    md.len(),
+                    body.len(),
                     p.display()
                 );
                 ExitCode::SUCCESS
@@ -119,10 +158,53 @@ pub fn run_report(args: ReportArgs) -> ExitCode {
             }
         },
         None => {
-            print!("{md}");
+            print!("{body}");
+            // JSON consumers expect a trailing newline; markdown already
+            // provides its own.
+            if args.format == "json" {
+                println!();
+            }
             ExitCode::SUCCESS
         }
     }
+}
+
+fn render_json(
+    bank: &PersistedGeneBank,
+    hosts: &[(&String, &PersistedHostState)],
+    args: &ReportArgs,
+) -> Result<String, serde_json::Error> {
+    let findings: Vec<JsonFinding<'_>> = hosts
+        .iter()
+        .map(|(name, hs)| {
+            let target = args
+                .target_template
+                .clone()
+                .unwrap_or_else(|| format!("https://{name}/<PATH>"));
+            let replay_command = format!(
+                "wafrift replay --target '{target}' --param {param} --payload '{payload}' --from-host '{name}'",
+                target = shell_escape(&target),
+                param = args.param,
+                payload = shell_escape(&args.payload),
+                name = shell_escape(name),
+            );
+            JsonFinding {
+                host: name.as_str(),
+                waf: hs.waf_name.as_deref(),
+                proven_techniques: &hs.proven_winners,
+                blocklisted_techniques: &hs.blocklisted,
+                replay_command,
+            }
+        })
+        .collect();
+    let report = JsonReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        source_schema: bank.schema,
+        total_hosts: bank.hosts.len(),
+        hosts_with_bypasses: hosts.len(),
+        findings,
+    };
+    serde_json::to_string_pretty(&report)
 }
 
 fn render_markdown(
@@ -293,6 +375,7 @@ mod tests {
             target_template: None,
             param: "q".into(),
             payload: "x".into(),
+            format: "markdown".into(),
         };
         let md = render_markdown(&bank, &hosts, &args);
         assert!(md.contains("api.example.com"));
@@ -353,8 +436,68 @@ mod tests {
             target_template: None,
             param: "q".into(),
             payload: "x".into(),
+            format: "markdown".into(),
         };
         let md = render_markdown(&bank, &[], &args);
         assert!(md.contains("No bypasses recorded yet"));
+    }
+
+    #[test]
+    fn json_format_emits_stable_schema() {
+        let bank = fake_bank();
+        let mut hosts: Vec<_> = bank
+            .hosts
+            .iter()
+            .filter(|(_, hs)| !hs.proven_winners.is_empty())
+            .collect();
+        hosts.sort_by(|a, b| a.0.cmp(b.0));
+        let args = ReportArgs {
+            proxy_bank: None,
+            only_host: vec![],
+            output: None,
+            target_template: None,
+            param: "q".into(),
+            payload: "x".into(),
+            format: "json".into(),
+        };
+        let json = render_json(&bank, &hosts, &args).expect("json must serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        // Stable top-level keys.
+        assert_eq!(parsed["schema_version"], REPORT_SCHEMA_VERSION);
+        assert_eq!(parsed["source_schema"], 1);
+        assert_eq!(parsed["total_hosts"], 2);
+        assert_eq!(parsed["hosts_with_bypasses"], 1);
+        // Finding payload.
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert_eq!(findings.len(), 1);
+        let f = &findings[0];
+        assert_eq!(f["host"], "api.example.com");
+        assert_eq!(f["waf"], "ModSecurity-CRS");
+        assert_eq!(f["proven_techniques"][0], "EncodingUrl");
+        assert_eq!(f["blocklisted_techniques"][0], "XssTagScript");
+        // Replay command must round-trip the host literally.
+        let cmd = f["replay_command"].as_str().expect("replay_command string");
+        assert!(cmd.contains("--from-host 'api.example.com'"));
+        assert!(cmd.contains("--target 'https://api.example.com/<PATH>'"));
+    }
+
+    #[test]
+    fn json_format_serializes_empty_findings_array() {
+        // No bypasses: findings must be [], not null. Downstream tooling
+        // that does `len(findings)` would crash on null.
+        let bank = PersistedGeneBank { schema: 1, hosts: HashMap::new() };
+        let args = ReportArgs {
+            proxy_bank: None,
+            only_host: vec![],
+            output: None,
+            target_template: None,
+            param: "q".into(),
+            payload: "x".into(),
+            format: "json".into(),
+        };
+        let json = render_json(&bank, &[], &args).expect("json must serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert!(parsed["findings"].is_array());
+        assert_eq!(parsed["findings"].as_array().unwrap().len(), 0);
     }
 }
