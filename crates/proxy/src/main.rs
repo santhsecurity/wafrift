@@ -593,11 +593,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mitm_enabled = args.mitm;
 
     // ── Load WAF response profiles for intelligent feedback ─────────
-    // The proxy reads `*.toml` files from `rules/responses/` next to
-    // the binary or in the cwd, and uses them to classify upstream
-    // responses into HardBlock/SoftBlock/RateLimit/Challenge/Pass —
-    // each gets different treatment by `HostState::record_signal`.
-    // No directory found ⇒ legacy block detection (status + body keywords).
+    // Resolution order:
+    //   1. `--rules-dir` (CLI override, future)
+    //   2. `<binary>/rules/responses/` (next to wafrift-proxy binary)
+    //   3. `./rules/responses/` (cwd, dev convenience)
+    //   4. `ResponseProfileDb::compiled_in()` — embedded copy that ships
+    //      inside the binary, so `cargo install wafrift-proxy` is never
+    //      stuck with empty profiles. (Fixes the same shape of bug
+    //      wafrift-detect 0.2.0 had.)
+    //
+    // Profiles classify upstream responses into HardBlock/SoftBlock/
+    // RateLimit/Challenge/Pass — each getting different treatment by
+    // `HostState::record_signal`.
     let response_profiles = {
         let next_to_binary = std::env::current_exe()
             .ok()
@@ -609,8 +616,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if cwd_dir.is_dir() {
             ResponseProfileDb::load_dir(cwd_dir)
         } else {
-            info!("no rules/responses/ directory found — using legacy block detection");
-            ResponseProfileDb::empty()
+            info!(
+                "no rules/responses/ directory found — using compiled-in profiles \
+                 (override with a rules/responses/ dir next to the binary)"
+            );
+            ResponseProfileDb::compiled_in()
         }
     };
     let response_profiles = Arc::new(response_profiles);

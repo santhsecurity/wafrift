@@ -148,6 +148,38 @@ impl ResponseProfileDb {
         Self::default()
     }
 
+    /// Load profiles compiled into the binary at build time.
+    ///
+    /// Used by `cargo install` consumers who don't ship a separate
+    /// `rules/responses/` directory. The vendored copy lives in
+    /// `crates/transport/rules/responses/profiles.toml` and ships with
+    /// the published crate (see `package.include` in Cargo.toml).
+    /// `load_dir` always wins when present; this is the fallback.
+    #[must_use]
+    pub fn compiled_in() -> Self {
+        const EMBEDDED: &str = include_str!("../rules/responses/profiles.toml");
+        match toml::from_str::<ProfileFile>(EMBEDDED) {
+            Ok(file) => {
+                tracing::info!(
+                    count = file.response_profile.len(),
+                    "loaded compiled-in WAF response profiles"
+                );
+                Self {
+                    profiles: file.response_profile,
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "compiled-in WAF response profiles failed to parse — \
+                     this is a build-time bug, please report it. \
+                     Falling back to empty profile DB."
+                );
+                Self::default()
+            }
+        }
+    }
+
     /// Classify an upstream response into a rich signal.
     ///
     /// Scans all loaded profiles against the response characteristics
@@ -368,6 +400,39 @@ mod tests {
         let db = ResponseProfileDb::empty();
         let sig = db.classify(403, &[], b"Forbidden");
         assert_eq!(sig.classification, BlockClass::HardBlock);
+    }
+
+    #[test]
+    fn compiled_in_profiles_load_at_least_seven_wafs() {
+        // Bundled profile DB should always have the 7 reference WAFs
+        // (Cloudflare / ModSec CRS / AWS WAF / Imperva / F5 / Akamai /
+        // Sucuri). If the build script broke or the include_str! path
+        // drifted, this test fails.
+        let db = ResponseProfileDb::compiled_in();
+        assert!(
+            db.profiles.len() >= 7,
+            "expected at least 7 compiled-in profiles, got {}",
+            db.profiles.len()
+        );
+    }
+
+    #[test]
+    fn compiled_in_classify_cloudflare_block() {
+        // Smoke test the full pipeline against the bundled profiles:
+        // a Cloudflare-shaped 403 should classify as HardBlock with
+        // matched_waf="Cloudflare" and a non-empty prioritize list.
+        let db = ResponseProfileDb::compiled_in();
+        let sig = db.classify(
+            403,
+            &[("CF-RAY".into(), "abc123".into())],
+            b"<title>Attention Required! | Cloudflare</title>",
+        );
+        assert_eq!(sig.classification, BlockClass::HardBlock);
+        assert_eq!(sig.matched_waf.as_deref(), Some("Cloudflare"));
+        assert!(
+            !sig.prioritize.is_empty(),
+            "Cloudflare profile must list at least one prioritized technique"
+        );
     }
 
     #[test]
