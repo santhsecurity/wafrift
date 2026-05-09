@@ -3,6 +3,7 @@ use clap_complete::{Shell, generate};
 use colored::Colorize;
 use serde_json::json;
 use std::io;
+use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::time::Duration;
 use wafrift_detect::waf_detect;
@@ -36,7 +37,7 @@ use technique_filter::TechniqueFilter;
     long_about = "WAF evasion toolkit — run without arguments for interactive mode.\n\n\
                   Exit codes (CI-friendly):\n\
                     0  success\n\
-                    1  generic error (bad input, IO, etc.)\n\
+                    1  generic error (bad input, IO, transport failure, etc.)\n\
                     2  bench-waf: zero bypasses on any case in --evade mode\n\
                     3  bench-diff: regression vs baseline (see --bypass-drop-pp)\n\
                     4  bench-waf --validate-only: corpus integrity errors",
@@ -54,38 +55,60 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Transform a payload with evasion techniques.
+    #[command(long_about = "Transform a payload with evasion techniques.\n\nExample:\n  wafrift evade --payload \"' OR 1=1--\" --level heavy")]
     Evade(EvadeArgs),
     /// Identify a WAF from response metadata.
+    #[command(long_about = "Identify a WAF from response metadata.\n\nExample:\n  wafrift detect --status 403 --headers \"server: cloudflare\"")]
     Detect(DetectArgs),
     /// Generate differential analysis probes.
+    #[command(long_about = "Generate differential analysis probes.\n\nExample:\n  wafrift probe --quick")]
     Probe(ProbeArgs),
     /// Fire evasion variants against a live target and report bypass results.
+    #[command(long_about = "Fire evasion variants against a live target and report bypass results.\n\nExample:\n  wafrift scan --target http://localhost:8080 --payload \"' OR 1=1--\" --level heavy")]
     Scan(ScanArgs),
     /// Reproducible WAF benchmark: measure raw block rate AND wafrift bypass rate.
     /// Pass `--evade` to actually run the evasion engine (off by default — without it,
     /// only the WAF's raw rejection rate is measured, no bypass claim is made).
-    #[command(name = "bench-waf")]
+    #[command(
+        name = "bench-waf",
+        long_about = "Reproducible WAF benchmark: measure raw block rate AND wafrift bypass rate.\nPass `--evade` to actually run the evasion engine (off by default).\n\nExample:\n  wafrift bench-waf --base-url http://127.0.0.1:18081 --evade --format json"
+    )]
     BenchWaf(bench_waf::BenchWafArgs),
     /// Compare two `bench-waf --output` JSON blobs and gate on regression.
-    #[command(name = "bench-diff")]
+    #[command(
+        name = "bench-diff",
+        long_about = "Compare two `bench-waf --output` JSON blobs and gate on regression.\n\nExample:\n  wafrift bench-diff --current run.json --baseline baseline.json"
+    )]
     BenchDiff(bench_diff::BenchDiffArgs),
     /// DNS hints for `origin_bypass` (authorized targets only).
-    #[command(name = "origin-hints")]
+    #[command(
+        name = "origin-hints",
+        long_about = "DNS hints for `origin_bypass` (authorized targets only).\n\nExample:\n  wafrift origin-hints --host api.example.com --format json"
+    )]
     OriginHints(origin_hints::OriginHintsArgs),
     /// Print JSON snippets for egress presets (e.g. Tor SOCKS).
-    #[command(name = "egress-example")]
+    #[command(
+        name = "egress-example",
+        long_about = "Print JSON snippets for egress presets (e.g. Tor SOCKS).\n\nExample:\n  wafrift egress-example --preset tor"
+    )]
     EgressExample(egress_example::EgressExampleArgs),
     /// List or explain available technique selectors for `--only`/`--exclude`.
+    #[command(long_about = "List or explain available technique selectors for `--only`/`--exclude`.\n\nExample:\n  wafrift techniques list")]
     Techniques(TechniquesArgs),
     /// Generate shell completions for bash, zsh, fish, or PowerShell.
+    #[command(long_about = "Generate shell completions for bash, zsh, fish, or PowerShell.\n\nExample:\n  wafrift completion bash > /etc/bash_completion.d/wafrift")]
     Completion(CompletionArgs),
     /// Origin discovery via crt.sh + DNS (authorized targets only).
+    #[command(long_about = "Origin discovery via crt.sh + DNS (authorized targets only).\n\nExample:\n  wafrift recon --domain example.com")]
     Recon(recon_cmd::ReconArgs),
     /// Replay a saved bypass against a target — proves reproducibility.
+    #[command(long_about = "Replay a saved bypass against a target — proves reproducibility.\n\nExample:\n  wafrift replay --target https://api.example.com/search --payload \"' OR 1=1--\" --from-host api.example.com")]
     Replay(replay::ReplayArgs),
     /// Generate a markdown findings report from the proxy gene bank.
+    #[command(long_about = "Generate a markdown findings report from the proxy gene bank.\n\nExample:\n  wafrift report --proxy-bank ~/.wafrift/gene-bank.json --output findings.md")]
     Report(report::ReportArgs),
     /// Scaffold a `.wafrift.toml` config in the current directory.
+    #[command(long_about = "Scaffold a `.wafrift.toml` config in the current directory.\n\nExample:\n  wafrift init --force")]
     Init(init_cmd::InitArgs),
 }
 
@@ -218,9 +241,9 @@ struct CompletionArgs {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // Store quiet flag for use in subcommands.
-    if cli.quiet {
-        // In quiet mode, disable colored output entirely.
+    // Disable colored output when --quiet is set or stdout is not a TTY
+    // (so pipes don't get polluted with ANSI escape sequences).
+    if cli.quiet || !io::stdout().is_terminal() {
         colored::control::set_override(false);
     }
 
@@ -230,7 +253,7 @@ fn main() -> ExitCode {
         Some(Commands::Evade(args)) => run_evade(args, quiet),
         Some(Commands::Detect(args)) => run_detect(args, quiet),
         Some(Commands::Probe(args)) => {
-            run_probe(args);
+            run_probe(args, quiet);
             ExitCode::SUCCESS
         }
         Some(Commands::Scan(args)) => {
@@ -241,25 +264,26 @@ fn main() -> ExitCode {
                 let cancel_clone = cancel.clone();
                 tokio::spawn(async move {
                     if tokio::signal::ctrl_c().await.is_ok() {
-                        eprintln!(
-                            "\n{}",
-                            "⚠ Ctrl+C received — finishing current request and saving results..."
-                                .yellow()
-                                .bold()
-                        );
+                        eprintln!("\nCtrl+C received — finishing current request and saving results...");
                         cancel_clone.cancel();
                     }
                 });
-                scan::run_scan(args, cancel).await
+                scan::run_scan(args, cancel, quiet).await
             })
         }
-        Some(Commands::BenchWaf(args)) => bench_waf::run_bench_waf(args),
-        Some(Commands::BenchDiff(args)) => bench_diff::run_bench_diff(args),
-        Some(Commands::OriginHints(args)) => origin_hints::run_origin_hints(args),
-        Some(Commands::EgressExample(args)) => egress_example::run_egress_example(args),
+        Some(Commands::BenchWaf(args)) => bench_waf::run_bench_waf(args, quiet),
+        Some(Commands::BenchDiff(args)) => bench_diff::run_bench_diff(args, quiet),
+        Some(Commands::OriginHints(args)) => origin_hints::run_origin_hints(args, quiet),
+        Some(Commands::EgressExample(args)) => egress_example::run_egress_example(args, quiet),
         Some(Commands::Techniques(args)) => match args.action {
             TechniquesAction::List => {
-                print!("{}", technique_filter::render_tree());
+                if quiet {
+                    let tree = technique_filter::render_tree();
+                    let lines: Vec<&str> = tree.lines().collect();
+                    println!("{}", json!({ "schema_version": 1, "techniques": lines }));
+                } else {
+                    print!("{}", technique_filter::render_tree());
+                }
                 ExitCode::SUCCESS
             }
         },
@@ -268,10 +292,10 @@ fn main() -> ExitCode {
             generate(args.shell, &mut cmd, "wafrift", &mut io::stdout());
             ExitCode::SUCCESS
         }
-        Some(Commands::Recon(args)) => recon_cmd::run_recon(args),
-        Some(Commands::Replay(args)) => replay::run_replay(args),
-        Some(Commands::Report(args)) => report::run_report(args),
-        Some(Commands::Init(args)) => init_cmd::run_init(args),
+        Some(Commands::Recon(args)) => recon_cmd::run_recon(args, quiet),
+        Some(Commands::Replay(args)) => replay::run_replay(args, quiet),
+        Some(Commands::Report(args)) => report::run_report(args, quiet),
+        Some(Commands::Init(args)) => init_cmd::run_init(args, quiet),
     }
 }
 /// Interactive TUI — the default experience when running `wafrift` with no args.
@@ -281,7 +305,6 @@ fn run_interactive() -> ExitCode {
         execute,
         terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
-    use std::io::IsTerminal;
 
     // Without a real TTY (CI, piped invocation) the TUI's poll loop would
     // hang forever waiting for keys. Exit cleanly with a usage hint instead.
@@ -320,16 +343,16 @@ fn run_interactive() -> ExitCode {
     let mut selected_menu = 0_usize;
     let menu_items = [
         (
-            "🔍  Scan",
+            "Scan",
             "Fire evasion variants against a live WAF target",
         ),
-        ("🧬  Gene Bank", "Browse learned WAF bypass genomes"),
+        ("Gene Bank", "Browse learned WAF bypass genomes"),
         (
-            "⚡  Evade",
+            "Evade",
             "Transform a single payload with evasion techniques",
         ),
-        ("🛡️  Detect", "Identify a WAF from response headers"),
-        ("📡  Probe", "Generate differential analysis probes"),
+        ("Detect", "Identify a WAF from response headers"),
+        ("Probe", "Generate differential analysis probes"),
     ];
 
     // Load gene bank stats.
@@ -613,7 +636,7 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
         Ok(f) => f,
         Err(msg) => {
             eprintln!("{} {msg}", "Filter error:".red().bold());
-            return ExitCode::from(2);
+            return ExitCode::from(1);
         }
     };
     let payload_type = grammar::classify(&args.payload);
@@ -632,7 +655,7 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
         if quiet {
             println!(
                 "{}",
-                json!({ "error": "no variants generated", "payload_type": payload_type_label(payload_type) })
+                json!({ "schema_version": 1, "error": "no variants generated", "payload_type": payload_type_label(payload_type) })
             );
         } else {
             eprintln!(
@@ -649,6 +672,7 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
         // JSON output: one object per line (NDJSON)
         for variant in &variants {
             let obj = json!({
+                "schema_version": 1,
                 "payload": variant.payload,
                 "techniques": variant.techniques,
                 "confidence": variant.confidence,
@@ -695,7 +719,7 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
         Ok(headers) => headers,
         Err(message) => {
             eprintln!("{} {}", "Header parse error:".red().bold(), message);
-            return ExitCode::from(2);
+            return ExitCode::from(1);
         }
     };
 
@@ -711,7 +735,7 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 })
             })
             .collect();
-        println!("{}", json!({ "detected": results }));
+        println!("{}", json!({ "schema_version": 1, "detected": results }));
         ExitCode::SUCCESS
     } else if let Some(result) = detected.first() {
         println!("{} {}", "Detected WAF:".bold().green(), result.name.bold());
@@ -731,7 +755,7 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     }
 }
 
-fn run_probe(args: ProbeArgs) {
+fn run_probe(args: ProbeArgs, quiet: bool) {
     let probes = if args.quick {
         differential::generate_quick_probes()
     } else {
@@ -740,11 +764,16 @@ fn run_probe(args: ProbeArgs) {
 
     for probe in probes {
         let line = json!({
+            "schema_version": 1,
             "payload": probe.payload,
             "tests": probe_target_label(&probe.tests),
             "description": probe.description,
             "expected_blocked": probe.expected_blocked,
         });
-        println!("{}", line.to_string().blue());
+        if quiet {
+            println!("{}", line);
+        } else {
+            println!("{}", line.to_string().blue());
+        }
     }
 }

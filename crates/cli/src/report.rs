@@ -11,6 +11,7 @@
 
 use clap::Args;
 use serde::Deserialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -63,25 +64,25 @@ struct PersistedGeneBank {
     hosts: HashMap<String, PersistedHostState>,
 }
 
-pub fn run_report(args: ReportArgs) -> ExitCode {
+pub fn run_report(args: ReportArgs, quiet: bool) -> ExitCode {
     let path = match resolve_path(args.proxy_bank.clone()) {
         Ok(p) => p,
         Err(msg) => {
-            eprintln!("error: {msg}");
+            eprintln!("error: {msg}. Fix: pass --proxy-bank with a valid path, or ensure ~/.wafrift/gene-bank.json exists.");
             return ExitCode::from(1);
         }
     };
     let raw = match fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: read {}: {e}", path.display());
+            eprintln!("error: read {}: {e}. Fix: verify the file path and permissions.", path.display());
             return ExitCode::from(1);
         }
     };
     let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("error: parse gene bank: {e}");
+            eprintln!("error: parse gene bank at {}: {e}. Fix: verify the file contains valid JSON.", path.display());
             return ExitCode::from(1);
         }
     };
@@ -96,6 +97,22 @@ pub fn run_report(args: ReportArgs) -> ExitCode {
         })
         .collect();
     hosts.sort_by(|a, b| a.0.cmp(b.0));
+
+    if quiet {
+        let summary: Vec<_> = hosts
+            .iter()
+            .map(|(name, hs)| {
+                json!({
+                    "host": name,
+                    "waf": hs.waf_name,
+                    "proven_winners": hs.proven_winners,
+                    "blocklisted": hs.blocklisted,
+                })
+            })
+            .collect();
+        println!("{}", json!({ "schema_version": 1, "hosts": summary }));
+        return ExitCode::SUCCESS;
+    }
 
     let md = render_markdown(&bank, &hosts, &args);
 

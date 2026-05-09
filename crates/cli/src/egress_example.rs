@@ -10,19 +10,22 @@ pub struct EgressExampleArgs {
     pub preset: String,
 }
 
-pub fn run_egress_example(args: EgressExampleArgs) -> ExitCode {
+pub fn run_egress_example(args: EgressExampleArgs, quiet: bool) -> ExitCode {
     let snippet = match args.preset.as_str() {
         "tor" => {
-            eprintln!(
-                "# Tor: start a local Tor SOCKS listener (default 9050). `socks5h` resolves DNS via Tor."
-            );
+            if !quiet {
+                eprintln!(
+                    "# Tor: start a local Tor SOCKS listener (default 9050). `socks5h` resolves DNS via Tor."
+                );
+            }
             json!({
+                "schema_version": 1,
                 "proxies": ["socks5h://127.0.0.1:9050"],
             })
         }
         _ => {
-            eprintln!("unknown preset");
-            return ExitCode::from(2);
+            eprintln!("unknown preset '{}'. Fix: use --preset tor.", args.preset);
+            return ExitCode::from(1);
         }
     };
     match serde_json::to_string_pretty(&snippet) {
@@ -31,7 +34,7 @@ pub fn run_egress_example(args: EgressExampleArgs) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("JSON serialization failed: {e}");
             ExitCode::from(1)
         }
     }

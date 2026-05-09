@@ -268,3 +268,134 @@ fn invalid_level_fails() {
         "should report error for invalid level: {stderr}"
     );
 }
+
+// ── Quiet / JSON discipline ────────────────────────────────────────────
+
+#[test]
+fn evade_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "evade", "--payload", "1=1", "--level", "light"]);
+    assert_eq!(code, 0, "evade --quiet should succeed");
+    let first = stdout.lines().next().unwrap_or("");
+    assert!(
+        first.contains("\"schema_version\""),
+        "first NDJSON line should contain schema_version: {first}"
+    );
+}
+
+#[test]
+fn detect_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&[
+        "--quiet",
+        "detect",
+        "--status",
+        "403",
+        "--headers",
+        "server: cloudflare",
+    ]);
+    assert_eq!(code, 0, "detect --quiet should succeed");
+    assert!(
+        stdout.contains("\"schema_version\""),
+        "detect --quiet should emit schema_version: {stdout}"
+    );
+}
+
+#[test]
+fn probe_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "probe"]);
+    assert_eq!(code, 0, "probe --quiet should succeed");
+    let first = stdout.lines().next().unwrap_or("");
+    assert!(
+        first.contains("\"schema_version\""),
+        "first NDJSON line should contain schema_version: {first}"
+    );
+}
+
+#[test]
+fn egress_example_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "egress-example", "--preset", "tor"]);
+    assert_eq!(code, 0, "egress-example --quiet should succeed");
+    assert!(
+        stdout.contains("\"schema_version\""),
+        "egress-example --quiet should emit schema_version: {stdout}"
+    );
+}
+
+#[test]
+fn techniques_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "techniques", "list"]);
+    assert_eq!(code, 0, "techniques --quiet should succeed");
+    assert!(
+        stdout.contains("\"schema_version\""),
+        "techniques --quiet should emit schema_version: {stdout}"
+    );
+}
+
+// ── Exit code consistency ──────────────────────────────────────────────
+
+#[test]
+fn evade_filter_error_returns_1_not_2() {
+    let (code, _stdout, stderr) = wafrift(&["evade", "--payload", "x", "--only", "invalid"]);
+    assert_eq!(code, 1, "evade filter error should return 1: stderr={stderr}");
+}
+
+#[test]
+fn detect_header_parse_error_returns_1_not_2() {
+    let (code, _stdout, stderr) = wafrift(&["detect", "--status", "200", "--headers", "badheader"]);
+    assert_eq!(code, 1, "detect header parse error should return 1: stderr={stderr}");
+}
+
+#[test]
+fn scan_filter_error_returns_1_not_2() {
+    let (code, _stdout, stderr) = wafrift(&[
+        "scan",
+        "--target",
+        "http://localhost",
+        "--payload",
+        "x",
+        "--only",
+        "invalid",
+    ]);
+    assert_eq!(code, 1, "scan filter error should return 1: stderr={stderr}");
+}
+
+// ── Help text examples ─────────────────────────────────────────────────
+
+#[test]
+fn every_subcommand_help_contains_example() {
+    let subcommands = &[
+        "evade",
+        "detect",
+        "probe",
+        "scan",
+        "bench-waf",
+        "bench-diff",
+        "origin-hints",
+        "egress-example",
+        "techniques",
+        "completion",
+        "recon",
+        "replay",
+        "report",
+        "init",
+    ];
+    for cmd in subcommands {
+        let (code, stdout, _) = wafrift(&[cmd, "--help"]);
+        assert_eq!(code, 0, "{cmd} --help should exit 0");
+        assert!(
+            stdout.contains("Example:"),
+            "{cmd} --help must contain a realistic example\n--- stdout ---\n{stdout}"
+        );
+    }
+}
+
+// ── Color / TTY discipline ─────────────────────────────────────────────
+
+#[test]
+fn piped_stdout_has_no_ansi_escapes() {
+    let (code, stdout, _) = wafrift(&["evade", "--payload", "1=1", "--level", "light"]);
+    assert_eq!(code, 0, "evade should succeed");
+    assert!(
+        !stdout.contains('\x1b'),
+        "piped stdout must not contain ANSI escape sequences: {stdout:?}"
+    );
+}

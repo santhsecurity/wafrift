@@ -100,18 +100,18 @@ struct ReplayResult {
     elapsed_ms: u128,
 }
 
-pub fn run_replay(args: ReplayArgs) -> ExitCode {
+pub fn run_replay(args: ReplayArgs, quiet: bool) -> ExitCode {
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("failed to start tokio runtime: {e}");
+            eprintln!("failed to start tokio runtime for replay: {e}. Fix: verify system resources and try again.");
             return ExitCode::from(1);
         }
     };
-    rt.block_on(async { run_replay_inner(args).await })
+    rt.block_on(async { run_replay_inner(args, quiet).await })
 }
 
-async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
+async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
     // Resolve technique list. Order: explicit --technique > --from-host >
     // --from-waf. If the resolved list is empty we error out instead of
     // silently sending an unmodified payload — that would be a
@@ -188,7 +188,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{} reqwest client build failed: {e}", "error:".red().bold());
+            eprintln!("{} Failed to build HTTP client for replay (check --timeout-secs, --insecure, and system TLS). Fix: verify the target URL and network settings. {e}", "error:".red().bold());
             return ExitCode::from(1);
         }
     };
@@ -220,8 +220,9 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         Ok(r) => r,
         Err(e) => {
             eprintln!(
-                "{} request failed: {e}",
-                "error:".red().bold()
+                "{} Request to {} failed: {e}. Fix: verify the target is reachable and the URL is correct.",
+                "error:".red().bold(),
+                evasion.request.url
             );
             return ExitCode::from(1);
         }
@@ -244,8 +245,12 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         elapsed_ms: elapsed.as_millis(),
     };
 
-    if args.format == "json" {
-        println!("{}", serde_json::to_string_pretty(&json!(result)).unwrap_or_default());
+    if quiet || args.format == "json" {
+        let mut json_result = serde_json::to_value(&result).unwrap_or_default();
+        if let Some(obj) = json_result.as_object_mut() {
+            obj.insert("schema_version".to_string(), json!(1));
+        }
+        println!("{}", serde_json::to_string_pretty(&json_result).unwrap_or_default());
     } else {
         let verdict = if blocked {
             format!("{} (status {status})", "BLOCKED".red().bold())
@@ -275,7 +280,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     }
 
     if blocked {
-        ExitCode::from(2)
+        ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
     }

@@ -54,13 +54,14 @@ pub(crate) fn scan_url_with_param(target: &str, param: &str, value_encoded: &str
 pub(crate) async fn run_scan(
     args: ScanArgs,
     cancel: tokio_util::sync::CancellationToken,
+    quiet: bool,
 ) -> ExitCode {
     let target = args.target.trim_end_matches('/');
     let filter = match crate::TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,
         Err(msg) => {
             eprintln!("{} {msg}", "Filter error:".red().bold());
-            return ExitCode::from(2);
+            return ExitCode::from(1);
         }
     };
     let encoding_only = args.encoding_only || !filter.grammar_enabled();
@@ -71,7 +72,7 @@ pub(crate) async fn run_scan(
             "{} no encoding strategies remain after --only/--exclude",
             "Filter error:".red().bold()
         );
-        return ExitCode::from(2);
+        return ExitCode::from(1);
     }
     let max_mutations = max_mutations_for_level(args.level);
 
@@ -129,7 +130,7 @@ pub(crate) async fn run_scan(
         return ExitCode::from(1);
     }
 
-    let scan_text = args.format != "json";
+    let scan_text = !quiet && args.format != "json";
     if scan_text {
         println!(
             "{}\n",
@@ -175,7 +176,7 @@ pub(crate) async fn run_scan(
     {
         Ok(client) => client,
         Err(e) => {
-            eprintln!("  {} {}", "✗ Failed to create HTTP client:".red().bold(), e);
+            eprintln!("  {} Failed to build HTTP client for scan (check --insecure and TLS config). Fix: verify network connectivity and target URL. {} ", "error:".red().bold(), e);
             return ExitCode::from(1);
         }
     };
@@ -187,7 +188,7 @@ pub(crate) async fn run_scan(
     let baseline_response = match http.get(target).send().await {
         Ok(resp) => resp,
         Err(err) => {
-            eprintln!("  {} {}", "✗ Cannot reach target:".red().bold(), err);
+            eprintln!("  {} Cannot reach target {target}: {err}. Fix: verify the target is up and the URL is correct.", "error:".red().bold());
             return ExitCode::from(1);
         }
     };
@@ -1617,9 +1618,9 @@ pub(crate) async fn run_scan(
         0.0
     };
 
-    if args.format == "json" {
+    if quiet || args.format == "json" {
         let scan = json!({
-            "scan_schema_version": 1,
+            "schema_version": 1,
             "target": target,
             "waf": waf_name,
             "payload_type": payload_type_label(payload_type),
@@ -1645,6 +1646,7 @@ pub(crate) async fn run_scan(
         });
         let json_output = if args.report_layers {
             json!({
+                "schema_version": 1,
                 "layer_report": {
                     "network": {
                         "target": target,

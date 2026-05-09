@@ -24,7 +24,7 @@ pub struct InitArgs {
     pub force: bool,
 }
 
-pub fn run_init(args: InitArgs) -> ExitCode {
+pub fn run_init(args: InitArgs, quiet: bool) -> ExitCode {
     let out_path = args
         .output
         .clone()
@@ -39,19 +39,21 @@ pub fn run_init(args: InitArgs) -> ExitCode {
     }
 
     if let Err(e) = fs::write(&out_path, SCAFFOLD) {
-        eprintln!("error: write {}: {e}", out_path.display());
+        eprintln!("error: write {}: {e}. Fix: verify the directory is writable.", out_path.display());
         return ExitCode::from(1);
     }
 
-    eprintln!(
-        "wrote scaffold ({} bytes) → {}",
-        SCAFFOLD.len(),
-        out_path.display()
-    );
-    eprintln!("Next steps:");
-    eprintln!("  1. Edit the file — uncomment the keys you want to override.");
-    eprintln!("  2. Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and point your client at it.");
-    eprintln!("  3. Run `wafrift report` after you have findings.");
+    if !quiet {
+        eprintln!(
+            "wrote scaffold ({} bytes) → {}",
+            SCAFFOLD.len(),
+            out_path.display()
+        );
+        eprintln!("Next steps:");
+        eprintln!("  1. Edit the file — uncomment the keys you want to override.");
+        eprintln!("  2. Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and point your client at it.");
+        eprintln!("  3. Run `wafrift report` after you have findings.");
+    }
     ExitCode::SUCCESS
 }
 

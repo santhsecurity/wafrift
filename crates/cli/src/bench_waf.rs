@@ -322,9 +322,9 @@ fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
         || lower.contains("%2524%257bjndi")
 }
 
-pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
+pub fn run_bench_waf(args: BenchWafArgs, quiet: bool) -> ExitCode {
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-    match rt.block_on(run_bench_waf_async(args)) {
+    match rt.block_on(run_bench_waf_async(args, quiet)) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("{} {e}", "error:".red().bold());
@@ -349,7 +349,7 @@ const KNOWN_CLASSES: &[&str] = &[
     "log4shell", "cve_pocs",
 ];
 
-fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
+fn validate_corpus_and_exit(cases: &[BenchCase], quiet: bool) -> Result<ExitCode, String> {
     use std::collections::{BTreeMap, HashSet};
     let mut seen: HashSet<&str> = HashSet::new();
     let mut by_class: BTreeMap<&str, usize> = BTreeMap::new();
@@ -369,19 +369,25 @@ fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
         }
         *by_class.entry(case.class.as_str()).or_insert(0) += 1;
     }
-    println!("corpus integrity:");
-    println!("  total cases: {}", cases.len());
-    for (cls, n) in &by_class {
-        println!("  {:>10}: {n}", cls);
+    if !quiet {
+        println!("corpus integrity:");
+        println!("  total cases: {}", cases.len());
+        for (cls, n) in &by_class {
+            println!("  {:>10}: {n}", cls);
+        }
     }
     if errors.is_empty() {
-        println!("OK ({} cases)", cases.len());
+        if !quiet {
+            println!("OK ({} cases)", cases.len());
+        }
         Ok(ExitCode::SUCCESS)
     } else {
         for e in &errors {
             eprintln!("  ERROR: {e}");
         }
-        eprintln!("{} corpus error(s)", errors.len());
+        if !quiet {
+            eprintln!("{} corpus error(s)", errors.len());
+        }
         Ok(ExitCode::from(4))
     }
 }
@@ -534,7 +540,7 @@ fn build_request_for_payload(base_url: &str, mode: &str, payload: &str) -> Reque
     }
 }
 
-async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String> {
+async fn run_bench_waf_async(mut args: BenchWafArgs, quiet: bool) -> Result<ExitCode, String> {
     // `--strategies all` expands to every selectable strategy. Lets a user
     // type one keyword instead of remembering the 11-element list. Keeps
     // user-supplied order otherwise (output ordering matters for diffs).
@@ -548,7 +554,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // --validate-only: run corpus integrity checks then exit. Doesn't
     // need a live WAF target; intended for CI gating on corpus PRs.
     if args.validate_only {
-        return validate_corpus_and_exit(&cases);
+        return validate_corpus_and_exit(&cases, quiet);
     }
 
     if !args.class.is_empty() {
@@ -579,7 +585,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     }
     let client = client_builder
         .build()
-        .map_err(|e| format!("HTTP client: {e}"))?;
+        .map_err(|e| format!("Failed to build HTTP client for bench (check --insecure and TLS). Fix: verify the WAF target is reachable. {e}"))?;
 
     // Healthcheck: make sure the target is even reachable before we
     // queue 30k probes that would all "fail" with connection errors.
@@ -677,7 +683,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
         }
     }
 
-    emit_report(&base_url, &args, &results)?;
+    emit_report(&base_url, &args, &results, quiet)?;
 
     // Exit code:
     //   0 — clean run
@@ -1330,7 +1336,7 @@ async fn run_differential_strategy(
     stat
 }
 
-fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> Result<(), String> {
+fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult], quiet: bool) -> Result<(), String> {
     // Aggregate by class.
     let mut by_class: BTreeMap<String, Vec<&CaseResult>> = BTreeMap::new();
     for r in results {
@@ -1365,6 +1371,7 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         .collect();
 
     let aggregate = serde_json::json!({
+        "schema_version": 1,
         "base_url": base_url,
         "evade_mode": args.evade,
         "strategies": args.strategies,
@@ -1414,7 +1421,7 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         .map_err(|e| format!("write {}: {e}", path.display()))?;
     }
 
-    if args.format == "json" {
+    if quiet || args.format == "json" {
         println!(
             "{}",
             serde_json::to_string_pretty(&aggregate).map_err(|e| e.to_string())?
@@ -1619,21 +1626,21 @@ mod tests {
             case("a", "sql", "1=1"),
             case("a", "xss", "<script>"),
         ];
-        let code = validate_corpus_and_exit(&cases).unwrap();
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
     }
 
     #[test]
     fn validate_corpus_flags_unknown_class() {
         let cases = vec![case("a", "definitelynot", "x")];
-        let code = validate_corpus_and_exit(&cases).unwrap();
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
     }
 
     #[test]
     fn validate_corpus_flags_empty_payload() {
         let cases = vec![case("a", "sql", "")];
-        let code = validate_corpus_and_exit(&cases).unwrap();
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
     }
 
@@ -1644,7 +1651,7 @@ mod tests {
             case("b", "xss", "<script>"),
             case("c", "log4shell", "${jndi:ldap://x}"),
         ];
-        let code = validate_corpus_and_exit(&cases).unwrap();
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 

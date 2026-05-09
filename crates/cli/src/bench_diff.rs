@@ -7,6 +7,7 @@
 //!
 //! Used as a CI gate: exit 3 means "wafrift got worse vs baseline".
 
+use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -33,18 +34,18 @@ pub struct BenchDiffArgs {
     pub raw_block_floor: f64,
 }
 
-pub fn run_bench_diff(args: BenchDiffArgs) -> ExitCode {
+pub fn run_bench_diff(args: BenchDiffArgs, quiet: bool) -> ExitCode {
     let cur = match load(&args.current) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: read {}: {e}", args.current.display());
+            eprintln!("error: read {}: {e}. Fix: verify the file path and that the bench-waf --output file exists.", args.current.display());
             return ExitCode::from(1);
         }
     };
     let base = match load(&args.baseline) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: read {}: {e}", args.baseline.display());
+            eprintln!("error: read {}: {e}. Fix: verify the file path and that the bench-waf --output file exists.", args.baseline.display());
             return ExitCode::from(1);
         }
     };
@@ -57,21 +58,43 @@ pub fn run_bench_diff(args: BenchDiffArgs) -> ExitCode {
 
     let mut regression = false;
 
+    if drop_pp >= args.bypass_drop_pp {
+        regression = true;
+    }
+
+    let stack_changed = cur_raw < args.raw_block_floor;
+
+    if quiet {
+        println!("{}", json!({
+            "schema_version": 1,
+            "regression": regression,
+            "delta_pp": -drop_pp,
+            "baseline_bypass": base_bypass,
+            "current_bypass": cur_bypass,
+            "baseline_raw_block": base_raw,
+            "current_raw_block": cur_raw,
+            "stack_changed": stack_changed,
+        }));
+        if regression {
+            return ExitCode::from(3);
+        }
+        return ExitCode::SUCCESS;
+    }
+
     println!("baseline overall bypass: {:.2}%", base_bypass * 100.0);
     println!("current  overall bypass: {:.2}%", cur_bypass * 100.0);
     println!("delta:                   {:+.2}pp", -drop_pp);
     println!("baseline raw-block:      {:.2}%", base_raw * 100.0);
     println!("current  raw-block:      {:.2}%", cur_raw * 100.0);
 
-    if drop_pp >= args.bypass_drop_pp {
+    if regression {
         eprintln!(
             "REGRESSION: bypass rate fell {:.2}pp (threshold {:.2}pp).",
             drop_pp, args.bypass_drop_pp
         );
-        regression = true;
     }
 
-    if cur_raw < args.raw_block_floor {
+    if stack_changed {
         eprintln!(
             "WARNING: current raw-block-rate {:.2}% < floor {:.2}% — \
              the WAF stack itself may have changed (not a wafrift bug).",
@@ -130,7 +153,7 @@ mod tests {
             baseline: base,
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
-        });
+        }, false);
         // ExitCode does not impl PartialEq; canonicalize via debug.
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(3)));
     }
@@ -154,7 +177,7 @@ mod tests {
             baseline: base,
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
-        });
+        }, false);
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 }
