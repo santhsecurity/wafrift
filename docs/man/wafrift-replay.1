@@ -1,0 +1,65 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH replay 1  "replay " 
+.SH NAME
+replay \- Replay a saved bypass against a target — proves reproducibility
+.SH SYNOPSIS
+\fBreplay\fR <\fB\-\-target\fR> [\fB\-\-param\fR] <\fB\-\-payload\fR> [\fB\-\-method\fR] [\fB\-\-technique\fR] [\fB\-\-from\-host\fR] [\fB\-\-proxy\-bank\fR] [\fB\-\-from\-waf\fR] [\fB\-\-insecure\fR] [\fB\-\-timeout\-secs\fR] [\fB\-\-format\fR] [\fB\-\-host\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Replay a saved bypass against a target — proves reproducibility
+.SH OPTIONS
+.TP
+\fB\-\-target\fR \fI<TARGET>\fR
+Target URL, e.g. `https://api.example.com/search`
+.TP
+\fB\-\-param\fR \fI<PARAM>\fR [default: q]
+Query/body parameter name to inject the payload into
+.TP
+\fB\-\-payload\fR \fI<PAYLOAD>\fR
+Raw payload to mutate via the saved technique chain. The same payload that produced the original bypass — the engine reapplies the same encoding pipeline to it
+.TP
+\fB\-\-method\fR \fI<METHOD>\fR [default: GET]
+HTTP method to use for the replay (GET / POST / PUT / ...)
+.TP
+\fB\-\-technique\fR \fI<TECHNIQUE>...\fR
+Technique pool keys to replay, e.g. `EncodingUrl,GrammarTautology`. Comma\-separated. At least one of `\-\-technique` / `\-\-from\-host` / `\-\-from\-waf` must be set.
+
+Precedence when multiple sources are supplied: `\-\-technique` > `\-\-from\-host` > `\-\-from\-waf`.
+.TP
+\fB\-\-from\-host\fR \fI<FROM_HOST>\fR
+Pull the technique list from the proxy gene bank by host. Default file: `~/.wafrift/gene\-bank.json`. Override with `\-\-proxy\-bank`.
+
+Only consulted when `\-\-technique` is omitted.
+.TP
+\fB\-\-proxy\-bank\fR \fI<PROXY_BANK>\fR
+Path to the proxy gene bank JSON file. Used **only** when `\-\-from\-host` is also supplied; otherwise this flag is ignored
+.TP
+\fB\-\-from\-waf\fR \fI<FROM_WAF>\fR
+Pull the technique list from the per\-WAF GeneBank by WAF name. Reads from `~/.wafrift/genomes/`.
+
+Only consulted when both `\-\-technique` and `\-\-from\-host` are omitted.
+.TP
+\fB\-\-insecure\fR
+Disable TLS verification (lab targets only)
+.TP
+\fB\-\-timeout\-secs\fR \fI<TIMEOUT_SECS>\fR [default: 30]
+Request timeout in seconds
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR [default: text]
+Output format: `text` (default) or `json` (machine\-parseable)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+text
+.IP \(bu 2
+json
+.RE
+.TP
+\fB\-\-host\fR \fI<HOST>\fR
+Optional Host header override (defaults to URL host)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)

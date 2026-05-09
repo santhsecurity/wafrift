@@ -1,0 +1,43 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH evade 1  "evade " 
+.SH NAME
+evade \- Transform a payload with evasion techniques
+.SH SYNOPSIS
+\fBevade\fR <\fB\-\-payload\fR> [\fB\-\-level\fR] [\fB\-\-encoding\-only\fR] [\fB\-\-only\fR] [\fB\-\-exclude\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Transform a payload with evasion techniques
+.SH OPTIONS
+.TP
+\fB\-\-payload\fR \fI<PAYLOAD>\fR
+Payload to mutate and encode
+.TP
+\fB\-\-level\fR \fI<LEVEL>\fR [default: medium]
+Evasion intensity
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+light
+.IP \(bu 2
+medium
+.IP \(bu 2
+heavy
+.RE
+.TP
+\fB\-\-encoding\-only\fR
+Apply encoding only, without grammar\-aware mutations. (Shorthand for `\-\-exclude grammar`.)
+.TP
+\fB\-\-only\fR \fI<ONLY>...\fR
+Restrict to listed technique paths (comma\-separated; e.g. `encoding/url,grammar`). Run `wafrift techniques list` for paths
+.TP
+\fB\-\-exclude\fR \fI<EXCLUDE>...\fR
+Drop listed technique paths (comma\-separated; e.g. `encoding/url/triple,smuggling`)
+.TP
+\fB\-o\fR, \fB\-\-output\fR \fI<OUTPUT>\fR
+Write output to a file instead of stdout
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

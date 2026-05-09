@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH bench-diff 1  "bench-diff " 
+.SH NAME
+bench\-diff \- Compare two `bench\-waf \-\-output` JSON blobs and gate on regression
+.SH SYNOPSIS
+\fBbench\-diff\fR <\fB\-\-current\fR> <\fB\-\-baseline\fR> [\fB\-\-bypass\-drop\-pp\fR] [\fB\-\-raw\-block\-floor\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Compare two `bench\-waf \-\-output` JSON blobs and gate on regression
+.SH OPTIONS
+.TP
+\fB\-\-current\fR \fI<CURRENT>\fR
+JSON output from the new bench\-waf run
+.TP
+\fB\-\-baseline\fR \fI<BASELINE>\fR
+JSON output from the prior baseline run
+.TP
+\fB\-\-bypass\-drop\-pp\fR \fI<BYPASS_DROP_PP>\fR [default: 2]
+Regression threshold: a drop of this many percentage points in `evaded_summary.overall_bypass_rate` triggers exit 3. Default 2pp matches the methodology.md rule
+.TP
+\fB\-\-raw\-block\-floor\fR \fI<RAW_BLOCK_FLOOR>\fR [default: 0.95]
+Stack\-mismatch threshold: if `raw_block_rate` falls below this, the WAF target itself changed (not wafrift). Default 0.95 per methodology.md
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

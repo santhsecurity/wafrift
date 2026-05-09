@@ -1,0 +1,44 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH report 1  "report " 
+.SH NAME
+report \- Generate a markdown findings report from the proxy gene bank
+.SH SYNOPSIS
+\fBreport\fR [\fB\-\-proxy\-bank\fR] [\fB\-\-only\-host\fR] [\fB\-\-output\fR] [\fB\-\-target\-template\fR] [\fB\-\-param\fR] [\fB\-\-payload\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Generate a markdown findings report from the proxy gene bank
+.SH OPTIONS
+.TP
+\fB\-\-proxy\-bank\fR \fI<PROXY_BANK>\fR
+Path to the proxy gene bank JSON. Default `~/.wafrift/gene\-bank.json`
+.TP
+\fB\-\-only\-host\fR \fI<ONLY_HOST>...\fR
+Restrict the report to hosts matching this glob (`*.example.com`). Repeatable / comma\-separated. Empty = all hosts
+.TP
+\fB\-\-output\fR \fI<OUTPUT>\fR
+Write the markdown to this file instead of stdout
+.TP
+\fB\-\-target\-template\fR \fI<TARGET_TEMPLATE>\fR
+Suggested target URL for replay commands (e.g. `https://api.example.com/search`). If omitted, replay snippets use `https://{host}/<PATH>` where `<PATH>` is a literal placeholder — it is printed verbatim and must be replaced by the operator with the actual endpoint path. Passing a target that literally contains `<PATH>` is allowed and will be reproduced as\-is
+.TP
+\fB\-\-param\fR \fI<PARAM>\fR [default: q]
+Suggested param name for replay commands
+.TP
+\fB\-\-payload\fR \fI<PAYLOAD>\fR [default: PAYLOAD\-HERE]
+Suggested payload for replay commands. Quote\-escape carefully
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR [default: markdown]
+Output format. `markdown` (default) is the pentest\-shaped writeup; `json` is a stable, machine\-parseable surface for CI gating and downstream report tooling. Both honour `\-\-only\-host`
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+markdown
+.IP \(bu 2
+json
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

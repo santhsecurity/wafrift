@@ -1302,6 +1302,19 @@ async fn proxy(
                     }
                 });
             } else {
+                // Plain HTTPS tunnel — wafrift only sees encrypted bytes
+                // and CANNOT apply evasion. Throttled per-host info log
+                // so the practitioner notices the gap without spamming
+                // every CONNECT (each tunnel hits this branch once).
+                if let Some(throttle) = WARN_THROTTLE.get() {
+                    if throttle.should_warn(&format!("connect-passthrough:{addr}")) {
+                        info!(
+                            target = %addr,
+                            "CONNECT pass-through (no MITM): bytes are TLS-encrypted, evasion engine inactive. \
+                             Pass `--mitm` to terminate TLS and apply evasion to HTTPS request bodies."
+                        );
+                    }
+                }
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(req).await {
                         Ok(upgraded) => {

@@ -1,0 +1,24 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH egress-example 1  "egress-example " 
+.SH NAME
+egress\-example \- Print JSON snippets for egress presets (e.g. Tor SOCKS)
+.SH SYNOPSIS
+\fBegress\-example\fR [\fB\-\-preset\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Print JSON snippets for egress presets (e.g. Tor SOCKS)
+.SH OPTIONS
+.TP
+\fB\-\-preset\fR \fI<PRESET>\fR [default: tor]
+Preset name: `tor` (SOCKS5h to local Tor)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+tor
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

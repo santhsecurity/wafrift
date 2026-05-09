@@ -1,0 +1,65 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH import-curl 1  "import-curl " 
+.SH NAME
+import\-curl \- Take a curl invocation (e.g. from Burp\*(Aqs "Copy as cURL"), run scan against the parsed target
+.SH SYNOPSIS
+\fBimport\-curl\fR [\fB\-\-curl\-file\fR] [\fB\-\-from\-stdin\fR] <\fB\-\-param\fR> <\fB\-\-payload\fR> [\fB\-\-level\fR] [\fB\-\-delay\-ms\fR] [\fB\-\-insecure\fR] [\fB\-\-format\fR] [\fB\-\-only\fR] [\fB\-\-exclude\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Take a curl invocation (e.g. from Burp\*(Aqs "Copy as cURL"), run scan against the parsed target
+.SH OPTIONS
+.TP
+\fB\-\-curl\-file\fR \fI<CURL_FILE>\fR
+Path to a file containing a curl invocation. Mutually exclusive with `\-\-from\-stdin`
+.TP
+\fB\-\-from\-stdin\fR
+Read the curl invocation from stdin. Mutually exclusive with `\-\-curl\-file`
+.TP
+\fB\-\-param\fR \fI<PARAM>\fR
+Query/body parameter name to inject the payload into. Must already exist in the parsed curl request OR will be appended
+.TP
+\fB\-\-payload\fR \fI<PAYLOAD>\fR
+Raw payload to mutate via the evasion engine
+.TP
+\fB\-\-level\fR \fI<LEVEL>\fR [default: heavy]
+Evasion intensity. Maps to `wafrift scan \-\-level`
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+light
+.IP \(bu 2
+medium
+.IP \(bu 2
+heavy
+.RE
+.TP
+\fB\-\-delay\-ms\fR \fI<DELAY_MS>\fR [default: 50]
+Inter\-request delay in milliseconds
+.TP
+\fB\-\-insecure\fR
+Disable TLS verification (lab targets only)
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR [default: text]
+Output format: `text` (default) or `json`
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+text
+.IP \(bu 2
+json
+.RE
+.TP
+\fB\-\-only\fR \fI<ONLY>...\fR
+Restrict to listed technique paths (comma\-separated)
+.TP
+\fB\-\-exclude\fR \fI<EXCLUDE>...\fR
+Drop listed technique paths (comma\-separated)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
