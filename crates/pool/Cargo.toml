@@ -11,7 +11,7 @@ categories = ["network-programming", "web-programming"]
 repository.workspace = true
 
 [dependencies]
-wafrift-types = { path = "../types" }
+wafrift-types = { workspace = true }
 reqwest = { workspace = true }
 
 [lints]
