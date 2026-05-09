@@ -121,15 +121,15 @@ impl WafGenome {
     /// a single scan and folds them into historical records.
     pub fn merge_session(&mut self, stats: &[(String, u32, u32)]) {
         let now = current_epoch();
-        self.targets_scanned += 1;
+        self.targets_scanned = self.targets_scanned.saturating_add(1);
         self.updated_at = now;
 
         for (name, successes, attempts) in stats {
             if let Some(existing) = self.techniques.iter_mut().find(|t| t.name == *name) {
-                existing.total_successes += successes;
-                existing.total_attempts += attempts;
+                existing.total_successes = existing.total_successes.saturating_add(*successes);
+                existing.total_attempts = existing.total_attempts.saturating_add(*attempts);
                 if *successes > 0 {
-                    existing.target_count += 1;
+                    existing.target_count = existing.target_count.saturating_add(1);
                     existing.last_success_epoch = now;
                 }
             } else {
