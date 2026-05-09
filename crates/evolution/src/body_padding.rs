@@ -35,6 +35,12 @@ pub const PAD_KEY: &str = "_wafrift_pad";
 /// push a real payload past a WAF's inspection window.
 pub const MIN_USEFUL_PAD: usize = 4 * 1024;
 
+/// Hard cap on padding size to prevent OOM from accidental
+/// `requested_bytes = usize::MAX` (deliberate abuse or arithmetic
+/// underflow upstream). 8 MiB is well above any documented cloud-WAF
+/// inspection window (Cloudflare Enterprise tops out at 128 KiB).
+pub const MAX_USEFUL_PAD: usize = 8 * 1024 * 1024;
+
 /// Generate `n` bytes of inert ASCII filler.
 ///
 /// Uses a deterministic xorshift PRNG over `[a-z0-9]` so the padding
@@ -92,6 +98,10 @@ pub fn pad(body: &[u8], content_type: &str, requested_bytes: usize) -> PadOutcom
     if requested_bytes < MIN_USEFUL_PAD {
         return PadOutcome::SkippedTooSmall;
     }
+    // Clamp pathological values silently rather than allocating GBs.
+    // 8 MiB is more than any real WAF inspects; anything beyond is
+    // either a bug or abuse.
+    let requested_bytes = requested_bytes.min(MAX_USEFUL_PAD);
 
     let ct_lower = content_type.to_ascii_lowercase();
     let main_type = ct_lower.split(';').next().unwrap_or("").trim().to_string();
@@ -369,6 +379,40 @@ mod tests {
             max_run <= 6,
             "filler has a run of {max_run} same bytes — would trigger WAF run-detection"
         );
+    }
+
+    #[test]
+    fn pathological_size_clamps_to_max() {
+        // requested_bytes = usize::MAX should NOT OOM; it should
+        // silently clamp to MAX_USEFUL_PAD (8 MiB).
+        let out = pad(b"id=42", "application/x-www-form-urlencoded", usize::MAX);
+        let PadOutcome::Padded { bytes, .. } = out else {
+            panic!("expected Padded, got {out:?}");
+        };
+        // 8 MiB plus the ~20-byte original; well under usize::MAX.
+        assert!(bytes.len() <= MAX_USEFUL_PAD + 64);
+        assert!(bytes.len() >= MAX_USEFUL_PAD);
+    }
+
+    #[test]
+    fn malformed_content_type_is_safe() {
+        // Garbage Content-Type strings must not panic.
+        for ct in &["", "////", ";;;;", "application/json;;;boundary=", "\x00\x01\x02"] {
+            // Should produce SOME PadOutcome, never panic.
+            let _ = pad(b"id=42", ct, 8 * 1024);
+        }
+    }
+
+    #[test]
+    fn empty_input_with_huge_size() {
+        // Empty body + very large pad (but not pathological) — must
+        // still produce structurally-valid output.
+        let out = pad(b"", "application/json", 1 * 1024 * 1024);
+        let PadOutcome::Padded { bytes, .. } = out else {
+            panic!()
+        };
+        // Must parse as valid JSON.
+        let _: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
     }
 
     #[test]
