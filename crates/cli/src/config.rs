@@ -10,7 +10,6 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// Operational configuration (Tier A) — runtime behavior tuning.
-#[allow(dead_code)] // Infrastructure: will be wired to CLI in next pass
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct WafRiftConfig {
@@ -105,7 +104,6 @@ impl WafRiftConfig {
     /// 2. `~/.config/wafrift/config.toml`
     ///
     /// Returns `Default` if no config file is found.
-    #[allow(dead_code)] // Infrastructure: will be wired to CLI in next pass
     pub fn load() -> Self {
         // Try current directory first.
         let cwd_config = PathBuf::from(".wafrift.toml");

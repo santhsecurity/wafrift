@@ -228,7 +228,6 @@ fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                     p.url = Some(url.to_string());
                 }
             }
-            _ => {}
         }
         i += 1;
     }

@@ -490,34 +490,12 @@ pub struct DetectedWaf {
 }
 
 /// Errors that can occur while loading rules.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RulesError {
-    Io(std::io::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("parse error: {0}")]
     Parse(String),
-}
-
-impl std::fmt::Display for RulesError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RulesError::Io(e) => write!(f, "io error: {e}"),
-            RulesError::Parse(s) => write!(f, "parse error: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for RulesError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            RulesError::Io(e) => Some(e),
-            RulesError::Parse(_) => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for RulesError {
-    fn from(e: std::io::Error) -> Self {
-        RulesError::Io(e)
-    }
 }
 
 /// Access the global rule engine (read lock).

@@ -134,7 +134,16 @@ wafrift replay --target https://target.com --from-waf Cloudflare --param id
 wafrift
 ```
 
-Launches a terminal UI with menu navigation, gene bank browser, and guided command hints.
+Launches a ratatui-based terminal UI with keyboard navigation. Features:
+
+- **Gene Bank Browser** — view per-WAF genome data, technique success rates, and historical scans
+- **Technique Tree** — hierarchical view of all encoding/grammar/smuggling technique paths
+- **Guided Command Builder** — step through scan/evade/detect with prompts instead of memorizing flags
+- **Status Dashboard** — at-a-glance learning cache size, genome count, and last scan summary
+
+**Keybindings:** `↑/↓` navigate, `Enter` select, `q` quit, `Tab` switch panels.
+
+> **Note:** The TUI is functional but early-stage. For scripted/CI workflows, use the CLI subcommands directly.
 
 ### Scan a Target
 

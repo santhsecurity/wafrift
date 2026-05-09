@@ -19,6 +19,7 @@ toml = { workspace = true }
 rand = { workspace = true }
 flate2 = "1"
 unicode-normalization = "0.1"
+thiserror = { workspace = true }
 
 [[example]]
 name = "encoding_basic"

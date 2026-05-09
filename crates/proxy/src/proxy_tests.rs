@@ -905,3 +905,68 @@ fn error_response_413_payload_too_large() {
     assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(resp.status().as_u16(), 413);
 }
+
+// ── /_wafrift/findings.md attacker-controlled-host injection guard ──
+
+#[test]
+fn sanitize_for_markdown_strips_backtick_breakouts() {
+    // Backticks would break out of `{host}` code formatting and let an
+    // attacker inject markdown / HTML / JS-handlers.
+    let evil = "evil`onclick=alert(1)`com";
+    let out = sanitize_for_markdown(evil);
+    assert!(!out.contains('`'), "backtick survived: {out}");
+}
+
+#[test]
+fn sanitize_for_markdown_strips_pipes_asterisks_brackets() {
+    // Markdown emphasis / table / link characters all become `_`.
+    for ch in &['*', '|', '[', ']', '(', ')', '{', '}', '<', '>', '\n', '\r'] {
+        let input = format!("a{ch}b");
+        let out = sanitize_for_markdown(&input);
+        assert!(!out.contains(*ch), "{ch:?} survived in {out}");
+    }
+}
+
+#[test]
+fn sanitize_for_markdown_keeps_legitimate_host_characters() {
+    // RFC 1123 / 3986 valid host characters must round-trip unchanged.
+    let inputs = [
+        "api.example.com",
+        "api-v2.example.com",
+        "10.0.0.1",
+        "example.com:8443",
+        "service_v1.example.com",
+    ];
+    for input in inputs {
+        let out = sanitize_for_markdown(input);
+        assert_eq!(out, input, "legitimate host got mutated: {input} -> {out}");
+    }
+}
+
+#[test]
+fn render_live_findings_does_not_render_attacker_markdown() {
+    // Stuff a malicious Host into proxy state, render markdown, assert
+    // the backtick / asterisk / bracket payload does not survive into
+    // the output. Defends against /_wafrift/findings.md being a stored
+    // markdown-injection sink reachable via crafted Host headers.
+    let mut state = ProxyState::default();
+    state.total_scanned = 1;
+    let mut hs = HostState::default();
+    hs.proven_winners = vec!["EncodingUrl".into()];
+    hs.waf_name = Some("Cloud`Flare`".into()); // backtick in WAF name too
+    state.hosts.insert("evil`alert(1)`.com".into(), hs);
+
+    let md = render_live_findings(&state);
+    // No raw backticks from the host or waf name — both should be
+    // sanitised to underscores before interpolation.
+    assert!(
+        !md.contains("evil`alert"),
+        "attacker host backtick payload survived in markdown:\n{md}"
+    );
+    assert!(
+        !md.contains("Cloud`Flare`"),
+        "attacker waf-name backtick survived:\n{md}"
+    );
+    // Sanity — sanitised form should still be present.
+    assert!(md.contains("evil_alert_1__.com"), "sanitised host missing:\n{md}");
+}

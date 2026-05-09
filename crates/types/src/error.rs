@@ -3,34 +3,25 @@
 //! A single error enum covers all evasion failures. Each variant carries
 //! a descriptive, lowercase, actionable message string.
 
-use std::fmt;
+
 
 /// Errors that can occur during evasion operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum WafRiftError {
     /// The request is malformed or missing required fields.
+    #[error("invalid request: {0}")]
     InvalidRequest(String),
     /// The payload could not be encoded with the selected strategy.
+    #[error("encoding failed: {0}")]
     EncodingFailed(String),
     /// The grammar mutation engine could not process the payload type.
+    #[error("grammar error: {0}")]
     GrammarError(String),
     /// An internal invariant was violated.
+    #[error("internal error: {0}")]
     Internal(String),
 }
-
-impl fmt::Display for WafRiftError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidRequest(msg) => write!(f, "invalid request: {msg}"),
-            Self::EncodingFailed(msg) => write!(f, "encoding failed: {msg}"),
-            Self::GrammarError(msg) => write!(f, "grammar error: {msg}"),
-            Self::Internal(msg) => write!(f, "internal error: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for WafRiftError {}
 
 impl WafRiftError {
     /// Create an invalid request error.

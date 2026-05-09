@@ -178,6 +178,7 @@ fn seed_host(
             added += 1;
         }
     }
+    let total_in_pool = entry.proven_winners.len();
 
     // Atomic write: tmp + sync_all + rename + parent fsync (mirrors the
     // proxy's save_gene_bank pattern).
@@ -216,9 +217,8 @@ fn seed_host(
     }
 
     eprintln!(
-        "seeded host {host:?} ({}): {added} new technique(s) added, {} total in pool",
+        "seeded host {host:?} ({}): {added} new technique(s) added, {total_in_pool} total in pool",
         path.display(),
-        entry.proven_winners.len()
     );
     ExitCode::SUCCESS
 }

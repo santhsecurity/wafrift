@@ -33,7 +33,7 @@ use wafrift_strategy::learning_cache::{CacheKey, LearningCache};
 use wafrift_strategy::pipeline::EvasionPipeline;
 use wafrift_transport::is_waf_block;
 
-use crate::ScanArgs;
+pub(crate) use crate::ScanArgs;
 use crate::helpers::{
     build_variants, confidence_badge, max_mutations_for_level, payload_type_label,
     strategies_for_level, variant_confidence,
@@ -165,7 +165,7 @@ pub(crate) async fn run_scan(
 
     // Step 1: WAF detection — fetch target and identify WAF.
     let http = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS))
         .danger_accept_invalid_certs(args.insecure)
         .redirect(reqwest::redirect::Policy::limited(5))
         // Use a realistic browser User-Agent to avoid CRS scanner detection rules.
@@ -1693,7 +1693,15 @@ pub(crate) async fn run_scan(
         };
         match serde_json::to_string_pretty(&json_output) {
             Ok(s) => {
-                println!("{s}");
+                if let Some(ref path) = args.output {
+                    if let Err(e) = std::fs::write(path, &s) {
+                        eprintln!("failed to write scan output to {}: {e}", path.display());
+                        return ExitCode::from(1);
+                    }
+                    eprintln!("scan results written to {}", path.display());
+                } else {
+                    println!("{s}");
+                }
                 return ExitCode::SUCCESS;
             }
             Err(e) => {
@@ -1776,15 +1784,21 @@ pub(crate) async fn run_scan(
                 "Techniques:".bold().cyan(),
                 techniques.join(" → ").yellow()
             );
-            let display_payload = if payload.len() > 120 {
-                format!("{}…", &payload[..120])
-            } else {
-                payload.clone()
-            };
+            // Print the full payload — practitioner needs the complete
+            // wire bytes to paste into Burp/curl/sqlmap. Note the byte
+            // length so they can spot truncation in their next step.
             println!(
-                "  {} {}",
+                "  {} {} {}",
                 "Payload:".bold().cyan(),
-                display_payload.bright_white()
+                payload.bright_white(),
+                format!("({} bytes)", payload.len()).bright_black()
+            );
+            println!(
+                "  {} curl -G --data-urlencode {}=$'{}' '{}'",
+                "Reproduce:".bold().cyan(),
+                args.param,
+                payload.replace('\'', "'\\''"),
+                target,
             );
         }
     }

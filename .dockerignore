@@ -1,0 +1,16 @@
+# Keep the docker build context small. Mirror .gitignore + cull
+# anything cargo will rebuild inside the container anyway.
+target/
+.git/
+.github/
+.audits/
+*.swp
+.DS_Store
+node_modules/
+wafrift-bench/results/
+docs/
+*.md
+!README.md
+!LICENSE-MIT
+!LICENSE-APACHE
+!CHANGELOG.md

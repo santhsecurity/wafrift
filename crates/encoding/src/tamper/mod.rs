@@ -184,27 +184,18 @@ impl TamperRegistry {
 }
 
 /// Errors that can occur during tampering.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TamperError {
     /// The requested strategy was not found in the registry.
+    #[error("Strategy not found: {0}")]
     StrategyNotFound(String),
     /// The TOML configuration is invalid.
+    #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
     /// Failed to load strategies from file.
+    #[error("Failed to load strategies: {0}")]
     LoadError(String),
 }
-
-impl std::fmt::Display for TamperError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::StrategyNotFound(name) => write!(f, "Strategy not found: {name}"),
-            Self::InvalidConfig(msg) => write!(f, "Invalid configuration: {msg}"),
-            Self::LoadError(msg) => write!(f, "Failed to load strategies: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for TamperError {}
 
 /// Creates a registry with all default strategies.
 #[must_use]

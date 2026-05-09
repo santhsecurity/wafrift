@@ -439,9 +439,10 @@ impl GeneBank {
 }
 
 /// Errors from gene bank operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum GeneBankError {
     /// I/O error reading/writing genome files.
+    #[error("gene bank I/O error at {}: {source}", path.display())]
     Io {
         /// Path that caused the error.
         path: PathBuf,
@@ -449,6 +450,7 @@ pub enum GeneBankError {
         source: std::io::Error,
     },
     /// Serialization error.
+    #[error("failed to serialize genome for {waf}: {source}")]
     Serialize {
         /// WAF name being serialized.
         waf: String,
@@ -456,24 +458,9 @@ pub enum GeneBankError {
         source: serde_json::Error,
     },
     /// No home directory found.
+    #[error("cannot determine home directory for gene bank storage")]
     NoHomeDir,
 }
-
-impl std::fmt::Display for GeneBankError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io { path, source } => {
-                write!(f, "gene bank I/O error at {}: {source}", path.display())
-            }
-            Self::Serialize { waf, source } => {
-                write!(f, "failed to serialize genome for {waf}: {source}")
-            }
-            Self::NoHomeDir => write!(f, "cannot determine home directory for gene bank storage"),
-        }
-    }
-}
-
-impl std::error::Error for GeneBankError {}
 
 /// Normalize a WAF name to a filesystem-safe key.
 pub(crate) fn normalize_name(name: &str) -> String {

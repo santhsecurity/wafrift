@@ -25,5 +25,5 @@ sha2 = "0.10"
 tokio = { workspace = true }
 
 [dev-dependencies]
-proptest = "1.11"
+proptest = { workspace = true }
 tokio-test = "0.4"

@@ -104,6 +104,24 @@ enum Commands {
     ImportCurl(import_curl::ImportCurlArgs),
     /// Manage gene-banks: list / export / import.
     Bank(bank::BankArgs),
+    /// Generate a troff man page for `wafrift` (and optionally subcommands).
+    Man(ManArgs),
+}
+
+/// Arguments for `wafrift man` — emits a troff(1) man page suitable for
+/// `man -l` consumption or installation under `/usr/local/share/man/man1/`.
+#[derive(clap::Args, Debug)]
+struct ManArgs {
+    /// Subcommand to render. Default: render the top-level `wafrift`
+    /// page. Pass `all` to emit a concatenated stream covering every
+    /// subcommand (one page per `\n.SH` section).
+    #[arg(long)]
+    sub: Option<String>,
+
+    /// Write to this file instead of stdout. Conventional install path
+    /// is `/usr/local/share/man/man1/wafrift.1`.
+    #[arg(long, short)]
+    output: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -321,7 +339,57 @@ fn main() -> ExitCode {
         Some(Commands::Seed(args)) => seed::run_seed(args),
         Some(Commands::ImportCurl(args)) => import_curl::run_import_curl(args),
         Some(Commands::Bank(args)) => bank::run_bank(args),
+        Some(Commands::Man(args)) => run_man(args),
     }
+}
+
+fn run_man(args: ManArgs) -> ExitCode {
+    let cmd = Cli::command();
+    let target_cmd = match args.sub.as_deref() {
+        None | Some("wafrift") => cmd,
+        Some("all") => cmd, // future: walk every subcommand and concat
+        Some(name) => match cmd
+            .get_subcommands()
+            .find(|c| c.get_name() == name)
+            .cloned()
+        {
+            Some(c) => c,
+            None => {
+                let names: Vec<&str> = Cli::command()
+                    .get_subcommands()
+                    .map(|c| c.get_name())
+                    .collect();
+                eprintln!("error: unknown subcommand {name:?}. Available: {names:?}");
+                return ExitCode::from(1);
+            }
+        },
+    };
+    let man = clap_mangen::Man::new(target_cmd);
+    let mut buf: Vec<u8> = Vec::new();
+    if let Err(e) = man.render(&mut buf) {
+        eprintln!("error: render man page: {e}");
+        return ExitCode::from(1);
+    }
+    match args.output {
+        Some(p) => {
+            if let Some(parent) = p.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Err(e) = std::fs::write(&p, &buf) {
+                eprintln!("error: write {}: {e}", p.display());
+                return ExitCode::from(1);
+            }
+            eprintln!("wrote man page ({} bytes) → {}", buf.len(), p.display());
+        }
+        None => {
+            use std::io::Write;
+            if let Err(e) = std::io::stdout().write_all(&buf) {
+                eprintln!("error: write stdout: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+    ExitCode::SUCCESS
 }
 /// Interactive TUI — the default experience when running `wafrift` with no args.
 fn run_interactive() -> ExitCode {

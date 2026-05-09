@@ -23,6 +23,7 @@ wafrift-fingerprint = { workspace = true }
 wafrift-recon = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
+clap_mangen = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 colored = { workspace = true }

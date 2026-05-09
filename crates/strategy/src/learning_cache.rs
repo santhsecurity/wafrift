@@ -161,26 +161,17 @@ impl LearningCache {
 }
 
 /// Errors from learning cache operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum LearningCacheError {
-    Io(std::io::Error),
-    Serde(serde_json::Error),
+    #[error("learning cache I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("learning cache serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+    #[error("cannot determine home directory")]
     NoHomeDir,
+    #[error("no path set for learning cache")]
     NoPath,
 }
-
-impl std::fmt::Display for LearningCacheError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "learning cache I/O error: {e}"),
-            Self::Serde(e) => write!(f, "learning cache serialization error: {e}"),
-            Self::NoHomeDir => f.write_str("cannot determine home directory"),
-            Self::NoPath => f.write_str("no path set for learning cache"),
-        }
-    }
-}
-
-impl std::error::Error for LearningCacheError {}
 
 fn current_epoch() -> u64 {
     std::time::SystemTime::now()
