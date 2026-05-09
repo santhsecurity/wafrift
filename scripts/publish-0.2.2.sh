@@ -27,7 +27,7 @@ publish() {
     else
         # If the crate is already at this version, that's fine — just
         # log and continue. Anything else: bail.
-        if grep -q "already uploaded" "/tmp/publish-${crate}.log"; then
+        if grep -qE "already uploaded|already exists on crates.io index" "/tmp/publish-${crate}.log"; then
             echo "==> $crate already at this version on crates.io; skipping."
         else
             echo "==> ERROR: $crate publish failed. See /tmp/publish-${crate}.log"

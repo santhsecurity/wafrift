@@ -293,7 +293,7 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
         Strategy::OverlongUtf8More => Ok(overlong_utf8_more(payload)),
         Strategy::ChunkedSplit => {
             let body = chunked_split(payload, 1024)?.body;
-            Ok(String::from_utf8_lossy(&body).into_owned())
+            String::from_utf8(body).map_err(|_| EncodeError::InvalidUtf8)
         }
         Strategy::ParameterPollution => Ok(parameter_pollute(payload)),
         Strategy::Base64Encode => Ok(base64_encode(payload)),
