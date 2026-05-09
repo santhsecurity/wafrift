@@ -1,7 +1,7 @@
 //! wafrift-transport — reqwest middleware for automatic WAF evasion.
 //!
 //! Drop-in wrapper around `reqwest::Client` that automatically applies
-//! WAF evasion techniques from `wafrift-core`. Tracks per-host state
+//! WAF evasion techniques from `wafrift-strategy`. Tracks per-host state
 //! and escalates evasion when WAF blocks are detected.
 //!
 //! # Usage

@@ -54,3 +54,6 @@ default = ["proxy-pool"]
 gossan-integration = ["origin-bypass"]
 origin-bypass = ["wafrift-transport/origin-bypass"]
 proxy-pool = ["wafrift-transport/proxy-pool"]
+
+[lints]
+workspace = true

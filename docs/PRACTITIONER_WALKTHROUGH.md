@@ -9,7 +9,7 @@ deployment). Backend: `kennethreitz/httpbin`. Probe target:
 ## Setup
 
 ```bash
-cd wafrift-staging
+cd wafrift
 wafrift-bench/scripts/up.sh modsec-pl4   # already up in this session
 cargo build --release -p wafrift-cli -p wafrift-proxy
 ```

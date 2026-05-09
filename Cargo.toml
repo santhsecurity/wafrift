@@ -25,6 +25,7 @@ members = [
 [workspace.package]
 version = "0.2.1"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/santhsecurity/wafrift"
@@ -35,6 +36,14 @@ authors = ["Santh Project <contact@santh.dev>"]
 
 [workspace.metadata.santh]
 status = "beta"
+
+# Centralised lint policy. Each crate opts in with `[lints] workspace = true`
+# in its Cargo.toml. Kept conservative on purpose — turning on `clippy::pedantic`
+# across 16 crates buries real warnings in noise. CI already runs
+# `cargo clippy --workspace --all-features --all-targets -- -D warnings`.
+[workspace.lints.rust]
+unsafe_code = "warn"
+unused_must_use = "deny"
 
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)

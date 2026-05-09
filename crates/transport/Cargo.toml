@@ -31,3 +31,6 @@ origin-bypass = []
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 wiremock = { workspace = true }
+
+[lints]
+workspace = true

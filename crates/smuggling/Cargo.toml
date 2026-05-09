@@ -26,3 +26,6 @@ httparse = "1.8"
 proptest = { workspace = true }
 httparse = "1.8"
 
+
+[lints]
+workspace = true

@@ -1,4 +1,4 @@
-//! HTTP method and request types for wafrift-core.
+//! HTTP method and request types — the foundation layer all wafrift crates depend on.
 //!
 //! Intentionally simple — no dependency on any HTTP library. The transport
 //! layer converts to/from `reqwest::Request` or raw bytes as needed.

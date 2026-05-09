@@ -38,3 +38,6 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 moka = { workspace = true }
 dirs = { workspace = true }
+
+[lints]
+workspace = true

@@ -408,6 +408,14 @@ pub fn evade_adaptive(
     EvasionResult::new(req, techniques, description)
 }
 
+/// Borrowed view of a WAF response: `(status, headers, body)`.
+///
+/// Public so consumers (proxy / transport / cli) can build one from a real
+/// response and hand it to [`evade_intelligent`] without reaching into private
+/// types. Lifetime-parameterised so the engine can index the headers/body
+/// without copying.
+pub type WafResponse<'a> = (u16, &'a [(String, String)], &'a [u8]);
+
 /// Unified intelligent evasion: WAF detection → advisor → MCTS → adaptive fallback.
 ///
 /// This is the **highest-level entry point** that combines all of WafRift's
@@ -447,8 +455,6 @@ pub fn evade_adaptive(
 ///     3,
 /// );
 /// ```
-pub type WafResponse<'a> = (u16, &'a [(String, String)], &'a [u8]);
-
 #[must_use]
 pub fn evade_intelligent<'a>(
     request: &Request,

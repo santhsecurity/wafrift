@@ -28,3 +28,6 @@ path = "examples/encoding_basic.rs"
 [[example]]
 name = "layered"
 path = "examples/layered.rs"
+
+[lints]
+workspace = true

@@ -43,7 +43,7 @@ Updated 2026-05-09.
 
 ## Verification
 
-- 1766+ unit/integration tests across 59 binaries, 0 failed,
+- 1774 unit/integration tests across 62 binaries, 0 failed,
   1 ignored.
 - Live walkthrough against ModSec + OWASP CRS at PL=4 captured in
   `docs/PRACTITIONER_WALKTHROUGH.md`.

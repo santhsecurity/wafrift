@@ -1,4 +1,4 @@
-//! Error types for wafrift-core.
+//! Error types for wafrift — shared across all crates.
 //!
 //! A single error enum covers all evasion failures. Each variant carries
 //! a descriptive, lowercase, actionable message string.
