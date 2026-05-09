@@ -16,6 +16,7 @@ pub fn is_hop_by_hop(name: &str) -> bool {
         || name.eq_ignore_ascii_case("trailer")
         || name.eq_ignore_ascii_case("transfer-encoding")
         || name.eq_ignore_ascii_case("upgrade")
+        || name.eq_ignore_ascii_case("x-forwarded-for")
 }
 
 /// Parse a single `Connection` header field-value into lowercase token names.
@@ -91,5 +92,20 @@ mod tests {
         let conn = connection_header_tokens("X-My-Hop");
         assert!(should_strip_proxy_header("X-My-Hop", &conn));
         assert!(!should_strip_proxy_header("X-Other", &conn));
+    }
+
+    #[test]
+    fn burp_zap_proxy_headers_are_hop_by_hop() {
+        assert!(is_hop_by_hop("Proxy-Connection"));
+        assert!(is_hop_by_hop("Proxy-Authorization"));
+        assert!(is_hop_by_hop("X-Forwarded-For"));
+    }
+
+    #[test]
+    fn connection_header_can_strip_custom_tokens() {
+        let conn = connection_header_tokens("X-Forwarded-For, Custom-Header");
+        assert!(should_strip_proxy_header("X-Forwarded-For", &conn));
+        assert!(should_strip_proxy_header("Custom-Header", &conn));
+        assert!(!should_strip_proxy_header("Content-Type", &conn));
     }
 }

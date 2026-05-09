@@ -452,3 +452,429 @@ fn tls_tunnel_addr_format_variations() {
         assert!(!addr.is_empty());
     }
 }
+
+// TEST 51-55: Gene bank persistence
+#[test]
+fn load_gene_bank_valid_v1() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_v1.json");
+    let json = r#"{"schema":1,"hosts":{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":null}}}"#;
+    std::fs::write(&tmp, json).unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 1);
+    assert!(bank.hosts.contains_key("api.example.com"));
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_future_schema_loads_but_warns() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_v2.json");
+    let json = r#"{"schema":2,"hosts":{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":"FutureWAF"}}}"#;
+    std::fs::write(&tmp, json).unwrap();
+    let bank = load_gene_bank(&tmp);
+    // Backward-compatible future schema should parse successfully.
+    assert_eq!(bank.schema, 2);
+    assert!(bank.hosts.contains_key("api.example.com"));
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_empty_file_returns_default() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_empty.json");
+    std::fs::write(&tmp, "   ").unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_malformed_json_returns_default() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_bad.json");
+    std::fs::write(&tmp, "not json").unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_missing_file_returns_default() {
+    let tmp = std::env::temp_dir().join("wafrift_test_gene_bank_missing.json");
+    let _ = std::fs::remove_file(&tmp);
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+}
+
+
+// ── validate_args ───────────────────────────────────────────────
+
+#[test]
+fn validate_args_accepts_defaults() {
+    let args = Args {
+        listen: "127.0.0.1:8080".into(),
+        escalation: None,
+        content_type_switching: false,
+        fingerprint_rotation: false,
+        insecure: false,
+        write_mitm_ca_dir: None,
+        mitm: false,
+        mitm_ca_dir: None,
+        allow_private_upstream: false,
+        insecure_open_upstream: false,
+        max_concurrent_connections: 4096,
+        max_upstream_response_bytes: 33554432,
+        max_evade_retries: 0,
+        gene_bank_path: "".into(),
+        gene_bank_flush_interval_secs: 60,
+        only_host: vec![],
+        skip_host: vec![],
+        only_path: vec![],
+        skip_path: vec![],
+        only_method: vec![],
+        max_rps_per_host: 0.0,
+        max_rps_per_host_burst: 0.0,
+    };
+    assert!(validate_args(&args).is_ok());
+}
+
+#[test]
+fn validate_args_rejects_zero_connections() {
+    let args = Args {
+        max_concurrent_connections: 0,
+        ..Args {
+            listen: "127.0.0.1:8080".into(),
+            escalation: None,
+            content_type_switching: false,
+            fingerprint_rotation: false,
+            insecure: false,
+            write_mitm_ca_dir: None,
+            mitm: false,
+            mitm_ca_dir: None,
+            allow_private_upstream: false,
+            insecure_open_upstream: false,
+            max_upstream_response_bytes: 33554432,
+            max_evade_retries: 0,
+            gene_bank_path: "".into(),
+            gene_bank_flush_interval_secs: 60,
+            only_host: vec![],
+            skip_host: vec![],
+            only_path: vec![],
+            skip_path: vec![],
+            only_method: vec![],
+            max_rps_per_host: 0.0,
+            max_rps_per_host_burst: 0.0,
+        }
+    };
+    let err = validate_args(&args).unwrap_err();
+    assert!(err.contains("--max-concurrent-connections must be >= 1"));
+}
+
+#[test]
+fn validate_args_rejects_small_response_bytes() {
+    let args = Args {
+        max_upstream_response_bytes: 100,
+        ..Args {
+            listen: "127.0.0.1:8080".into(),
+            escalation: None,
+            content_type_switching: false,
+            fingerprint_rotation: false,
+            insecure: false,
+            write_mitm_ca_dir: None,
+            mitm: false,
+            mitm_ca_dir: None,
+            allow_private_upstream: false,
+            insecure_open_upstream: false,
+            max_concurrent_connections: 4096,
+            max_evade_retries: 0,
+            gene_bank_path: "".into(),
+            gene_bank_flush_interval_secs: 60,
+            only_host: vec![],
+            skip_host: vec![],
+            only_path: vec![],
+            skip_path: vec![],
+            only_method: vec![],
+            max_rps_per_host: 0.0,
+            max_rps_per_host_burst: 0.0,
+        }
+    };
+    let err = validate_args(&args).unwrap_err();
+    assert!(err.contains("--max-upstream-response-bytes must be >= 4096"));
+}
+
+#[test]
+fn validate_args_rejects_negative_rps() {
+    let args = Args {
+        max_rps_per_host: -2.0,
+        ..Args {
+            listen: "127.0.0.1:8080".into(),
+            escalation: None,
+            content_type_switching: false,
+            fingerprint_rotation: false,
+            insecure: false,
+            write_mitm_ca_dir: None,
+            mitm: false,
+            mitm_ca_dir: None,
+            allow_private_upstream: false,
+            insecure_open_upstream: false,
+            max_concurrent_connections: 4096,
+            max_upstream_response_bytes: 33554432,
+            max_evade_retries: 0,
+            gene_bank_path: "".into(),
+            gene_bank_flush_interval_secs: 60,
+            only_host: vec![],
+            skip_host: vec![],
+            only_path: vec![],
+            skip_path: vec![],
+            only_method: vec![],
+            max_rps_per_host_burst: 0.0,
+        }
+    };
+    let err = validate_args(&args).unwrap_err();
+    assert!(err.contains("--max-rps-per-host must be a non-negative number"));
+    assert!(err.contains("-2"));
+}
+
+#[test]
+fn validate_args_rejects_negative_burst() {
+    let args = Args {
+        max_rps_per_host_burst: -1.5,
+        ..Args {
+            listen: "127.0.0.1:8080".into(),
+            escalation: None,
+            content_type_switching: false,
+            fingerprint_rotation: false,
+            insecure: false,
+            write_mitm_ca_dir: None,
+            mitm: false,
+            mitm_ca_dir: None,
+            allow_private_upstream: false,
+            insecure_open_upstream: false,
+            max_concurrent_connections: 4096,
+            max_upstream_response_bytes: 33554432,
+            max_evade_retries: 0,
+            gene_bank_path: "".into(),
+            gene_bank_flush_interval_secs: 60,
+            only_host: vec![],
+            skip_host: vec![],
+            only_path: vec![],
+            skip_path: vec![],
+            only_method: vec![],
+            max_rps_per_host: 0.0,
+        }
+    };
+    let err = validate_args(&args).unwrap_err();
+    assert!(err.contains("--max-rps-per-host-burst must be a non-negative number"));
+}
+
+#[test]
+fn validate_args_rejects_invalid_escalation() {
+    let args = Args {
+        escalation: Some("extreme".into()),
+        ..Args {
+            listen: "127.0.0.1:8080".into(),
+            content_type_switching: false,
+            fingerprint_rotation: false,
+            insecure: false,
+            write_mitm_ca_dir: None,
+            mitm: false,
+            mitm_ca_dir: None,
+            allow_private_upstream: false,
+            insecure_open_upstream: false,
+            max_concurrent_connections: 4096,
+            max_upstream_response_bytes: 33554432,
+            max_evade_retries: 0,
+            gene_bank_path: "".into(),
+            gene_bank_flush_interval_secs: 60,
+            only_host: vec![],
+            skip_host: vec![],
+            only_path: vec![],
+            skip_path: vec![],
+            only_method: vec![],
+            max_rps_per_host: 0.0,
+            max_rps_per_host_burst: 0.0,
+        }
+    };
+    let err = validate_args(&args).unwrap_err();
+    assert!(err.contains("--escalation must be one of: light, medium, heavy"));
+    assert!(err.contains("extreme"));
+}
+
+#[test]
+fn validate_args_accepts_valid_escalation() {
+    for level in ["light", "medium", "heavy"] {
+        let args = Args {
+            escalation: Some(level.into()),
+            ..Args {
+                listen: "127.0.0.1:8080".into(),
+                content_type_switching: false,
+                fingerprint_rotation: false,
+                insecure: false,
+                write_mitm_ca_dir: None,
+                mitm: false,
+                mitm_ca_dir: None,
+                allow_private_upstream: false,
+                insecure_open_upstream: false,
+                max_concurrent_connections: 4096,
+                max_upstream_response_bytes: 33554432,
+                max_evade_retries: 0,
+                gene_bank_path: "".into(),
+                gene_bank_flush_interval_secs: 60,
+                only_host: vec![],
+                skip_host: vec![],
+                only_path: vec![],
+                skip_path: vec![],
+                only_method: vec![],
+                max_rps_per_host: 0.0,
+                max_rps_per_host_burst: 0.0,
+            }
+        };
+        assert!(validate_args(&args).is_ok(), "failed for {}", level);
+    }
+}
+
+// ── gene bank loading / saving ──────────────────────────────────
+
+#[test]
+fn load_gene_bank_missing_file_returns_default() {
+    let dir = std::env::temp_dir().join(format!("wafrift_gb_missing_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("gene-bank.json");
+    let bank = load_gene_bank(&path);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+}
+
+#[test]
+fn load_gene_bank_empty_file_returns_default() {
+    let dir = std::env::temp_dir().join(format!("wafrift_gb_empty_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gene-bank.json");
+    std::fs::write(&path, "").unwrap();
+    let bank = load_gene_bank(&path);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_gene_bank_malformed_returns_default() {
+    let dir = std::env::temp_dir().join(format!("wafrift_gb_bad_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gene-bank.json");
+    std::fs::write(&path, "{not json").unwrap();
+    let bank = load_gene_bank(&path);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_gene_bank_valid_parses() {
+    let dir = std::env::temp_dir().join(format!("wafrift_gb_valid_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gene-bank.json");
+    std::fs::write(
+        &path,
+        r#"{"schema":1,"hosts":{"example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":null}}}"#,
+    )
+    .unwrap();
+    let bank = load_gene_bank(&path);
+    assert_eq!(bank.schema, 1);
+    assert!(bank.hosts.contains_key("example.com"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_and_load_gene_bank_round_trip() {
+    let dir = std::env::temp_dir().join(format!("wafrift_gb_rt_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gene-bank.json");
+
+    let mut state = ProxyState::default();
+    let hs = state.hosts.entry("example.com".into()).or_default();
+    hs.proven_winners.push("UrlEncode".into());
+    hs.blocklisted.push("Base64".into());
+    hs.waf_name = Some("Cloudflare".into());
+
+    save_gene_bank(&state, &path).unwrap();
+    let loaded = load_gene_bank(&path);
+    assert_eq!(loaded.schema, 1);
+    assert_eq!(loaded.hosts.len(), 1);
+    let host = loaded.hosts.get("example.com").unwrap();
+    assert_eq!(host.proven_winners, vec!["UrlEncode"]);
+    assert_eq!(host.blocklisted, vec!["Base64"]);
+    assert_eq!(host.waf_name, Some("Cloudflare".into()));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn default_gene_bank_path_empty_uses_home() {
+    // When supplied is empty, it should return Some path under home.
+    let result = default_gene_bank_path("");
+    if std::env::var_os("HOME").is_some() {
+        assert!(result.is_some());
+        let p = result.unwrap();
+        assert!(p.ends_with("gene-bank.json"));
+    } else {
+        assert!(result.is_none());
+    }
+}
+
+#[test]
+fn default_gene_bank_path_off_returns_none() {
+    assert!(default_gene_bank_path("off").is_none());
+}
+
+#[test]
+fn default_gene_bank_path_dash_returns_none() {
+    assert!(default_gene_bank_path("-").is_none());
+}
+
+#[test]
+fn default_gene_bank_path_explicit_returns_path() {
+    let result = default_gene_bank_path("/tmp/wafrift-test-bank.json");
+    assert_eq!(result, Some(std::path::PathBuf::from("/tmp/wafrift-test-bank.json")));
+}
+
+// ── render_live_findings ────────────────────────────────────────
+
+#[test]
+fn render_findings_zero_requests() {
+    let state = ProxyState::default();
+    let md = render_live_findings(&state);
+    assert!(md.contains("No requests have been proxied yet"));
+    assert!(md.contains("Total proxied: 0"));
+}
+
+#[test]
+fn render_findings_hosts_but_no_winners() {
+    let mut state = ProxyState::default();
+    state.total_scanned = 5;
+    let hs = state.hosts.entry("example.com".into()).or_default();
+    hs.record_block();
+    let md = render_live_findings(&state);
+    assert!(md.contains("No bypasses discovered yet"));
+    assert!(md.contains("Total proxied: 5"));
+    assert!(md.contains("Hosts seen: 1"));
+}
+
+#[test]
+fn render_findings_with_winners() {
+    let mut state = ProxyState::default();
+    state.total_scanned = 10;
+    let hs = state.hosts.entry("example.com".into()).or_default();
+    hs.proven_winners.push("UrlEncode".into());
+    hs.waf_name = Some("Cloudflare".into());
+    let md = render_live_findings(&state);
+    assert!(md.contains("Hosts with proven bypasses"));
+    assert!(md.contains("`example.com`"));
+    assert!(md.contains("Cloudflare"));
+    assert!(md.contains("UrlEncode"));
+    assert!(md.contains("wafrift replay"));
+}

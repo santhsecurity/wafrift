@@ -93,14 +93,14 @@ impl EvasionConfig {
     /// Validate the configuration for conflicts or missing dependencies.
     pub fn validate(&self) -> Result<(), String> {
         if self.insecure_tls {
-            eprintln!(
-                "WARNING: TLS certificate validation is disabled (--insecure-tls). Do not use in production."
+            tracing::warn!(
+                "TLS certificate validation is disabled (--insecure-tls). Do not use in production."
             );
         }
 
         if self.grammar_mutations && !self.encoding_enabled {
-            eprintln!(
-                "WARNING: Grammar mutations are enabled but encoding is disabled. Mutations may require encoding to bypass effectively."
+            tracing::warn!(
+                "Grammar mutations are enabled but encoding is disabled. Mutations may require encoding to bypass effectively."
             );
         }
 

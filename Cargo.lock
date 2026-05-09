@@ -3724,6 +3724,7 @@ dependencies = [
  "serde",
  "sqlparser",
  "toml",
+ "tracing",
  "wafrift-types",
 ]
 
@@ -3853,6 +3854,7 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "serde_json",
+ "tracing",
  "urlencoding",
 ]
 
