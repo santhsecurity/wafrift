@@ -4,6 +4,65 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — three EvilWAF / nowafplsV2 gaps closed (body padding, TLS rotation, TUI)
+
+- **`wafrift_evolution::body_padding`** — content-type-aware request
+  body padder (`Technique::BodyPadding(usize)`). Cloud WAFs only
+  inspect the leading N bytes (Cloudflare Pro 8 KB, AWS WAF 16 KB,
+  Akamai 8 KB). Padding past that window makes the rule engine miss
+  the malicious payload while the origin parses the body correctly.
+  JSON / form-urlencoded / multipart all supported with structurally-
+  valid splicing; opaque content-types skipped honestly. 14 unit
+  tests cover roundtrips, edge cases, and case-sensitive boundary
+  parameter handling. Wired into `wafrift-proxy
+  --body-padding-bytes <N>`.
+
+- **`wafrift-proxy --tls-impersonate-rotate p1,p2,p3`** — round-robin
+  pool of `StealthClient`s. `UpstreamClient::StealthPool { clients,
+  cursor }` advances an `AtomicUsize` cursor on every send so each
+  upstream request lands on a different browser ClientHello
+  fingerprint. Defeats per-fingerprint rate limits and reputation
+  systems (Cloudflare bot-management, Akamai BMP, PerimeterX). 3
+  unit tests prove cursor distribution + feature-disabled path +
+  empty-slice rejection. Mutually exclusive with `--tls-impersonate`
+  (clap-enforced).
+
+- **`wafrift-proxy --no-conn-reuse`** — flips
+  `pool_max_idle_per_host(0)` so every upstream forward opens a fresh
+  TCP connection. Kernel picks a new ephemeral source port each time;
+  defeats per-source-port rate limits and 5-tuple reputation. Trade-
+  off (one TCP+TLS handshake per request) is explicit, never default.
+
+- **`wafrift-proxy --tui`** — real-time terminal dashboard
+  (ratatui + crossterm). Header (bind/mode/stealth/padding/conn-
+  reuse), per-pane counters (Total / Bypassed % / Blocked / Errors /
+  Padded bodies / Avg latency), TLS rotation distribution with
+  per-profile bars, top-5 hosts table (sent/blocked/bypassed/top
+  technique), 200-line scrollback of recent requests with
+  BYPASS / BLOCK colour coding and `+pad` / TLS-profile tags.
+  `q` / Esc / Ctrl-C trigger graceful shutdown (gene bank flushes
+  on the same code path SIGINT uses); `r` resets counters; `c`
+  clears the recent stream. Tracing logs route to a file when --tui
+  is on so the dashboard owns the terminal alternate-screen.
+  Verified live: 180-request stress through proxy → modsec-pl1 +
+  modsec-pl3 + naxsi shows 119 bypassed (66.1%), 60 padded bodies,
+  every POST tagged `+pad` in the recent stream.
+
+### Honest limitations on local stress test
+
+- Self-hosted modsec PL1-PL4 + Naxsi all inspect the FULL request
+  body up to Apache `LimitRequestBody`. Body-padding evades cloud
+  WAFs (paid SaaS with hard inspection caps) but not local instances
+  configured to inspect everything. Manual verification: modsec-pl1
+  returns 200 on `_wafrift_pad=A*16384&id=42` and httpbin echoes the
+  full padded body back unchanged → padding is structurally valid
+  and the proxy attaches it correctly; the local WAFs simply read
+  past 16 KB.
+- TCP raw-options rotation (EvilWAF's third TCP-layer evasion) is NOT
+  implemented — would require `CAP_NET_RAW` and the proxy currently
+  uses pure userspace networking. Filed as honest gap, not silently
+  shipped.
+
 ### Added — EvilWAF JA3/JA4 parity (closed previously-documented gap)
 
 - **`wafrift_transport::stealth::StealthClient`** wraps `rquest`
