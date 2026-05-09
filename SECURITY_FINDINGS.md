@@ -351,7 +351,116 @@ body and the attack payload never reached the application.
 (`😀` style) per RFC 8259 §7. Two new tests cover BMP +
 supplementary-plane round-trip via `serde_json::from_slice`.
 
+### R-024 — IPv6 bogon allowlist missing 6to4 + RFC 3849 docs prefix
+
+**Severity:** high
+**File:** `crates/proxy/src/upstream_policy.rs:46` (`ip_addr_is_bogon`)
+**Class:** SSRF allowlist bypass (transition / documentation prefixes)
+
+`ip_addr_is_bogon` already recursed through IPv4-mapped/compat (R-001),
+but two additional escape hatches existed:
+
+1. **6to4** (`2002::/16`, RFC 3056): the 32-bit IPv4 is embedded at
+   `segs[1..3]`. An attacker controlling 6to4 routing could craft
+   `2002:c0a8:0101::1` → routes to RFC1918 `192.168.1.1`, or
+   `2002:a9fe:a9fe::1` → AWS IMDS via 6to4 transit.
+2. **RFC 3849 documentation prefix** (`2001:db8::/32`): real services
+   shouldn't live here; a target whose DNS returns docs prefix is
+   misconfigured at best, attacker-controlled at worst.
+
+**Fix.** V6 arm now decodes the 6to4 embedded V4 and recurses through
+`ip_addr_is_bogon`; documentation prefix returns true outright. Five
+new unit tests cover the new shapes (private V4 over 6to4, public V4
+over 6to4 stays clean, `2001:db8::/32`).
+
+### R-025 — sudo trust install hangs interactively in CI / headless
+
+**Severity:** medium (UX)
+**File:** `crates/proxy/src/mitm.rs` (`install_ca_trust`)
+
+The Linux Debian/Ubuntu trust-install path called `sudo cp ...` and
+`sudo update-ca-certificates` with stdin inherited from the parent.
+On a CI runner (or any headless context) without cached sudo creds,
+sudo would prompt for a password and block on stdin forever — wedging
+the proxy startup with no diagnostic.
+
+**Fix.** Added `sudo -n true` non-interactive probe before either
+sudo command runs. If sudo isn't usable non-interactively, fall
+through to the manual instructions block. All sudo invocations now
+also redirect stdin from `/dev/null` defensively.
+
+### R-026 — `--mitm` on a non-loopback `--listen` is a CA-key exposure
+
+**Severity:** critical (operator footgun)
+**File:** `crates/proxy/src/main.rs:484` (startup gate)
+
+Operator runs `wafrift-proxy --listen 0.0.0.0:8080 --mitm` to share
+the proxy across a lab. Anyone on the LAN can route HTTPS through
+and have it re-signed by the local MITM CA — the CA is now
+effectively a network-wide trust root.
+
+**Fix.** Startup hard-aborts (exit 1) when `--mitm` is set and the
+listen address isn't loopback. Operators that genuinely want a shared
+proxy must bind to loopback and front it with their own ACL'd reverse
+proxy.
+
+### R-027 — `bench-diff` silently compares evade-mode vs no-evade-mode
+
+**Severity:** medium (CI integrity)
+**File:** `crates/cli/src/bench_diff.rs`
+
+`bypass_rate()` returns `0.0` when `evaded_summary` is missing
+(no-evade-mode runs lack this field). Comparing a no-evade baseline
+against a with-evade current would silently pass with `drop=0`.
+Comparing the reverse would pretend to show a huge regression.
+
+**Fix.** New `evade_mode(v)` helper + warning when the two sides
+disagree. Doesn't fail the run (operator may know what they're
+doing) but the warning is unmissable on stderr.
+
+### R-028 — Multipart boundary collision risk (defence in depth)
+
+**Severity:** low
+**File:** `crates/content-type/src/content_type.rs`
+
+`random_boundary()` returns `----WafriftBoundary{32 hex}`. Birthday-
+collision odds with attacker-controlled payload content are 1/2^128,
+i.e. zero in practice. But the API offered no _guaranteed_-collision-
+free helper.
+
+**Fix.** New `unique_boundary(values: &[&str])` checks the candidate
+against every supplied value (preceded by the framing `--`) and
+regenerates if a hit appears. Bounded retry cap of 16 attempts so a
+broken entropy source surfaces as the last candidate, not an infinite
+loop.
+
+### R-029 — `wafrift-recon` returned `anyhow::Error` from public API
+
+**Severity:** low (API ergonomics)
+**File:** `crates/recon/src/lib.rs`
+
+Library callers couldn't pattern-match on transport vs status vs parse
+failures because the error type was `anyhow::Error`. The audit
+(`docs/REFINEMENT_AUDIT.md` §1) flagged this as a workspace
+inconsistency.
+
+**Fix.** New `ReconError` enum (`thiserror`) with three variants:
+`Transport`, `BadStatus`, `Parse`. Public `Result<T>` alias added.
+
+### R-030 — `eprintln!` in library crates polluted piped stdout/stderr
+
+**Severity:** low (UX)
+**Files:** `crates/grammar/src/grammar/{template,cmd,sql/common}.rs`,
+`crates/types/src/config.rs`
+
+Library code wrote warnings to stderr via `eprintln!`. CLI consumers
+piping wafrift output into jq or other tooling got framework noise
+mixed in.
+
+**Fix.** Migrated to `tracing::warn!` at the four sites; warnings now
+respect `RUST_LOG` and disappear by default unless explicitly enabled.
+
 ## Open
 
-(All initial-pass findings shipped fixes — see Resolved section. Wave-2
-audit findings will land here as they come in.)
+(R-024 → R-030 shipped fixes in this round. No findings currently open.
+New findings land here as they're discovered.)
