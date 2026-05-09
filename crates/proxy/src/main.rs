@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::{Bytes, Incoming};
@@ -55,6 +55,60 @@ struct ProxyLimits {
     /// attempts use heavier evasion. The first non-blocked response
     /// wins; otherwise the last block is returned.
     max_evade_retries: u32,
+}
+
+// ── Per-request evasion control via X-WafRift-Evade header ──────────
+/// Header name the client can set to control evasion per-request.
+/// Values: "off" (skip evasion entirely) or "light"/"medium"/"heavy"
+/// (force escalation level for this request only).
+const X_WAFRIFT_EVADE: &str = "x-wafrift-evade";
+
+// ── Response tagging headers ────────────────────────────────────────
+/// Injected into every evaded response so the practitioner can see at a
+/// glance what happened. Visible in Burp, browser devtools, curl -v.
+const X_WAFRIFT_TECHNIQUES: &str = "x-wafrift-techniques";
+const X_WAFRIFT_BLOCKED: &str = "x-wafrift-blocked";
+
+// ── NDJSON request/response logger ──────────────────────────────────
+/// Shared logger handle; None when --log-dir is not set.
+type SharedLogger = Option<Arc<RequestLogger>>;
+
+struct RequestLogger {
+    #[allow(dead_code)] // kept for future log rotation
+    dir: PathBuf,
+    /// Append-only file, protected by a tokio mutex for async writes.
+    writer: tokio::sync::Mutex<std::io::BufWriter<std::fs::File>>,
+}
+
+impl RequestLogger {
+    fn open(dir: &std::path::Path) -> std::io::Result<Self> {
+        std::fs::create_dir_all(dir)?;
+        let now = time::OffsetDateTime::now_utc();
+        let ts = format!(
+            "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
+            now.year(), now.month() as u8, now.day(),
+            now.hour(), now.minute(), now.second(),
+        );
+        let path = dir.join(format!("wafrift-proxy-{ts}.ndjson"));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        info!(path = %path.display(), "request/response log opened");
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            writer: tokio::sync::Mutex::new(std::io::BufWriter::new(file)),
+        })
+    }
+
+    async fn log_entry(&self, entry: &serde_json::Value) {
+        use std::io::Write;
+        let mut w = self.writer.lock().await;
+        if let Ok(line) = serde_json::to_string(entry) {
+            let _ = writeln!(w, "{line}");
+            let _ = w.flush();
+        }
+    }
 }
 
 /// CLI arguments for the proxy binary.
@@ -148,6 +202,12 @@ struct Args {
     /// Token-bucket burst capacity for --max-rps-per-host. Defaults to the rps value when 0. Ignored when rps is 0.
     #[arg(long, default_value_t = 0.0)]
     max_rps_per_host_burst: f64,
+
+    /// Write NDJSON request/response logs to this directory. Each proxy session creates a timestamped
+    /// file. Every proxied request is logged with method, URL, headers sent, techniques applied,
+    /// upstream status, and whether the WAF blocked. Essential for pentest engagement reports.
+    #[arg(long = "log-dir")]
+    log_dir: Option<PathBuf>,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
@@ -597,6 +657,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let conn_sem = Arc::new(Semaphore::new(args.max_concurrent_connections));
 
+    // ── Request/response logger ─────────────────────────────────────
+    let logger: SharedLogger = if let Some(dir) = &args.log_dir {
+        match RequestLogger::open(dir) {
+            Ok(l) => Some(Arc::new(l)),
+            Err(e) => {
+                error!(dir = %dir.display(), error = %e, "failed to open log directory");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     if args.insecure_open_upstream {
         warn!("--insecure-open-upstream: upstream DNS/literal policy checks are disabled");
     }
@@ -693,6 +766,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // loopback before exposing the status endpoint.
         let expose_status_per_conn = expose_wafrift_status && peer.ip().is_loopback();
 
+        let logger = logger.clone();
         tokio::task::spawn(async move {
             let _permit = permit;
             if let Err(err) = http1::Builder::new()
@@ -714,6 +788,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             scope.clone(),
                             rate_limiter.clone(),
                             expose_status_per_conn,
+                            logger.clone(),
                         )
                     }),
                 )
@@ -1056,6 +1131,20 @@ async fn forward_wafrift_request(
         }
     }
 
+    // ── Inject response tagging headers ──────────────────────────────
+    // These are visible in Burp, browser devtools, and curl -v so the
+    // practitioner immediately knows what WafRift did to this request.
+    if !technique_keys.is_empty() {
+        response_builder = response_builder.header(
+            X_WAFRIFT_TECHNIQUES,
+            technique_keys.join(", "),
+        );
+    }
+    response_builder = response_builder.header(
+        X_WAFRIFT_BLOCKED,
+        if is_block { "true" } else { "false" },
+    );
+
     Ok(response_builder
         .body(Full::new(Bytes::from(buf)))
         .unwrap_or_else(|_| {
@@ -1264,6 +1353,7 @@ async fn proxy(
     scope: Arc<ScopeFilter>,
     rate_limiter: Arc<RateLimiter>,
     expose_wafrift_status: bool,
+    logger: SharedLogger,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // CONNECT: optional TLS MITM (terminate client TLS, evade, forward via HTTPS).
     if req.method() == Method::CONNECT {
@@ -1453,6 +1543,17 @@ async fn proxy(
 
     let log_uri = req.uri().to_string();
 
+    // ── Per-request evasion control via X-WafRift-Evade header ──────
+    // Strip the header before forwarding — it's for the proxy, not upstream.
+    let evade_override = wafrift_req
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(X_WAFRIFT_EVADE))
+        .map(|(_, v)| v.to_ascii_lowercase());
+    wafrift_req
+        .headers
+        .retain(|(k, _)| !k.eq_ignore_ascii_case(X_WAFRIFT_EVADE));
+
     rate_limiter.acquire(&host).await;
 
     let path_for_scope = req
@@ -1460,22 +1561,76 @@ async fn proxy(
         .path_and_query()
         .map(|p| p.path().to_string())
         .unwrap_or_else(|| "/".to_string());
-    if !scope.allows(&host, &path_for_scope, &wafrift_req.method) {
-        return forward_passthrough(wafrift_req, host, &client, policy, limits).await;
+
+    // X-WafRift-Evade: off  → skip evasion entirely for this request
+    let skip_evasion = evade_override.as_deref() == Some("off");
+    if skip_evasion || !scope.allows(&host, &path_for_scope, &wafrift_req.method) {
+        debug!(host = %host, uri = %log_uri, "evasion skipped (off/out-of-scope)");
+        let resp = forward_passthrough(wafrift_req, host.clone(), &client, policy, limits).await;
+        if let (Ok(r), Some(log)) = (&resp, &logger) {
+            log.log_entry(&serde_json::json!({
+                "ts": time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default(),
+                "host": host,
+                "method": req.method().as_str(),
+                "url": log_uri,
+                "evaded": false,
+                "status": r.status().as_u16(),
+            }))
+            .await;
+        }
+        return resp;
     }
 
-    forward_with_evade_retry(
+    // X-WafRift-Evade: light/medium/heavy → override escalation for this request
+    let effective_escalation = match evade_override.as_deref() {
+        Some("light") | Some("medium") | Some("heavy") => evade_override,
+        _ => default_escalation,
+    };
+
+    let resp = forward_with_evade_retry(
         wafrift_req,
-        host,
-        log_uri,
+        host.clone(),
+        log_uri.clone(),
         state,
         config,
-        default_escalation,
+        effective_escalation,
         &client,
         policy,
         limits,
     )
-    .await
+    .await;
+
+    // ── Log the request/response ────────────────────────────────────
+    if let (Ok(r), Some(log)) = (&resp, &logger) {
+        let techniques: Vec<&str> = r
+            .headers()
+            .get(X_WAFRIFT_TECHNIQUES)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.split(", ").collect())
+            .unwrap_or_default();
+        let blocked = r
+            .headers()
+            .get(X_WAFRIFT_BLOCKED)
+            .and_then(|v| v.to_str().ok())
+            == Some("true");
+        log.log_entry(&serde_json::json!({
+            "ts": time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default(),
+            "host": host,
+            "method": req.method().as_str(),
+            "url": log_uri,
+            "evaded": true,
+            "techniques": techniques,
+            "status": r.status().as_u16(),
+            "blocked": blocked,
+        }))
+        .await;
+    }
+
+    resp
 }
 
 /// Forward a request verbatim with no evasion, no gene-bank update,

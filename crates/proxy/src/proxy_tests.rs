@@ -546,6 +546,7 @@ fn default_args() -> Args {
         only_method: vec![],
         max_rps_per_host: 0.0,
         max_rps_per_host_burst: 0.0,
+        log_dir: None,
     }
 }
 
