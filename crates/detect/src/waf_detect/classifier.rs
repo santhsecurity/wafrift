@@ -5,6 +5,11 @@ use std::fmt;
 use crate::waf_detect::rules;
 pub use crate::waf_detect::rules::{DetectConfig, DetectedWaf};
 
+/// Confidence threshold for callers that need a high-confidence WAF identity.
+///
+/// Use this when persisting or acting on a single guessed vendor.
+pub const ACTIONABLE_CONFIDENCE_THRESHOLD: f64 = 0.5;
+
 impl fmt::Display for DetectedWaf {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

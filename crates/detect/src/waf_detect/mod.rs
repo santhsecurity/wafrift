@@ -14,6 +14,6 @@ mod tests;
 
 pub use active_probe::{ProbePayload, ProbeResult, active_probe, classify_drift, probe_set};
 pub use blocking::is_blocked_response;
-pub use classifier::{DetectedWaf, detect, supported_wafs};
+pub use classifier::{ACTIONABLE_CONFIDENCE_THRESHOLD, DetectedWaf, detect, supported_wafs};
 pub use evasion::suggest_evasion;
 pub use rules::{DetectConfig, reload as reload_rules};

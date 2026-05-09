@@ -18,6 +18,12 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
+/// Minimum confidence required for detections based only on body text.
+///
+/// Body-only matches are easier to spoof with generic wording (for example
+/// benign 404 pages containing "forbidden"), so require stronger evidence.
+const BODY_ONLY_MIN_CONFIDENCE: f64 = 0.5;
+
 /// Global in-memory rule database.
 static RULE_DB: Lazy<RwLock<RuleEngine>> = Lazy::new(|| {
     let engine = RuleEngine::load_embedded().unwrap_or_else(|e| {
@@ -423,7 +429,15 @@ impl RuleEngine {
             .into_iter()
             .filter_map(|(name, (score, indicators))| {
                 let rule = &self.rules[name];
-                if score >= rule.confidence_threshold {
+                let has_non_body_indicator = indicators
+                    .iter()
+                    .any(|indicator| !indicator.starts_with("body: "));
+                let effective_threshold = if has_non_body_indicator {
+                    rule.confidence_threshold
+                } else {
+                    rule.confidence_threshold.max(BODY_ONLY_MIN_CONFIDENCE)
+                };
+                if score >= effective_threshold {
                     Some(DetectedWaf {
                         name: name.to_string(),
                         confidence: score.min(1.0),
