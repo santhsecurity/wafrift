@@ -9,7 +9,16 @@ use std::fmt::Write as _;
 pub fn unicode_encode(payload: &str) -> String {
     let mut out = String::with_capacity(payload.len() * 6);
     for ch in payload.chars() {
-        let _ = write!(&mut out, "\\u{:04X}", ch as u32);
+        let code = ch as u32;
+        if code > 0xFFFF {
+            // Non-BMP: emit surrogate pair (valid in JSON/JavaScript)
+            let surrogate_base = code - 0x1_0000;
+            let high = 0xD800 + ((surrogate_base >> 10) & 0x3FF);
+            let low = 0xDC00 + (surrogate_base & 0x3FF);
+            let _ = write!(&mut out, "\\u{:04X}\\u{:04X}", high, low);
+        } else {
+            let _ = write!(&mut out, "\\u{:04X}", code);
+        }
     }
     out
 }

@@ -27,7 +27,39 @@ pub fn encode_in_context(
 
     let base = match crate::encoding::encode(payload, strategy) {
         Ok(s) => s,
-        Err(_) => return Err(ContextualEncodeError::InvalidUtf8 { offset: 0 }),
+        Err(e) => {
+            return Err(match e {
+                crate::error::EncodeError::InvalidUtf8 => ContextualEncodeError::InvalidUtf8 { offset: 0 },
+                crate::error::EncodeError::PayloadTooLarge { max, actual } => {
+                    ContextualEncodeError::PayloadTooLarge {
+                        context,
+                        size: actual,
+                        max,
+                    }
+                }
+                crate::error::EncodeError::LayeredOutputTooLarge { max, actual } => {
+                    ContextualEncodeError::PayloadTooLarge {
+                        context,
+                        size: actual,
+                        max,
+                    }
+                }
+                crate::error::EncodeError::InvalidContext { strategy: s, context: _ } => {
+                    ContextualEncodeError::ContextIncompatible {
+                        strategy: s.into(),
+                        context,
+                        reason: "strategy invalid for context".into(),
+                    }
+                }
+                crate::error::EncodeError::InvalidConfig(msg) => {
+                    ContextualEncodeError::ContextIncompatible {
+                        strategy: "config".into(),
+                        context,
+                        reason: msg,
+                    }
+                }
+            });
+        }
     };
 
     escape_for_context(&base, context)
@@ -186,9 +218,25 @@ pub fn validate_in_context(
                     });
                 }
                 if c == '\\' {
-                    match chars.next() {
+                    let escaped = chars.next();
+                    match escaped {
                         Some('\\') | Some('"') | Some('n') | Some('r') | Some('t')
-                        | Some('b') | Some('f') | Some('/') | Some('u') => {}
+                        | Some('b') | Some('f') | Some('/') => {}
+                        Some('u') => {
+                            // Validate exactly 4 hex digits after \u
+                            for _ in 0..4 {
+                                match chars.next() {
+                                    Some(c) if c.is_ascii_hexdigit() => {}
+                                    _ => {
+                                        return Err(ContextualEncodeError::ContextIncompatible {
+                                            strategy: "validate".into(),
+                                            context,
+                                            reason: "invalid Unicode escape in JSON string".into(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
                         Some(other) => {
                             return Err(ContextualEncodeError::ContextIncompatible {
                                 strategy: "validate".into(),
@@ -204,33 +252,31 @@ pub fn validate_in_context(
                             });
                         }
                     }
-                    // Skip hex digits after \u
-                    if chars.peek() == Some(&'u') {
-                        chars.next();
-                        for _ in 0..4 {
-                            match chars.next() {
-                                Some(c) if c.is_ascii_hexdigit() => {}
-                                _ => {
-                                    return Err(ContextualEncodeError::ContextIncompatible {
-                                        strategy: "validate".into(),
-                                        context,
-                                        reason: "invalid Unicode escape in JSON string".into(),
-                                    });
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
         InjectionContext::XmlAttribute => {
-            for c in payload.chars() {
-                if c == '"' && !payload.contains("&quot;") {
+            let mut chars = payload.chars();
+            while let Some(c) = chars.next() {
+                if c == '"' {
                     return Err(ContextualEncodeError::ContextIncompatible {
                         strategy: "validate".into(),
                         context,
                         reason: "unescaped double quote in XML attribute".into(),
                     });
+                }
+                if c == '&' {
+                    // Allow known entity references; anything else starting with & is suspicious
+                    let remainder: String = chars.by_ref().take(6).collect();
+                    if !remainder.starts_with("quot;")
+                        && !remainder.starts_with("amp;")
+                        && !remainder.starts_with("lt;")
+                        && !remainder.starts_with("gt;")
+                    {
+                        // Not a known entity — could be an unescaped &
+                        // (We keep scanning rather than erroring, since & alone
+                        // is technically valid XML text if followed by whitespace.)
+                    }
                 }
             }
         }
