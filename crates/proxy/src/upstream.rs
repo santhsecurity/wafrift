@@ -30,6 +30,7 @@
 //! - With `tls-impersonate`: both variants compile.
 
 use bytes::Bytes;
+#[cfg(feature = "tls-impersonate")]
 use std::time::Duration;
 use thiserror::Error;
 use wafrift_transport::stealth::ImpersonateProfile;
@@ -65,7 +66,9 @@ pub struct UpstreamResponse {
     pub body: Bytes,
 }
 
-/// Either the default reqwest client or a stealth (rquest) client.
+/// Either the default reqwest client or a stealth (rquest) client,
+/// optionally wearing a different browser fingerprint per request via
+/// the [`UpstreamClient::StealthPool`] variant.
 #[derive(Clone)]
 pub enum UpstreamClient {
     /// Default rustls-backed reqwest client. Carries SSRF resolver,
@@ -77,6 +80,22 @@ pub enum UpstreamClient {
     /// set on the proxy command line. Compiled out by default.
     #[cfg(feature = "tls-impersonate")]
     Stealth(std::sync::Arc<StealthClient>),
+
+    /// Round-robin pool of stealth clients (one per profile). Lets the
+    /// proxy rotate browser fingerprints per request, which defeats
+    /// rate-limit-by-JA3 and per-fingerprint reputation systems
+    /// (Cloudflare bot-management, Akamai BMP). Selected with
+    /// `--tls-impersonate-rotate chrome131,firefox133,safari18`.
+    #[cfg(feature = "tls-impersonate")]
+    StealthPool {
+        /// Pre-built clients, one per profile. Indexed via the atomic
+        /// `cursor` below.
+        clients: std::sync::Arc<Vec<std::sync::Arc<StealthClient>>>,
+        /// Round-robin counter. `AtomicUsize` so `send()` stays `&self`
+        /// — the proxy holds the pool inside an `Arc` and dispatches
+        /// from many concurrent tasks.
+        cursor: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    },
 }
 
 impl UpstreamClient {
@@ -100,6 +119,41 @@ impl UpstreamClient {
             let client = StealthClient::with_timeout(_profile, Duration::from_secs(60))
                 .map_err(|e| UpstreamError::Request(e.to_string()))?;
             Ok(Self::Stealth(std::sync::Arc::new(client)))
+        }
+        #[cfg(not(feature = "tls-impersonate"))]
+        {
+            Err(UpstreamError::StealthFeatureDisabled)
+        }
+    }
+
+    /// Build a rotating pool of stealth clients (one per profile).
+    /// `send()` advances a round-robin cursor so successive requests
+    /// land on different fingerprints.
+    ///
+    /// # Errors
+    ///
+    /// - [`UpstreamError::StealthFeatureDisabled`] if built without
+    ///   `tls-impersonate`.
+    /// - [`UpstreamError::Request`] if any client fails to build OR if
+    ///   `_profiles` is empty (a pool of zero is meaningless).
+    pub fn stealth_pool(_profiles: &[ImpersonateProfile]) -> Result<Self, UpstreamError> {
+        #[cfg(feature = "tls-impersonate")]
+        {
+            if _profiles.is_empty() {
+                return Err(UpstreamError::Request(
+                    "stealth_pool requires at least one profile".into(),
+                ));
+            }
+            let mut clients = Vec::with_capacity(_profiles.len());
+            for &p in _profiles {
+                let c = StealthClient::with_timeout(p, Duration::from_secs(60))
+                    .map_err(|e| UpstreamError::Request(format!("{}: {e}", p.name())))?;
+                clients.push(std::sync::Arc::new(c));
+            }
+            Ok(Self::StealthPool {
+                clients: std::sync::Arc::new(clients),
+                cursor: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            })
         }
         #[cfg(not(feature = "tls-impersonate"))]
         {
@@ -171,30 +225,48 @@ impl UpstreamClient {
             }
             #[cfg(feature = "tls-impersonate")]
             Self::Stealth(client) => {
-                let stealth_resp = client
-                    .send(method, url, headers, body.as_deref(), max_body)
-                    .await
-                    .map_err(|e| UpstreamError::Request(e.to_string()))?;
-                let status = http::StatusCode::from_u16(stealth_resp.status)
-                    .map_err(|e| UpstreamError::Request(e.to_string()))?;
-                let mut header_map = http::HeaderMap::with_capacity(stealth_resp.headers.len());
-                for (k, v) in &stealth_resp.headers {
-                    if let (Ok(name), Ok(val)) = (
-                        http::HeaderName::from_bytes(k.as_bytes()),
-                        http::HeaderValue::from_bytes(v.as_bytes()),
-                    ) {
-                        header_map.append(name, val);
-                    }
-                    // Silently drop headers with invalid bytes — same
-                    // behaviour as reqwest's parser would have.
-                }
-                Ok(UpstreamResponse {
-                    status,
-                    headers: header_map,
-                    body: Bytes::from(stealth_resp.body),
-                })
+                Self::send_via_stealth(client, method, url, headers, body, max_body).await
+            }
+            #[cfg(feature = "tls-impersonate")]
+            Self::StealthPool { clients, cursor } => {
+                let idx = cursor
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    % clients.len();
+                let client = clients[idx].clone();
+                Self::send_via_stealth(&client, method, url, headers, body, max_body).await
             }
         }
+    }
+
+    #[cfg(feature = "tls-impersonate")]
+    async fn send_via_stealth(
+        client: &StealthClient,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: Option<Vec<u8>>,
+        max_body: usize,
+    ) -> Result<UpstreamResponse, UpstreamError> {
+        let stealth_resp = client
+            .send(method, url, headers, body.as_deref(), max_body)
+            .await
+            .map_err(|e| UpstreamError::Request(e.to_string()))?;
+        let status = http::StatusCode::from_u16(stealth_resp.status)
+            .map_err(|e| UpstreamError::Request(e.to_string()))?;
+        let mut header_map = http::HeaderMap::with_capacity(stealth_resp.headers.len());
+        for (k, v) in &stealth_resp.headers {
+            if let (Ok(name), Ok(val)) = (
+                http::HeaderName::from_bytes(k.as_bytes()),
+                http::HeaderValue::from_bytes(v.as_bytes()),
+            ) {
+                header_map.append(name, val);
+            }
+        }
+        Ok(UpstreamResponse {
+            status,
+            headers: header_map,
+            body: Bytes::from(stealth_resp.body),
+        })
     }
 
     /// Returns the operator-visible name of the active TLS stack, for
@@ -205,6 +277,8 @@ impl UpstreamClient {
             Self::Reqwest(_) => "rustls (default)",
             #[cfg(feature = "tls-impersonate")]
             Self::Stealth(_) => "boringssl (stealth)",
+            #[cfg(feature = "tls-impersonate")]
+            Self::StealthPool { .. } => "boringssl (stealth pool, rotating)",
         }
     }
 }
@@ -244,8 +318,11 @@ mod tests {
     #[cfg(not(feature = "tls-impersonate"))]
     #[test]
     fn stealth_constructor_errors_when_feature_off() {
-        let err = UpstreamClient::stealth(ImpersonateProfile::Chrome131).unwrap_err();
-        assert!(matches!(err, UpstreamError::StealthFeatureDisabled));
+        match UpstreamClient::stealth(ImpersonateProfile::Chrome131) {
+            Err(UpstreamError::StealthFeatureDisabled) => {}
+            Err(other) => panic!("expected StealthFeatureDisabled, got {other}"),
+            Ok(_) => panic!("expected error, got Ok variant"),
+        }
     }
 
     #[cfg(feature = "tls-impersonate")]
@@ -253,5 +330,54 @@ mod tests {
     fn stealth_constructor_builds_when_feature_on() {
         let upstream = UpstreamClient::stealth(ImpersonateProfile::Chrome131).unwrap();
         assert_eq!(upstream.tls_stack_name(), "boringssl (stealth)");
+    }
+
+    #[cfg(feature = "tls-impersonate")]
+    #[test]
+    fn stealth_pool_rotates_round_robin() {
+        let pool = UpstreamClient::stealth_pool(&[
+            ImpersonateProfile::Chrome131,
+            ImpersonateProfile::Firefox133,
+            ImpersonateProfile::Safari18,
+        ])
+        .unwrap();
+        assert_eq!(pool.tls_stack_name(), "boringssl (stealth pool, rotating)");
+        // Cursor advances on every send. We can't test a real send
+        // without a network, but we can exercise the cursor by faking
+        // index calculation.
+        if let UpstreamClient::StealthPool { clients, cursor } = &pool {
+            assert_eq!(clients.len(), 3);
+            let first =
+                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            let second =
+                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            let third =
+                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            let fourth =
+                cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+            assert_eq!((first, second, third, fourth), (0, 1, 2, 0));
+        } else {
+            panic!("expected StealthPool variant");
+        }
+    }
+
+    #[cfg(feature = "tls-impersonate")]
+    #[test]
+    fn stealth_pool_rejects_empty_profiles() {
+        let err = UpstreamClient::stealth_pool(&[]).unwrap_err();
+        match err {
+            UpstreamError::Request(msg) => assert!(msg.contains("at least one")),
+            other => panic!("expected Request error, got {other:?}"),
+        }
+    }
+
+    #[cfg(not(feature = "tls-impersonate"))]
+    #[test]
+    fn stealth_pool_errors_when_feature_off() {
+        match UpstreamClient::stealth_pool(&[ImpersonateProfile::Chrome131]) {
+            Err(UpstreamError::StealthFeatureDisabled) => {}
+            Err(other) => panic!("expected StealthFeatureDisabled, got {other}"),
+            Ok(_) => panic!("expected error, got Ok variant"),
+        }
     }
 }

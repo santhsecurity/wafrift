@@ -40,7 +40,7 @@ pub enum StealthError {
     /// The string passed to `--tls-impersonate` did not match a known
     /// browser profile. The error carries the offending string and the
     /// supported set so the practitioner sees a usable hint.
-    #[error("unknown impersonate profile {0:?} (supported: {})", supported_profiles().join(", "))]
+    #[error("unknown impersonate profile {raw:?} (supported: {})", supported_profiles().join(", "), raw = .0)]
     UnknownProfile(String),
 
     /// Building the underlying `rquest::Client` failed. Most commonly
@@ -295,6 +295,7 @@ pub use imp::StealthClient;
 /// the cargo feature flag — better than a "method not found" compile
 /// error from downstream code that conditionally uses stealth mode.
 #[cfg(not(feature = "tls-impersonate"))]
+#[derive(Debug)]
 pub struct StealthClient;
 
 #[cfg(not(feature = "tls-impersonate"))]
