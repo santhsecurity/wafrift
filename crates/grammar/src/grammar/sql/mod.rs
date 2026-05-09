@@ -5,6 +5,8 @@
 
 use rand::Rng;
 
+/// AST-level SQL metamorphism (sqlparser lift -> transform -> lower).
+pub mod ast_metamorph;
 /// Blind and time-based SQL mutation helpers.
 pub mod blind;
 /// Comment-based SQL mutation helpers.
@@ -75,6 +77,14 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         &mut results,
         max_mutations,
         keywordless_mutations(payload, max_mutations / 4),
+    );
+
+    // AST-level metamorphism: lift -> transform -> lower via sqlparser.
+    // Yields semantic-identical fragments with different text signatures.
+    extend_until_limit(
+        &mut results,
+        max_mutations,
+        ast_metamorph::mutations(payload, max_mutations / 4),
     );
 
     if contains_tautology(payload) {

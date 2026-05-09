@@ -698,31 +698,16 @@ async fn run_redos_strategy(
     let shapes: Vec<(&str, String)> = vec![
         ("classic_aabb", format!("{}{}", "a".repeat(50), p)),
         ("group_plus", format!("{}{}", "a".repeat(40), p)),
-        (
-            "alternation_overlap",
-            format!("{}{}", "ab".repeat(30), p),
-        ),
-        (
-            "nested_quantifier",
-            format!("{}{}", "x".repeat(80), p),
-        ),
-        (
-            "evil_email_shape",
-            format!("a@{}.{}", "a".repeat(50), p),
-        ),
+        ("alternation_overlap", format!("{}{}", "ab".repeat(30), p)),
+        ("nested_quantifier", format!("{}{}", "x".repeat(80), p)),
+        ("evil_email_shape", format!("a@{}.{}", "a".repeat(50), p)),
         // Long Unicode escape sequence — most regex implementations slow down
         // on large surrogate-pair sequences.
-        (
-            "unicode_storm",
-            format!("{}{}", "\\u00ff".repeat(40), p),
-        ),
+        ("unicode_storm", format!("{}{}", "\\u00ff".repeat(40), p)),
         // Repeated backslash quoting — known historical CRS slowdown.
         ("backslash_storm", format!("{}{}", "\\\\".repeat(60), p)),
         // Many word-boundary anchors — \b matching forces re-evaluation.
-        (
-            "word_boundary_storm",
-            format!("{}{}", " a ".repeat(40), p),
-        ),
+        ("word_boundary_storm", format!("{}{}", " a ".repeat(40), p)),
     ];
 
     for (label, blob) in shapes.iter().take(args.variants) {
