@@ -80,6 +80,46 @@ Each evasion crate (`encoding`, `grammar`, `smuggling`, etc.) has one file per s
 
 Smuggling probe templates live in `rules/smuggling/*.toml`. See existing entries for the schema.
 
+## Contributing a New WAF Block-Page Marker (No Rust Required)
+
+When you encounter a new WAF and find its block page contains a distinctive
+substring, header, or rule-ID prefix, add it to one of the community-contributed
+TOML tables. Each is a flat data file — append a line, rebuild, done.
+
+| File                                                | What it is                                          |
+|-----------------------------------------------------|-----------------------------------------------------|
+| `crates/oracle/rules/markers/block.toml`            | Body substrings that indicate a block page          |
+| `crates/oracle/rules/markers/challenge.toml`        | CAPTCHA / JS challenge markers                      |
+| `crates/oracle/rules/markers/rate_limit.toml`       | Rate-limit body markers                             |
+| `crates/oracle/rules/markers/success.toml`          | App-success markers (welcome / dashboard / etc.)    |
+| `crates/oracle/rules/markers/rule_id_prefixes.toml` | Prefixes that introduce a numeric rule ID           |
+| `crates/oracle/rules/markers/rule_categories.toml`  | OWASP rule categories (sqli / xss / lfi / …)        |
+| `crates/oracle/rules/markers/vendors.toml`          | WAF vendor names appearing in block bodies          |
+| `crates/oracle/rules/markers/waf_headers.toml`      | Response headers that identify a WAF                |
+| `crates/oracle/rules/markers/block_headers.toml`    | Headers that ONLY appear when a WAF blocks          |
+| `crates/grammar/rules/polyglot/polyglots.toml`      | Cross-context polyglot payloads                     |
+| `crates/evolution/rules/probes/differential.toml`   | Differential-probe payloads                         |
+| `crates/detect/rules/detect/<vendor>.toml`          | Full passive WAF detection signature (per vendor)   |
+
+Tip: when adding a body marker, prefer specificity. `"access denied"` is fine;
+`"denied"` alone matches too many benign 4xx pages. The engine match is a
+case-insensitive substring.
+
+## Local development gotcha: moving the workspace
+
+If you `git mv`, symlink, or otherwise relocate the workspace directory after
+having built it once, the e2e CLI tests will fail with `failed to execute
+wafrift binary: NotFound` — `CARGO_BIN_EXE_wafrift` is baked into the
+incremental cache with the old absolute path. Fix:
+
+```bash
+cargo clean -p wafrift-cli
+cargo test -p wafrift-cli
+```
+
+(`cargo install` users won't hit this; only contributors who relocate the
+workspace.)
+
 ## Extension Guide
 
 To add a new capability, create a new module in the appropriate crate within `crates/`. If the feature is major (new technique family), create a new crate. Register new CLI commands in `crates/cli/src/main.rs`.

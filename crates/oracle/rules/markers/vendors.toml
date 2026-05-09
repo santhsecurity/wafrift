@@ -1,0 +1,14 @@
+# WAF vendor names that may appear in block-page bodies.
+#
+# Used as a fallback when no rule ID or category is available. Keep this list
+# tight — overly generic vendor strings (e.g. "f5" alone) match too many
+# benign pages. Prefer multi-word identifiers when possible.
+
+vendors = [
+    "cloudflare",
+    "akamai",
+    "imperva",
+    "f5",
+    "aws waf",
+    "modsecurity",
+]

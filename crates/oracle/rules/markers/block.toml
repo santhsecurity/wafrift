@@ -1,0 +1,31 @@
+# Body substrings that indicate a WAF block page.
+#
+# Match is case-insensitive substring against decompressed response body.
+# Adding a marker here requires no Rust knowledge — just append the string,
+# rebuild, and the engine picks it up.
+#
+# When adding a marker, prefer specificity: "access denied" is fine,
+# "denied" alone matches too many benign 4xx pages.
+
+patterns = [
+    "access denied",
+    "forbidden",
+    "blocked",
+    "waf",
+    "cloudflare",
+    "akamai",
+    "incapsula",
+    "sucuri",
+    "mod_security",
+    "modsecurity",
+    "owasp",
+    "imperva",
+    "big-ip",
+    "f5",
+    "rule violation",
+    "request rejected",
+    "unauthorized request",
+    "bad request",
+    "security check",
+    "challenge",
+]

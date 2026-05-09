@@ -2,67 +2,16 @@
 //!
 //! Scans response bodies for known WAF block-page markers and success
 //! indicators. Operates on raw bytes and can decompress gzip if needed.
+//!
+//! Marker tables (`BLOCK_MARKERS`, `CHALLENGE_MARKERS`, `RATE_LIMIT_MARKERS`,
+//! `SUCCESS_MARKERS`, `RULE_ID_PREFIXES`, `RULE_CATEGORIES`, `VENDOR_NAMES`)
+//! are community-contributed via `crates/oracle/rules/markers/*.toml` and
+//! compiled in by `build.rs`. Adding a marker is a one-line PR with no Rust.
 
 use std::io::Read;
 use wafrift_types::{BlockReason, Signal};
 
-/// Known block-page substrings (case-insensitive).
-const BLOCK_MARKERS: &[&str] = &[
-    "access denied",
-    "forbidden",
-    "blocked",
-    "waf",
-    "cloudflare",
-    "akamai",
-    "incapsula",
-    "sucuri",
-    "mod_security",
-    "modsecurity",
-    "owasp",
-    "imperva",
-    "big-ip",
-    "f5",
-    "rule violation",
-    "request rejected",
-    "unauthorized request",
-    "bad request",
-    "security check",
-    "challenge",
-];
-
-/// Known challenge-page substrings.
-const CHALLENGE_MARKERS: &[&str] = &[
-    "challenge-platform",
-    "cf-im-under-attack",
-    "jschl_vc",
-    "js_challenge",
-    "recaptcha",
-    "g-recaptcha",
-    "hcaptcha",
-    "turnstile",
-    "checking your browser",
-    "ddos-guard",
-    "please wait",
-];
-
-/// Known rate-limit substrings.
-const RATE_LIMIT_MARKERS: &[&str] = &[
-    "rate limit",
-    "too many requests",
-    "slow down",
-    "throttled",
-    "quota exceeded",
-];
-
-/// Known success markers.
-const SUCCESS_MARKERS: &[&str] = &[
-    "welcome",
-    "login successful",
-    "success",
-    "authenticated",
-    "dashboard",
-    "home",
-];
+include!(concat!(env!("OUT_DIR"), "/markers_data.rs"));
 
 /// Extract body-marker signals from a response body.
 ///
@@ -119,7 +68,7 @@ pub fn extract_block_reason(body: &[u8], is_gzipped: bool) -> Option<BlockReason
     let lower = text.to_ascii_lowercase();
 
     // Rule ID patterns: "Rule ID: 12345", "rule_id=12345", etc.
-    for prefix in ["rule id:", "rule_id", "ruleid", " incident id:"] {
+    for prefix in RULE_ID_PREFIXES {
         if let Some(pos) = lower.find(prefix) {
             let start = pos + prefix.len();
             let after = &text[start..];
@@ -135,23 +84,16 @@ pub fn extract_block_reason(body: &[u8], is_gzipped: bool) -> Option<BlockReason
     }
 
     // Category patterns
-    for cat in ["sql injection", "xss", "rfi", "lfi", "rce", "cmd injection"] {
+    for cat in RULE_CATEGORIES {
         if lower.contains(cat) {
-            return Some(BlockReason::RuleCategory(cat.to_string()));
+            return Some(BlockReason::RuleCategory((*cat).to_string()));
         }
     }
 
     // Vendor-specific prefixes
-    for vendor in [
-        "cloudflare",
-        "akamai",
-        "imperva",
-        "f5",
-        "aws waf",
-        "modsecurity",
-    ] {
+    for vendor in VENDOR_NAMES {
         if lower.contains(vendor) {
-            return Some(BlockReason::VendorReason(vendor.to_string()));
+            return Some(BlockReason::VendorReason((*vendor).to_string()));
         }
     }
 

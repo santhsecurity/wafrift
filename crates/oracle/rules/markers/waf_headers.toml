@@ -1,0 +1,130 @@
+# Response headers that identify a WAF.
+#
+# Each entry is matched case-insensitively against the response header name.
+# `value_pattern` is a case-insensitive substring; empty string means "any value
+# matches" (i.e. presence-only).
+#
+# `description` is what gets emitted as the signal name (e.g. signal
+# `header:cloudflare_ray_id`). Keep it stable across releases — gene-banks
+# reference these strings.
+
+# ── Cloudflare ──
+[[entry]]
+name = "cf-ray"
+value_pattern = ""
+description = "cloudflare_ray_id"
+
+[[entry]]
+name = "cf-mitigated"
+value_pattern = ""
+description = "cloudflare_mitigated"
+
+[[entry]]
+name = "cf-cache-status"
+value_pattern = ""
+description = "cloudflare_cache"
+
+# ── Akamai ──
+[[entry]]
+name = "x-akamai-transformed"
+value_pattern = ""
+description = "akamai_transformed"
+
+[[entry]]
+name = "akamai-grn"
+value_pattern = ""
+description = "akamai_grn"
+
+# ── AWS WAF / CloudFront ──
+[[entry]]
+name = "x-amzn-requestid"
+value_pattern = ""
+description = "aws_request_id"
+
+[[entry]]
+name = "x-amzn-waf-action"
+value_pattern = "block"
+description = "aws_waf_block"
+
+[[entry]]
+name = "x-amzn-waf-action"
+value_pattern = "allow"
+description = "aws_waf_allow"
+
+# ── Imperva / Incapsula ──
+[[entry]]
+name = "x-iinfo"
+value_pattern = ""
+description = "imperva_incapsula"
+
+[[entry]]
+name = "x-cdn"
+value_pattern = "Incapsula"
+description = "imperva_incapsula_cdn"
+
+# ── ModSecurity ──
+[[entry]]
+name = "x-mod-security"
+value_pattern = ""
+description = "modsecurity"
+
+[[entry]]
+name = "server"
+value_pattern = "ModSecurity"
+description = "modsecurity_server"
+
+# ── Sucuri ──
+[[entry]]
+name = "x-sucuri-id"
+value_pattern = ""
+description = "sucuri_waf"
+
+[[entry]]
+name = "x-sucuri-cache"
+value_pattern = ""
+description = "sucuri_cache"
+
+# ── F5 BIG-IP ASM ──
+[[entry]]
+name = "x-waf-status"
+value_pattern = ""
+description = "f5_bigip_waf"
+
+[[entry]]
+name = "ts"
+value_pattern = ""
+description = "f5_bigip_cookie"
+
+# ── Barracuda ──
+[[entry]]
+name = "barra_counter_session"
+value_pattern = ""
+description = "barracuda_waf"
+
+# ── Fortinet / FortiWeb ──
+[[entry]]
+name = "fortiwafd"
+value_pattern = ""
+description = "fortiweb"
+
+# ── DDoS-GUARD ──
+[[entry]]
+name = "server"
+value_pattern = "ddos-guard"
+description = "ddos_guard"
+
+# ── Generic block indicators ──
+[[entry]]
+name = "x-blocked-by"
+value_pattern = ""
+description = "generic_blocked_by"
+
+[[entry]]
+name = "x-waf-event-info"
+value_pattern = ""
+description = "generic_waf_event"
+
+[[entry]]
+name = "x-firewall-protection"
+value_pattern = ""
+description = "generic_firewall"

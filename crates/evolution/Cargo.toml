@@ -24,6 +24,13 @@ lru = "0.18"
 sha2 = "0.10"
 tokio = { workspace = true }
 
+[build-dependencies]
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
 tokio-test = "0.4"
+
+[lints]
+workspace = true

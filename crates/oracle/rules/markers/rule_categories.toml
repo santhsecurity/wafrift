@@ -1,0 +1,14 @@
+# OWASP / WAF rule category names that may appear in block-page bodies.
+#
+# When matched, the engine attributes the block to a category, which informs
+# the strategy engine's mutation choice (e.g. SQL category -> try grammar
+# mutation next, not encoding).
+
+categories = [
+    "sql injection",
+    "xss",
+    "rfi",
+    "lfi",
+    "rce",
+    "cmd injection",
+]

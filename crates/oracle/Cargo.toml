@@ -20,5 +20,12 @@ wafrift-types = { workspace = true }
 url = "2"
 flate2 = "1"
 
+[build-dependencies]
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
+
+[lints]
+workspace = true

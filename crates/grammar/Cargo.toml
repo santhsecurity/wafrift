@@ -18,5 +18,12 @@ toml = { workspace = true }
 sqlparser = { workspace = true }
 tracing = { workspace = true }
 
+[build-dependencies]
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
+
+[lints]
+workspace = true
