@@ -42,6 +42,10 @@ use wafrift_transport::is_waf_block;
 /// Maximum request body buffered per message (plain HTTP + MITM plaintext).
 const MAX_PROXY_BODY_BYTES: usize = 16 * 1024 * 1024;
 
+use std::sync::OnceLock;
+
+static WARN_THROTTLE: OnceLock<WarnThrottle> = OnceLock::new();
+
 #[derive(Clone)]
 struct ProxyLimits {
     max_upstream_response_bytes: usize,
@@ -486,6 +490,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insecure_open_upstream: args.insecure_open_upstream,
     });
 
+    let _ = WARN_THROTTLE.set(WarnThrottle::new(5));
+
     if args.insecure_open_upstream && args.allow_private_upstream {
         warn!("--insecure-open-upstream makes --allow-private-upstream redundant; all upstream checks are disabled");
     }
@@ -498,7 +504,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // time.
     let global_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(config.insecure_tls)
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(
+            wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+        ))
         .dns_resolver(Arc::new(BogonFilteringResolver {
             policy: policy.clone(),
         }))
@@ -879,7 +887,11 @@ async fn forward_wafrift_request(
     let resp = match builder.send().await {
         Ok(r) => r,
         Err(e) => {
-            warn!(host = %host, error = %e, "forwarding failed");
+            if let Some(throttle) = WARN_THROTTLE.get() {
+                if throttle.should_warn(&format!("forward:{host}")) {
+                    warn!(host = %host, error = %e, "forwarding failed");
+                }
+            }
             // S3 fix: Do not leak internal errors to external callers
             return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
         }
@@ -1054,6 +1066,11 @@ async fn mitm_plaintext_request(
     let body_bytes = match limited.collect().await {
         Ok(b) => b.to_bytes().to_vec(),
         Err(_) => {
+            if let Some(throttle) = WARN_THROTTLE.get() {
+                if throttle.should_warn(&format!("body-limit:{host}")) {
+                    warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
+                }
+            }
             return Ok(error_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request body too large",
@@ -1338,11 +1355,16 @@ async fn proxy(
 
     // Read body — bounded by MAX_PROXY_BODY_BYTES at stream-read time
     // so an unbounded streaming body can't exhaust proxy memory before
-    // a post-collection size check would fire.
+    // a post-collection size check could fire.
     let limited = Limited::new(req.body_mut(), MAX_PROXY_BODY_BYTES);
     let body_bytes = match limited.collect().await {
         Ok(b) => b.to_bytes().to_vec(),
         Err(_) => {
+            if let Some(throttle) = WARN_THROTTLE.get() {
+                if throttle.should_warn(&format!("body-limit:{host}")) {
+                    warn!(host = %host, limit = MAX_PROXY_BODY_BYTES, "request body exceeded size limit");
+                }
+            }
             return Ok(error_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request body too large",
@@ -1450,7 +1472,11 @@ async fn forward_passthrough(
     let resp = match builder.send().await {
         Ok(r) => r,
         Err(e) => {
-            warn!(host = %host, error = %e, "passthrough forwarding failed");
+            if let Some(throttle) = WARN_THROTTLE.get() {
+                if throttle.should_warn(&format!("passthrough:{host}")) {
+                    warn!(host = %host, error = %e, "passthrough forwarding failed");
+                }
+            }
             return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
         }
     };

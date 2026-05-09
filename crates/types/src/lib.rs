@@ -14,6 +14,26 @@ pub mod technique;
 pub mod verdict;
 
 // ──────────────────────────────────────────────
+//  Workspace-wide tunables (single source of truth so the proxy,
+//  scan-side, and replay paths all agree on baseline timeouts).
+// ──────────────────────────────────────────────
+
+/// Default per-request HTTP timeout (seconds). Used by every reqwest
+/// client builder in the workspace unless the caller explicitly opts
+/// into a different value (e.g. `bench-waf --timeout-secs`).
+///
+/// Why 30s: the bench corpus includes deliberate ReDoS-style inputs
+/// that may legitimately keep a backend busy for tens of seconds, and
+/// a too-tight default turns slow-but-real bypasses into spurious
+/// "blocked" verdicts. The CLI scan path historically used 10s — that
+/// is now considered the override knob, not the floor.
+pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Default redirect chain depth allowed when wafrift acts as an HTTP
+/// client. Mirrors curl's default to minimise practitioner surprise.
+pub const DEFAULT_MAX_REDIRECTS: usize = 5;
+
+// ──────────────────────────────────────────────
 //  Public re-exports
 // ──────────────────────────────────────────────
 

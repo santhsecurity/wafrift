@@ -507,11 +507,8 @@ fn load_gene_bank_missing_file_returns_default() {
 }
 
 
-// ── validate_args ───────────────────────────────────────────────
-
-#[test]
-fn validate_args_accepts_defaults() {
-    let args = Args {
+fn default_args() -> Args {
+    Args {
         listen: "127.0.0.1:8080".into(),
         escalation: None,
         content_type_switching: false,
@@ -534,37 +531,21 @@ fn validate_args_accepts_defaults() {
         only_method: vec![],
         max_rps_per_host: 0.0,
         max_rps_per_host_burst: 0.0,
-    };
-    assert!(validate_args(&args).is_ok());
+    }
+}
+
+// ── validate_args ───────────────────────────────────────────────
+
+#[test]
+fn validate_args_accepts_defaults() {
+    assert!(validate_args(&default_args()).is_ok());
 }
 
 #[test]
 fn validate_args_rejects_zero_connections() {
     let args = Args {
         max_concurrent_connections: 0,
-        ..Args {
-            listen: "127.0.0.1:8080".into(),
-            escalation: None,
-            content_type_switching: false,
-            fingerprint_rotation: false,
-            insecure: false,
-            write_mitm_ca_dir: None,
-            mitm: false,
-            mitm_ca_dir: None,
-            allow_private_upstream: false,
-            insecure_open_upstream: false,
-            max_upstream_response_bytes: 33554432,
-            max_evade_retries: 0,
-            gene_bank_path: "".into(),
-            gene_bank_flush_interval_secs: 60,
-            only_host: vec![],
-            skip_host: vec![],
-            only_path: vec![],
-            skip_path: vec![],
-            only_method: vec![],
-            max_rps_per_host: 0.0,
-            max_rps_per_host_burst: 0.0,
-        }
+        ..default_args()
     };
     let err = validate_args(&args).unwrap_err();
     assert!(err.contains("--max-concurrent-connections must be >= 1"));
@@ -574,29 +555,7 @@ fn validate_args_rejects_zero_connections() {
 fn validate_args_rejects_small_response_bytes() {
     let args = Args {
         max_upstream_response_bytes: 100,
-        ..Args {
-            listen: "127.0.0.1:8080".into(),
-            escalation: None,
-            content_type_switching: false,
-            fingerprint_rotation: false,
-            insecure: false,
-            write_mitm_ca_dir: None,
-            mitm: false,
-            mitm_ca_dir: None,
-            allow_private_upstream: false,
-            insecure_open_upstream: false,
-            max_concurrent_connections: 4096,
-            max_evade_retries: 0,
-            gene_bank_path: "".into(),
-            gene_bank_flush_interval_secs: 60,
-            only_host: vec![],
-            skip_host: vec![],
-            only_path: vec![],
-            skip_path: vec![],
-            only_method: vec![],
-            max_rps_per_host: 0.0,
-            max_rps_per_host_burst: 0.0,
-        }
+        ..default_args()
     };
     let err = validate_args(&args).unwrap_err();
     assert!(err.contains("--max-upstream-response-bytes must be >= 4096"));
@@ -606,29 +565,7 @@ fn validate_args_rejects_small_response_bytes() {
 fn validate_args_rejects_negative_rps() {
     let args = Args {
         max_rps_per_host: -2.0,
-        ..Args {
-            listen: "127.0.0.1:8080".into(),
-            escalation: None,
-            content_type_switching: false,
-            fingerprint_rotation: false,
-            insecure: false,
-            write_mitm_ca_dir: None,
-            mitm: false,
-            mitm_ca_dir: None,
-            allow_private_upstream: false,
-            insecure_open_upstream: false,
-            max_concurrent_connections: 4096,
-            max_upstream_response_bytes: 33554432,
-            max_evade_retries: 0,
-            gene_bank_path: "".into(),
-            gene_bank_flush_interval_secs: 60,
-            only_host: vec![],
-            skip_host: vec![],
-            only_path: vec![],
-            skip_path: vec![],
-            only_method: vec![],
-            max_rps_per_host_burst: 0.0,
-        }
+        ..default_args()
     };
     let err = validate_args(&args).unwrap_err();
     assert!(err.contains("--max-rps-per-host must be a non-negative number"));
@@ -639,29 +576,7 @@ fn validate_args_rejects_negative_rps() {
 fn validate_args_rejects_negative_burst() {
     let args = Args {
         max_rps_per_host_burst: -1.5,
-        ..Args {
-            listen: "127.0.0.1:8080".into(),
-            escalation: None,
-            content_type_switching: false,
-            fingerprint_rotation: false,
-            insecure: false,
-            write_mitm_ca_dir: None,
-            mitm: false,
-            mitm_ca_dir: None,
-            allow_private_upstream: false,
-            insecure_open_upstream: false,
-            max_concurrent_connections: 4096,
-            max_upstream_response_bytes: 33554432,
-            max_evade_retries: 0,
-            gene_bank_path: "".into(),
-            gene_bank_flush_interval_secs: 60,
-            only_host: vec![],
-            skip_host: vec![],
-            only_path: vec![],
-            skip_path: vec![],
-            only_method: vec![],
-            max_rps_per_host: 0.0,
-        }
+        ..default_args()
     };
     let err = validate_args(&args).unwrap_err();
     assert!(err.contains("--max-rps-per-host-burst must be a non-negative number"));
@@ -671,29 +586,7 @@ fn validate_args_rejects_negative_burst() {
 fn validate_args_rejects_invalid_escalation() {
     let args = Args {
         escalation: Some("extreme".into()),
-        ..Args {
-            listen: "127.0.0.1:8080".into(),
-            content_type_switching: false,
-            fingerprint_rotation: false,
-            insecure: false,
-            write_mitm_ca_dir: None,
-            mitm: false,
-            mitm_ca_dir: None,
-            allow_private_upstream: false,
-            insecure_open_upstream: false,
-            max_concurrent_connections: 4096,
-            max_upstream_response_bytes: 33554432,
-            max_evade_retries: 0,
-            gene_bank_path: "".into(),
-            gene_bank_flush_interval_secs: 60,
-            only_host: vec![],
-            skip_host: vec![],
-            only_path: vec![],
-            skip_path: vec![],
-            only_method: vec![],
-            max_rps_per_host: 0.0,
-            max_rps_per_host_burst: 0.0,
-        }
+        ..default_args()
     };
     let err = validate_args(&args).unwrap_err();
     assert!(err.contains("--escalation must be one of: light, medium, heavy"));
@@ -705,88 +598,13 @@ fn validate_args_accepts_valid_escalation() {
     for level in ["light", "medium", "heavy"] {
         let args = Args {
             escalation: Some(level.into()),
-            ..Args {
-                listen: "127.0.0.1:8080".into(),
-                content_type_switching: false,
-                fingerprint_rotation: false,
-                insecure: false,
-                write_mitm_ca_dir: None,
-                mitm: false,
-                mitm_ca_dir: None,
-                allow_private_upstream: false,
-                insecure_open_upstream: false,
-                max_concurrent_connections: 4096,
-                max_upstream_response_bytes: 33554432,
-                max_evade_retries: 0,
-                gene_bank_path: "".into(),
-                gene_bank_flush_interval_secs: 60,
-                only_host: vec![],
-                skip_host: vec![],
-                only_path: vec![],
-                skip_path: vec![],
-                only_method: vec![],
-                max_rps_per_host: 0.0,
-                max_rps_per_host_burst: 0.0,
-            }
+            ..default_args()
         };
         assert!(validate_args(&args).is_ok(), "failed for {}", level);
     }
 }
 
-// ── gene bank loading / saving ──────────────────────────────────
-
-#[test]
-fn load_gene_bank_missing_file_returns_default() {
-    let dir = std::env::temp_dir().join(format!("wafrift_gb_missing_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    let path = dir.join("gene-bank.json");
-    let bank = load_gene_bank(&path);
-    assert_eq!(bank.schema, 0);
-    assert!(bank.hosts.is_empty());
-}
-
-#[test]
-fn load_gene_bank_empty_file_returns_default() {
-    let dir = std::env::temp_dir().join(format!("wafrift_gb_empty_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("gene-bank.json");
-    std::fs::write(&path, "").unwrap();
-    let bank = load_gene_bank(&path);
-    assert_eq!(bank.schema, 0);
-    assert!(bank.hosts.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn load_gene_bank_malformed_returns_default() {
-    let dir = std::env::temp_dir().join(format!("wafrift_gb_bad_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("gene-bank.json");
-    std::fs::write(&path, "{not json").unwrap();
-    let bank = load_gene_bank(&path);
-    assert_eq!(bank.schema, 0);
-    assert!(bank.hosts.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn load_gene_bank_valid_parses() {
-    let dir = std::env::temp_dir().join(format!("wafrift_gb_valid_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("gene-bank.json");
-    std::fs::write(
-        &path,
-        r#"{"schema":1,"hosts":{"example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":null}}}"#,
-    )
-    .unwrap();
-    let bank = load_gene_bank(&path);
-    assert_eq!(bank.schema, 1);
-    assert!(bank.hosts.contains_key("example.com"));
-    let _ = std::fs::remove_dir_all(&dir);
-}
+// ── gene bank saving / round trip ───────────────────────────────
 
 #[test]
 fn save_and_load_gene_bank_round_trip() {
@@ -813,9 +631,10 @@ fn save_and_load_gene_bank_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ── default_gene_bank_path ──────────────────────────────────────
+
 #[test]
 fn default_gene_bank_path_empty_uses_home() {
-    // When supplied is empty, it should return Some path under home.
     let result = default_gene_bank_path("");
     if std::env::var_os("HOME").is_some() {
         assert!(result.is_some());
@@ -839,7 +658,10 @@ fn default_gene_bank_path_dash_returns_none() {
 #[test]
 fn default_gene_bank_path_explicit_returns_path() {
     let result = default_gene_bank_path("/tmp/wafrift-test-bank.json");
-    assert_eq!(result, Some(std::path::PathBuf::from("/tmp/wafrift-test-bank.json")));
+    assert_eq!(
+        result,
+        Some(std::path::PathBuf::from("/tmp/wafrift-test-bank.json"))
+    );
 }
 
 // ── render_live_findings ────────────────────────────────────────
