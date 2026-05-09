@@ -24,11 +24,18 @@ pub fn alternating_case(payload: &str, start_upper: bool) -> String {
 }
 
 /// Case alternation — deterministic alternating upper/lower.
+///
+/// **Idempotency.** NOT idempotent. Applying twice to the same payload
+/// flips every alphabetic character again, producing a different pattern
+/// (e.g., `select` → `SeLeCt` → `sElEcT`).
 pub fn case_alternate(payload: &str) -> String {
     alternating_case(payload, true)
 }
 
 /// Random case alternation — unpredictable mixed-case output.
+///
+/// **Idempotency.** NOT idempotent. Each application re-randomises the
+/// case of every alphabetic character independently.
 pub fn random_case_alternate(payload: &str) -> String {
     payload
         .chars()
@@ -82,5 +89,22 @@ mod tests {
     #[test]
     fn uppercase_basic() {
         assert_eq!(uppercase("SeLeCt"), "SELECT");
+    }
+
+    #[test]
+    fn case_alternate_not_idempotent() {
+        let once = case_alternate("select");
+        let twice = case_alternate(&once);
+        assert_ne!(once, twice, "case_alternate must not be idempotent");
+        assert_eq!(once, "SeLeCt");
+        assert_eq!(twice, "sElEcT");
+    }
+
+    #[test]
+    fn random_case_not_idempotent() {
+        let a = random_case_alternate("SELECT");
+        let b = random_case_alternate(&a);
+        // Statistically almost certain to differ.
+        assert_ne!(a, b, "random_case should re-randomise on second application");
     }
 }

@@ -778,10 +778,10 @@ async fn forward_wafrift_request(
         }
 
         let is_new = !st.hosts.contains_key(&host);
-        let hs = st.hosts.entry(host.clone()).or_default();
         if is_new {
             st.host_fifo.push_back(host.clone());
         }
+        let hs = st.hosts.entry(host.clone()).or_default();
 
         // Apply default escalation if requested.
         if let Some(esc) = &default_escalation {

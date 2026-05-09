@@ -91,6 +91,13 @@ fn evasion(name: &'static str, desc: &'static str, flaw: H2TargetFlaw) -> H2Evas
     }
 }
 
+/// Inject CRLF in :path to smuggle headers during downgrade.
+///
+/// # Safety
+/// Sends invalid HTTP/2 pseudo-headers containing raw CRLF sequences.
+/// This may corrupt downstream parser state, desynchronize connection pools,
+/// or cause request splitting. Only use on targets you own or have explicit
+/// authorization to test.
 pub fn crlf_in_pseudo_headers(
     path: &str,
     smuggled_header: &str,
@@ -115,6 +122,13 @@ pub fn crlf_in_pseudo_headers(
     }
 }
 
+/// Smuggle a complete second request via CRLF in :path.
+///
+/// # Safety
+/// Sends invalid HTTP/2 pseudo-headers containing raw CRLF sequences.
+/// This may corrupt downstream parser state, desynchronize connection pools,
+/// or cause request splitting. Only use on targets you own or have explicit
+/// authorization to test.
 pub fn crlf_request_smuggle(path: &str, smuggled_path: &str) -> H2Evasion {
     let path = sanitize_input(path).unwrap();
     let smuggled = sanitize_input(smuggled_path).unwrap();
@@ -139,6 +153,12 @@ pub fn crlf_request_smuggle(path: &str, smuggled_path: &str) -> H2Evasion {
 /// the injection (HPACK rejects it; raw frame writers do not). For
 /// every other H2Evasion helper, header inputs ARE sanitised — see
 /// the contract on `authority_host_mismatch`.
+///
+/// # Safety
+/// Sends invalid HTTP/2 headers containing raw CRLF sequences.
+/// This may corrupt downstream parser state, desynchronize connection pools,
+/// or cause request splitting. Only use on targets you own or have explicit
+/// authorization to test.
 pub fn crlf_in_regular_header(header: &str, value: &str) -> H2Evasion {
     H2Evasion {
         name: "H2 CRLF Regular Header",
@@ -148,6 +168,13 @@ pub fn crlf_in_regular_header(header: &str, value: &str) -> H2Evasion {
     }
 }
 
+/// Inject CRLF into a header name.
+///
+/// # Safety
+/// Sends invalid HTTP/2 headers containing raw CRLF sequences.
+/// This may corrupt downstream parser state, desynchronize connection pools,
+/// or cause request splitting. Only use on targets you own or have explicit
+/// authorization to test.
 pub fn crlf_in_header_name(name_prefix: &str, name_suffix: &str) -> H2Evasion {
     H2Evasion {
         name: "H2 CRLF Header Name",
@@ -444,6 +471,13 @@ pub fn missing_authority(path: &str) -> H2Evasion {
     }
 }
 
+/// Generate :path variants containing forbidden characters.
+///
+/// # Safety
+/// Sends HTTP/2 pseudo-headers with characters forbidden by RFC 7540
+/// (null, space, tab). This may corrupt downstream parser state or
+/// cause request rejection. Only use on targets you own or have explicit
+/// authorization to test.
 pub fn invalid_path_chars() -> Vec<H2Evasion> {
     vec!["\x00", " ", "\t"]
         .into_iter()
@@ -461,6 +495,12 @@ pub fn invalid_path_chars() -> Vec<H2Evasion> {
         .collect()
 }
 
+/// Inject :status into a request HEADERS frame.
+///
+/// # Safety
+/// Sends HTTP/2 request frames containing a response-only pseudo-header.
+/// This may corrupt downstream parser state. Only use on targets you own
+/// or have explicit authorization to test.
 pub fn status_in_request(path: &str) -> H2Evasion {
     H2Evasion {
         name: "H2 :status in Request",
@@ -501,6 +541,12 @@ pub fn pseudo_header_reordering(path: &str, host: &str) -> Vec<H2Evasion> {
     .collect()
 }
 
+/// Place a regular header before pseudo-headers.
+///
+/// # Safety
+/// Sends HTTP/2 HEADERS frames that violate RFC 7540 ordering rules.
+/// This may corrupt downstream parser state. Only use on targets you own
+/// or have explicit authorization to test.
 pub fn regular_header_before_pseudo() -> H2Evasion {
     H2Evasion {
         name: "H2 Regular Before Pseudo",
