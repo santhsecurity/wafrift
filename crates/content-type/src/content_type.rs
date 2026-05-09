@@ -51,6 +51,12 @@ pub enum ContentTypeTechnique {
     MixedContentType,
 }
 
+/// Maximum size of a form-encoded body before parsing is refused.
+///
+/// Prevents DoS via adversarial multi-gigabyte inputs that would be
+/// fully allocated as strings during `split('&')` and `to_string()`.
+const MAX_FORM_BODY_SIZE: usize = 8 * 1024 * 1024;
+
 /// Parse form-encoded body into key-value pairs.
 ///
 /// Only segments containing `=` are considered valid key-value pairs.
@@ -61,8 +67,15 @@ pub enum ContentTypeTechnique {
 /// replaced with U+FFFD. The earlier lossy decode could produce
 /// variants that diverged from how the upstream form decoder would
 /// have rejected the body, masking real parser-discrepancy attacks.
+///
+/// **Size guarding.** Bodies larger than [`MAX_FORM_BODY_SIZE`] are
+/// rejected (empty vector returned) to prevent memory exhaustion on
+/// adversarial inputs.
 #[must_use]
 pub fn parse_form_body(body: &[u8]) -> Vec<(String, String)> {
+    if body.len() > MAX_FORM_BODY_SIZE {
+        return Vec::new();
+    }
     let Ok(body_str) = std::str::from_utf8(body) else {
         return Vec::new();
     };
