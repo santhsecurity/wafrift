@@ -1,0 +1,203 @@
+schema = 1
+# Tautology / always-true SQLi: classic ' OR '1'='1, OR 1=1, AND 1=1.
+# Most-cited SQLi family. CRS PL1 catches almost all literal forms.
+
+[[case]]
+id = "or_1_eq_1_dash"
+class = "sql"
+payload = "' OR 1=1--"
+
+[[case]]
+id = "or_1_eq_1_hash"
+class = "sql"
+payload = "' OR 1=1#"
+
+[[case]]
+id = "or_1_eq_1_semi"
+class = "sql"
+payload = "' OR 1=1;--"
+
+[[case]]
+id = "or_str_tautology"
+class = "sql"
+payload = "' OR 'a'='a"
+
+[[case]]
+id = "or_str_tautology_paren"
+class = "sql"
+payload = "') OR ('a'='a"
+
+[[case]]
+id = "and_1_eq_1"
+class = "sql"
+payload = "' AND 1=1--"
+
+[[case]]
+id = "or_true"
+class = "sql"
+payload = "' OR true--"
+
+[[case]]
+id = "or_2_gt_1"
+class = "sql"
+payload = "' OR 2>1--"
+
+[[case]]
+id = "or_1_lt_2"
+class = "sql"
+payload = "' OR 1<2--"
+
+[[case]]
+id = "or_neq_self"
+class = "sql"
+payload = "' OR 1<>2--"
+
+[[case]]
+id = "or_like_self"
+class = "sql"
+payload = "' OR 'a' LIKE 'a"
+
+[[case]]
+id = "or_in_self"
+class = "sql"
+payload = "' OR 1 IN(1)--"
+
+[[case]]
+id = "or_between"
+class = "sql"
+payload = "' OR 1 BETWEEN 0 AND 2--"
+
+[[case]]
+id = "or_is_not_null"
+class = "sql"
+payload = "' OR 1 IS NOT NULL--"
+
+[[case]]
+id = "or_not_false"
+class = "sql"
+payload = "' OR NOT 1=0--"
+
+[[case]]
+id = "username_admin_dash"
+class = "sql"
+payload = "admin'--"
+
+[[case]]
+id = "username_admin_hash"
+class = "sql"
+payload = "admin'#"
+
+[[case]]
+id = "username_admin_paren"
+class = "sql"
+payload = "admin') --"
+
+[[case]]
+id = "username_admin_or"
+class = "sql"
+payload = "admin' OR '1'='1"
+
+[[case]]
+id = "double_quote_tautology"
+class = "sql"
+payload = "\" OR \"\"=\""
+
+[[case]]
+id = "no_quote_tautology"
+class = "sql"
+payload = " OR 1=1"
+
+[[case]]
+id = "having_tautology"
+class = "sql"
+payload = "' HAVING 1=1--"
+
+[[case]]
+id = "group_by_tautology"
+class = "sql"
+payload = "' GROUP BY 1 HAVING 1=1--"
+
+[[case]]
+id = "exists_tautology"
+class = "sql"
+payload = "' OR EXISTS(SELECT 1)--"
+
+[[case]]
+id = "any_tautology"
+class = "sql"
+payload = "' OR 1=ANY(SELECT 1)--"
+
+[[case]]
+id = "ascii_tautology"
+class = "sql"
+payload = "' OR ASCII('a')=97--"
+
+[[case]]
+id = "hex_tautology"
+class = "sql"
+payload = "' OR 0x31=0x31--"
+
+[[case]]
+id = "char_tautology"
+class = "sql"
+payload = "' OR CHAR(49)=CHAR(49)--"
+
+[[case]]
+id = "concat_tautology"
+class = "sql"
+payload = "' OR CONCAT(1)=CONCAT(1)--"
+
+[[case]]
+id = "case_tautology"
+class = "sql"
+payload = "' OR CASE WHEN 1=1 THEN 1 END=1--"
+
+[[case]]
+id = "if_tautology"
+class = "sql"
+payload = "' OR IF(1=1,1,0)=1--"
+
+[[case]]
+id = "iif_tautology"
+class = "sql"
+payload = "' OR IIF(1=1,1,0)=1--"
+
+[[case]]
+id = "decode_tautology"
+class = "sql"
+payload = "' OR DECODE(1,1,1,0)=1--"
+
+[[case]]
+id = "coalesce_tautology"
+class = "sql"
+payload = "' OR COALESCE(1,1)=1--"
+
+[[case]]
+id = "nullif_tautology"
+class = "sql"
+payload = "' OR NULLIF(1,2)=1--"
+
+[[case]]
+id = "isnull_tautology"
+class = "sql"
+payload = "' OR ISNULL(NULL)--"
+
+[[case]]
+id = "regexp_tautology"
+class = "sql"
+payload = "' OR 'a' REGEXP 'a"
+
+[[case]]
+id = "rlike_tautology"
+class = "sql"
+payload = "' OR 'a' RLIKE 'a"
+
+[[case]]
+id = "soundex_tautology"
+class = "sql"
+payload = "' OR SOUNDEX('a')=SOUNDEX('a')--"
+
+[[case]]
+id = "least_tautology"
+class = "sql"
+payload = "' OR LEAST(1,1)=1--"

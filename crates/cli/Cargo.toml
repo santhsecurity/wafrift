@@ -36,6 +36,8 @@ wafrift-strategy = { workspace = true }
 wafrift-transport = { workspace = true }
 wafrift-oracle = { workspace = true }
 wafrift-types = { workspace = true }
+wafrift-smuggling = { workspace = true, features = ["unsafe-probes"] }
+wafrift-content-type = { workspace = true }
 
 [features]
 default = []

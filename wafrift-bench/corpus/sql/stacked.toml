@@ -1,0 +1,102 @@
+schema = 1
+# Stacked queries: piggyback a second statement after a semicolon.
+
+[[case]]
+id = "stacked_drop"
+class = "sql"
+payload = "'; DROP TABLE users--"
+
+[[case]]
+id = "stacked_create"
+class = "sql"
+payload = "'; CREATE TABLE x(a INT)--"
+
+[[case]]
+id = "stacked_insert"
+class = "sql"
+payload = "'; INSERT INTO users VALUES(0,'a','b')--"
+
+[[case]]
+id = "stacked_update"
+class = "sql"
+payload = "'; UPDATE users SET admin=1 WHERE 1=1--"
+
+[[case]]
+id = "stacked_delete"
+class = "sql"
+payload = "'; DELETE FROM users WHERE 1=1--"
+
+[[case]]
+id = "stacked_alter_user"
+class = "sql"
+payload = "'; ALTER USER postgres WITH PASSWORD 'pwn'--"
+
+[[case]]
+id = "stacked_grant"
+class = "sql"
+payload = "'; GRANT ALL PRIVILEGES ON DATABASE x TO public--"
+
+[[case]]
+id = "stacked_revoke"
+class = "sql"
+payload = "'; REVOKE ALL ON x FROM public--"
+
+[[case]]
+id = "stacked_truncate"
+class = "sql"
+payload = "'; TRUNCATE TABLE users--"
+
+[[case]]
+id = "stacked_set"
+class = "sql"
+payload = "'; SET @a=1--"
+
+[[case]]
+id = "stacked_select"
+class = "sql"
+payload = "'; SELECT version()--"
+
+[[case]]
+id = "stacked_call_proc"
+class = "sql"
+payload = "'; CALL sys_eval('id')--"
+
+[[case]]
+id = "stacked_exec_mssql"
+class = "sql"
+payload = "'; EXEC xp_cmdshell 'whoami'--"
+
+[[case]]
+id = "stacked_pg_copy"
+class = "sql"
+payload = "'; COPY pg_user TO '/tmp/x'--"
+
+[[case]]
+id = "stacked_pg_lo"
+class = "sql"
+payload = "'; SELECT lo_import('/etc/passwd')--"
+
+[[case]]
+id = "stacked_use_mysql_priv"
+class = "sql"
+payload = "'; USE mysql; SELECT user FROM user--"
+
+[[case]]
+id = "stacked_load_data"
+class = "sql"
+payload = "'; LOAD DATA INFILE '/etc/passwd' INTO TABLE x--"
+
+[[case]]
+id = "stacked_with_recursive_pg"
+class = "sql"
+payload = "'; WITH RECURSIVE r(i) AS (SELECT 1 UNION SELECT i+1 FROM r WHERE i<5) SELECT * FROM r--"
+
+[[case]]
+id = "stacked_two_statements"
+class = "sql"
+payload = "'; SELECT 1; SELECT version()--"
+
+[[case]]
+id = "stacked_chain_or"
+class = "sql"
+payload = "'; SELECT 1; UPDATE users SET admin=1; SELECT 1--"

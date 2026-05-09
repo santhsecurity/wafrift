@@ -1,0 +1,72 @@
+schema = 1
+# Cloud-provider metadata service URLs (the canonical SSRF target).
+
+[[case]]
+id = "aws_metadata_root"
+class = "ssrf"
+payload = "http://169.254.169.254/"
+
+[[case]]
+id = "aws_metadata_latest"
+class = "ssrf"
+payload = "http://169.254.169.254/latest/meta-data/"
+
+[[case]]
+id = "aws_iam_creds"
+class = "ssrf"
+payload = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+
+[[case]]
+id = "aws_user_data"
+class = "ssrf"
+payload = "http://169.254.169.254/latest/user-data/"
+
+[[case]]
+id = "gcp_metadata_root"
+class = "ssrf"
+payload = "http://metadata.google.internal/"
+
+[[case]]
+id = "gcp_token"
+class = "ssrf"
+payload = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+
+[[case]]
+id = "gcp_attributes"
+class = "ssrf"
+payload = "http://metadata.google.internal/computeMetadata/v1beta1/instance/attributes/"
+
+[[case]]
+id = "azure_metadata"
+class = "ssrf"
+payload = "http://169.254.169.254/metadata/instance?api-version=2021-02-01"
+
+[[case]]
+id = "azure_identity"
+class = "ssrf"
+payload = "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F"
+
+[[case]]
+id = "do_metadata"
+class = "ssrf"
+payload = "http://169.254.169.254/metadata/v1.json"
+
+[[case]]
+id = "alibaba_metadata"
+class = "ssrf"
+payload = "http://100.100.100.200/latest/meta-data/"
+
+[[case]]
+id = "oracle_metadata"
+class = "ssrf"
+payload = "http://192.0.0.192/latest/"
+
+[[case]]
+id = "kubelet_pods"
+class = "ssrf"
+payload = "http://127.0.0.1:10255/pods"
+
+[[case]]
+id = "kubernetes_api_self"
+class = "ssrf"
+payload = "https://kubernetes.default.svc/api/v1/namespaces/default/pods"

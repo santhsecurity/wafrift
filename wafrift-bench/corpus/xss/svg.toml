@@ -1,0 +1,87 @@
+schema = 1
+# SVG-based XSS — different parsing model lets some payloads through HTML sanitizers.
+
+[[case]]
+id = "svg_onload"
+class = "xss"
+payload = "<svg onload=alert(1)>"
+
+[[case]]
+id = "svg_slash_onload"
+class = "xss"
+payload = "<svg/onload=alert(1)>"
+
+[[case]]
+id = "svg_script"
+class = "xss"
+payload = "<svg><script>alert(1)</script></svg>"
+
+[[case]]
+id = "svg_script_xlink_href"
+class = "xss"
+payload = "<svg><script xlink:href=data:,alert(1) /></svg>"
+
+[[case]]
+id = "svg_animate_attribute_name"
+class = "xss"
+payload = "<svg><animate attributeName=href values=javascript:alert(1)></animate></svg>"
+
+[[case]]
+id = "svg_set"
+class = "xss"
+payload = "<svg><set attributeName=onload to=alert(1)></set></svg>"
+
+[[case]]
+id = "svg_use_xlink"
+class = "xss"
+payload = "<svg><use xlink:href=\"data:image/svg+xml,<svg id='x' xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>#x\"/></svg>"
+
+[[case]]
+id = "svg_a_xlink_href"
+class = "xss"
+payload = "<svg><a xlink:href=\"javascript:alert(1)\"><rect width=100 height=100/></a></svg>"
+
+[[case]]
+id = "svg_image_onerror"
+class = "xss"
+payload = "<svg><image href=x onerror=alert(1) /></svg>"
+
+[[case]]
+id = "svg_foreignObject_iframe"
+class = "xss"
+payload = "<svg><foreignObject><iframe src=javascript:alert(1)></iframe></foreignObject></svg>"
+
+[[case]]
+id = "svg_filter_javascript"
+class = "xss"
+payload = "<svg><filter><feImage href=\"javascript:alert(1)\"></feImage></filter></svg>"
+
+[[case]]
+id = "svg_pattern_javascript"
+class = "xss"
+payload = "<svg><pattern><image href=\"javascript:alert(1)\"></image></pattern></svg>"
+
+[[case]]
+id = "svg_handler"
+class = "xss"
+payload = "<svg><handler ev:event='load' xlink:href='data:,alert(1)' /></svg>"
+
+[[case]]
+id = "svg_circle_onbegin"
+class = "xss"
+payload = "<svg><animate onbegin=alert(1) attributeName=x dur=1s></animate></svg>"
+
+[[case]]
+id = "svg_animate_event"
+class = "xss"
+payload = "<svg><animate onend=alert(1) attributeName=x dur=1ms></animate></svg>"
+
+[[case]]
+id = "svg_repeat_event"
+class = "xss"
+payload = "<svg><animate onrepeat=alert(1) attributeName=x dur=1ms repeatCount=2></animate></svg>"
+
+[[case]]
+id = "svg_data_uri"
+class = "xss"
+payload = "<embed src=\"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIG9ubG9hZD0iYWxlcnQoMSkiPjwvc3ZnPg==\">"

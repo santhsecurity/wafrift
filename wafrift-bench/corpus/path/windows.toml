@@ -1,0 +1,52 @@
+schema = 1
+# Windows path traversal.
+
+[[case]]
+id = "boot_ini"
+class = "path"
+payload = "..\\..\\..\\..\\boot.ini"
+
+[[case]]
+id = "windows_system_drivers_etc_hosts"
+class = "path"
+payload = "..\\..\\..\\..\\windows\\system32\\drivers\\etc\\hosts"
+
+[[case]]
+id = "win_ini"
+class = "path"
+payload = "..\\..\\..\\..\\windows\\win.ini"
+
+[[case]]
+id = "system32_config_sam"
+class = "path"
+payload = "..\\..\\..\\..\\windows\\system32\\config\\sam"
+
+[[case]]
+id = "iis_log"
+class = "path"
+payload = "..\\..\\..\\..\\windows\\system32\\logfiles\\smtpsvc1\\ex000101.log"
+
+[[case]]
+id = "absolute_c_drive"
+class = "path"
+payload = "C:\\windows\\win.ini"
+
+[[case]]
+id = "absolute_unc"
+class = "path"
+payload = "\\\\127.0.0.1\\C$\\windows\\win.ini"
+
+[[case]]
+id = "url_enc_backslash"
+class = "path"
+payload = "..%5C..%5C..%5Cwindows%5Cwin.ini"
+
+[[case]]
+id = "double_url_enc_backslash"
+class = "path"
+payload = "..%255C..%255Cwindows%255Cwin.ini"
+
+[[case]]
+id = "mixed_slash"
+class = "path"
+payload = "../..\\../..\\windows/win.ini"

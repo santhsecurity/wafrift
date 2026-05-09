@@ -1,0 +1,82 @@
+schema = 1
+# Attribute-context XSS: payload lands inside an HTML attribute value.
+
+[[case]]
+id = "attr_break_quote_alert"
+class = "xss"
+payload = "x\" onerror=\"alert(1)"
+
+[[case]]
+id = "attr_break_apos_alert"
+class = "xss"
+payload = "x' onerror='alert(1)"
+
+[[case]]
+id = "attr_break_no_quote"
+class = "xss"
+payload = "x onerror=alert(1)"
+
+[[case]]
+id = "attr_javascript_uri_attr"
+class = "xss"
+payload = "javascript:alert(1)"
+
+[[case]]
+id = "attr_html_entity_lt"
+class = "xss"
+payload = "&lt;img src=x onerror=alert(1)&gt;"
+
+[[case]]
+id = "attr_double_encode"
+class = "xss"
+payload = "&#x3c;img src=x onerror=alert(1)&#x3e;"
+
+[[case]]
+id = "attr_url_encode"
+class = "xss"
+payload = "%3Cscript%3Ealert(1)%3C/script%3E"
+
+[[case]]
+id = "attr_double_url_encode"
+class = "xss"
+payload = "%253Cscript%253Ealert(1)%253C/script%253E"
+
+[[case]]
+id = "attr_overlong_utf8_lt"
+class = "xss"
+payload = "%C0%BCscript%C0%BEalert(1)%C0%BC/script%C0%BE"
+
+[[case]]
+id = "attr_unicode_escape"
+class = "xss"
+payload = "\\u003cscript\\u003ealert(1)\\u003c/script\\u003e"
+
+[[case]]
+id = "attr_html_entity_decimal"
+class = "xss"
+payload = "&#60;script&#62;alert(1)&#60;/script&#62;"
+
+[[case]]
+id = "attr_html_entity_named"
+class = "xss"
+payload = "&lt;script&gt;alert&lpar;1&rpar;&lt;/script&gt;"
+
+[[case]]
+id = "attr_partial_quote_break"
+class = "xss"
+payload = "''onerror=alert(1)//"
+
+[[case]]
+id = "attr_padded_event"
+class = "xss"
+payload = "x   onerror   =   alert(1)"
+
+[[case]]
+id = "attr_capital_event"
+class = "xss"
+payload = "x ONERROR=alert(1)"
+
+[[case]]
+id = "attr_mixed_case_event"
+class = "xss"
+payload = "x OnErRoR=alert(1)"

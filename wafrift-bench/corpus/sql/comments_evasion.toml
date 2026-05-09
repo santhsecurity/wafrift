@@ -1,0 +1,147 @@
+schema = 1
+# Comment-based evasion / obfuscation: use SQL comments to break up keywords.
+
+[[case]]
+id = "inline_comment_or"
+class = "sql"
+payload = "' /*!OR*/ 1=1--"
+
+[[case]]
+id = "inline_comment_select"
+class = "sql"
+payload = "' UNION /*!50000SELECT*/ NULL,NULL--"
+
+[[case]]
+id = "padded_or"
+class = "sql"
+payload = "'/**/OR/**/1=1--"
+
+[[case]]
+id = "padded_union"
+class = "sql"
+payload = "'/**/UNION/**/SELECT/**/NULL,NULL--"
+
+[[case]]
+id = "case_or"
+class = "sql"
+payload = "' Or 1=1--"
+
+[[case]]
+id = "case_select"
+class = "sql"
+payload = "' Union SeLeCt NULL,NULL--"
+
+[[case]]
+id = "double_select"
+class = "sql"
+payload = "' UNUNIONION SESELECTLECT NULL,NULL--"
+
+[[case]]
+id = "tab_separated"
+class = "sql"
+payload = "'\tOR\t1=1--"
+
+[[case]]
+id = "newline_separated"
+class = "sql"
+payload = "'\nOR\n1=1--"
+
+[[case]]
+id = "vertical_tab_separated"
+class = "sql"
+payload = "'\u000bOR\u000b1=1--"
+
+[[case]]
+id = "form_feed_separated"
+class = "sql"
+payload = "'\u000cOR\u000c1=1--"
+
+[[case]]
+id = "url_encoded_keyword"
+class = "sql"
+payload = "%27%20OR%201%3D1--"
+
+[[case]]
+id = "double_url_encoded"
+class = "sql"
+payload = "%2527%2520OR%25201%253D1--"
+
+[[case]]
+id = "mixed_case_url_enc"
+class = "sql"
+payload = "%27%20Or%201%3d1--"
+
+[[case]]
+id = "char_function"
+class = "sql"
+payload = "' OR CHAR(49)=CHAR(49)--"
+
+[[case]]
+id = "concat_keyword"
+class = "sql"
+payload = "' OR CONCAT('1','=','1')--"
+
+[[case]]
+id = "hex_keyword"
+class = "sql"
+payload = "' OR 0x4f522031=0x4f522031--"
+
+[[case]]
+id = "scientific_notation"
+class = "sql"
+payload = "' OR 1.0=1e0--"
+
+[[case]]
+id = "unicode_zero_width"
+class = "sql"
+payload = "' O​R 1=1--"
+
+[[case]]
+id = "no_space_paren"
+class = "sql"
+payload = "'OR(1)=(1)--"
+
+[[case]]
+id = "extra_keyword_padding"
+class = "sql"
+payload = "' OR    1=1--"
+
+[[case]]
+id = "outer_paren"
+class = "sql"
+payload = "((' OR 1=1--))"
+
+[[case]]
+id = "concat_op"
+class = "sql"
+payload = "' || ' OR 1=1--"
+
+[[case]]
+id = "ternary_op"
+class = "sql"
+payload = "' OR 1=1?1:0--"
+
+[[case]]
+id = "all_caps"
+class = "sql"
+payload = "' OR 1=1 -- "
+
+[[case]]
+id = "all_lower"
+class = "sql"
+payload = "' or 1=1 -- "
+
+[[case]]
+id = "comment_only_dash"
+class = "sql"
+payload = "'--"
+
+[[case]]
+id = "comment_only_hash"
+class = "sql"
+payload = "'#"
+
+[[case]]
+id = "block_comment_close"
+class = "sql"
+payload = "' OR 1=1/*"

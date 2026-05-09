@@ -1,0 +1,92 @@
+schema = 1
+# Localhost / loopback bypass shapes.
+
+[[case]]
+id = "localhost"
+class = "ssrf"
+payload = "http://localhost/"
+
+[[case]]
+id = "localhost_127"
+class = "ssrf"
+payload = "http://127.0.0.1/"
+
+[[case]]
+id = "localhost_zero"
+class = "ssrf"
+payload = "http://0.0.0.0/"
+
+[[case]]
+id = "localhost_decimal"
+class = "ssrf"
+payload = "http://2130706433/"
+
+[[case]]
+id = "localhost_hex"
+class = "ssrf"
+payload = "http://0x7f000001/"
+
+[[case]]
+id = "localhost_octal"
+class = "ssrf"
+payload = "http://0177.0.0.1/"
+
+[[case]]
+id = "localhost_short"
+class = "ssrf"
+payload = "http://127.1/"
+
+[[case]]
+id = "ipv6_localhost"
+class = "ssrf"
+payload = "http://[::1]/"
+
+[[case]]
+id = "ipv6_zero"
+class = "ssrf"
+payload = "http://[::]/"
+
+[[case]]
+id = "ipv6_mapped"
+class = "ssrf"
+payload = "http://[::ffff:127.0.0.1]/"
+
+[[case]]
+id = "url_at_bypass"
+class = "ssrf"
+payload = "http://expected.com@127.0.0.1/"
+
+[[case]]
+id = "url_hash_bypass"
+class = "ssrf"
+payload = "http://127.0.0.1#@expected.com/"
+
+[[case]]
+id = "url_question_bypass"
+class = "ssrf"
+payload = "http://127.0.0.1?@expected.com/"
+
+[[case]]
+id = "subdomain_eval_dns"
+class = "ssrf"
+payload = "http://127.0.0.1.nip.io/"
+
+[[case]]
+id = "rfc_zero_address"
+class = "ssrf"
+payload = "http://0/"
+
+[[case]]
+id = "trailing_dot"
+class = "ssrf"
+payload = "http://localhost./"
+
+[[case]]
+id = "url_path_traversal"
+class = "ssrf"
+payload = "http://127.0.0.1/../"
+
+[[case]]
+id = "encoded_ipv4"
+class = "ssrf"
+payload = "http://%31%32%37%2e%30%2e%30%2e%31/"

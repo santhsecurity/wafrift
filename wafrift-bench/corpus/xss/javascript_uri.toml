@@ -1,0 +1,112 @@
+schema = 1
+# JavaScript-URI XSS: javascript: URIs in href/src/etc.
+
+[[case]]
+id = "a_href_js"
+class = "xss"
+payload = "<a href=javascript:alert(1)>x</a>"
+
+[[case]]
+id = "iframe_src_js"
+class = "xss"
+payload = "<iframe src=javascript:alert(1)>"
+
+[[case]]
+id = "frame_src_js"
+class = "xss"
+payload = "<frame src=javascript:alert(1)>"
+
+[[case]]
+id = "embed_src_js"
+class = "xss"
+payload = "<embed src=javascript:alert(1)>"
+
+[[case]]
+id = "object_data_js"
+class = "xss"
+payload = "<object data=javascript:alert(1)></object>"
+
+[[case]]
+id = "form_action_js"
+class = "xss"
+payload = "<form action=javascript:alert(1)><input type=submit></form>"
+
+[[case]]
+id = "button_formaction_js"
+class = "xss"
+payload = "<button form=x formaction=javascript:alert(1)>x</button>"
+
+[[case]]
+id = "input_formaction_js"
+class = "xss"
+payload = "<input type=image src=x formaction=javascript:alert(1)>"
+
+[[case]]
+id = "math_xlink_js"
+class = "xss"
+payload = "<math><a xlink:href=\"javascript:alert(1)\">x</a></math>"
+
+[[case]]
+id = "js_uri_template"
+class = "xss"
+payload = "javascript:alert`1`"
+
+[[case]]
+id = "js_uri_void"
+class = "xss"
+payload = "javascript:void(alert(1))"
+
+[[case]]
+id = "js_uri_eval"
+class = "xss"
+payload = "javascript:eval(atob('YWxlcnQoMSk='))"
+
+[[case]]
+id = "js_uri_with_label"
+class = "xss"
+payload = "javascript:x:alert(1)"
+
+[[case]]
+id = "js_uri_url_enc_colon"
+class = "xss"
+payload = "javascript%3aalert(1)"
+
+[[case]]
+id = "js_uri_html_ent_colon"
+class = "xss"
+payload = "javascript&#58;alert(1)"
+
+[[case]]
+id = "js_uri_hex_colon"
+class = "xss"
+payload = "javascript&#x3a;alert(1)"
+
+[[case]]
+id = "js_uri_tab_after_proto"
+class = "xss"
+payload = "java\tscript:alert(1)"
+
+[[case]]
+id = "js_uri_newline_after_proto"
+class = "xss"
+payload = "java\nscript:alert(1)"
+
+[[case]]
+id = "js_uri_padded_proto"
+class = "xss"
+payload = " javascript:alert(1)"
+
+[[case]]
+id = "data_uri_html_script"
+class = "xss"
+payload = "data:text/html,<script>alert(1)</script>"
+
+[[case]]
+id = "data_uri_html_b64"
+class = "xss"
+payload = "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="
+
+[[case]]
+id = "vbscript_alert"
+class = "xss"
+payload = "vbscript:msgbox(1)"

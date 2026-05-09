@@ -1,0 +1,122 @@
+schema = 1
+# Script-tag-based XSS variants.
+
+[[case]]
+id = "script_alert"
+class = "xss"
+payload = "<script>alert(1)</script>"
+
+[[case]]
+id = "script_alert_double"
+class = "xss"
+payload = "<script>alert(\"xss\")</script>"
+
+[[case]]
+id = "script_confirm"
+class = "xss"
+payload = "<script>confirm(1)</script>"
+
+[[case]]
+id = "script_prompt"
+class = "xss"
+payload = "<script>prompt(1)</script>"
+
+[[case]]
+id = "script_eval"
+class = "xss"
+payload = "<script>eval('alert(1)')</script>"
+
+[[case]]
+id = "script_settimeout"
+class = "xss"
+payload = "<script>setTimeout('alert(1)',0)</script>"
+
+[[case]]
+id = "script_function"
+class = "xss"
+payload = "<script>Function('alert(1)')()</script>"
+
+[[case]]
+id = "script_constructor"
+class = "xss"
+payload = "<script>(function(){alert(1)})()</script>"
+
+[[case]]
+id = "script_template_literal"
+class = "xss"
+payload = "<script>alert`1`</script>"
+
+[[case]]
+id = "script_unicode_alert"
+class = "xss"
+payload = "<script>\\u0061lert(1)</script>"
+
+[[case]]
+id = "script_hex_alert"
+class = "xss"
+payload = "<script>\\x61lert(1)</script>"
+
+[[case]]
+id = "script_octal_alert"
+class = "xss"
+payload = "<script>\\141lert(1)</script>"
+
+[[case]]
+id = "script_alternating_case"
+class = "xss"
+payload = "<ScRiPt>alert(1)</sCrIpT>"
+
+[[case]]
+id = "script_window_alert"
+class = "xss"
+payload = "<script>window.alert(1)</script>"
+
+[[case]]
+id = "script_top_alert"
+class = "xss"
+payload = "<script>top.alert(1)</script>"
+
+[[case]]
+id = "script_global_this"
+class = "xss"
+payload = "<script>globalThis.alert(1)</script>"
+
+[[case]]
+id = "script_self_alert"
+class = "xss"
+payload = "<script>self.alert(1)</script>"
+
+[[case]]
+id = "script_with_attr"
+class = "xss"
+payload = "<script type=\"text/javascript\">alert(1)</script>"
+
+[[case]]
+id = "script_module"
+class = "xss"
+payload = "<script type=\"module\">alert(1)</script>"
+
+[[case]]
+id = "script_inside_comment"
+class = "xss"
+payload = "<!--<script>alert(1)</script>-->"
+
+[[case]]
+id = "script_split_with_comment"
+class = "xss"
+payload = "<scr<!--x-->ipt>alert(1)</scr<!--x-->ipt>"
+
+[[case]]
+id = "script_nested_close"
+class = "xss"
+payload = "<script><script></script>alert(1)//</script>"
+
+[[case]]
+id = "script_async"
+class = "xss"
+payload = "<script async>alert(1)</script>"
+
+[[case]]
+id = "script_defer"
+class = "xss"
+payload = "<script defer>alert(1)</script>"

