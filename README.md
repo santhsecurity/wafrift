@@ -216,6 +216,33 @@ wafrift-proxy --listen 127.0.0.1:8080 --tls-impersonate chrome131
 sqlmap -u "https://target.cloudflare-protected.com/x?id=1" --proxy=http://127.0.0.1:8080
 ```
 
+#### Per-request fingerprint rotation + body padding
+
+Cloud WAFs inspect only the leading bytes of a request body
+(Cloudflare Pro 8 KB, AWS WAF 16 KB, Akamai 8 KB) — pad past that
+window and the rule engine never sees the malicious bytes. Combine
+with TLS profile rotation and a fresh TCP source port per request:
+
+```bash
+wafrift-proxy --listen 127.0.0.1:8080 \
+    --tls-impersonate-rotate chrome131,firefox133,safari18 \
+    --body-padding-bytes 16384 \
+    --no-conn-reuse \
+    --tui
+```
+
+- `--tls-impersonate-rotate` round-robins across the listed browser
+  profiles. Defeats per-fingerprint rate limits and reputation.
+- `--body-padding-bytes 16384` prepends 16 KB of inert filler to every
+  JSON / form-urlencoded / multipart body via the new
+  `_wafrift_pad` field/part. Cloud WAFs miss the payload; the origin
+  parses it correctly.
+- `--no-conn-reuse` opens a fresh TCP connection per upstream forward
+  (kernel picks a new ephemeral source port each time).
+- `--tui` opens a real-time terminal dashboard (per-host bypass rate,
+  TLS rotation distribution, padded-body counter, live request stream).
+  Press `q` for graceful shutdown, `r` to reset counters.
+
 ### 🔴 Red Team — "Persistent evasion against the same WAF"
 
 ```bash
