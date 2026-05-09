@@ -226,6 +226,29 @@ fn budget_exhaustion_terminates() {
 }
 
 #[test]
+fn zero_request_budget_terminates_immediately() {
+    let mut engine = EvolutionEngine::with_algorithm(
+        "hill_climbing",
+        crate::evolution::GenePool::default_wafrift(),
+        rand::rngs::StdRng::seed_from_u64(2),
+        Budget {
+            max_requests: 0,
+            max_generations: 100,
+            max_time_seconds: 3600,
+            stagnation_limit: 10,
+        },
+    )
+    .unwrap();
+    engine.algorithm.initialize(
+        vec![crate::evolution::Chromosome::new(vec![])],
+        &engine.gene_pool,
+        &mut engine.rng.clone(),
+    );
+    assert!(engine.should_terminate());
+    assert!(engine.batch_candidates(1).is_empty());
+}
+
+#[test]
 fn always_blocking_oracle_terminates() {
     let mut engine = EvolutionEngine::new_seeded(10, 123);
     engine.budget = Budget {

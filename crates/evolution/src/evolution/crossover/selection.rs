@@ -83,3 +83,17 @@ pub fn adaptive_select<'a>(
     let adjusted_size = base_size + ((max_size - base_size) as f64 * (1.0 - diversity)) as usize;
     tournament_select_with_size(population, adjusted_size, rng)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn tournament_select_single_chromosome_returns_it() {
+        let population = vec![Chromosome::new(vec![("encoding".into(), "None".into())])];
+        let mut rng = StdRng::seed_from_u64(29);
+        let selected = tournament_select(&population, &mut rng);
+        assert_eq!(selected.genes, population[0].genes);
+    }
+}

@@ -125,3 +125,19 @@ pub fn comprehensive_mutate(
     scramble_mutation(chromosome, 0.05, rng);
     log
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn empty_chromosome_mutation_is_noop() {
+        let mut chromosome = Chromosome::new(Vec::new());
+        let gene_pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(23);
+        let log = mutate_with_log(&mut chromosome, &gene_pool, 1.0, &mut rng);
+        assert!(chromosome.genes.is_empty());
+        assert!(log.is_empty());
+    }
+}

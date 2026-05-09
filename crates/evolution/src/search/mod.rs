@@ -3,6 +3,7 @@
 use crate::evolution::{Chromosome, GenePool};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
 use rand::rngs::StdRng;
+use std::cmp::Ordering;
 
 /// A candidate requested for evaluation, with a stable evaluation ID.
 #[derive(Debug, Clone)]
@@ -57,6 +58,26 @@ pub trait SearchAlgorithm: Send + Sync + std::fmt::Debug {
 
     /// Restore internal state from bytes.
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError>;
+}
+
+/// Convert non-finite fitness values into a strict worst-case sentinel.
+///
+/// NaN and +/-inf break partial ordering semantics and can lock algorithms
+/// into never-accept states. Mapping them to `-inf` keeps comparisons total.
+#[must_use]
+pub(crate) fn comparable_fitness(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        f64::NEG_INFINITY
+    }
+}
+
+#[must_use]
+pub(crate) fn fitness_cmp(a: f64, b: f64) -> Ordering {
+    comparable_fitness(a)
+        .partial_cmp(&comparable_fitness(b))
+        .unwrap_or(Ordering::Equal)
 }
 
 pub mod hill_climb;

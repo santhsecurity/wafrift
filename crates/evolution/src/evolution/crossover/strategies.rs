@@ -157,3 +157,41 @@ pub fn crossover_with_strategy(
         CrossoverStrategy::OrderBased => order_based_crossover(parent_a, parent_b, rng),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn empty_chromosome_crossover_returns_empty() {
+        let parent_a = Chromosome::new(Vec::new());
+        let parent_b = Chromosome::new(Vec::new());
+        let mut rng = StdRng::seed_from_u64(13);
+        let child = single_point_crossover(&parent_a, &parent_b, &mut rng);
+        assert!(child.genes.is_empty());
+    }
+
+    #[test]
+    fn single_gene_single_point_crossover_returns_valid_clone_shape() {
+        let parent_a = Chromosome::new(vec![("encoding".into(), "UrlEncode".into())]);
+        let parent_b = Chromosome::new(vec![("encoding".into(), "None".into())]);
+        let mut rng = StdRng::seed_from_u64(17);
+        let child = single_point_crossover(&parent_a, &parent_b, &mut rng);
+        assert_eq!(child.genes.len(), 1);
+        assert_eq!(child.genes[0].0, "encoding");
+    }
+
+    #[test]
+    fn crossover_with_identical_parents_matches_parent() {
+        let parent_a = Chromosome::new(vec![
+            ("encoding".into(), "UrlEncode".into()),
+            ("content_type".into(), "JsonNested".into()),
+        ]);
+        let parent_b = parent_a.clone();
+        let mut rng = StdRng::seed_from_u64(19);
+        let child = uniform_crossover(&parent_a, &parent_b, &mut rng);
+        assert_eq!(child.genes, parent_a.genes);
+        assert_eq!(child.genes, parent_b.genes);
+    }
+}

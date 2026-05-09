@@ -176,6 +176,10 @@ impl BypassEntry {
         // attack at roughly 2^32 chromosomes — well within reach of a
         // long-running scan, causing BypassCorpus::add to silently
         // dedupe distinct bypass discoveries.
+        //
+        // Important: gene order is part of the payload identity. Two
+        // chromosomes with the same set of genes in different order
+        // intentionally produce different hashes.
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         for (k, v) in &chromosome.genes {
@@ -291,5 +295,30 @@ mod tests {
 
         let mutation = Lineage::mutation(&chrom, vec![], 2);
         assert!(mutation.to_trace().contains("mutation"));
+    }
+
+    #[test]
+    fn empty_lineage_trace_is_serializable() {
+        let chrom = Chromosome::new(Vec::new());
+        let cross = Lineage::crossover(&chrom, &chrom, "single_point", 1);
+        let trace = cross.to_trace();
+        assert!(trace.contains("crossover"));
+        assert!(trace.contains("a={}"));
+        assert!(trace.contains("b={}"));
+    }
+
+    #[test]
+    fn payload_hash_is_order_sensitive() {
+        let chrom_a = Chromosome::new(vec![
+            ("encoding".into(), "UrlEncode".into()),
+            ("content_type".into(), "JsonNested".into()),
+        ]);
+        let chrom_b = Chromosome::new(vec![
+            ("content_type".into(), "JsonNested".into()),
+            ("encoding".into(), "UrlEncode".into()),
+        ]);
+        let a = BypassEntry::from_chromosome(&chrom_a, None);
+        let b = BypassEntry::from_chromosome(&chrom_b, None);
+        assert_ne!(a.payload_hash, b.payload_hash);
     }
 }
