@@ -494,8 +494,9 @@ mod tests {
         };
         // --from-host wins over --from-waf when --technique is absent.
         // (We can't test the full load here without a gene-bank file,
-        // but we can verify the error message mentions the host lookup.)
-        let err2 = resolve_techniques(&args2).unwrap_err(); eprintln!("ERR2: {}", err2); assert!(err2.contains("proxy bank") || err2.contains("gene bank") || err2.contains("host"), "unexpected: {}", err2);
+        // but we can verify the error comes from the proxy-bank path.)
+        let err2 = resolve_techniques(&args2).unwrap_err();
+        assert!(err2.contains("proxy gene bank"), "unexpected: {err2}");
 
         let args3 = ReplayArgs {
             technique: vec![],
@@ -503,7 +504,8 @@ mod tests {
             ..base.clone()
         };
         // --from-waf is consulted last.
-        assert!(resolve_techniques(&args3).unwrap_err().contains("gene bank"));
+        let err3 = resolve_techniques(&args3).unwrap_err();
+        assert!(err3.contains("genome"), "unexpected: {err3}");
     }
 
     #[test]
