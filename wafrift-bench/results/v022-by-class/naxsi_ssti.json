@@ -1,0 +1,1455 @@
+{
+  "base_url": "http://127.0.0.1:18087",
+  "by_class": {
+    "ssti": {
+      "bypass_rate": 0.12222222222222222,
+      "cases": 45,
+      "evaded_bypassed": 55,
+      "evaded_total": 450,
+      "raw_block_rate": 0.7333333333333333,
+      "raw_blocked": 33
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 0.19555555555555557,
+      "bypassed": 44,
+      "oracle_valid": 24,
+      "variants": 225
+    },
+    "mcts": {
+      "bypass_rate": 0.04888888888888889,
+      "bypassed": 11,
+      "oracle_valid": 11,
+      "variants": 225
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 44,
+    "cases_with_at_least_one_oracle_valid_bypass": 25,
+    "oracle_valid_rate": 0.07777777777777778,
+    "oracle_valid_share_of_bypasses": 0.6363636363636364,
+    "overall_bypass_rate": 0.12222222222222222,
+    "total_variants_bypassed": 55,
+    "total_variants_oracle_valid": 35,
+    "total_variants_sent": 450
+  },
+  "lineage_output": null,
+  "raw_block_rate": 0.7333333333333333,
+  "raw_blocked": 33,
+  "results": [
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2017_5638_struts_ognl",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.542293,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2018_11776_struts_namespace",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.195787,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2019_2725_weblogic_t3",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.165949,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "cve_2021_22205_gitlab_exiftool",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15087,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2021_26084_atlassian_confluence_ognl",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.164737,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2022_22965_spring4shell",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.19450399999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "cve_2022_30190_follina_msdt",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.10944,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2022_26134_atlassian_confluence_ognl",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.214783,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "twig_arith",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.215745,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "twig_filter_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20822000000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "twig_attr_dump",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16267199999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "twig_app_request",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.101395,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "freemarker_exec_new",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.10233700000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "freemarker_objectconstructor",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16148099999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "freemarker_assign_keep",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15666200000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "velocity_runtime_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.207879,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "velocity_set_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22428199999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "smarty_php_block",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.288595,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "smarty_self_template",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.14918700000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "erb_exec_backtick",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.146842,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "erb_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.263587,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "erb_open",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15599,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "go_print",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.176559,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "go_call",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17629899999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "handlebars_constructor",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.136372,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "arith_basic",
+      "raw_blocked": false,
+      "raw_latency_ms": 0.98803,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "arith_complex",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.128527,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "config_dump",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.281073,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "config_items",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.14013,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "self_dump",
+      "raw_blocked": false,
+      "raw_latency_ms": 0.809636,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "self_namespace",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.059166,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "request_environ",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.205618,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "url_for_globals",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.250393,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "subprocess_popen",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.188222,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "os_popen",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17666,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "import_lookup",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.146992,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, grammar:time_blind, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "lipsum_globals",
+      "raw_blocked": false,
+      "raw_latency_ms": 0.97757,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "joiner_init",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.025361,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cycler_init",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.12453,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "namespace_init",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.187701,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "g_environ",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.007948,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "session_dict",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.398088,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "request_args_dict",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.1752690000000001,
+      "raw_status": 200
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "filter_attribute",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.159877,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:template_mutation"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "via_get_flashed",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.0449490000000001,
+      "raw_status": 200
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 45,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}

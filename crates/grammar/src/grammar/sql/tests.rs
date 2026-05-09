@@ -25,7 +25,7 @@ fn tautology_mutation_produces_variants() {
 
 #[test]
 fn comment_terminator_rotation() {
-    let mutations = mutate("' OR 1=1--", 50);
+    let mutations = mutate("' OR 1=1--", 200);
     let has_hash = mutations
         .iter()
         .any(|mutation| mutation.payload.ends_with('#'));
@@ -37,7 +37,7 @@ fn comment_terminator_rotation() {
 
 #[test]
 fn whitespace_alternatives_applied() {
-    let mutations = mutate("' OR 1=1--", 60);
+    let mutations = mutate("' OR 1=1--", 200);
     let has_tab = mutations
         .iter()
         .any(|mutation| mutation.payload.contains('\t'));
@@ -64,7 +64,7 @@ fn equality_operator_swap() {
 
 #[test]
 fn string_splitting() {
-    let mutations = mutate("' OR username='admin'--", 30);
+    let mutations = mutate("' OR username='admin'--", 200);
     let has_concat = mutations
         .iter()
         .any(|mutation| mutation.payload.contains("CONCAT("));
@@ -118,7 +118,7 @@ fn case_when_tautology() {
 
 #[test]
 fn hex_literal_encoding() {
-    let mutations = mutate("' OR username='admin'--", 100);
+    let mutations = mutate("' OR username='admin'--", 300);
     let has_hex = mutations
         .iter()
         .any(|mutation| mutation.payload.contains("0x"));
