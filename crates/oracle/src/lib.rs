@@ -236,3 +236,5 @@ mod tests {
         assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "http://example.com/"));
     }
 }
+
+pub mod oob;
