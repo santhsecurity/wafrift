@@ -288,8 +288,20 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
         hosts: HashMap::new(),
     };
     for (host, hs) in &state.hosts {
-        if hs.proven_winners.is_empty() && hs.blocklisted.is_empty() {
-            continue; // skip empty hosts to keep the file small
+        // Persist any host where the proxy has accumulated discovery
+        // signal — proven winners, blocklisted techniques, identified
+        // WAF, OR observed blocks. The earlier "skip empty hosts to
+        // keep the file small" rule dropped hosts with only
+        // block-count telemetry, so a practitioner who left the proxy
+        // running through 100 blocked attempts and then SIGTERM'd
+        // would lose every bit of discovery progress on restart.
+        // A host with non-zero blocks is a host worth remembering.
+        if hs.proven_winners.is_empty()
+            && hs.blocklisted.is_empty()
+            && hs.waf_name.is_none()
+            && hs.blocks == 0
+        {
+            continue; // truly empty — skip
         }
         bank.hosts.insert(
             host.clone(),
@@ -1132,16 +1144,14 @@ async fn mitm_plaintext_request(
         .filter(|(k, _)| !should_strip_proxy_header(k, &conn))
         .collect();
 
-    let wafrift_req = wafrift_types::Request {
-        method: wafrift_types::Method::from(req.method().as_str()),
+    let mut wafrift_req = wafrift_types::Request::with_method(
+        wafrift_types::Method::from(req.method().as_str()),
         url,
-        headers,
-        body: if body_bytes.is_empty() {
-            None
-        } else {
-            Some(body_bytes)
-        },
-    };
+    );
+    wafrift_req.headers = headers;
+    if !body_bytes.is_empty() {
+        wafrift_req.body = Some(body_bytes);
+    }
 
     let log_uri = wafrift_req.url.clone();
 
@@ -1439,16 +1449,14 @@ async fn proxy(
         .filter(|(k, _)| !should_strip_proxy_header(k, &conn))
         .collect();
 
-    let wafrift_req = wafrift_types::Request {
-        method: wafrift_types::Method::from(req.method().as_str()),
-        url: req.uri().to_string(),
-        headers,
-        body: if body_bytes.is_empty() {
-            None
-        } else {
-            Some(body_bytes)
-        },
-    };
+    let mut wafrift_req = wafrift_types::Request::with_method(
+        wafrift_types::Method::from(req.method().as_str()),
+        req.uri().to_string(),
+    );
+    wafrift_req.headers = headers;
+    if !body_bytes.is_empty() {
+        wafrift_req.body = Some(body_bytes);
+    }
 
     let log_uri = req.uri().to_string();
 
