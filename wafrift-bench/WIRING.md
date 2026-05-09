@@ -73,34 +73,53 @@ sqlmap's payloads get evade-wrapped on the fly.
 
 ## Gaps — what's NOT wired (yet)
 
-1. **MAP-Elites loop in bench** — `evolution::search::map_elites` is
-   coded but only invoked from `wafrift scan`'s feedback loop. Bench
-   could expose `--strategies map-elites` to drive a feedback-search
-   on each case.
-2. **Novelty / sim-anneal / tabu / hill-climb** — same as MAP-Elites:
-   coded in `evolution::search`, only callable through `scan`'s
-   intelligence loop, not surfaced as a bench strategy.
-3. **Differential probing** — `evolution::differential` builds probe
-   payloads to fingerprint exact WAF rule boundaries. Not exposed as
-   a bench strategy yet.
-4. **Custom rules** — `evolution::custom_rules` lets users drop their
-   own technique TOMLs into the gene bank. No bench mode exists for
-   "test cases against this user-supplied rule pack".
-5. **Lineage tracking** — `evolution::lineage` records which mutation
-   chain produced each finding. The bench reports techniques that
-   correlated with bypasses but doesn't persist the full lineage tree.
-6. **Oracle semantic-validity** — `oracle::sql/xss/cmdi/ssti/path`
-   could verify that bypassed payloads are actually valid attacks
-   (not garbage that slipped through). Bench currently counts every
-   non-blocked response as a bypass.
-7. **AST metamorphism (#5)** — `wafrift-grammar` has dialect-aware
-   string-level mutators but no full SQL-AST lift / transform / lower
-   pipeline. sqlparser is already a dep (oracle uses it) so the
-   foundation is there.
-8. **Transport feature gates** — `proxy-pool`, `origin-bypass`,
-   `gossan-integration` are off by default in `wafrift-cli`. The proxy
-   binary uses transport directly. Need an explicit decision on
-   enabling these in shipped binaries.
+**[CLOSED 2026-05-08 evening]**
+
+1. ✅ **MAP-Elites + sim-anneal + hill-climb + tabu + novelty in bench** —
+   `--strategies hill-climb,sim-anneal,tabu,novelty,map-elites` wired.
+   `run_evolution_strategy` runs an `EvolutionEngine` per case, gets
+   chromosomes, renders via grammar+encoding genes, sends, feeds
+   verdict back. Algorithms learn what beats the WAF as they go.
+2. ✅ **AST metamorphism (#5)** — `crates/grammar/src/grammar/sql/ast_metamorph.rs`
+   lifts via sqlparser, applies 7 transforms, lowers back. Wired
+   through `sql::mutate` so AST variants flow through `build_variants`
+   automatically.
+3. ✅ **Oracle semantic-validity** — `--oracle-gate` flag wires
+   per-class oracle dispatch (sql / xss / cmdi / ssti / path).
+   Per-strategy `oracle_valid` counter; aggregate
+   `total_variants_oracle_valid` + `oracle_valid_share_of_bypasses`
+   in JSON output.
+
+**Open / next-step**
+
+- **Differential probing as bench strategy** — `evolution::differential`
+  builds probe payloads to fingerprint exact WAF rule boundaries.
+  Not exposed as a `--strategies differential` mode yet.
+- **Custom rules in bench** — `evolution::custom_rules` lets users
+  drop their own technique TOMLs into the gene bank. No bench mode
+  for "test cases against this user-supplied rule pack".
+- **Lineage persistence** — `evolution::lineage` records mutation
+  chains. Bench logs `bypass_techniques` summary but doesn't persist
+  the full lineage tree (would let users replay any single bypass
+  exactly from the JSON).
+- **Proxy multi-variant retry** — `wafrift-proxy` applies one
+  `strategy::evade` per intercepted request. Bench achieves much
+  higher bypass by trying 20 variants per case. Open: add a proxy
+  retry mode that cycles strategies/variants until a non-403, then
+  caches the winner per host.
+- **More attack-class oracles** — `oracle_valid()` falls through to
+  `true` for `ldap / ssrf / xxe / nosql / log4shell / cve_pocs`
+  (no per-class oracle yet). Adding LDAP/NoSQL/XXE oracles would
+  tighten the gating across the corpus.
+- **Naxsi from source** — replaced with BunkerWeb (modsec-based)
+  because no public naxsi docker image exists. BunkerWeb v1.6.0
+  also requires the `bunkerity/scheduler` companion to actually
+  engage modsec — env-var-only setup is pass-through. Open: build
+  naxsi-from-source Dockerfile for true positive-security model
+  coverage.
+- **Transport feature gates** — `proxy-pool`, `origin-bypass`,
+  `gossan-integration` off by default in `wafrift-cli`. Decision
+  on enabling them in shipped binaries.
 
 ## What's intentionally not in the bench
 
