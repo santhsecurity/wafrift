@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH detect 1  "detect " 
+.SH NAME
+detect \- Identify a WAF from response metadata
+.SH SYNOPSIS
+\fBdetect\fR <\fB\-\-status\fR> <\fB\-\-headers\fR> [\fB\-\-body\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Identify a WAF from response metadata
+.SH OPTIONS
+.TP
+\fB\-\-status\fR \fI<STATUS>\fR
+HTTP status code
+.TP
+\fB\-\-headers\fR \fI<HEADERS>\fR
+Repeated "key: value" header arguments
+.TP
+\fB\-\-body\fR \fI<BODY>\fR [default: ]
+Response body fragment
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

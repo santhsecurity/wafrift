@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH init 1  "init " 
+.SH NAME
+init \- Scaffold a `.wafrift.toml` config in the current directory
+.SH SYNOPSIS
+\fBinit\fR [\fB\-\-output\fR] [\fB\-\-force\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Scaffold a `.wafrift.toml` config in the current directory
+.SH OPTIONS
+.TP
+\fB\-\-output\fR \fI<OUTPUT>\fR
+Output path for the scaffold. Defaults to `./.wafrift.toml`
+.TP
+\fB\-\-force\fR
+Overwrite the file if it already exists. Without this flag, init refuses to clobber an existing config — operators have no expectation that `wafrift init` would destroy in\-flight tuning
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

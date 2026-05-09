@@ -26,6 +26,45 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ### Added
 
+- **Release-readiness pass for cybersec practitioners (latest round).**
+  - **`wafrift seed`** — pre-load gene-bank with known-working techniques
+    (`--waf <name>` writes the per-WAF GeneBank, `--host <hostname>`
+    writes the proxy gene-bank). Day-one practitioner workflow:
+    skip discovery if you already know what beats the target.
+  - **`wafrift import-curl`** — feed a curl invocation (e.g. from Burp's
+    "Copy as cURL") + a payload/param into the scan engine. Tokeniser
+    handles single/double quotes, multi-line `\\\n` continuations, and
+    the no-op flags Chromium/Burp emit (`-i`, `--compressed`, etc.).
+    Reads from `--curl-file` or `--from-stdin`.
+  - **`wafrift bank list / export / import`** — manage gene-banks as
+    first-class objects. `export` packs the proxy gene-bank + every
+    per-WAF GeneBank into a self-describing JSON envelope (with
+    `schema_version` + `wafrift_version`); `import` merges by
+    default (union of techniques, dedupe) or `--replace` overwrites.
+    Lets teams share findings: scp the envelope, `wafrift bank import`.
+  - **`wafrift man`** — emits a troff(1) man page via clap_mangen.
+    `wafrift man --output /usr/local/share/man/man1/wafrift.1` and
+    `man wafrift` works. `--sub <subcommand>` for per-command pages.
+  - **CTF / pentest quickstart** added to README — five concrete recipes
+    (SQLi login bypass, SSTI, SSRF-to-internal, LFI/path-traversal,
+    XXE) with single-command shapes.
+  - **Lawful-use clause** added to `SECURITY.md`, new `CODE_OF_CONDUCT.md`,
+    and `README.md` bottom. Codifies authorisation requirement,
+    operator-bears-liability transfer, and the project's policy of
+    refusing support for unauthorised testing.
+  - **`Dockerfile` + `.dockerignore`** for one-step `docker run
+    santhsecurity/wafrift`. Multi-stage build, non-root runtime user,
+    tini PID 1, OCI image-spec labels.
+  - **`.github/workflows/release.yml`** — on tag push, builds Linux
+    x86_64 + aarch64, macOS x86_64 + arm64, Windows x86_64 binaries;
+    SHA-256 checksum per artefact; attaches to GitHub Release.
+    Practitioners on Kali / CTF VMs without a Rust toolchain can
+    download a binary directly.
+  - **scan text output** now prints the full evaded payload (was
+    truncated to 120 chars) plus a copy-paste curl reproduce line, so
+    the practitioner doesn't have to re-run anything to get the wire
+    bytes for Burp/sqlmap.
+
 - **Practitioner-shaped proxy + CLI surface (this round).**
   - `wafrift-proxy --only-host / --skip-host / --only-path / --skip-path
     / --only-method` — request-level scope filter with a tiny ASCII glob

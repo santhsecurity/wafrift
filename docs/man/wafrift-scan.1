@@ -1,0 +1,74 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH scan 1  "scan " 
+.SH NAME
+scan \- Fire evasion variants against a live target and report bypass results
+.SH SYNOPSIS
+\fBscan\fR <\fB\-\-target\fR> <\fB\-\-payload\fR> [\fB\-\-param\fR] [\fB\-\-level\fR] [\fB\-\-encoding\-only\fR] [\fB\-\-delay\-ms\fR] [\fB\-\-format\fR] [\fB\-\-stealth\-browser\fR] [\fB\-\-insecure\fR] [\fB\-\-report\-layers\fR] [\fB\-\-only\fR] [\fB\-\-exclude\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Fire evasion variants against a live target and report bypass results
+.SH OPTIONS
+.TP
+\fB\-\-target\fR \fI<TARGET>\fR
+Target URL to test evasion variants against (e.g., http://localhost:8080)
+.TP
+\fB\-\-payload\fR \fI<PAYLOAD>\fR
+Payload to mutate and test
+.TP
+\fB\-\-param\fR \fI<PARAM>\fR [default: q]
+Query parameter name to inject into
+.TP
+\fB\-\-level\fR \fI<LEVEL>\fR [default: heavy]
+Evasion intensity
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+light
+.IP \(bu 2
+medium
+.IP \(bu 2
+heavy
+.RE
+.TP
+\fB\-\-encoding\-only\fR
+Apply encoding only, without grammar\-aware mutations
+.TP
+\fB\-\-delay\-ms\fR \fI<DELAY_MS>\fR [default: 50]
+Delay between requests in milliseconds (avoid rate\-limit bans)
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR [default: text]
+Output format: text or json
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+text
+.IP \(bu 2
+json
+.RE
+.TP
+\fB\-\-stealth\-browser\fR \fI<STEALTH_BROWSER>\fR
+Optional browser fingerprint to impersonate (e.g., \*(Aqchrome\*(Aq, \*(Aqsafari\*(Aq, \*(Aqedge\*(Aq)
+.TP
+\fB\-\-insecure\fR
+Disable TLS verification
+.TP
+\fB\-\-report\-layers\fR
+With `\-\-format json`, add a `layer_report` object (network / detection / baseline / evasion)
+.TP
+\fB\-\-only\fR \fI<ONLY>...\fR
+Restrict to listed technique paths (comma\-separated; e.g. `encoding/url,grammar`). Run `wafrift techniques list` for paths
+.TP
+\fB\-\-exclude\fR \fI<EXCLUDE>...\fR
+Drop listed technique paths (comma\-separated)
+.TP
+\fB\-o\fR, \fB\-\-output\fR \fI<OUTPUT>\fR
+Write JSON output to a file instead of stdout
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

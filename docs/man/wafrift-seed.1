@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH seed 1  "seed " 
+.SH NAME
+seed \- Pre\-load a gene\-bank with known\-working techniques (per\-WAF or per\-host)
+.SH SYNOPSIS
+\fBseed\fR [\fB\-\-technique\fR] [\fB\-\-waf\fR] [\fB\-\-host\fR] [\fB\-\-proxy\-bank\fR] [\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Pre\-load a gene\-bank with known\-working techniques (per\-WAF or per\-host)
+.SH OPTIONS
+.TP
+\fB\-\-technique\fR \fI<TECHNIQUE>...\fR
+Comma\-separated technique pool keys to seed. Each key is a string like `EncodingDoubleUrl`, `GrammarTautology`, `SmugglingClTeBasic`. Run `wafrift techniques list` for the canonical list
+.TP
+\fB\-\-waf\fR \fI<WAF>\fR
+Seed the per\-WAF GeneBank under `~/.wafrift/genomes/<waf>.json`. Mutually exclusive with `\-\-host`
+.TP
+\fB\-\-host\fR \fI<HOST>\fR
+Seed the proxy gene\-bank for a specific host. Mutually exclusive with `\-\-waf`
+.TP
+\fB\-\-proxy\-bank\fR \fI<PROXY_BANK>\fR
+Override the proxy gene\-bank path. Default `~/.wafrift/gene\-bank.json`. Only consulted when `\-\-host` is set
+.TP
+\fB\-\-dry\-run\fR
+Show what would be written and exit 0 without touching disk
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

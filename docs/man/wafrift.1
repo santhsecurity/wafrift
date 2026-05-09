@@ -1,0 +1,90 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH wafrift 1  "wafrift 0.2.1" 
+.SH NAME
+wafrift \- WAF evasion toolkit — run without arguments for interactive mode
+.SH SYNOPSIS
+\fBwafrift\fR [\fB\-q\fR|\fB\-\-quiet\fR] [\fB\-c\fR|\fB\-\-config\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+WAF evasion toolkit — run without arguments for interactive mode.
+.PP
+Exit codes (CI\-friendly):
+0  success
+1  generic error (bad input, IO, etc.)
+2  bench\-waf: zero bypasses on any case in \-\-evade mode
+2  replay:    saved bypass got blocked (regression signal)
+3  bench\-diff: regression vs baseline (see \-\-bypass\-drop\-pp)
+4  bench\-waf \-\-validate\-only: corpus integrity errors
+.SH OPTIONS
+.TP
+\fB\-q\fR, \fB\-\-quiet\fR
+Suppress human\-readable output — emit only machine\-parseable results (JSON)
+.TP
+\fB\-c\fR, \fB\-\-config\fR \fI<CONFIG>\fR
+Path to a TOML config file. Default: `.wafrift.toml` in CWD or `~/.config/wafrift/config.toml`
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+wafrift\-evade(1)
+Transform a payload with evasion techniques
+.TP
+wafrift\-detect(1)
+Identify a WAF from response metadata
+.TP
+wafrift\-probe(1)
+Generate differential analysis probes
+.TP
+wafrift\-scan(1)
+Fire evasion variants against a live target and report bypass results
+.TP
+wafrift\-bench\-waf(1)
+Reproducible WAF benchmark: measure raw block rate AND wafrift bypass rate. Pass `\-\-evade` to actually run the evasion engine (off by default — without it, only the WAF\*(Aqs raw rejection rate is measured, no bypass claim is made)
+.TP
+wafrift\-bench\-diff(1)
+Compare two `bench\-waf \-\-output` JSON blobs and gate on regression
+.TP
+wafrift\-origin\-hints(1)
+DNS hints for `origin_bypass` (authorized targets only)
+.TP
+wafrift\-egress\-example(1)
+Print JSON snippets for egress presets (e.g. Tor SOCKS)
+.TP
+wafrift\-techniques(1)
+List or explain available technique selectors for `\-\-only`/`\-\-exclude`
+.TP
+wafrift\-completion(1)
+Generate shell completions for bash, zsh, fish, or PowerShell
+.TP
+wafrift\-recon(1)
+Origin discovery via crt.sh + DNS (authorized targets only)
+.TP
+wafrift\-replay(1)
+Replay a saved bypass against a target — proves reproducibility
+.TP
+wafrift\-report(1)
+Generate a markdown findings report from the proxy gene bank
+.TP
+wafrift\-init(1)
+Scaffold a `.wafrift.toml` config in the current directory
+.TP
+wafrift\-seed(1)
+Pre\-load a gene\-bank with known\-working techniques (per\-WAF or per\-host)
+.TP
+wafrift\-import\-curl(1)
+Take a curl invocation (e.g. from Burp\*(Aqs "Copy as cURL"), run scan against the parsed target
+.TP
+wafrift\-bank(1)
+Manage gene\-banks: list / export / import
+.TP
+wafrift\-man(1)
+Generate a troff man page for `wafrift` (and optionally subcommands)
+.TP
+wafrift\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.2.1

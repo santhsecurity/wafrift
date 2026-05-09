@@ -1,0 +1,29 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH origin-hints 1  "origin-hints " 
+.SH NAME
+origin\-hints \- DNS hints for `origin_bypass` (authorized targets only)
+.SH SYNOPSIS
+\fBorigin\-hints\fR <\fB\-\-host\fR> [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+DNS hints for `origin_bypass` (authorized targets only)
+.SH OPTIONS
+.TP
+\fB\-\-host\fR \fI<HOST>\fR
+Hostname only (e.g. `api.example.com`), not a full URL
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR [default: text]
+`text` or `json`
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+text
+.IP \(bu 2
+json
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
