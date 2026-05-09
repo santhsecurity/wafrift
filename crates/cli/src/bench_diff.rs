@@ -49,6 +49,19 @@ pub fn run_bench_diff(args: BenchDiffArgs) -> ExitCode {
         }
     };
 
+    // Catch the foot-gun where one side ran with --evade and the other
+    // didn't. The bypass-rate column only exists in evade mode, and a
+    // missing field reads as 0 — silent comparison would either show a
+    // huge drop (regression alarm) or a huge climb (false reassurance).
+    let cur_evade = evade_mode(&cur);
+    let base_evade = evade_mode(&base);
+    if cur_evade != base_evade {
+        eprintln!(
+            "WARNING: mode mismatch — baseline evade_mode={base_evade}, current evade_mode={cur_evade}. \
+             Bypass-rate comparison is meaningless when only one side ran the evasion engine."
+        );
+    }
+
     let cur_bypass = bypass_rate(&cur);
     let base_bypass = bypass_rate(&base);
     let cur_raw = raw_block_rate(&cur);
@@ -101,6 +114,10 @@ fn bypass_rate(v: &serde_json::Value) -> f64 {
 
 fn raw_block_rate(v: &serde_json::Value) -> f64 {
     v.pointer("/raw_block_rate").and_then(|x| x.as_f64()).unwrap_or(0.0)
+}
+
+fn evade_mode(v: &serde_json::Value) -> bool {
+    v.pointer("/evade_mode").and_then(|x| x.as_bool()).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -214,6 +231,27 @@ mod tests {
             raw_block_floor: 0.95,
         });
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(1)));
+    }
+
+    #[test]
+    fn evade_mode_mismatch_warns_but_does_not_fail() {
+        // Comparing a no-evade baseline against a with-evade current is a
+        // foot-gun. We warn but don't fail (the operator may know exactly
+        // what they're doing).
+        let dir = std::env::temp_dir().join("wafrift_bench_diff_test_mode_mismatch");
+        let _ = std::fs::create_dir_all(&dir);
+        let cur = dir.join("cur.json");
+        let base = dir.join("base.json");
+        write(&base, r#"{"raw_block_rate":1.0,"evade_mode":false}"#);
+        write(&cur, r#"{"raw_block_rate":1.0,"evade_mode":true,"evaded_summary":{"overall_bypass_rate":0.10}}"#);
+        let code = run_bench_diff(BenchDiffArgs {
+            current: cur,
+            baseline: base,
+            bypass_drop_pp: 2.0,
+            raw_block_floor: 0.95,
+        });
+        // base_bypass=0, cur_bypass=0.10 → drop_pp negative → no regression.
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 
     #[test]
