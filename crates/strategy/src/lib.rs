@@ -22,3 +22,5 @@ pub use learning_cache::LearningCache;
 pub use pipeline::{EvasionPipeline, EvasionPlanOutput};
 pub use planner::plan_pipelines;
 pub use strategy::*;
+
+pub mod explain;

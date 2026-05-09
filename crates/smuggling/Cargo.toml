@@ -15,6 +15,7 @@ default = []
 unsafe-probes = []
 
 [dependencies]
+wafrift-types = { path = "../types" }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 toml = { workspace = true }

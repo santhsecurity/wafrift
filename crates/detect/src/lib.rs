@@ -11,3 +11,5 @@ pub use waf_detect::{
     DetectConfig, DetectedWaf, ProbePayload, ProbeResult, active_probe, classify_drift, detect,
     is_blocked_response, reload_rules, suggest_evasion, supported_wafs,
 };
+
+pub mod explain;

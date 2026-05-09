@@ -24,3 +24,5 @@ pub use tamper::{
     TamperConfig, TamperError, TamperRegistry, TamperStrategy, all_tamper_names, default_registry,
     tamper,
 };
+
+pub mod contextual;

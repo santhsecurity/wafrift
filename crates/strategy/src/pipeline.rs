@@ -3,13 +3,21 @@
 use serde::{Deserialize, Serialize};
 use wafrift_types::{Request, Technique};
 
+use wafrift_types::injection_context::InjectionContext;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvasionStage {
+    pub technique: Technique,
+    pub context: Option<InjectionContext>,
+}
+
 /// A single evasion pipeline: an ordered list of techniques to apply.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvasionPipeline {
     /// Human-readable identifier for this pipeline.
     pub name: String,
     /// Ordered techniques to apply.
-    pub techniques: Vec<Technique>,
+    pub stages: Vec<EvasionStage>,
     /// Estimated cost in number of requests.
     pub cost: u32,
     /// Historical success rate (0–10000, where 10000 = 100%).
@@ -19,10 +27,10 @@ pub struct EvasionPipeline {
 impl EvasionPipeline {
     /// Create a new pipeline.
     #[must_use]
-    pub fn new(name: impl Into<String>, techniques: Vec<Technique>, cost: u32) -> Self {
+    pub fn new(name: impl Into<String>, stages: Vec<EvasionStage>, cost: u32) -> Self {
         Self {
             name: name.into(),
-            techniques,
+            stages,
             cost,
             success_bps: 0,
         }
@@ -42,8 +50,8 @@ impl EvasionPipeline {
     /// to a caller; call `evade_adaptive(&req, cfg, &plan, &state)` to
     /// actually execute it.
     #[must_use]
-    pub fn apply_to(&self, req: &Request) -> (Request, Vec<Technique>) {
-        (req.clone(), self.techniques.clone())
+    pub fn apply_to(&self, req: &Request) -> (Request, Vec<EvasionStage>) {
+        (req.clone(), self.stages.clone())
     }
 }
 
@@ -92,7 +100,7 @@ mod tests {
 
     #[test]
     fn pipeline_cost_tracking() {
-        let p = EvasionPipeline::new("test", vec![Technique::UserAgentRotation], 3);
+        let p = EvasionPipeline::new("test", vec![EvasionStage { technique: Technique::UserAgentRotation, context: None }], 3);
         assert_eq!(p.cost, 3);
     }
 

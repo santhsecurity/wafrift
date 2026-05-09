@@ -11,6 +11,8 @@ categories = ["encoding", "network-programming", "web-programming"]
 repository.workspace = true
 
 [dependencies]
+wafrift-types = { path = "../types" }
+urlencoding = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

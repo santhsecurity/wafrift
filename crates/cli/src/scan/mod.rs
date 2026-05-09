@@ -443,8 +443,8 @@ pub(crate) async fn run_scan(
             && entry.success_rate() > 0.5
         {
             // Replay the winning pipeline's encoding on raw payload.
-            for tech in &entry.pipeline.techniques {
-                let encoded = match tech {
+            for tech in &entry.pipeline.stages {
+                let encoded = match &tech.technique {
                     wafrift_types::Technique::PayloadEncoding(enc_name) => {
                         encoding::all_strategies()
                             .iter()
@@ -466,7 +466,7 @@ pub(crate) async fn run_scan(
                             bypass_variants.push((
                                 0,
                                 enc_payload.clone(),
-                                vec![format!("cache_replay::{}", tech)],
+                                vec![format!("cache_replay::{}", tech.technique)],
                                 0.95,
                             ));
                             if scan_text {
@@ -1861,20 +1861,20 @@ pub(crate) async fn run_scan(
         && let Some(ref mut cache) = learning_cache
     {
         // Build a pipeline from the best winning technique combination.
-        let best_techniques: Vec<wafrift_types::Technique> = bypass_variants
+        let best_techniques: Vec<wafrift_strategy::pipeline::EvasionStage> = bypass_variants
             .first()
             .map(|(_, _, techs, _)| {
                 techs
                     .iter()
                     .map(|t| {
                         if t.starts_with("encoding::") {
-                            wafrift_types::Technique::PayloadEncoding(t.clone())
+                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::PayloadEncoding(t.clone()), context: None }
                         } else if t.starts_with("tamper::") {
-                            wafrift_types::Technique::GrammarMutation(t.clone())
+                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::GrammarMutation(t.clone()), context: None }
                         } else if t.starts_with("vector::") {
-                            wafrift_types::Technique::ContentTypeSwitch(t.clone())
+                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::ContentTypeSwitch(t.clone()), context: None }
                         } else {
-                            wafrift_types::Technique::GrammarMutation(t.clone())
+                            wafrift_strategy::pipeline::EvasionStage { technique: wafrift_types::Technique::GrammarMutation(t.clone()), context: None }
                         }
                     })
                     .collect()
@@ -1884,7 +1884,7 @@ pub(crate) async fn run_scan(
         // Validate composition ordering.
         let layers: Vec<composition::EvasionLayer> = best_techniques
             .iter()
-            .map(|t| match t {
+            .map(|t| match &t.technique {
                 wafrift_types::Technique::PayloadEncoding(_) => composition::EvasionLayer::Encoding,
                 wafrift_types::Technique::GrammarMutation(_) => composition::EvasionLayer::Grammar,
                 wafrift_types::Technique::ContentTypeSwitch(_) => {
@@ -1896,7 +1896,8 @@ pub(crate) async fn run_scan(
             .collect();
         let valid_order = composition::is_valid_sequence(&layers);
 
-        let pipeline_cost = cost::pipeline_cost(&best_techniques);
+        let techniques_for_cost: Vec<_> = best_techniques.iter().map(|s| s.technique.clone()).collect();
+        let pipeline_cost = cost::pipeline_cost(&techniques_for_cost);
         let pipeline = EvasionPipeline::new(
             format!("auto_{waf_name}_{payload_type_str}"),
             best_techniques,

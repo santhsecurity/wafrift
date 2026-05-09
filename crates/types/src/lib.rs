@@ -12,6 +12,12 @@ pub mod request;
 pub mod result;
 pub mod technique;
 pub mod verdict;
+pub mod injection_context;
+pub mod session;
+pub mod discovery;
+pub mod oob;
+pub mod format;
+pub mod explanation;
 
 // ──────────────────────────────────────────────
 //  Workspace-wide tunables (single source of truth so the proxy,

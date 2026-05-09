@@ -3593,6 +3593,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.2",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
@@ -3657,6 +3658,8 @@ version = "0.2.1"
 dependencies = [
  "rand 0.8.6",
  "serde_json",
+ "thiserror 2.0.18",
+ "wafrift-types",
 ]
 
 [[package]]
@@ -3699,6 +3702,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "wafrift-types",
  "wiremock",
 ]
 
@@ -3715,6 +3719,8 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "unicode-normalization",
+ "urlencoding",
+ "wafrift-types",
 ]
 
 [[package]]
@@ -3762,13 +3768,17 @@ dependencies = [
 name = "wafrift-oracle"
 version = "0.2.1"
 dependencies = [
+ "async-trait",
  "flate2",
  "proptest",
  "serde",
  "serde_json",
  "sqlparser",
+ "thiserror 2.0.18",
+ "tokio",
  "toml",
  "url",
+ "uuid",
  "wafrift-grammar",
  "wafrift-types",
 ]
@@ -3778,6 +3788,7 @@ name = "wafrift-pool"
 version = "0.2.1"
 dependencies = [
  "reqwest",
+ "wafrift-types",
 ]
 
 [[package]]
@@ -3838,6 +3849,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "toml",
+ "wafrift-types",
 ]
 
 [[package]]
@@ -3868,13 +3880,19 @@ dependencies = [
 name = "wafrift-transport"
 version = "0.2.1"
 dependencies = [
+ "base64",
  "bytes",
  "http",
  "proptest",
+ "regex",
  "reqwest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "toml",
  "tracing",
+ "urlencoding",
  "wafrift-pool",
  "wafrift-strategy",
  "wafrift-types",
@@ -3891,6 +3909,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]

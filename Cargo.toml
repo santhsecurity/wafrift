@@ -74,7 +74,7 @@ thiserror = "2"
 anyhow = "1"
 
 # HTTP
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream", "json"] }
 http = "1"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
@@ -117,3 +117,4 @@ rustls-pki-types = "1.14.0"
 
 webpki-roots = "1.0.6"
 fs4 = "1.1"
+uuid = { version = "1.0", features = ["v4", "serde"] }
