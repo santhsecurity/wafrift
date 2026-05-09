@@ -1,6 +1,6 @@
 //! Evasion-aware HTTP client — wraps reqwest with automatic WAF bypass.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use wafrift_strategy::HostState;
@@ -25,6 +25,9 @@ pub struct EvasionClient {
     config: EvasionConfig,
     /// Per-host evasion state (thread-safe for concurrent use).
     host_states: Mutex<HashMap<String, HostState>>,
+    /// FIFO insertion order for deterministic eviction when the map
+    /// exceeds its cap.
+    host_fifo: Mutex<VecDeque<String>>,
 }
 
 impl EvasionClient {
@@ -55,7 +58,9 @@ impl EvasionClient {
         let mut builder = reqwest::Client::builder()
             .danger_accept_invalid_certs(config.insecure_tls)
             .redirect(reqwest::redirect::Policy::limited(10))
-            .timeout(std::time::Duration::from_secs(30));
+            .timeout(std::time::Duration::from_secs(
+                wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+            ));
 
         #[cfg(feature = "proxy-pool")]
         if !config.proxies.is_empty()
