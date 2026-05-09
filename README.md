@@ -110,17 +110,26 @@ mv wafrift wafrift-proxy /usr/local/bin/
 ### From crates.io
 
 ```bash
-cargo install wafrift-cli --version '>=0.2.1'
+cargo install wafrift-cli --version '>=0.2.2'
+# Optional: TLS impersonation (rquest 5.x + BoringSSL — adds boring-sys C build)
+cargo install wafrift-proxy --version '>=0.2.2' --features tls-impersonate
 ```
 
-This installs the `wafrift` binary. Requires a Rust toolchain.
+This installs the `wafrift` and `wafrift-proxy` binaries. Requires a
+Rust toolchain.
 
 > **⚠ Avoid `wafrift-detect@0.2.0`.** The 0.2.0 build of the
 > `wafrift-detect` sub-crate on crates.io shipped with an empty WAF
 > rule database (build-script path bug; the 182 vendored TOML files
-> were excluded from the published artefact). 0.2.1 is fixed and is
+> were excluded from the published artefact). 0.2.1+ is fixed and is
 > the version pulled in by `wafrift-cli >= 0.2.1`. If you have an
 > older install: `cargo install --force wafrift-cli`.
+>
+> **0.2.2 highlights:** body-padding evasion (cloud-WAF inspection
+> bypass), TLS profile rotation pool, per-request connection-reuse
+> off, real-time TUI dashboard, `quote_free` SQL mutator (naxsi 0.6%
+> → 99.4%), SSRF scheme-mangling (naxsi 2.1% → 78.7%), path absolute-
+> target promotion (naxsi 5.6% → 70.4%). Full notes: CHANGELOG.md.
 
 ### From source
 

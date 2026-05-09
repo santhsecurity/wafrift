@@ -4,6 +4,69 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — naxsi-class WAF closures (D5+E2)
+
+- **`wafrift_grammar::sql::quote_free`** — quote / comment / paren-free
+  SQL injection rewrites (`1' OR '1'='1` → `1 OR 1=1`,
+  `1 OR 1 IS NOT NULL`, etc). URL-decodes the input first so encoded
+  forms (`1%27%20OR%20%271%27%3D%271`) trigger the rewrite. Promoted
+  to priority 1 in `sql::mutate` so the first 5 variants always
+  include 5 quote-free candidates. naxsi sql: **0.6% → 99.4%** case
+  bypass, **0.2% → 30.0%** oracle-valid.
+
+- **`wafrift_grammar::ssrf` scheme-mangling** — emits scheme-mangled
+  variants (`http:/X` single-slash, `//X` protocol-relative, bare
+  `X`, `http:////X` quad-slash, plus protocol-relative + integer/
+  octal IPs) that bypass naxsi's `http://<IP>` rule while still
+  resolving via Python urllib3 / Java URL / Go net/url / libcurl
+  normalisation. naxsi ssrf: **2.1% → 78.7%** case bypass.
+
+- **`wafrift_grammar::path_traversal` absolute-target promotion** —
+  16 high-value LFI targets that don't contain `..` or `passwd`
+  (`/proc/self/environ`, `/.ssh/id_rsa`, `/.git/config`,
+  `/var/log/auth.log`, etc) emitted FIRST in the variant list
+  (refactored from BTreeSet to insertion-ordered Vec + HashSet
+  dedup so `take(--variants 5)` actually reaches them). naxsi path:
+  **5.6% → 70.4%** case bypass.
+
+### Added — defensive hardening
+
+- **`MAX_USEFUL_PAD = 8 MiB` ceiling on `body_padding::pad`** —
+  silently clamps `requested_bytes >= 8 MiB` so a caller passing
+  `usize::MAX` (deliberate or arithmetic underflow) doesn't OOM the
+  process. 8 MiB is well above any documented cloud-WAF inspection
+  window (Cloudflare Enterprise: 128 KiB).
+
+- **5 new adversarial tests** across `body_padding` + `quote_free`:
+  pathological-size clamping, malformed Content-Type strings, empty
+  inputs with huge pads, URL-encoded shape detection, NUL-byte in
+  payload. None panic; output may be empty. 19 + 12 tests pass.
+
+### Fixed
+
+- **rquest 5.x migration.** All rquest 4.x versions were yanked from
+  crates.io between v0.2.2 release prep and CI run, breaking every
+  build. Migrated `crates/transport/src/stealth.rs` to
+  `rquest::ClientBuilder::emulation()` + `rquest_util::Emulation`
+  (the new home for browser profiles after 5.0 split them out).
+  Public `ImpersonateProfile` enum names are stable for CLI compat.
+
+- **CI YAML parser fix.** Workflow file had an unquoted `stealth::`
+  in a `- run:` value; YAML parser saw it as a nested mapping and
+  rejected the file (CI ran zero jobs since c1699b4). Quoted the
+  value.
+
+- **MSRV 1.85 lock fix.** `gene_bank/mod.rs` used
+  `std::fs::File::lock` which is gated behind unstable `file_lock`
+  (Rust 1.89+). Switched to `fs4::FileExt::lock` (workspace dep
+  already present, stable since fs4 1.0).
+
+- **Per-class baseline `wafrift-bench/results/v022-by-class/`** —
+  20 JSON files (10 classes × 2 WAFs) + SUMMARY.md documenting where
+  naxsi has structural gaps that need new mutators (xss/ldap/xxe
+  block on class-defining tokens; honest documentation rather than
+  silent failure).
+
 ## [0.2.2] — 2026-05-09
 
 ### Added — three EvilWAF / nowafplsV2 gaps closed (body padding, TLS rotation, TUI)
