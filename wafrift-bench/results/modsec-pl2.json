@@ -1,0 +1,1871 @@
+{
+  "base_url": "http://127.0.0.1:18082",
+  "by_class": {
+    "cmdi": {
+      "bypass_rate": 0.0825,
+      "cases": 8,
+      "evaded_bypassed": 33,
+      "evaded_total": 400,
+      "raw_block_rate": 0.75,
+      "raw_blocked": 6
+    },
+    "ldap": {
+      "bypass_rate": 0.235,
+      "cases": 4,
+      "evaded_bypassed": 47,
+      "evaded_total": 200,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 4
+    },
+    "log4shell": {
+      "bypass_rate": 0.19205298013245034,
+      "cases": 6,
+      "evaded_bypassed": 29,
+      "evaded_total": 151,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 6
+    },
+    "nosql": {
+      "bypass_rate": 0.23270440251572327,
+      "cases": 6,
+      "evaded_bypassed": 37,
+      "evaded_total": 159,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 6
+    },
+    "path": {
+      "bypass_rate": 0.11740890688259109,
+      "cases": 6,
+      "evaded_bypassed": 29,
+      "evaded_total": 247,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 6
+    },
+    "sql": {
+      "bypass_rate": 0.08166666666666667,
+      "cases": 12,
+      "evaded_bypassed": 49,
+      "evaded_total": 600,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 12
+    },
+    "ssrf": {
+      "bypass_rate": 0.0,
+      "cases": 10,
+      "evaded_bypassed": 0,
+      "evaded_total": 500,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 10
+    },
+    "ssti": {
+      "bypass_rate": 0.14,
+      "cases": 8,
+      "evaded_bypassed": 56,
+      "evaded_total": 400,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 8
+    },
+    "xss": {
+      "bypass_rate": 0.0,
+      "cases": 8,
+      "evaded_bypassed": 0,
+      "evaded_total": 400,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 8
+    },
+    "xxe": {
+      "bypass_rate": 0.0,
+      "cases": 4,
+      "evaded_bypassed": 0,
+      "evaded_total": 132,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 4
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 50,
+    "overall_bypass_rate": 0.08780181875195986,
+    "total_variants_bypassed": 280,
+    "total_variants_sent": 3189
+  },
+  "raw_block_rate": 0.9722222222222222,
+  "raw_blocked": 70,
+  "results": [
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "aws_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.24815,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "gcp_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.046629,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "azure_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.077026,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "localhost_redis",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.861091,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "file_uri",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9631419999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "gopher_smtp",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8902450000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "decimal_localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8855459999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "ipv6_localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.116941,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "url_at_bypass",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.878272,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "dns_rebinding_pin",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.831154,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:command_obfuscation",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::IisUnicodeEncode",
+          "heavy:separator_swap+encoding::FullwidthEncode"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "shell_id",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.353358,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:command_obfuscation",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "shell_pipe_id",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.58883,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:command_obfuscation",
+          "heavy:separator_swap+encoding::FullwidthEncode"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "shell_backtick",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.82372,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.02,
+            "bypassed": 1,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.02,
+        "bypass_techniques": [
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 1,
+        "variants_total": 50
+      },
+      "id": "shell_subshell",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.867923,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.06,
+            "bypassed": 3,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.06,
+        "bypass_techniques": [
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 3,
+        "variants_total": 50
+      },
+      "id": "shell_amp_amp",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.974874,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:command_obfuscation",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "shell_newline",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.994822,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.12,
+            "bypassed": 6,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.12,
+        "bypass_techniques": [
+          "heavy:command_obfuscation",
+          "heavy:space_swap",
+          "heavy:space_swap",
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 50
+      },
+      "id": "windows_amp",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.00484,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.06,
+            "bypassed": 3,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.06,
+        "bypass_techniques": [
+          "heavy:separator_swap+encoding::SpaceToPlus",
+          "heavy:separator_swap+encoding::SpaceToHash",
+          "heavy:separator_swap+encoding::IisUnicodeEncode"
+        ],
+        "variants_bypassed": 3,
+        "variants_total": 50
+      },
+      "id": "windows_pipe",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.168408,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "linux_etc_passwd",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.024577,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "linux_double_dot",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.05222,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.30434782608695654,
+            "bypassed": 7,
+            "variants": 23
+          }
+        },
+        "bypass_rate": 0.30434782608695654,
+        "bypass_techniques": [
+          "heavy:encoding::IisUnicodeEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 23
+      },
+      "id": "url_encoded",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.934008,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.25,
+            "bypassed": 6,
+            "variants": 24
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "heavy:encoding::IisUnicodeEncode",
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 24
+      },
+      "id": "double_url_encoded",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.995302,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "windows_boot_ini",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.067319,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation+encoding::Base64UrlEncode",
+          "heavy:path_traversal_mutation+encoding::HexEncode",
+          "heavy:path_traversal_mutation+encoding::GzipEncode",
+          "heavy:path_traversal_mutation+encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "null_byte_truncation",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2443009999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "external_entity_passwd",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8854460000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "parameter_entity",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.652037,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "billion_laughs",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.625758,
+      "raw_status": 403
+    },
+    {
+      "class": "xxe",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 33
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 33
+      },
+      "id": "external_xinclude",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.550666,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "script_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.997407,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "img_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9975470000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "svg_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.011293,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "javascript_uri",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.900435,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "iframe_srcdoc",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.094299,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "body_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.094139,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "details_ontoggle",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.947292,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "variants_bypassed": 0,
+        "variants_total": 50
+      },
+      "id": "polyglot_ova",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.4579630000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 5,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 25
+      },
+      "id": "jndi_ldap_basic",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9673,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.15384615384615385,
+            "bypassed": 4,
+            "variants": 26
+          }
+        },
+        "bypass_rate": 0.15384615384615385,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::HexEncode"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 26
+      },
+      "id": "jndi_rmi",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.057651,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 5,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 25
+      },
+      "id": "jndi_dns",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.964014,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 5,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 25
+      },
+      "id": "jndi_lower_obfuscation",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.040699,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 5,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 25
+      },
+      "id": "jndi_double_dollar",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.034577,
+      "raw_status": 403
+    },
+    {
+      "class": "log4shell",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2,
+            "bypassed": 5,
+            "variants": 25
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 25
+      },
+      "id": "jndi_envvar_default",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.075945,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "tautology_or_1_eq_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.030348,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "tautology_or_a_eq_a",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.086184,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "tautology_admin",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.415804,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.1,
+            "bypassed": 5,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div",
+          "heavy:union_swap"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 50
+      },
+      "id": "union_select_null",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.352465,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "union_information_schema",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.167467,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "blind_boolean_substr",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.4808359999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "blind_time_sleep",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.150796,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "blind_time_pg_sleep",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1718849999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "error_extractvalue",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2337209999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "stacked_drop",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2762520000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "comment_inline",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1802110000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.08,
+            "bypassed": 4,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.08,
+        "bypass_techniques": [
+          "heavy:keywordless+numeric_sub",
+          "heavy:keywordless+numeric_mul",
+          "heavy:keywordless+numeric_add",
+          "heavy:keywordless+numeric_div"
+        ],
+        "variants_bypassed": 4,
+        "variants_total": 50
+      },
+      "id": "case_alternation",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.118785,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "jinja2_arith",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.012325,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "jinja2_subprocess",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2015909999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "twig_arith",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9846430000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "twig_filter",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.343178,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "freemarker_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1363079999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "velocity_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.198327,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "erb_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9821579999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ssti",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation",
+          "heavy:template_mutation"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "smarty_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.106973,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.25925925925925924,
+            "bypassed": 7,
+            "variants": 27
+          }
+        },
+        "bypass_rate": 0.25925925925925924,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 27
+      },
+      "id": "mongo_ne",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.994932,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2692307692307692,
+            "bypassed": 7,
+            "variants": 26
+          }
+        },
+        "bypass_rate": 0.2692307692307692,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::PercentagePrefix",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 26
+      },
+      "id": "mongo_gt",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.897069,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.18518518518518517,
+            "bypassed": 5,
+            "variants": 27
+          }
+        },
+        "bypass_rate": 0.18518518518518517,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode"
+        ],
+        "variants_bypassed": 5,
+        "variants_total": 27
+      },
+      "id": "mongo_regex",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.982449,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.2222222222222222,
+            "bypassed": 6,
+            "variants": 27
+          }
+        },
+        "bypass_rate": 0.2222222222222222,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 27
+      },
+      "id": "mongo_where_true",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.953855,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.23076923076923078,
+            "bypassed": 6,
+            "variants": 26
+          }
+        },
+        "bypass_rate": 0.23076923076923078,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64UrlEncode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 26
+      },
+      "id": "mongo_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.5801630000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "nosql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.23076923076923078,
+            "bypassed": 6,
+            "variants": 26
+          }
+        },
+        "bypass_rate": 0.23076923076923078,
+        "bypass_techniques": [
+          "heavy:encoding::FullwidthEncode",
+          "heavy:encoding::Base64Encode",
+          "heavy:encoding::HexEncode",
+          "heavy:encoding::Utf7Encode",
+          "heavy:encoding::GzipEncode",
+          "heavy:encoding::DeflateEncode"
+        ],
+        "variants_bypassed": 6,
+        "variants_total": 26
+      },
+      "id": "couch_inject",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2041160000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.18,
+            "bypassed": 9,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.18,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::Base64Encode",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::GzipEncode",
+          "heavy:ldap_mutation+encoding::DeflateEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode"
+        ],
+        "variants_bypassed": 9,
+        "variants_total": 50
+      },
+      "id": "tautology_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.078279,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.3,
+            "bypassed": 15,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::CaseAlternation",
+          "heavy:ldap_mutation+encoding::RandomCase",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::Base64Encode",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::BetweenObfuscation",
+          "heavy:ldap_mutation+encoding::ChunkedSplit",
+          "heavy:ldap_mutation+encoding::GzipEncode",
+          "heavy:ldap_mutation+encoding::DeflateEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode"
+        ],
+        "variants_bypassed": 15,
+        "variants_total": 50
+      },
+      "id": "tautology_and",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.975816,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.14,
+            "bypassed": 7,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.14,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::Base64UrlEncode",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode"
+        ],
+        "variants_bypassed": 7,
+        "variants_total": 50
+      },
+      "id": "wildcard_anon",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.297612,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.32,
+            "bypassed": 16,
+            "variants": 50
+          }
+        },
+        "bypass_rate": 0.32,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation+encoding::CaseAlternation",
+          "heavy:ldap_mutation+encoding::RandomCase",
+          "heavy:ldap_mutation+encoding::IisUnicodeEncode",
+          "heavy:ldap_mutation+encoding::JsonEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode",
+          "heavy:ldap_mutation+encoding::Base64Encode",
+          "heavy:ldap_mutation+encoding::HexEncode",
+          "heavy:ldap_mutation+encoding::BetweenObfuscation",
+          "heavy:ldap_mutation+encoding::ChunkedSplit",
+          "heavy:ldap_mutation+encoding::GzipEncode",
+          "heavy:ldap_mutation+encoding::DeflateEncode",
+          "heavy:ldap_mutation+encoding::FullwidthEncode",
+          "heavy:ldap_mutation+encoding::HomoglyphEncode"
+        ],
+        "variants_bypassed": 16,
+        "variants_total": 50
+      },
+      "id": "boolean_filter",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.90866,
+      "raw_status": 403
+    }
+  ],
+  "strategies": [
+    "heavy"
+  ],
+  "total_cases": 72,
+  "variants_per_case_per_strategy": 50
+}
