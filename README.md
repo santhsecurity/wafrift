@@ -10,40 +10,47 @@
 
 Other tools give you one trick: junk padding, header injection, smuggling, or a static tamper list. WafRift is the union — encoding, grammar-aware mutation, content-type switching, request smuggling, and TLS/HTTP fingerprint rotation. In v0.1 the **CLI exposes encoding strategies and the grammar layer as fine-grained `--only`/`--exclude` selectors**; the rest run as part of the default pipeline. Per-host toggle persistence and a Burp Suite control panel are tracked in the [post-0.1 roadmap](docs/GAP_CLOSURE_ROADMAP.md). Turn the engine loose and a search loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses the target WAF and persists winning pipelines to a per-WAF **gene bank** so the next scan starts with zero discovery phase.
 
-```
-$ wafrift scan --target http://target.com --payload "' OR 1=1--" --level heavy
+## Measured bypass rates
 
-╔══════════════════════════════════════════════════╗
-║  WafRift Live WAF Evasion Scanner
-╚══════════════════════════════════════════════════╝
+Every number below is reproducible from the bench harness in
+[`wafrift-bench/`](./wafrift-bench/). Methodology in
+[`wafrift-bench/methodology.md`](./wafrift-bench/methodology.md);
+machine-readable JSON in `wafrift-bench/results/`.
 
-  Target: http://target.com
-  Payload Type: SQL Injection
-  Variants: 941
+**Target: ModSecurity + OWASP CRS (the most-deployed open-source WAF).**
+Corpus: 557 cases across 10 attack classes (sql / xss / cmdi / ssti /
+path / ldap / xxe / ssrf / nosql / log4shell). 10 evasion strategies
+combined: payload-string mutation, MCTS (mctrust 0.4), HTTP smuggling,
+content-type confusion, ReDoS, hill-climbing, simulated annealing,
+tabu, novelty, MAP-Elites. Oracle-gated (each "bypass" verified
+structurally as a valid attack, not garbage that slipped past).
 
-[1/7] Detecting WAF...
-  ✓ Detected: ModSecurity CRS (88% confidence)
-  📋 Advisor: Use heavy encoding + keyword-free mutations
+| Paranoia | Variants sent | Bypassed | Bypass rate | Cases ≥1 bypass |
+|---|---:|---:|---:|---:|
+| **PL=1** (default) | 46k | 16.7k | **36%** | **557 / 557 (100%)** |
+| PL=2 | 60k | 17.6k | 29% | 557 / 557 (100%) |
+| PL=3 | 60k | 17.3k | 28% | 557 / 557 (100%) |
+| **PL=4** (most aggressive) | 60k | 16.3k | **27%** | **557 / 557 (100%)** |
 
-[2/7] Testing baseline (raw payload)...
-  ✓ Raw payload BLOCKED — WAF is active (HTTP 403)
+**At every paranoia level — including PL=4, the most paranoid CRS
+preset — every single attack case in the corpus has at least one
+working bypass.** Once a working evasion seed exists, the per-host
+gene bank (`~/.wafrift/genomes/`) replays it indefinitely, so
+subsequent scans against the same WAF start with zero discovery
+phase.
 
-[3/7] Exploring evasion variants...
-  ....!!..!..!!.....!!.....!!.....!!.....!!
-
-[4/7] Exploiting winning strategies...
-  → encoding chaining  → cross-pollination  → fresh mutations
-
-[5/7] Multi-vector delivery (header, HPP, multipart)...
-[6/7] Header obfuscation probing...
-[7/7] Intelligence loop (50 evolution rounds)...
-
-══════════════════════════════════════════════════
-  WAF: ModSecurity CRS   Bypass Rate: 77.9%
-  Blocked: 178            Bypassed: 764
-══════════════════════════════════════════════════
-
-🧬 Gene bank updated: 12 techniques saved for ModSecurity CRS
+```bash
+# Reproduce
+git clone https://github.com/santhsecurity/wafrift && cd wafrift
+wafrift-bench/scripts/up.sh modsec-pl4
+cargo run --release -p wafrift-cli -- bench-waf \
+    --base-url http://127.0.0.1:18084 \
+    --corpus wafrift-bench/corpus \
+    --evade --variants 20 \
+    --strategies heavy,mcts,smuggling,content-type,redos,hill-climb,sim-anneal,tabu,novelty,map-elites \
+    --oracle-gate \
+    --output repro.json
+jq .evaded_summary repro.json
 ```
 
 ## Why WafRift?

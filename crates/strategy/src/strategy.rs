@@ -311,11 +311,7 @@ fn build_mcts_result(env: WafRiftEnv, _config: &EvasionConfig) -> Option<Evasion
 /// MCTS depth is derived from host state's block count: more blocks ->
 /// deeper search (capped at 5).
 #[must_use]
-pub fn evade_smart(
-    request: &Request,
-    state: &HostState,
-    config: &EvasionConfig,
-) -> EvasionResult {
+pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig) -> EvasionResult {
     // Without prior block signal, there's nothing for MCTS to learn from yet.
     // Use the classic pipeline for the first request to a new host.
     if state.blocks == 0 {

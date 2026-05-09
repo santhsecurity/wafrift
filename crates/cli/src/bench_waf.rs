@@ -26,8 +26,10 @@ use wafrift_evolution::evolution::{EvolutionEngine, GenePool};
 use wafrift_evolution::types::Budget;
 use wafrift_grammar::grammar::{self, PayloadType};
 use wafrift_oracle::cmdi::CmdiOracle;
+use wafrift_oracle::ldap::LdapOracle;
 use wafrift_oracle::path::PathOracle;
 use wafrift_oracle::sql::{self as sql_oracle, DatabaseDialect};
+use wafrift_oracle::ssrf::SsrfOracle;
 use wafrift_oracle::ssti::SstiOracle;
 use wafrift_oracle::traits::PayloadOracle;
 use wafrift_oracle::xss::XssOracle;
@@ -105,6 +107,24 @@ pub struct BenchWafArgs {
     /// Also write the JSON result blob to this file.
     #[arg(long)]
     pub output: Option<PathBuf>,
+
+    /// Emit only the aggregate summary (skip per-case details). Cuts JSON
+    /// output by 100x for CI gating.
+    #[arg(long, default_value_t = false)]
+    pub summary_only: bool,
+
+    /// Skip the upstream healthcheck before benching. By default the bench
+    /// pings the WAF target's /get endpoint first and fails fast with an
+    /// actionable error if the target isn't responding (so 30k connection
+    /// errors don't masquerade as 100% block rate).
+    #[arg(long, default_value_t = false)]
+    pub skip_healthcheck: bool,
+
+    /// Adaptive throttle: if this many consecutive sends fail at the
+    /// connection level (target is overwhelmed), pause for 2s and continue
+    /// at half-speed. 0 disables. Default 50.
+    #[arg(long, default_value_t = 50)]
+    pub adaptive_pause_after_errors: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,7 +191,9 @@ struct StrategyStat {
 }
 
 /// Returns true if the variant retains the exploit semantics of the original
-/// payload for `class`. Falls back to true when no oracle exists for the class.
+/// payload for `class`. Per-class structural validity check via the
+/// corresponding oracle in wafrift-oracle. Falls back to true only for
+/// classes that genuinely have no oracle (cve_pocs is held-out test data).
 fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
     match class {
         "sql" => sql_oracle::is_valid_expression_injection(transformed, DatabaseDialect::Generic),
@@ -179,10 +201,80 @@ fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
         "cmdi" => CmdiOracle.is_semantically_valid(original, transformed),
         "ssti" => SstiOracle.is_semantically_valid(original, transformed),
         "path" => PathOracle.is_semantically_valid(original, transformed),
-        // No oracle for ldap / ssrf / xxe / nosql / log4shell / cve_pocs:
-        // accept the bypass on faith. (Adding oracles here is in-scope.)
+        "ldap" => LdapOracle.is_semantically_valid(original, transformed),
+        "ssrf" => SsrfOracle.is_semantically_valid(original, transformed),
+        "nosql" => is_valid_nosql(original, transformed),
+        "xxe" => is_valid_xxe(original, transformed),
+        "log4shell" => is_valid_log4shell(original, transformed),
+        // cve_pocs is the held-out test set — accept on faith and let the
+        // per-payload oracle (if applicable based on payload content) gate.
         _ => true,
     }
+}
+
+/// NoSQL injection structural validity: the variant must still contain at
+/// least one MongoDB operator marker ($ne / $gt / $regex / $where / $or /
+/// $in / $exists / $type) OR a MongoDB-style operator-key bracket form
+/// (`[$op]=`). Without these the parser won't see it as a NoSQL filter.
+fn is_valid_nosql(_original: &str, transformed: &str) -> bool {
+    const MONGO_OPS: &[&str] = &[
+        "$ne",
+        "$gt",
+        "$lt",
+        "$gte",
+        "$lte",
+        "$regex",
+        "$where",
+        "$or",
+        "$and",
+        "$in",
+        "$nin",
+        "$exists",
+        "$type",
+        "$elemMatch",
+        "$all",
+    ];
+    MONGO_OPS.iter().any(|op| transformed.contains(op)) || transformed.contains("[$")
+}
+
+/// XXE structural validity: the transformed payload must still parse as XML
+/// with at least one ENTITY / DOCTYPE / XInclude marker. Otherwise it's just
+/// a string with `<` characters, not an XML attack.
+fn is_valid_xxe(_original: &str, transformed: &str) -> bool {
+    let lower = transformed.to_ascii_lowercase();
+    let has_xml_decl_or_root = lower.contains("<?xml")
+        || lower.contains("<!doctype")
+        || lower.contains("<soap:")
+        || lower.contains("<svg")
+        || (lower.contains('<') && lower.contains("xmlns"));
+    let has_xxe_marker = lower.contains("<!entity")
+        || lower.contains("system ")
+        || lower.contains("xi:include")
+        || lower.contains("file://")
+        || lower.contains("php://");
+    has_xml_decl_or_root && has_xxe_marker
+}
+
+/// Log4Shell structural validity: must still contain a JNDI lookup expression.
+/// Common shapes: `${jndi:`, obfuscated `${${lower:j}ndi:`, `${${env:NaN:-j}ndi:`,
+/// percent-encoded `%24%7Bjndi`. We accept anything that resolves to a JNDI
+/// scheme on lookup.
+fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
+    let lower = transformed.to_ascii_lowercase();
+    // Direct or partially-obfuscated forms.
+    let has_jndi_ref = lower.contains("${jndi:")
+        || lower.contains("ndi:ldap")
+        || lower.contains("ndi:rmi")
+        || lower.contains("ndi:dns")
+        || lower.contains("ndi:iiop")
+        || lower.contains("ndi:corba")
+        || lower.contains("ndi:nis")
+        || lower.contains("ndi:nds")
+        || lower.contains("ndi:ldaps")
+        // URL-encoded ${
+        || lower.contains("%24%7bjndi")
+        || lower.contains("%2524%257bjndi");
+    has_jndi_ref
 }
 
 pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
@@ -361,9 +453,15 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
         return Err("no cases match the requested classes".into());
     }
 
+    // Pick a randomized real-browser User-Agent (vs. the obvious
+    // wafrift-bench/0.1 marker) so the WAF doesn't have a free signal.
+    let ua = wafrift_fingerprint::fingerprint::random_profile()
+        .map(|p| p.user_agent.to_string())
+        .unwrap_or_else(|| "Mozilla/5.0".into());
+
     let mut client_builder = Client::builder()
         .timeout(std::time::Duration::from_secs(args.timeout_secs))
-        .user_agent("wafrift-bench/0.1");
+        .user_agent(ua);
     if args.insecure {
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
@@ -371,23 +469,67 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
         .build()
         .map_err(|e| format!("HTTP client: {e}"))?;
 
+    // Healthcheck: make sure the target is even reachable before we
+    // queue 30k probes that would all "fail" with connection errors.
+    if !args.skip_healthcheck {
+        let probe_url = format!("{}/get", base_url.trim_end_matches('/'));
+        match client
+            .get(&probe_url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(format!(
+                    "healthcheck failed: cannot reach {probe_url}: {e}\n\
+                     Hint: bring the WAF stack up first. \
+                     For the bundled stacks, e.g. `wafrift-bench/scripts/up.sh modsec-pl1`. \
+                     Pass --skip-healthcheck to override."
+                ));
+            }
+        }
+    }
+
+    // Adaptive throttle state: consecutive connection errors -> pause + slow down.
+    let consecutive_errors = std::sync::atomic::AtomicU32::new(0);
+    let extra_delay_ms = std::sync::atomic::AtomicU64::new(0);
+
     let mut results: Vec<CaseResult> = Vec::with_capacity(cases.len());
 
+    use std::sync::atomic::Ordering;
+
     for (idx, case) in cases.iter().enumerate() {
-        if idx > 0 && args.delay_ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        if idx > 0 {
+            let total_delay = args.delay_ms + extra_delay_ms.load(Ordering::Relaxed);
+            if total_delay > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(total_delay)).await;
+            }
         }
         let req = build_request(&base_url, case);
-        let (raw_status, raw_blocked, raw_latency_ms) =
-            match send(&client, &req, args.timeout_secs).await {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("warn: {} (raw): {e}", case.id);
-                    // Treat as raw=blocked with status 0 so the case is recorded
-                    // but doesn't poison the aggregate.
-                    (0, true, 0.0)
+        let (raw_status, raw_blocked, raw_latency_ms) = match send(&client, &req, args.timeout_secs)
+            .await
+        {
+            Ok(t) => {
+                consecutive_errors.store(0, Ordering::Relaxed);
+                t
+            }
+            Err(e) => {
+                eprintln!("warn: {} (raw): {e}", case.id);
+                let n = consecutive_errors.fetch_add(1, Ordering::Relaxed) + 1;
+                if args.adaptive_pause_after_errors > 0 && n == args.adaptive_pause_after_errors {
+                    eprintln!(
+                        "warn: {n} consecutive connection errors — pausing 2s and \
+                             doubling per-request delay (target may be choked)"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let prev = extra_delay_ms.load(Ordering::Relaxed);
+                    extra_delay_ms.store(prev.max(50) + args.delay_ms, Ordering::Relaxed);
+                    consecutive_errors.store(0, Ordering::Relaxed);
                 }
-            };
+                (0, true, 0.0)
+            }
+        };
 
         let evaded = if args.evade {
             Some(run_evade(&client, case, &base_url, &args).await?)
@@ -957,6 +1099,33 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         by_class.entry(r.class.clone()).or_default().push(r);
     }
 
+    // Aggregate by strategy across all cases.
+    let mut by_strategy_acc: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+    for r in results {
+        if let Some(e) = &r.evaded {
+            for (name, stat) in &e.by_strategy {
+                let entry = by_strategy_acc.entry(name.clone()).or_insert((0, 0, 0));
+                entry.0 += stat.variants;
+                entry.1 += stat.bypassed;
+                entry.2 += stat.oracle_valid;
+            }
+        }
+    }
+    let by_strategy_json: serde_json::Map<String, serde_json::Value> = by_strategy_acc
+        .iter()
+        .map(|(name, (variants, bypassed, oracle_valid))| {
+            (
+                name.clone(),
+                serde_json::json!({
+                    "variants": variants,
+                    "bypassed": bypassed,
+                    "bypass_rate": if *variants > 0 { *bypassed as f64 / *variants as f64 } else { 0.0 },
+                    "oracle_valid": oracle_valid,
+                }),
+            )
+        })
+        .collect();
+
     let aggregate = serde_json::json!({
         "base_url": base_url,
         "evade_mode": args.evade,
@@ -994,7 +1163,8 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
                 "bypass_rate": if evaded_total > 0 { evaded_bypassed as f64 / evaded_total as f64 } else { 0.0 },
             }))
         }).collect::<serde_json::Map<_, _>>(),
-        "results": results,
+        "by_strategy": by_strategy_json,
+        "results": if args.summary_only { serde_json::Value::Null } else { serde_json::to_value(results).map_err(|e| e.to_string())? },
     });
 
     if let Some(path) = &args.output {
@@ -1083,6 +1253,29 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
                     class,
                     rs.len(),
                     raw_rate * 100.0
+                );
+            }
+        }
+
+        // Per-strategy breakdown — answers "which of the 10 strategies
+        // is doing work and which is dead weight on this WAF?"
+        if args.evade && !by_strategy_acc.is_empty() {
+            println!();
+            println!("{}", "by strategy:".bold());
+            for (name, (variants, bypassed, oracle_valid)) in &by_strategy_acc {
+                let rate = if *variants > 0 {
+                    *bypassed as f64 / *variants as f64 * 100.0
+                } else {
+                    0.0
+                };
+                let valid_rate = if *bypassed > 0 {
+                    *oracle_valid as f64 / *bypassed as f64 * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "  {:<14} variants {:>6}  bypass {:>5.1}%  oracle-valid {:>5.1}% of bypass",
+                    name, variants, rate, valid_rate
                 );
             }
         }

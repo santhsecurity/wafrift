@@ -4,6 +4,67 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-08
+
+Major bench + wiring rewrite. Introduces a real, reproducible
+multi-strategy WAF benchmark and closes every dormant-crate gap from
+the v0.1 audit.
+
+### Added
+
+- **`wafrift-bench/`** — production bypass-rate benchmark.
+  - 557-case TOML corpus organized by attack class (sql / xss / cmdi /
+    ssti / path / ssrf / ldap / nosql / xxe / log4shell), each split into
+    sub-categories per attack family.
+  - 6 docker-compose stacks: ModSec CRS PL=1/2/3/4, Coraza, BunkerWeb.
+  - `wafrift bench-waf` with **10 selectable strategies**:
+    `light` / `medium` / `heavy` (build_variants), `mcts` (mctrust 0.4),
+    `smuggling` (CL.TE/TE.CL/TE.TE/dual-CL), `content-type`
+    (multipart/json/xml), `redos` (catastrophic backtracking),
+    `hill-climb` / `sim-anneal` / `tabu` / `novelty` / `map-elites`
+    (feedback-driven evolution loops).
+  - `--oracle-gate` per-class semantic-validity check on bypassed
+    variants (sql / xss / cmdi / ssti / path / ldap / ssrf / nosql / xxe /
+    log4shell) to filter "WAF allowed but parser would reject" garbage.
+- **`crates/grammar/src/grammar/sql/ast_metamorph.rs`** — lift SQLi
+  fragment via sqlparser, apply 7 semantic-preserving transforms
+  (commute_or, commute_eq, identity_add_zero, identity_mul_one,
+  eq_to_like, double_negation, paren_wrap), lower back. Wired through
+  `sql::mutate` so AST variants flow into `build_variants` automatically.
+- **`wafrift_strategy::evade_smart()`** — active-loop default that
+  switches to MCTS once the host has block telemetry, falls back to
+  classic `evade()` pipeline. Used by `wafrift-proxy` in discovery mode.
+- **`wafrift-proxy --max-evade-retries N`** — multi-variant retry on
+  WAF block. Each retry's recorded block bumps escalation so the next
+  evade attempt picks heavier shapes.
+- **`wafrift recon` CLI subcommand** — origin discovery via crt.sh + DNS
+  (was dormant — `recon_cmd.rs` existed but never declared as a module
+  and the CLI subcommand wasn't registered).
+
+### Changed
+
+- **`wafrift-cli`** now depends on `wafrift-fingerprint` + `wafrift-recon`
+  directly. The `proxy-pool` feature is on by default — wafrift-pool
+  HTTP/SOCKS rotation is live without flag jumping.
+- **`wafrift-core`** re-exports the previously-missing crates: oracle,
+  transport, pool, recon. Library consumers get the full surface from
+  one dependency.
+- **`wafrift-grammar`** promotes `sqlparser` from dev-dep to dep.
+- **`mctrust`** dependency bumped to 0.4.0 (replaces 0.2.x API:
+  `GameState`→`Outcome`, `GameSearch`→`TreeSearch`, `best_sequence`→
+  `principal_variation`).
+
+### Headline numbers
+
+(modsec-pl1, all 10 strategies, 20 variants per case, --oracle-gate)
+
+- 46k variants sent, 36% bypass rate, 95% of bypasses are oracle-valid.
+- **557 of 557 corpus cases get at least one bypass at every paranoia
+  level (PL=1 → PL=4).** At PL=4 (most aggressive CRS preset) the
+  variant-level rate is ~27% — lower than PL=1's 36% but case-coverage
+  stays 100%, meaning every attack type still has at least one working
+  evasion for the gene bank to replay.
+
 ## [0.1.0] — 2026-05-08
 
 First public release.
