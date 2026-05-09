@@ -528,11 +528,16 @@ pub fn supported_wafs() -> Vec<String> {
 }
 
 /// Suggest evasions for a WAF name using the global rule engine.
+///
+/// Returns owned `String`s so callers can keep them past the engine's
+/// `RwLock` guard. The previous version returned `&'static str` via
+/// `Box::leak` on every call — at sustained proxy traffic that leaked
+/// ~100 KB/sec (4 strings × ~25 chars × 1000 req/s) and ~360 MB/hour.
+/// The leaked-string optimisation was wrong: `suggest_evasion` runs in
+/// the per-response hot path, not once at startup.
 #[must_use]
-pub fn suggest_evasion(waf_name: &str) -> Vec<&'static str> {
-    // This requires allocating because we can't return references to
-    // inside the RwLock.  We instead cache the default set as static.
-    let list: Vec<String> = with_engine(|engine| {
+pub fn suggest_evasion(waf_name: &str) -> Vec<String> {
+    with_engine(|engine| {
         engine
             .rules
             .get(waf_name)
@@ -545,14 +550,7 @@ pub fn suggest_evasion(waf_name: &str) -> Vec<&'static str> {
                     "ContentTypeSwitch".into(),
                 ]
             })
-    });
-    // Leak the strings to obtain 'static references.  This is fine
-    // because the set of evasion strings is bounded and created once.
-    let leaked: Vec<&'static str> = list
-        .into_iter()
-        .map(|s| -> &'static str { Box::leak(s.into_boxed_str()) })
-        .collect();
-    leaked
+    })
 }
 
 /// Configuration for ambiguity reporting.
