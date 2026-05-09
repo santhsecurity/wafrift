@@ -60,6 +60,7 @@ pub struct ReportArgs {
 #[derive(Serialize)]
 struct JsonReport<'a> {
     schema_version: u32,
+    wafrift_version: &'static str,
     source_schema: u32,
     total_hosts: usize,
     hosts_with_bypasses: usize,
@@ -199,6 +200,7 @@ fn render_json(
         .collect();
     let report = JsonReport {
         schema_version: REPORT_SCHEMA_VERSION,
+        wafrift_version: env!("CARGO_PKG_VERSION"),
         source_schema: bank.schema,
         total_hosts: bank.hosts.len(),
         hosts_with_bypasses: hosts.len(),
