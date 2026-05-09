@@ -94,7 +94,10 @@ pub async fn resolve_origins(hosts: &[String]) -> Result<Vec<String>> {
         // Simple tokio DNS resolution
         if let Ok(addrs) = tokio::net::lookup_host(format!("{host}:443")).await {
             for addr in addrs {
-                origin_ips.push(addr.ip().to_string());
+                let ip = addr.ip().to_string();
+                if !is_edge_ip(&ip) {
+                    origin_ips.push(ip);
+                }
             }
         }
     }

@@ -26,7 +26,7 @@ include!(concat!(env!("OUT_DIR"), "/markers_data.rs"));
 #[must_use]
 pub fn extract_body_signals(body: &[u8], is_gzipped: bool) -> Vec<Signal> {
     let text = if is_gzipped {
-        decompress_gzip(body).unwrap_or_default()
+        decompress_gzip(body).unwrap_or_else(|| String::from_utf8_lossy(body).to_string())
     } else {
         String::from_utf8_lossy(body).to_string()
     };
@@ -61,7 +61,7 @@ pub fn extract_body_signals(body: &[u8], is_gzipped: bool) -> Vec<Signal> {
 #[must_use]
 pub fn extract_block_reason(body: &[u8], is_gzipped: bool) -> Option<BlockReason> {
     let text = if is_gzipped {
-        decompress_gzip(body).unwrap_or_default()
+        decompress_gzip(body).unwrap_or_else(|| String::from_utf8_lossy(body).to_string())
     } else {
         String::from_utf8_lossy(body).to_string()
     };
