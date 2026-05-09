@@ -137,4 +137,20 @@ mod tests {
         l.acquire("b").await;
         assert!(start.elapsed() < Duration::from_millis(50));
     }
+
+    #[tokio::test]
+    async fn concurrent_stress_same_host_no_deadlock() {
+        // Simulate sqlmap firing hundreds of requests/sec to one host.
+        let l = RateLimiter::new(10_000.0, 100.0);
+        let mut handles = vec![];
+        for _ in 0..100 {
+            let lim = l.clone();
+            handles.push(tokio::spawn(async move {
+                lim.acquire("target").await;
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+    }
 }
