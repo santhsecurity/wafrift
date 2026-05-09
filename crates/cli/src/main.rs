@@ -235,7 +235,13 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Scan(args)) => {
-            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
             rt.block_on(async {
                 // Install graceful Ctrl+C handler so gene bank can be saved on interrupt.
                 let cancel = tokio_util::sync::CancellationToken::new();
