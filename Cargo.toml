@@ -23,7 +23,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -47,19 +47,19 @@ unused_must_use = "deny"
 
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)
-wafrift-types = { path = "crates/types", version = "0.2.1" }
-wafrift-encoding = { path = "crates/encoding", version = "0.2.1" }
-wafrift-grammar = { path = "crates/grammar", version = "0.2.1" }
-wafrift-content-type = { path = "crates/content-type", version = "0.2.1" }
-wafrift-smuggling = { path = "crates/smuggling", version = "0.2.1" }
-wafrift-fingerprint = { path = "crates/fingerprint", version = "0.2.1" }
-wafrift-detect = { path = "crates/detect", version = "0.2.1" }
-wafrift-evolution = { path = "crates/evolution", version = "0.2.1" }
-wafrift-strategy = { path = "crates/strategy", version = "0.2.1" }
-wafrift-oracle = { path = "crates/oracle", version = "0.2.1" }
-wafrift-transport = { path = "crates/transport", version = "0.2.1" }
-wafrift-pool = { path = "crates/pool", version = "0.2.1" }
-wafrift-recon = { path = "crates/recon", version = "0.2.1" }
+wafrift-types = { path = "crates/types", version = "0.2.2" }
+wafrift-encoding = { path = "crates/encoding", version = "0.2.2" }
+wafrift-grammar = { path = "crates/grammar", version = "0.2.2" }
+wafrift-content-type = { path = "crates/content-type", version = "0.2.2" }
+wafrift-smuggling = { path = "crates/smuggling", version = "0.2.2" }
+wafrift-fingerprint = { path = "crates/fingerprint", version = "0.2.2" }
+wafrift-detect = { path = "crates/detect", version = "0.2.2" }
+wafrift-evolution = { path = "crates/evolution", version = "0.2.2" }
+wafrift-strategy = { path = "crates/strategy", version = "0.2.2" }
+wafrift-oracle = { path = "crates/oracle", version = "0.2.2" }
+wafrift-transport = { path = "crates/transport", version = "0.2.2" }
+wafrift-pool = { path = "crates/pool", version = "0.2.2" }
+wafrift-recon = { path = "crates/recon", version = "0.2.2" }
 mctrust = "=0.4.0"
 # External dependencies (unavailable in this environment)
 # attackstr = { path = "../../libs/offensive/attackstr" }

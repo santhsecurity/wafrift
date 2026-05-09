@@ -4,6 +4,8 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-05-09
+
 ### Added — three EvilWAF / nowafplsV2 gaps closed (body padding, TLS rotation, TUI)
 
 - **`wafrift_evolution::body_padding`** — content-type-aware request
@@ -47,6 +49,38 @@ All notable changes to wafrift are documented here. The format is based on [Keep
   Verified live: 180-request stress through proxy → modsec-pl1 +
   modsec-pl3 + naxsi shows 119 bypassed (66.1%), 60 padded bodies,
   every POST tagged `+pad` in the recent stream.
+
+### Added — body-padding wired into the evolution chain (D1+D2)
+
+- `wafrift_evolution::body_padding::fill` switched from
+  `b'A'.repeat(n)` to a deterministic xorshift64* over `[a-z0-9]`.
+  Defeats Naxsi's BIG_REQUEST + RX heuristics that flag long
+  single-character runs. Live verification across 7 stacks: 16 KB
+  pure padding now passes through modsec-pl1, modsec-pl2, coraza,
+  and bunkerweb cleanly (where run-of-A previously triggered them).
+
+- `EvasionConfig.body_padding_bytes: usize` field; `maximum()` builder
+  defaults to 16 * 1024 (AWS-WAF-default tier). `strategy::evade()`
+  now applies body padding as Step 3, AFTER every other body-mutating
+  layer, recording `Technique::BodyPadding(actual_added)` so the
+  gene-bank credits padding-as-winner like any other technique.
+  `EvasionLayer::BodyPadding` variant added with prerequisites
+  `[Encoding, ContentType, Grammar]`.
+
+- bench-waf v0.2.2 baseline pinned for all 7 local stacks
+  (modsec PL1-4 + coraza + bunkerweb + naxsi) at
+  `wafrift-bench/results/v022-*.json`. Highlights with the mcts
+  strategy + body-padding-via-maximum:
+
+  ```
+  modsec-pl1   raw 94.2%   bypassed 100.0%   oracle-valid 86.1%
+  modsec-pl2   raw 99.4%   bypassed 100.0%   oracle-valid 85.2%
+  modsec-pl3   raw 99.4%   bypassed 100.0%   oracle-valid 82.7%
+  modsec-pl4   raw 100.0%  bypassed 100.0%   oracle-valid 83.8%
+  coraza       raw 94.8%   bypassed  35.8%   oracle-valid 16.2%
+  bunkerweb    raw 94.2%   bypassed 100.0%   oracle-valid 86.7%
+  naxsi        raw 99.4%   bypassed   0.6%   oracle-valid  0.2%
+  ```
 
 ### Honest limitations on local stress test
 
