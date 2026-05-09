@@ -20,6 +20,7 @@ pub struct ReconArgs {
 #[derive(Serialize)]
 struct ReconReport<'a> {
     schema_version: u32,
+    wafrift_version: &'static str,
     domain: &'a str,
     subdomains: Vec<String>,
     origin_ips: Vec<String>,
@@ -86,6 +87,7 @@ pub fn run_recon(args: ReconArgs) -> ExitCode {
         if json_mode {
             let report = ReconReport {
                 schema_version: RECON_SCHEMA_VERSION,
+                wafrift_version: env!("CARGO_PKG_VERSION"),
                 domain: &args.domain,
                 subdomains,
                 origin_ips: ips,

@@ -96,6 +96,11 @@ pub struct ReplayArgs {
 
 #[derive(Debug, Serialize)]
 struct ReplayResult {
+    /// Schema version for downstream parsers / CI gates. Bump when the
+    /// JSON shape changes incompatibly so tooling can detect drift.
+    schema_version: u32,
+    /// wafrift CLI version that produced the result.
+    wafrift_version: &'static str,
     target: String,
     param: String,
     method: String,
@@ -107,6 +112,8 @@ struct ReplayResult {
     response_bytes: usize,
     elapsed_ms: u128,
 }
+
+const REPLAY_SCHEMA_VERSION: u32 = 1;
 
 pub fn run_replay(args: ReplayArgs) -> ExitCode {
     let rt = match tokio::runtime::Runtime::new() {
@@ -240,6 +247,8 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     let blocked = is_waf_block(status, &body);
 
     let result = ReplayResult {
+        schema_version: REPLAY_SCHEMA_VERSION,
+        wafrift_version: env!("CARGO_PKG_VERSION"),
         target: args.target.clone(),
         param: args.param.clone(),
         method: args.method.to_ascii_uppercase(),
