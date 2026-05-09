@@ -20,8 +20,17 @@
 //! - Presence of common WAF block-page markers
 //! - Body hash (first 4KB, for exact-match detection)
 
+use once_cell::sync::Lazy;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+
+/// Lazily-compiled `<title>` extractor. Was being compiled per call —
+/// hot path runs once per upstream response, so the per-call cost
+/// scaled linearly with traffic.
+static TITLE_RE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r"<title\b[^>]*>(.*?)</title>")
+        .expect("hardcoded title regex must compile")
+});
 
 /// A compact fingerprint of an HTTP response.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -175,8 +184,7 @@ fn extract_content_type(headers: &[(String, String)]) -> String {
 /// and whitespace variations.
 fn extract_title(body: &str) -> Option<String> {
     // Match <title followed by optional attributes/whitespace, then >
-    let re = regex::Regex::new(r"<title\b[^>]*>(.*?)</title>").ok()?;
-    let caps = re.captures(body)?;
+    let caps = TITLE_RE.captures(body)?;
     let title = caps.get(1)?.as_str();
     Some(title.trim().to_ascii_lowercase())
 }

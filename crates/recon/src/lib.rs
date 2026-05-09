@@ -5,7 +5,13 @@
 //! to origin infrastructure, bypassing the edge WAF.
 
 use serde::Deserialize;
+use std::time::Duration;
 use thiserror::Error;
+
+/// Timeout for outbound CT log queries. crt.sh routinely takes 10-20s
+/// and occasionally hangs entirely; without a timeout `wafrift discover`
+/// would be a DoS-on-self for every blocked-up upstream.
+const CT_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Public error type for the recon crate. Library callers should pattern-
 /// match on this rather than `anyhow::Error` so they can react to
@@ -35,7 +41,9 @@ struct CrtShEntry {
 pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
     tracing::info!(domain, "querying crt.sh for CT logs");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(CT_QUERY_TIMEOUT)
+        .build()?;
     let url = format!("https://crt.sh/?q=%.{domain}&output=json");
 
     let res = client.get(&url).send().await?;
@@ -259,3 +267,5 @@ mod tests {
         assert!(origins.is_empty());
     }
 }
+
+pub mod discovery;
