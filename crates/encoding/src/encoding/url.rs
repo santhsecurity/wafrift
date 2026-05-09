@@ -95,7 +95,19 @@ pub fn triple_url_encode(payload: impl AsRef<[u8]>) -> String {
             }
             i += 7;
         }
-        // Check for single or double encoded %XX / %25XX
+        // Check for double-encoded sequence %25XX
+        else if bytes[i] == b'%'
+            && i + 4 < bytes.len()
+            && bytes[i + 1..i + 3].eq_ignore_ascii_case(b"25")
+            && bytes[i + 3].is_ascii_hexdigit()
+            && bytes[i + 4].is_ascii_hexdigit()
+        {
+            out.push_str("%2525");
+            out.push(bytes[i + 3] as char);
+            out.push(bytes[i + 4] as char);
+            i += 5;
+        }
+        // Check for single encoded %XX
         else if bytes[i] == b'%'
             && i + 2 < bytes.len()
             && bytes[i + 1].is_ascii_hexdigit()
@@ -192,5 +204,34 @@ mod tests {
         assert!(encoded.contains("%27")); // '
         assert!(encoded.contains("%20")); // space
         assert!(!encoded.contains("%4F")); // O is unreserved
+    }
+
+    #[test]
+    fn double_url_encode_trailing_percent() {
+        // Input ending in bare '%' must not produce an incomplete %2 fragment.
+        assert_eq!(double_url_encode("%"), "%2525");
+        assert_eq!(double_url_encode("foo%"), "foo%2525");
+        assert_eq!(double_url_encode("%2"), "%2525%2532");
+        assert_eq!(double_url_encode("%G"), "%2525%2547");
+    }
+
+    #[test]
+    fn triple_url_encode_trailing_percent() {
+        assert_eq!(triple_url_encode("%"), "%252525");
+        assert_eq!(triple_url_encode("foo%"), "foo%252525");
+        assert_eq!(triple_url_encode("%2"), "%252525%252532");
+        assert_eq!(triple_url_encode("%G"), "%252525%252547");
+    }
+
+    #[test]
+    fn triple_url_encode_handles_double_encoded() {
+        // %2520 is double-encoded space; triple-encoding should yield %252520.
+        assert_eq!(triple_url_encode("%2520"), "%252520");
+        // %2525 is double-encoded '%'; triple-encoding should yield %252525.
+        assert_eq!(triple_url_encode("%2525"), "%252525");
+        // Mixed: raw space + double-encoded space.
+        assert_eq!(triple_url_encode(" %2520"), "%252520%252520");
+        // Already triple-encoded must be preserved.
+        assert_eq!(triple_url_encode("%252520"), "%252520");
     }
 }

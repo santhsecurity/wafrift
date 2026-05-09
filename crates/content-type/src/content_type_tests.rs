@@ -215,6 +215,60 @@ mod tests {
     }
 
     #[test]
+    fn parse_form_body_rejects_oversized() {
+        let huge = vec![b'A'; super::MAX_FORM_BODY_SIZE + 1];
+        assert!(parse_form_body(&huge).is_empty());
+    }
+
+    #[test]
+    fn parse_form_body_accepts_max_size() {
+        let body = vec![b'a'; super::MAX_FORM_BODY_SIZE];
+        // No '=' delimiters → empty result, but must not panic or allocate huge vecs.
+        assert!(parse_form_body(&body).is_empty());
+    }
+
+    #[test]
+    fn multipart_boundary_avoids_collision() {
+        // Payload that contains the static boundary prefix.
+        let payload = "----WafriftBoundary0000000000000000";
+        let params = vec![("field".into(), payload.into())];
+        let variants = generate_variants(&params);
+        for variant in &variants {
+            if matches!(
+                variant.technique,
+                ContentTypeTechnique::Multipart
+                    | ContentTypeTechnique::MultipartQuotedBoundary
+                    | ContentTypeTechnique::MultipartWhitespaceBoundary
+                    | ContentTypeTechnique::MultipartDuplicateBoundary
+                    | ContentTypeTechnique::MultipartCharsetPrefix
+                    | ContentTypeTechnique::MixedContentType
+            ) {
+                let ct = &variant.content_type;
+                let boundary = ct
+                    .split("boundary=")
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim_matches('"')
+                    .trim();
+                let body_str = String::from_utf8_lossy(&variant.body);
+                // Every occurrence of the boundary in the body must be a
+                // framework delimiter (preceded by "--" and either at start
+                // or after \r\n). If the payload contained the boundary,
+                // we would see an embedded occurrence.
+                for (idx, _) in body_str.match_indices(boundary) {
+                    let before = &body_str[..idx];
+                    assert!(
+                        before.ends_with("--")
+                            && (before.len() == 2 || before.ends_with("\r\n--")),
+                        "boundary embedded in payload at position {idx} for {:?}: {body_str}",
+                        variant.technique
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn xml_special_chars_in_namespace_variant() {
         let params = vec![("q".into(), "<script>alert(1)</script>".into())];
         let variants = generate_variants(&params);

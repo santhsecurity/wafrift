@@ -90,6 +90,7 @@ impl EvasionClient {
             inner,
             config,
             host_states: Mutex::new(HashMap::new()),
+            host_fifo: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -108,6 +109,7 @@ impl EvasionClient {
             inner: client,
             config,
             host_states: Mutex::new(HashMap::new()),
+            host_fifo: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -199,30 +201,52 @@ impl EvasionClient {
                     max = max_attempts,
                     "WAF block detected — escalating evasion"
                 );
-                let mut states = self.lock_states();
-                if states.len() >= 10_000 && !states.contains_key(&host) {
-                    let key_to_remove = states.keys().next().cloned().unwrap_or_default();
-                    states.remove(&key_to_remove);
-                }
-                let state = states.entry(host.clone()).or_default();
-                if technique_keys.is_empty() {
-                    state.record_block();
-                } else {
-                    state.record_block_for_many(&technique_keys);
+                {
+                    let mut states = self.lock_states();
+                    if states.len() >= 10_000 && !states.contains_key(&host) {
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        while let Some(key_to_remove) = fifo.pop_front() {
+                            if states.remove(&key_to_remove).is_some() {
+                                break;
+                            }
+                        }
+                    }
+                    let is_new = !states.contains_key(&host);
+                    let state = states.entry(host.clone()).or_default();
+                    if is_new {
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        fifo.push_back(host.clone());
+                    }
+                    if technique_keys.is_empty() {
+                        state.record_block();
+                    } else {
+                        state.record_block_for_many(&technique_keys);
+                    }
                 }
                 continue;
             }
 
             // Not blocked (or last attempt) — record success and return
             if !is_blocked {
-                let mut states = self.lock_states();
-                if states.len() >= 10_000 && !states.contains_key(&host) {
-                    let key_to_remove = states.keys().next().cloned().unwrap_or_default();
-                    states.remove(&key_to_remove);
-                }
-                let state = states.entry(host.clone()).or_default();
-                if !techniques.is_empty() {
-                    state.record_success_for_many(&techniques);
+                {
+                    let mut states = self.lock_states();
+                    if states.len() >= 10_000 && !states.contains_key(&host) {
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        while let Some(key_to_remove) = fifo.pop_front() {
+                            if states.remove(&key_to_remove).is_some() {
+                                break;
+                            }
+                        }
+                    }
+                    let is_new = !states.contains_key(&host);
+                    let state = states.entry(host.clone()).or_default();
+                    if is_new {
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        fifo.push_back(host.clone());
+                    }
+                    if !techniques.is_empty() {
+                        state.record_success_for_many(&techniques);
+                    }
                 }
             }
 

@@ -234,6 +234,11 @@ fn check_size(payload: &[u8]) -> Result<(), EncodeError> {
 /// Returns `EncodeError::PayloadTooLarge` if the input exceeds [`MAX_PAYLOAD_SIZE`].
 /// Returns `EncodeError::InvalidUtf8` for text-oriented strategies when the input
 /// contains invalid UTF-8.
+///
+/// # UTF-8 safety
+/// Text-oriented strategies validate UTF-8 via `std::str::from_utf8` and return
+/// `InvalidUtf8` on failure. No unsafe UTF-8 conversions (`from_utf8_unchecked`,
+/// lossy casts, etc.) are used in the encoding pipeline.
 pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, EncodeError> {
     let payload = payload.as_ref();
     check_size(payload)?;

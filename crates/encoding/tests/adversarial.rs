@@ -191,6 +191,19 @@ fn f013_whitespace_insertion_preserves_keyword_integrity() {
 }
 
 // =============================================================================
+// F-015: No panic on invalid UTF-8 for any strategy
+// =============================================================================
+
+#[test]
+fn f015_no_panic_on_invalid_utf8() {
+    let invalid = b"\x80\x81\x82";
+    for strategy in wafrift_encoding::all_strategies() {
+        let _ = encode(invalid, strategy);
+        // Reaching here without panicking is the pass condition.
+    }
+}
+
+// =============================================================================
 // F-014: SqlCommentInsertion splits SQL keywords in half
 // =============================================================================
 

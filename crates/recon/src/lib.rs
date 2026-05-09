@@ -4,8 +4,25 @@
 //! It queries public APIs like crt.sh to discover subdomains that might point directly
 //! to origin infrastructure, bypassing the edge WAF.
 
-use anyhow::{Context, Result};
 use serde::Deserialize;
+use thiserror::Error;
+
+/// Public error type for the recon crate. Library callers should pattern-
+/// match on this rather than `anyhow::Error` so they can react to
+/// transport vs parse vs status failures distinctly.
+#[derive(Debug, Error)]
+pub enum ReconError {
+    #[error("crt.sh request failed: {0}")]
+    Transport(#[from] reqwest::Error),
+
+    #[error("crt.sh returned status {0}")]
+    BadStatus(reqwest::StatusCode),
+
+    #[error("failed to parse crt.sh response: {0}")]
+    Parse(#[from] serde_json::Error),
+}
+
+pub type Result<T> = std::result::Result<T, ReconError>;
 
 #[derive(Debug, Deserialize)]
 struct CrtShEntry {
@@ -21,17 +38,13 @@ pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
     let client = reqwest::Client::new();
     let url = format!("https://crt.sh/?q=%.{domain}&output=json");
 
-    let res = client
-        .get(&url)
-        .send()
-        .await
-        .context("failed to query crt.sh")?;
+    let res = client.get(&url).send().await?;
 
     if !res.status().is_success() {
-        anyhow::bail!("crt.sh returned status {}", res.status());
+        return Err(ReconError::BadStatus(res.status()));
     }
 
-    let body = res.text().await.context("failed to read crt.sh body")?;
+    let body = res.text().await?;
     let subdomains = parse_crtsh_response(&body, domain)?;
 
     tracing::info!(
@@ -45,8 +58,7 @@ pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
 ///
 /// Extracted for testability — this is the pure logic without HTTP.
 fn parse_crtsh_response(body: &str, domain: &str) -> Result<Vec<String>> {
-    let entries: Vec<CrtShEntry> =
-        serde_json::from_str(body).context("failed to parse crt.sh JSON")?;
+    let entries: Vec<CrtShEntry> = serde_json::from_str(body)?;
 
     let mut subdomains: Vec<String> = entries
         .into_iter()

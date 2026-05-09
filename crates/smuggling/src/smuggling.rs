@@ -634,6 +634,12 @@ pub fn all_detection_probes(host: &str) -> Vec<SmugglingPayload> {
 }
 
 /// All exploit payloads (requires `unsafe-probes` feature).
+///
+/// # Safety
+/// Sends intentionally malformed or desynchronising HTTP traffic that may
+/// corrupt downstream parser state, poison connection pools, or cause
+/// request splitting. Only enable on targets you own or have explicit
+/// written authorization to test.
 #[cfg(feature = "unsafe-probes")]
 #[must_use]
 pub fn all_payloads(host: &str, smuggled_prefix: &str) -> Vec<SmugglingPayload> {

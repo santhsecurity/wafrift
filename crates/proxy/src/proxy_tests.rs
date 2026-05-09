@@ -700,3 +700,208 @@ fn render_findings_with_winners() {
     assert!(md.contains("UrlEncode"));
     assert!(md.contains("wafrift replay"));
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CLIENT-COMPAT REFINEMENT TESTS
+// ═════════════════════════════════════════════════════════════════════════════
+
+use wafrift_proxy::hop_by_hop::{
+    collect_connection_header_names, is_hop_by_hop, should_strip_proxy_header,
+};
+use wafrift_proxy::rate_limit::RateLimiter;
+use wafrift_transport::is_waf_block;
+
+// ── 1. Burp/ZAP hop-by-hop stripping ──────────────────────────────────────
+
+#[test]
+fn burp_proxy_connection_is_hop_by_hop() {
+    assert!(is_hop_by_hop("Proxy-Connection"));
+    assert!(is_hop_by_hop("proxy-connection"));
+    assert!(is_hop_by_hop("PROXY-CONNECTION"));
+}
+
+#[test]
+fn burp_proxy_authorization_is_hop_by_hop() {
+    assert!(is_hop_by_hop("Proxy-Authorization"));
+    assert!(is_hop_by_hop("proxy-authorization"));
+}
+
+#[test]
+fn burp_x_forwarded_for_is_hop_by_hop() {
+    assert!(is_hop_by_hop("X-Forwarded-For"));
+    assert!(is_hop_by_hop("x-forwarded-for"));
+}
+
+#[test]
+fn burp_connection_header_triggers_strip() {
+    let headers = vec![
+        ("Connection".to_string(), "keep-alive, X-Custom-Hop".to_string()),
+        ("X-Custom-Hop".to_string(), "value".to_string()),
+        ("Content-Type".to_string(), "text/html".to_string()),
+    ];
+    let conn = collect_connection_header_names(&headers);
+    assert!(should_strip_proxy_header("keep-alive", &conn));
+    assert!(should_strip_proxy_header("X-Custom-Hop", &conn));
+    assert!(!should_strip_proxy_header("Content-Type", &conn));
+}
+
+#[test]
+fn response_side_strips_proxy_headers() {
+    // Simulate upstream response headers containing proxy-specific fields.
+    let resp_headers = vec![
+        ("Connection".to_string(), "Proxy-Authentication".to_string()),
+        ("Proxy-Authentication".to_string(), "Basic xyz".to_string()),
+        ("X-Forwarded-For".to_string(), "1.2.3.4".to_string()),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ];
+    let conn = collect_connection_header_names(&resp_headers);
+    assert!(should_strip_proxy_header("Proxy-Authentication", &conn));
+    assert!(should_strip_proxy_header("X-Forwarded-For", &conn));
+    assert!(!should_strip_proxy_header("Content-Type", &conn));
+}
+
+// ── 2. sqlmap high-rate: rate limiter + warn throttle ─────────────────────
+
+#[tokio::test]
+async fn rate_limiter_concurrent_same_host_no_deadlock() {
+    let limiter = RateLimiter::new(1000.0, 1000.0);
+    let mut handles = vec![];
+    for _ in 0..50 {
+        let l = limiter.clone();
+        handles.push(tokio::spawn(async move {
+            l.acquire("target.com").await;
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+}
+
+#[test]
+fn warn_throttle_dedups_within_cooldown() {
+    let throttle = WarnThrottle::new(60);
+    assert!(throttle.should_warn("key:a"));
+    assert!(!throttle.should_warn("key:a"));
+    assert!(throttle.should_warn("key:b"));
+}
+
+#[test]
+fn proxy_state_fifo_eviction_is_deterministic() {
+    let mut state = ProxyState::default();
+    for i in 0..5 {
+        let host = format!("host-{i:04}.example.com");
+        state.hosts.entry(host.clone()).or_default().blocks = 1;
+        state.host_fifo.push_back(host);
+    }
+    assert_eq!(state.hosts.len(), 5);
+    assert_eq!(state.host_fifo.len(), 5);
+
+    // Evict the oldest (host-0000)
+    while let Some(key) = state.host_fifo.pop_front() {
+        if state.hosts.remove(&key).is_some() {
+            break;
+        }
+    }
+    assert!(!state.hosts.contains_key("host-0000.example.com"));
+    assert!(state.hosts.contains_key("host-0001.example.com"));
+}
+
+#[test]
+fn proxy_state_host_isolation_no_leak() {
+    let mut state = ProxyState::default();
+    state.hosts.entry("host-a.com".into()).or_default().record_block();
+    state.hosts.entry("host-b.com".into()).or_default().record_success(
+        wafrift_types::Technique::PayloadEncoding("UrlEncode".into()),
+    );
+    assert_eq!(state.hosts.get("host-a.com").unwrap().blocks, 1);
+    assert_eq!(state.hosts.get("host-b.com").unwrap().blocks, 0);
+    assert_eq!(state.hosts.get("host-b.com").unwrap().successes, 1);
+}
+
+// ── 3. ffuf 404 false WAF identification ──────────────────────────────────
+
+#[test]
+fn ffuf_404_forbidden_body_not_waf_block() {
+    // Custom 404 pages often say "forbidden" or "access denied".
+    assert!(!is_waf_block(404, b"Forbidden - you cannot access this resource"));
+    assert!(!is_waf_block(404, b"Access Denied - page not found"));
+    assert!(!is_waf_block(404, b"Request blocked - this path does not exist"));
+}
+
+#[test]
+fn ffuf_404_with_akamai_reference_not_blocked() {
+    assert!(!is_waf_block(404, b"Access Denied. Reference #18.abc123"));
+}
+
+#[test]
+fn ffuf_200_with_same_body_is_blocked() {
+    // Same body on 200 SHOULD still be flagged (real WAF block page).
+    assert!(is_waf_block(200, b"Forbidden - you cannot access this resource"));
+}
+
+// ── 4. curl --resolve literal IP in Host ──────────────────────────────────
+
+#[test]
+fn curl_literal_ipv4_host_header() {
+    assert_eq!(extract_host_from_header("192.168.1.1"), "192.168.1.1");
+    assert_eq!(extract_host_from_header("192.168.1.1:8080"), "192.168.1.1");
+    assert_eq!(extract_host_from_header("10.0.0.1:443"), "10.0.0.1");
+}
+
+#[test]
+fn curl_literal_ipv6_host_header() {
+    assert_eq!(extract_host_from_header("[::1]"), "::1");
+    assert_eq!(extract_host_from_header("[::1]:443"), "::1");
+    assert_eq!(extract_host_from_header("[2001:db8::1]:8080"), "2001:db8::1");
+    assert_eq!(extract_host_from_header("2001:db8::1"), "2001:db8::1");
+}
+
+#[test]
+fn curl_malformed_host_header_safe() {
+    assert_eq!(extract_host_from_header("[::1"), "");
+    assert_eq!(extract_host_from_header("["), "");
+    assert_eq!(extract_host_from_header(""), "");
+}
+
+// ── 5. Browser keep-alive / pipeline ──────────────────────────────────────
+
+#[test]
+fn pipeline_state_per_host_isolated() {
+    // Simulate two requests on the same TCP connection to different hosts.
+    let mut state = ProxyState::default();
+    state.host_fifo.push_back("api.example.com".into());
+    state.hosts.entry("api.example.com".into()).or_default().blocks = 3;
+
+    state.host_fifo.push_back("cdn.example.com".into());
+    state.hosts.entry("cdn.example.com".into()).or_default().blocks = 0;
+
+    assert_eq!(
+        state.hosts.get("api.example.com").unwrap().escalation_level(),
+        wafrift_strategy::EscalationLevel::Medium
+    );
+    assert_eq!(
+        state.hosts.get("cdn.example.com").unwrap().escalation_level(),
+        wafrift_strategy::EscalationLevel::None
+    );
+}
+
+// ── 6. Chunked body > MAX_PROXY_BODY_BYTES ────────────────────────────────
+
+#[tokio::test]
+async fn oversized_body_limited_errors_once() {
+    use http_body_util::{BodyExt, Full, Limited};
+    use hyper::body::Bytes;
+
+    let big = vec![0u8; MAX_PROXY_BODY_BYTES + 1];
+    let body = Full::new(Bytes::from(big));
+    let limited = Limited::new(body, MAX_PROXY_BODY_BYTES);
+    let result = limited.collect().await;
+    assert!(result.is_err(), "Limited must error on oversized body");
+}
+
+#[test]
+fn error_response_413_payload_too_large() {
+    let resp = error_response(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(resp.status().as_u16(), 413);
+}
