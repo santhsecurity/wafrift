@@ -253,6 +253,35 @@ mod tests {
     }
 
     #[test]
+    fn url_encoded_input_is_recognised() {
+        // Adversarial: bench-waf delivers payloads URL-encoded as
+        // values of `?id=`. The URL-decode pass at the top of
+        // `mutations()` must let the shape detector see the literal
+        // quote and OR keyword.
+        let encoded = "1%27%20OR%20%271%27%3D%271";
+        let out = mutations(encoded, 10);
+        assert!(
+            !out.is_empty(),
+            "URL-encoded boolean-OR injection not recognised; quote_free won't fire on bench-waf wire payloads"
+        );
+        // First variant should be quote-free.
+        for v in &out {
+            assert!(!v.payload.contains('\''));
+            assert!(!v.payload.contains("--"));
+        }
+    }
+
+    #[test]
+    fn pathological_input_doesnt_panic() {
+        // Adversarial inputs that have triggered crashes in other
+        // payload mutators across other projects:
+        for p in &["", "%", "%%%", "%2", "%XX", "\x00\x01\x02", "a' OR 1\x00=1", "/*\x00*/"] {
+            // Just must not panic. Output may be empty.
+            let _ = mutations(p, 10);
+        }
+    }
+
+    #[test]
     fn dump_for_real_corpus_payloads() {
         // Sanity-check against actual bench corpus shapes. Run via:
         //   cargo test -p wafrift-grammar dump_for_real_corpus_payloads -- --nocapture
