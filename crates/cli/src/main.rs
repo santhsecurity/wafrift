@@ -15,6 +15,7 @@ mod config;
 mod egress_example;
 mod helpers;
 mod origin_hints;
+mod recon_cmd;
 mod scan;
 mod technique_filter;
 
@@ -62,6 +63,8 @@ enum Commands {
     Techniques(TechniquesArgs),
     /// Generate shell completions for bash, zsh, fish, or PowerShell.
     Completion(CompletionArgs),
+    /// Origin discovery via crt.sh + DNS (authorized targets only).
+    Recon(recon_cmd::ReconArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -242,6 +245,7 @@ fn main() -> ExitCode {
             generate(args.shell, &mut cmd, "wafrift", &mut io::stdout());
             ExitCode::SUCCESS
         }
+        Some(Commands::Recon(args)) => recon_cmd::run_recon(args),
     }
 }
 /// Interactive TUI — the default experience when running `wafrift` with no args.

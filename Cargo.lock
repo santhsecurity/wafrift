@@ -3046,8 +3046,10 @@ dependencies = [
  "wafrift-detect",
  "wafrift-encoding",
  "wafrift-evolution",
+ "wafrift-fingerprint",
  "wafrift-grammar",
  "wafrift-oracle",
+ "wafrift-recon",
  "wafrift-smuggling",
  "wafrift-strategy",
  "wafrift-transport",
@@ -3078,8 +3080,12 @@ dependencies = [
  "wafrift-evolution",
  "wafrift-fingerprint",
  "wafrift-grammar",
+ "wafrift-oracle",
+ "wafrift-pool",
+ "wafrift-recon",
  "wafrift-smuggling",
  "wafrift-strategy",
+ "wafrift-transport",
  "wafrift-types",
 ]
 

@@ -19,6 +19,8 @@ wafrift-encoding = { workspace = true }
 wafrift-grammar = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
+wafrift-fingerprint = { workspace = true }
+wafrift-recon = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -41,6 +43,10 @@ wafrift-content-type = { workspace = true }
 rand = { workspace = true }
 
 [features]
-default = []
+# proxy-pool (HTTP/SOCKS proxy rotation via wafrift-pool) is on by default
+# now that the CLI ships full transport features. origin-bypass and
+# gossan-integration remain opt-in because they pull in larger deps.
+default = ["proxy-pool"]
 gossan-integration = ["origin-bypass"]
 origin-bypass = ["wafrift-transport/origin-bypass"]
+proxy-pool = ["wafrift-transport/proxy-pool"]

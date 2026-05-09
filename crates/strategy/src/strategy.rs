@@ -302,6 +302,33 @@ fn build_mcts_result(env: WafRiftEnv, _config: &EvasionConfig) -> Option<Evasion
 /// let state = HostState::default();
 /// let result = strategy::evade_adaptive(&req, &EvasionConfig::default(), &plan, &state);
 /// ```
+/// Active-loop evade: try MCTS first when the host has accumulated some
+/// block telemetry (so MCTS has signal to learn from), fall through to the
+/// classic [`evade`] pipeline otherwise. Drop-in replacement for `evade()`
+/// that gives the production proxy + scan loop the AlphaGo-for-WAFs spirit
+/// without forcing every callsite to know about MCTS.
+///
+/// MCTS depth is derived from host state's block count: more blocks ->
+/// deeper search (capped at 5).
+#[must_use]
+pub fn evade_smart(
+    request: &Request,
+    state: &HostState,
+    config: &EvasionConfig,
+) -> EvasionResult {
+    // Without prior block signal, there's nothing for MCTS to learn from yet.
+    // Use the classic pipeline for the first request to a new host.
+    if state.blocks == 0 {
+        return evade(request, state, config);
+    }
+    let depth = (state.blocks as usize / 2).clamp(2, 5);
+    if let Some(mcts_result) = evade_mcts(request, config, depth) {
+        return mcts_result;
+    }
+    // MCTS bailed (e.g., empty action space) — fall back to classic evade.
+    evade(request, state, config)
+}
+
 #[must_use]
 pub fn evade_adaptive(
     request: &Request,

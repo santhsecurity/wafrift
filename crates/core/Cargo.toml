@@ -20,6 +20,10 @@ wafrift-fingerprint = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
 wafrift-strategy = { workspace = true }
+wafrift-oracle = { workspace = true }
+wafrift-transport = { workspace = true }
+wafrift-pool = { workspace = true }
+wafrift-recon = { workspace = true }
 
 # Keep direct deps for existing integration tests
 rand = { workspace = true }

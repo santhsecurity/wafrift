@@ -31,7 +31,7 @@ use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::upstream_policy::{
     UpstreamPolicy, assert_connect_target_allowed, assert_forward_url_allowed,
 };
-use wafrift_strategy::strategy::evade;
+use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
 use wafrift_transport::is_waf_block;
 
@@ -41,6 +41,12 @@ const MAX_PROXY_BODY_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Clone)]
 struct ProxyLimits {
     max_upstream_response_bytes: usize,
+    /// On a WAF block (403/406/etc.), retry the request with escalated
+    /// evasion up to this many extra times. Default 0 (no retry).
+    /// Each retry bumps the host's "blocks" counter so successive
+    /// attempts use heavier evasion. The first non-blocked response
+    /// wins; otherwise the last block is returned.
+    max_evade_retries: u32,
 }
 
 /// CLI arguments for the proxy binary.
@@ -94,6 +100,16 @@ struct Args {
     /// Maximum bytes buffered per upstream HTTP response body.
     #[arg(long, default_value_t = 33554432)]
     max_upstream_response_bytes: usize,
+
+    /// On a WAF block (HTTP 403/406 or matching block body), retry the
+    /// same request with escalated evasion this many times before giving
+    /// up. Default 0 = current behavior (one attempt, return whatever
+    /// the WAF says). With N>0, the proxy mimics the bench behavior:
+    /// keep trying different evade strategies until one lands or the
+    /// budget is exhausted. The successful technique is recorded in
+    /// the host's gene bank so subsequent requests rotate it directly.
+    #[arg(long, default_value_t = 0)]
+    max_evade_retries: u32,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
@@ -234,6 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let limits = Arc::new(ProxyLimits {
         max_upstream_response_bytes: args.max_upstream_response_bytes,
+        max_evade_retries: args.max_evade_retries,
     });
     let conn_sem = Arc::new(Semaphore::new(args.max_concurrent_connections));
 
@@ -301,6 +318,61 @@ fn error_response(status: StatusCode, message: &str) -> Response<Full<Bytes>> {
         })
 }
 
+/// Wrap [`forward_wafrift_request`] with a retry loop. The first attempt
+/// runs the standard pipeline. If the WAF blocks (HTTP 403/406), each
+/// retry re-enters `forward_wafrift_request` — which records the previous
+/// block in the host's `HostState`, automatically bumping escalation so
+/// the next pass picks heavier evasion. Returns the first non-blocked
+/// response, or the last block if all attempts fail. Behavior is
+/// identical to the old single-shot proxy when `max_evade_retries == 0`.
+#[allow(clippy::too_many_arguments)]
+async fn forward_with_evade_retry(
+    wafrift_req: wafrift_types::Request,
+    host: String,
+    request_log_uri: String,
+    state: SharedState,
+    config: Arc<EvasionConfig>,
+    default_escalation: Option<String>,
+    client: &reqwest::Client,
+    policy: Arc<UpstreamPolicy>,
+    limits: Arc<ProxyLimits>,
+) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    let max = limits.max_evade_retries;
+    let mut last: Option<Response<Full<Bytes>>> = None;
+    for attempt in 0..=max {
+        let resp = forward_wafrift_request(
+            wafrift_req.clone(),
+            host.clone(),
+            request_log_uri.clone(),
+            Arc::clone(&state),
+            Arc::clone(&config),
+            default_escalation.clone(),
+            client,
+            Arc::clone(&policy),
+            Arc::clone(&limits),
+        )
+        .await?;
+        let status = resp.status().as_u16();
+        if status != 403 && status != 406 {
+            if attempt > 0 {
+                info!(
+                    host = %host,
+                    attempt,
+                    status,
+                    "evade retry landed a bypass"
+                );
+            }
+            return Ok(resp);
+        }
+        last = Some(resp);
+    }
+    Ok(last.unwrap_or_else(|| {
+        let mut r = Response::new(Full::new(Bytes::from("no attempt completed")));
+        *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        r
+    }))
+}
+
 /// Run `evade` + upstream `reqwest` forward for one logical request.
 #[allow(clippy::too_many_arguments)]
 async fn forward_wafrift_request(
@@ -365,13 +437,17 @@ async fn forward_wafrift_request(
             }
             (result, keys)
         } else {
-            // ── Discovery mode: use standard escalation-based evade() ──
+            // ── Discovery mode: MCTS-first via evade_smart, falls back
+            // to classic evade() pipeline. evade_smart switches to MCTS
+            // once the host has accumulated block telemetry — so the
+            // first request to a new host runs the cheap pipeline, and
+            // every subsequent block triggers tree-search reasoning. ──
             if hs.discovery_complete {
                 // Winners were pruned — re-entering discovery.
                 info!(host = %host, "all winners pruned, re-entering discovery");
             }
             let host_state = hs.clone();
-            let result = evade(&wafrift_req, &host_state, &config);
+            let result = evade_smart(&wafrift_req, &host_state, &config);
             let keys: Vec<String> = result
                 .techniques
                 .iter()
@@ -589,7 +665,7 @@ async fn mitm_plaintext_request(
     };
 
     let log_uri = wafrift_req.url.clone();
-    forward_wafrift_request(
+    forward_with_evade_retry(
         wafrift_req,
         host,
         log_uri,
@@ -831,7 +907,7 @@ async fn proxy(
     };
 
     let log_uri = req.uri().to_string();
-    forward_wafrift_request(
+    forward_with_evade_retry(
         wafrift_req,
         host,
         log_uri,

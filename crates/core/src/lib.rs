@@ -45,6 +45,16 @@ pub use wafrift_evolution::intelligence;
 pub use wafrift_strategy::host_state;
 pub use wafrift_strategy::strategy;
 
+// ── Validation / oracle layer ──
+pub use wafrift_oracle as oracle;
+
+// ── Transport / network ──
+pub use wafrift_pool as pool;
+pub use wafrift_transport as transport;
+
+// ── Discovery ──
+pub use wafrift_recon as recon;
+
 // Re-export key types that integration tests expect at crate root
 pub use wafrift_strategy::host_state::HostState;
 pub use wafrift_strategy::strategy::{CalibrationResult, EscalationLevel, EvasionConfig};
