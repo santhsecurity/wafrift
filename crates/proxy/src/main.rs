@@ -312,9 +312,26 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
         f.sync_all()?;
     }
     std::fs::rename(&tmp, path)?;
+    // Fsync parent directory so the rename is durable.
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
     Ok(())
 }
 
+/// Restore persisted host states from disk into the in-memory proxy state.
+///
+/// # Concurrency safety
+///
+/// This function must be called while holding the `ProxyState` mutex.
+/// In `main()` the load+restore is performed before the accept loop
+/// begins, and the mutex is held for the entire operation, so no
+/// request can interleave and create host entries during restore.
+/// The `HashMap::entry` call would merge with (and partially
+/// overwrite) any existing entry, which is why the atomic load+restore
+/// under the lock matters.
 fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
     let mut restored = 0usize;
     for (host, persisted) in bank.hosts {
@@ -413,12 +430,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.mitm && args.mitm_ca_dir.is_none() {
         // Auto-generate CA to default directory.
-        let default_dir = wafrift_proxy::mitm::default_mitm_ca_dir()
-            .ok_or_else(|| {
-                error!("cannot determine home directory for MITM CA storage");
-                std::process::exit(1);
-            })
-            .unwrap();
+        let Some(default_dir) = wafrift_proxy::mitm::default_mitm_ca_dir() else {
+            error!(
+                "cannot determine home directory for MITM CA storage \
+                 (no $HOME / dirs::config_dir on this OS). Pass --mitm-ca-dir \
+                 explicitly or unset --mitm."
+            );
+            std::process::exit(1);
+        };
         info!(
             "No --mitm-ca-dir specified; using default: {}",
             default_dir.display()
@@ -427,7 +446,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mitm_ca: Option<Arc<CertificateAuthority>> = if args.mitm {
-        let dir = args.mitm_ca_dir.as_ref().unwrap();
+        // Safe: the block above guarantees mitm_ca_dir is Some when args.mitm is true.
+        let dir = args
+            .mitm_ca_dir
+            .as_ref()
+            .expect("mitm_ca_dir was set above when args.mitm is true");
         let ca = wafrift_proxy::mitm::ensure_ca(dir)?;
 
         // Attempt OS trust store installation.
@@ -467,6 +490,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let expose_wafrift_status = addr.ip().is_loopback();
     if !expose_wafrift_status {
         warn!("--listen is bound to a non-loopback address ({}). /_wafrift/status and /_wafrift/findings.md are disabled to prevent information leakage.", addr);
+        if args.mitm {
+            // The proxy will accept CONNECT from any client reachable
+            // on the LAN and re-sign upstream certs with the local CA
+            // — turning the MITM CA into a network-wide trust root.
+            // That's almost never what the operator wanted; if they
+            // really meant it, they have to explicitly accept the risk
+            // by running on loopback + binding through a tunnel.
+            error!(
+                "REFUSING TO START: --mitm + non-loopback --listen ({}) is a CA-private-key-exposure risk. \
+                 Anyone on the network can route HTTPS through this proxy and have it re-signed with your MITM CA. \
+                 If you really want this (lab-only), bind to a loopback address and front-end with your own ACL'd reverse proxy.",
+                addr
+            );
+            std::process::exit(1);
+        }
     }
 
     let mut config = EvasionConfig::default();
@@ -557,9 +595,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Persistent gene bank ────────────────────────────────────────
     let gene_bank_path = default_gene_bank_path(&args.gene_bank_path);
     if let Some(path) = &gene_bank_path {
-        let bank = load_gene_bank(path);
         let restored = {
             let mut st = shared_state.lock().await;
+            let bank = load_gene_bank(path);
             restore_gene_bank(&mut st, bank)
         };
         if restored > 0 {

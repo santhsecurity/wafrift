@@ -2,8 +2,8 @@
 #[allow(clippy::module_inception)]
 mod tests {
     use crate::content_type::{
-        ContentTypeTechnique, generate_variants, generate_variants_from_body, parse_form_body,
-        xml_safe_name,
+        ContentTypeTechnique, MAX_FORM_BODY_SIZE, generate_variants, generate_variants_from_body,
+        parse_form_body, xml_safe_name,
     };
 
     #[test]
@@ -216,13 +216,13 @@ mod tests {
 
     #[test]
     fn parse_form_body_rejects_oversized() {
-        let huge = vec![b'A'; super::MAX_FORM_BODY_SIZE + 1];
+        let huge = vec![b'A'; MAX_FORM_BODY_SIZE + 1];
         assert!(parse_form_body(&huge).is_empty());
     }
 
     #[test]
     fn parse_form_body_accepts_max_size() {
-        let body = vec![b'a'; super::MAX_FORM_BODY_SIZE];
+        let body = vec![b'a'; MAX_FORM_BODY_SIZE];
         // No '=' delimiters → empty result, but must not panic or allocate huge vecs.
         assert!(parse_form_body(&body).is_empty());
     }

@@ -268,3 +268,109 @@ fn invalid_level_fails() {
         "should report error for invalid level: {stderr}"
     );
 }
+
+// ── New practitioner surface (replay / report / init) ─────────────────
+
+#[test]
+fn replay_help_lists_source_flags() {
+    let (code, stdout, _) = wafrift(&["replay", "--help"]);
+    assert_eq!(code, 0, "replay --help should exit 0");
+    for keyword in &["--target", "--param", "--payload", "--from-host", "--from-waf", "--technique"] {
+        assert!(
+            stdout.contains(keyword),
+            "replay --help missing flag {keyword:?}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn replay_without_techniques_errors_actionable() {
+    // No --technique, --from-host, or --from-waf — must fail with a
+    // message that names the missing flags, not a generic "no input".
+    let (code, _stdout, stderr) = wafrift(&[
+        "replay",
+        "--target", "https://example.com/x",
+        "--payload", "test",
+    ]);
+    assert_ne!(code, 0, "replay with no source flag should fail");
+    assert!(
+        stderr.contains("--technique") || stderr.contains("--from-host") || stderr.contains("--from-waf"),
+        "error must name the missing source flags: {stderr}"
+    );
+}
+
+#[test]
+fn report_help_documents_format_options() {
+    let (code, stdout, _) = wafrift(&["report", "--help"]);
+    assert_eq!(code, 0, "report --help should exit 0");
+    assert!(stdout.contains("markdown"), "report --help missing markdown format: {stdout}");
+    assert!(stdout.contains("json"), "report --help missing json format: {stdout}");
+    assert!(stdout.contains("--proxy-bank"), "report --help missing --proxy-bank: {stdout}");
+}
+
+#[test]
+fn report_json_emits_valid_json_with_schema_version() {
+    use std::io::Write;
+    // Write a minimal proxy-bank JSON to a tempfile.
+    let tmp = std::env::temp_dir().join(format!("wafrift-report-test-{}.json", std::process::id()));
+    {
+        let mut f = std::fs::File::create(&tmp).expect("create tempfile");
+        writeln!(
+            f,
+            r#"{{"schema":1,"hosts":{{"api.example.com":{{"proven_winners":["EncodingUrl"],"blocklisted":[],"waf_name":"ModSec"}}}}}}"#
+        ).unwrap();
+    }
+    let (code, stdout, _) = wafrift(&[
+        "report",
+        "--proxy-bank",
+        tmp.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    let _ = std::fs::remove_file(&tmp);
+    assert_eq!(code, 0, "report --format json should exit 0");
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("report --format json must emit valid JSON");
+    assert_eq!(parsed["schema_version"], 1, "schema_version field missing");
+    assert_eq!(parsed["hosts_with_bypasses"], 1);
+    assert_eq!(parsed["findings"][0]["host"], "api.example.com");
+}
+
+#[test]
+fn init_creates_scaffold_then_refuses_overwrite() {
+    let dir = std::env::temp_dir().join(format!("wafrift-init-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir tempdir");
+    let target = dir.join(".wafrift.toml");
+
+    let (code, _stdout, _stderr) = wafrift(&[
+        "init",
+        "--output",
+        target.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "first init should succeed");
+    assert!(target.exists(), "scaffold file must be created");
+
+    // Second init without --force must refuse.
+    let (code2, _stdout2, stderr2) = wafrift(&[
+        "init",
+        "--output",
+        target.to_str().unwrap(),
+    ]);
+    assert_ne!(code2, 0, "second init without --force should fail");
+    assert!(
+        stderr2.contains("--force"),
+        "error must mention --force escape hatch: {stderr2}"
+    );
+
+    // Third init WITH --force must succeed.
+    let (code3, _stdout3, _stderr3) = wafrift(&[
+        "init",
+        "--output",
+        target.to_str().unwrap(),
+        "--force",
+    ]);
+    assert_eq!(code3, 0, "third init with --force should succeed");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

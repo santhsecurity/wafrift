@@ -14,26 +14,38 @@
 //! A crash at any point leaves either the old file intact or the new
 //! file fully written — never a truncated/corrupt state.
 //!
-//! Corrupt files encountered on load are quarantined to
-//! `<name>.json.corrupt.<timestamp>` and a warning is emitted.
+//! # Concurrency
+//!
+//! Per-genome **advisory file locks** (`~/.wafrift/genomes/<waf>.lock`)
+//! ensure that concurrent writers (e.g. multiple `wafrift-scan`
+//! processes, or scan while proxy is active) serialize safely.
+//! The lock is tied to the file descriptor and is released automatically
+//! by the kernel on process exit; a stale `.lock` file on disk is
+//! harmless and is cleaned up on successful write.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 
 /// A single technique's historical performance record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TechniqueRecord {
     /// Technique name (e.g., `"DoubleUrlEncode"`).
+    #[serde(default)]
     pub name: String,
     /// Total successes across all targets with this WAF.
+    #[serde(default)]
     pub total_successes: u32,
     /// Total attempts across all targets with this WAF.
+    #[serde(default)]
     pub total_attempts: u32,
     /// Number of distinct targets where this technique succeeded.
+    #[serde(default)]
     pub target_count: u32,
     /// Unix timestamp of last successful use.
+    #[serde(default)]
     pub last_success_epoch: u64,
 }
 
@@ -52,12 +64,16 @@ impl TechniqueRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WafGenome {
     /// WAF name (e.g., `"Cloudflare"`, `"ModSecurity"`).
+    #[serde(default)]
     pub waf_name: String,
     /// Per-technique performance records.
+    #[serde(default)]
     pub techniques: Vec<TechniqueRecord>,
     /// Total targets scanned with this WAF.
+    #[serde(default)]
     pub targets_scanned: u32,
     /// Last update timestamp (unix epoch seconds).
+    #[serde(default)]
     pub updated_at: u64,
 }
 
@@ -77,6 +93,12 @@ impl WafGenome {
     ///
     /// Only returns techniques with at least `min_attempts` historical
     /// data points to avoid recommending under-tested techniques.
+    ///
+    /// # Edge case
+    ///
+    /// If no technique meets the `min_attempts` threshold, returns an
+    /// empty vector.  Callers must handle this gracefully (e.g. fall
+    /// back to untested techniques or continue discovery).
     #[must_use]
     pub fn top_techniques(&self, n: usize, min_attempts: u32) -> Vec<&TechniqueRecord> {
         let mut eligible: Vec<&TechniqueRecord> = self
@@ -199,7 +221,6 @@ impl GeneBank {
                     self.cache.get(&key)
                 }
                 Err(e) => {
-                    // Quarantine corrupt file instead of silently dropping it.
                     Self::quarantine_corrupt(&path, &e);
                     None
                 }
@@ -217,9 +238,13 @@ impl GeneBank {
 
     /// Save a WAF genome to disk using atomic write.
     ///
-    /// Writes to a `.tmp` file first, then renames it to the final
-    /// path.  A crash at any point leaves either the old file intact
-    /// or the new file fully committed — never a truncated state.
+    /// Writes to a `.tmp` file first, fsyncs it, renames it to the final
+    /// path, then fsyncs the parent directory.  A crash at any point
+    /// leaves either the old file intact or the new file fully committed
+    /// — never a truncated state.
+    ///
+    /// An exclusive advisory lock is acquired for the duration of the
+    /// operation to serialize concurrent writers.
     ///
     /// # Errors
     ///
@@ -227,33 +252,10 @@ impl GeneBank {
     pub fn save(&mut self, genome: &WafGenome) -> Result<(), GeneBankError> {
         let key = normalize_name(&genome.waf_name);
         let path = self.genome_path(&key);
-        let tmp_path = path.with_extension("json.tmp");
-
-        let json = serde_json::to_string_pretty(genome).map_err(|e| GeneBankError::Serialize {
-            waf: genome.waf_name.clone(),
-            source: e,
-        })?;
-
-        // Phase 1: Write to temp file.
-        fs::write(&tmp_path, &json).map_err(|e| GeneBankError::Io {
-            path: tmp_path.clone(),
-            source: e,
-        })?;
-
-        // Phase 2: Atomic rename.
-        //
-        // On POSIX, rename(2) is atomic within the same filesystem.
-        // On Windows, this is not strictly atomic but is still
-        // crash-safe — the old file is replaced in a single operation.
-        fs::rename(&tmp_path, &path).map_err(|e| {
-            // Clean up the temp file if rename fails.
-            let _ = fs::remove_file(&tmp_path);
-            GeneBankError::Io {
-                path: path.clone(),
-                source: e,
-            }
-        })?;
-
+        let (lock_file, lock_path) = self.acquire_lock(&path)?;
+        self.write_genome(&path, genome)?;
+        drop(lock_file);
+        let _ = fs::remove_file(&lock_path);
         self.cache.insert(key, genome.clone());
         Ok(())
     }
@@ -264,6 +266,9 @@ impl GeneBank {
     /// If the existing genome file is corrupt, it is quarantined and
     /// a fresh genome is created from this session's data.
     ///
+    /// An exclusive advisory lock is acquired for the full
+    /// read-modify-write cycle to prevent lost updates.
+    ///
     /// # Errors
     ///
     /// Returns an error if the genome cannot be saved to disk.
@@ -273,38 +278,21 @@ impl GeneBank {
         stats: &[(String, u32, u32)],
     ) -> Result<(), GeneBankError> {
         let key = normalize_name(waf_name);
+        let path = self.genome_path(&key);
+        let (lock_file, lock_path) = self.acquire_lock(&path)?;
+
         let mut genome = self
             .cache
             .remove(&key)
-            .or_else(|| {
-                let path = self.genome_path(&key);
-                if path.exists() {
-                    match fs::read_to_string(&path) {
-                        Ok(contents) => match serde_json::from_str(&contents) {
-                            Ok(g) => Some(g),
-                            Err(e) => {
-                                // Quarantine and start fresh.
-                                Self::quarantine_corrupt(&path, &e);
-                                None
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                path = %path.display(),
-                                error = %e,
-                                "failed to read genome for merge"
-                            );
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
-            })
+            .or_else(|| self.read_genome_from_disk(&path))
             .unwrap_or_else(|| WafGenome::new(waf_name));
 
         genome.merge_session(stats);
-        self.save(&genome)
+        self.write_genome(&path, &genome)?;
+        drop(lock_file);
+        let _ = fs::remove_file(&lock_path);
+        self.cache.insert(key, genome);
+        Ok(())
     }
 
     /// List all known WAF genomes.
@@ -330,6 +318,101 @@ impl GeneBank {
     /// Path to a specific genome file.
     fn genome_path(&self, normalized_name: &str) -> PathBuf {
         self.root.join(format!("{normalized_name}.json"))
+    }
+
+    /// Acquire an exclusive advisory lock for a genome file.
+    ///
+    /// Returns the locked file handle and the lock file path.
+    /// The caller must drop the handle to release the lock.
+    fn acquire_lock(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<(fs::File, PathBuf), GeneBankError> {
+        let lock_path = path.with_extension("lock");
+        let lock_file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| GeneBankError::Io {
+                path: lock_path.clone(),
+                source: e,
+            })?;
+        lock_file.lock().map_err(|e| GeneBankError::Io {
+            path: lock_path.clone(),
+            source: e,
+        })?;
+        Ok((lock_file, lock_path))
+    }
+
+    /// Atomic write of a genome to disk.
+    ///
+    /// Does NOT acquire locks — the caller must hold the advisory lock.
+    fn write_genome(
+        &self,
+        path: &std::path::Path,
+        genome: &WafGenome,
+    ) -> Result<(), GeneBankError> {
+        let tmp_path = path.with_extension("json.tmp");
+        let json = serde_json::to_string_pretty(genome).map_err(|e| GeneBankError::Serialize {
+            waf: genome.waf_name.clone(),
+            source: e,
+        })?;
+
+        let mut file = fs::File::create(&tmp_path).map_err(|e| GeneBankError::Io {
+            path: tmp_path.clone(),
+            source: e,
+        })?;
+        file.write_all(json.as_bytes()).map_err(|e| GeneBankError::Io {
+            path: tmp_path.clone(),
+            source: e,
+        })?;
+        file.sync_all().map_err(|e| GeneBankError::Io {
+            path: tmp_path.clone(),
+            source: e,
+        })?;
+        drop(file);
+
+        fs::rename(&tmp_path, path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            GeneBankError::Io {
+                path: path.to_path_buf(),
+                source: e,
+            }
+        })?;
+
+        // Ensure the directory entry is durable.
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = fs::OpenOptions::new().read(true).open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Read a genome from disk, quarantining if corrupt.
+    fn read_genome_from_disk(&self, path: &std::path::Path) -> Option<WafGenome> {
+        if !path.exists() {
+            return None;
+        }
+        match fs::read_to_string(path) {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(g) => Some(g),
+                Err(e) => {
+                    Self::quarantine_corrupt(path, &e);
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "failed to read genome for merge"
+                );
+                None
+            }
+        }
     }
 
     /// Quarantine a corrupt genome file by renaming it.
@@ -393,7 +476,7 @@ impl std::fmt::Display for GeneBankError {
 impl std::error::Error for GeneBankError {}
 
 /// Normalize a WAF name to a filesystem-safe key.
-fn normalize_name(name: &str) -> String {
+pub(crate) fn normalize_name(name: &str) -> String {
     name.to_lowercase()
         .chars()
         .map(|c| {
@@ -420,227 +503,4 @@ fn current_epoch() -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn technique_record_success_rate() {
-        let rec = TechniqueRecord {
-            name: "DoubleUrlEncode".into(),
-            total_successes: 8,
-            total_attempts: 10,
-            target_count: 3,
-            last_success_epoch: 0,
-        };
-        assert!((rec.success_rate() - 0.8).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn technique_record_zero_attempts() {
-        let rec = TechniqueRecord {
-            name: "Test".into(),
-            total_successes: 0,
-            total_attempts: 0,
-            target_count: 0,
-            last_success_epoch: 0,
-        };
-        assert!((rec.success_rate()).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn genome_merge_session_new_techniques() {
-        let mut genome = WafGenome::new("TestWAF");
-        let stats = vec![
-            ("DoubleUrlEncode".into(), 8, 10),
-            ("OverlongUtf8".into(), 5, 10),
-        ];
-        genome.merge_session(&stats);
-        assert_eq!(genome.techniques.len(), 2);
-        assert_eq!(genome.targets_scanned, 1);
-        assert_eq!(genome.techniques[0].total_successes, 8);
-    }
-
-    #[test]
-    fn genome_merge_session_accumulates() {
-        let mut genome = WafGenome::new("TestWAF");
-        let stats1 = vec![("DoubleUrlEncode".into(), 5, 10)];
-        let stats2 = vec![("DoubleUrlEncode".into(), 3, 5)];
-        genome.merge_session(&stats1);
-        genome.merge_session(&stats2);
-        assert_eq!(genome.targets_scanned, 2);
-        assert_eq!(genome.techniques[0].total_successes, 8);
-        assert_eq!(genome.techniques[0].total_attempts, 15);
-        assert_eq!(genome.techniques[0].target_count, 2);
-    }
-
-    #[test]
-    fn genome_seed_winners_filters_low_rate() {
-        let mut genome = WafGenome::new("TestWAF");
-        genome.techniques.push(TechniqueRecord {
-            name: "Good".into(),
-            total_successes: 9,
-            total_attempts: 10,
-            target_count: 5,
-            last_success_epoch: 100,
-        });
-        genome.techniques.push(TechniqueRecord {
-            name: "Bad".into(),
-            total_successes: 1,
-            total_attempts: 10,
-            target_count: 1,
-            last_success_epoch: 50,
-        });
-        let winners = genome.seed_winners();
-        assert_eq!(winners, vec!["Good".to_string()]);
-    }
-
-    #[test]
-    fn gene_bank_roundtrip() {
-        let tmp = std::env::temp_dir().join("wafrift_test_genebank");
-        let _ = fs::remove_dir_all(&tmp);
-        let mut bank = GeneBank::open(tmp.clone()).unwrap();
-
-        let mut genome = WafGenome::new("Cloudflare");
-        genome.merge_session(&[("OverlongUtf8".into(), 9, 10)]);
-        bank.save(&genome).unwrap();
-
-        // Re-open and load
-        let mut bank2 = GeneBank::open(tmp.clone()).unwrap();
-        let loaded = bank2.load("Cloudflare").unwrap();
-        assert_eq!(loaded.techniques[0].name, "OverlongUtf8");
-        assert_eq!(loaded.techniques[0].total_successes, 9);
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn gene_bank_list_wafs() {
-        let tmp = std::env::temp_dir().join("wafrift_test_list");
-        let _ = fs::remove_dir_all(&tmp);
-        let mut bank = GeneBank::open(tmp.clone()).unwrap();
-
-        bank.save(&WafGenome::new("Cloudflare")).unwrap();
-        bank.save(&WafGenome::new("AWS WAF")).unwrap();
-
-        let wafs = bank.list_wafs();
-        assert!(wafs.contains(&"cloudflare".to_string()));
-        assert!(wafs.contains(&"aws_waf".to_string()));
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn normalize_name_handles_special_chars() {
-        assert_eq!(normalize_name("AWS WAF"), "aws_waf");
-        assert_eq!(normalize_name("Cloudflare (Pro)"), "cloudflare__pro_");
-        assert_eq!(normalize_name("ModSecurity/CRS"), "modsecurity_crs");
-    }
-
-    // ── Corruption resilience tests ──
-
-    #[test]
-    fn corrupt_genome_is_quarantined_on_load() {
-        let tmp = std::env::temp_dir().join("wafrift_test_corrupt_load");
-        let _ = fs::remove_dir_all(&tmp);
-        let _ = fs::create_dir_all(&tmp);
-
-        // Write corrupt JSON to the genome file.
-        let corrupt_path = tmp.join("cloudflare.json");
-        fs::write(&corrupt_path, "{ this is not valid json!!!").unwrap();
-
-        let mut bank = GeneBank::open(tmp.clone()).unwrap();
-        let result = bank.load("Cloudflare");
-
-        // Should return None (corrupt file).
-        assert!(result.is_none());
-
-        // Original file should be quarantined (renamed).
-        assert!(
-            !corrupt_path.exists(),
-            "corrupt file should have been renamed"
-        );
-
-        // A .corrupt. file should exist.
-        let quarantined: Vec<_> = fs::read_dir(&tmp)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt."))
-            .collect();
-        assert_eq!(
-            quarantined.len(),
-            1,
-            "expected exactly one quarantined file"
-        );
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn corrupt_genome_is_quarantined_on_merge() {
-        let tmp = std::env::temp_dir().join("wafrift_test_corrupt_merge");
-        let _ = fs::remove_dir_all(&tmp);
-        let _ = fs::create_dir_all(&tmp);
-
-        // Write corrupt JSON.
-        let corrupt_path = tmp.join("cloudflare.json");
-        fs::write(&corrupt_path, "GARBAGE").unwrap();
-
-        let mut bank = GeneBank::open(tmp.clone()).unwrap();
-
-        // merge_and_save should quarantine the corrupt file and create
-        // a fresh genome from the session data.
-        bank.merge_and_save("Cloudflare", &[("DoubleUrlEncode".into(), 5, 10)])
-            .unwrap();
-
-        // The genome should now be loadable with the new data.
-        let mut bank2 = GeneBank::open(tmp.clone()).unwrap();
-        let loaded = bank2.load("Cloudflare").unwrap();
-        assert_eq!(loaded.techniques.len(), 1);
-        assert_eq!(loaded.techniques[0].name, "DoubleUrlEncode");
-        assert_eq!(loaded.techniques[0].total_successes, 5);
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn atomic_write_no_temp_file_left() {
-        let tmp = std::env::temp_dir().join("wafrift_test_atomic");
-        let _ = fs::remove_dir_all(&tmp);
-        let mut bank = GeneBank::open(tmp.clone()).unwrap();
-
-        bank.save(&WafGenome::new("TestWAF")).unwrap();
-
-        // No .tmp files should remain.
-        let tmp_files: Vec<_> = fs::read_dir(&tmp)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
-            .collect();
-        assert!(
-            tmp_files.is_empty(),
-            "no .tmp files should remain after save"
-        );
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn list_wafs_excludes_corrupt_and_tmp_files() {
-        let tmp = std::env::temp_dir().join("wafrift_test_list_filter");
-        let _ = fs::remove_dir_all(&tmp);
-        let _ = fs::create_dir_all(&tmp);
-
-        // Create valid, corrupt, and tmp files.
-        fs::write(tmp.join("cloudflare.json"), "{}").unwrap();
-        fs::write(tmp.join("aws.json.corrupt.12345"), "GARBAGE").unwrap();
-        fs::write(tmp.join("modsec.json.tmp"), "{}").unwrap();
-
-        let bank = GeneBank::open(tmp.clone()).unwrap();
-        let wafs = bank.list_wafs();
-
-        assert_eq!(wafs, vec!["cloudflare"]);
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-}
+mod tests;

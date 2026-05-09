@@ -103,3 +103,4 @@ moka = { version = "0.12.15", features = ["future"] }
 rustls-pki-types = "1.14.0"
 
 webpki-roots = "1.0.6"
+fs4 = "1.1"

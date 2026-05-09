@@ -175,7 +175,13 @@ pub(crate) async fn run_scan(
     {
         Ok(client) => client,
         Err(e) => {
-            eprintln!("  {} {}", "✗ Failed to create HTTP client:".red().bold(), e);
+            eprintln!(
+                "  {} {} ({})\n    {}",
+                "✗ Failed to create HTTP client:".red().bold(),
+                "reqwest builder error",
+                e,
+                "hint: this usually means a TLS backend (rustls / native-tls) failed to initialise — check OS root certs are present".bright_black()
+            );
             return ExitCode::from(1);
         }
     };
@@ -187,7 +193,13 @@ pub(crate) async fn run_scan(
     let baseline_response = match http.get(target).send().await {
         Ok(resp) => resp,
         Err(err) => {
-            eprintln!("  {} {}", "✗ Cannot reach target:".red().bold(), err);
+            eprintln!(
+                "  {} {} ({})\n    {}",
+                "✗ Cannot reach target:".red().bold(),
+                target,
+                err,
+                "hint: check the URL is reachable, the host resolves, and your network allows the connection".bright_black()
+            );
             return ExitCode::from(1);
         }
     };

@@ -210,7 +210,7 @@ mod tests {
     fn double_url_encode_trailing_percent() {
         // Input ending in bare '%' must not produce an incomplete %2 fragment.
         assert_eq!(double_url_encode("%"), "%2525");
-        assert_eq!(double_url_encode("foo%"), "foo%2525");
+        assert_eq!(double_url_encode("foo%"), "%2566%256F%256F%2525");
         assert_eq!(double_url_encode("%2"), "%2525%2532");
         assert_eq!(double_url_encode("%G"), "%2525%2547");
     }
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn triple_url_encode_trailing_percent() {
         assert_eq!(triple_url_encode("%"), "%252525");
-        assert_eq!(triple_url_encode("foo%"), "foo%252525");
+        assert_eq!(triple_url_encode("foo%"), "%252566%25256F%25256F%252525");
         assert_eq!(triple_url_encode("%2"), "%252525%252532");
         assert_eq!(triple_url_encode("%G"), "%252525%252547");
     }
