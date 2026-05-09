@@ -3,6 +3,7 @@ use clap_complete::{Shell, generate};
 use colored::Colorize;
 use serde_json::json;
 use std::io;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 use wafrift_detect::waf_detect;
@@ -10,17 +11,20 @@ use wafrift_evolution::differential;
 use wafrift_grammar::grammar;
 use wafrift_strategy::gene_bank::GeneBank;
 
+mod bank;
 mod bench_diff;
 mod bench_waf;
 mod config;
 mod egress_example;
 mod helpers;
+mod import_curl;
 mod init_cmd;
 mod origin_hints;
 mod recon_cmd;
 mod replay;
 mod report;
 mod scan;
+mod seed;
 mod technique_filter;
 
 use helpers::{
@@ -47,6 +51,11 @@ struct Cli {
     /// Suppress human-readable output — emit only machine-parseable results (JSON).
     #[arg(long, short, global = true)]
     quiet: bool,
+
+    /// Path to a TOML config file. Default: `.wafrift.toml` in CWD or
+    /// `~/.config/wafrift/config.toml`.
+    #[arg(long, short, global = true)]
+    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -88,6 +97,13 @@ enum Commands {
     Report(report::ReportArgs),
     /// Scaffold a `.wafrift.toml` config in the current directory.
     Init(init_cmd::InitArgs),
+    /// Pre-load a gene-bank with known-working techniques (per-WAF or per-host).
+    Seed(seed::SeedArgs),
+    /// Take a curl invocation (e.g. from Burp's "Copy as cURL"), run scan against the parsed target.
+    #[command(name = "import-curl")]
+    ImportCurl(import_curl::ImportCurlArgs),
+    /// Manage gene-banks: list / export / import.
+    Bank(bank::BankArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -114,6 +130,10 @@ struct EvadeArgs {
     /// `encoding/url/triple,smuggling`).
     #[arg(long, num_args = 1.., value_delimiter = ',')]
     exclude: Vec<String>,
+
+    /// Write output to a file instead of stdout.
+    #[arg(long, short)]
+    output: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -138,57 +158,63 @@ struct ProbeArgs {
     quick: bool,
 }
 
-/// Arguments for the live WAF scan command.
+/// Arguments for the live WAF scan command. `pub` so sibling modules
+/// (e.g. `import_curl`) can construct one and dispatch through
+/// `scan::run_scan` without duplicating CLI state.
 #[derive(clap::Args, Debug)]
-struct ScanArgs {
+pub struct ScanArgs {
     /// Target URL to test evasion variants against (e.g., http://localhost:8080).
     #[arg(long)]
-    target: String,
+    pub target: String,
 
     /// Payload to mutate and test.
     #[arg(long)]
-    payload: String,
+    pub payload: String,
 
     /// Query parameter name to inject into.
     #[arg(long, default_value = "q")]
-    param: String,
+    pub param: String,
 
     /// Evasion intensity.
     #[arg(long, value_enum, default_value_t = Level::Heavy)]
-    level: Level,
+    pub level: Level,
 
     /// Apply encoding only, without grammar-aware mutations.
     #[arg(long)]
-    encoding_only: bool,
+    pub encoding_only: bool,
 
     /// Delay between requests in milliseconds (avoid rate-limit bans).
     #[arg(long, default_value_t = 50)]
-    delay_ms: u64,
+    pub delay_ms: u64,
 
     /// Output format: text or json.
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
-    format: String,
+    pub format: String,
 
     /// Optional browser fingerprint to impersonate (e.g., 'chrome', 'safari', 'edge').
     #[arg(long)]
-    stealth_browser: Option<String>,
+    pub stealth_browser: Option<String>,
 
     /// Disable TLS verification.
     #[arg(long, default_value_t = false)]
-    insecure: bool,
+    pub insecure: bool,
 
     /// With `--format json`, add a `layer_report` object (network / detection / baseline / evasion).
     #[arg(long = "report-layers", default_value_t = false)]
-    report_layers: bool,
+    pub report_layers: bool,
 
     /// Restrict to listed technique paths (comma-separated; e.g.
     /// `encoding/url,grammar`). Run `wafrift techniques list` for paths.
     #[arg(long, num_args = 1.., value_delimiter = ',')]
-    only: Vec<String>,
+    pub only: Vec<String>,
 
     /// Drop listed technique paths (comma-separated).
     #[arg(long, num_args = 1.., value_delimiter = ',')]
-    exclude: Vec<String>,
+    pub exclude: Vec<String>,
+
+    /// Write JSON output to a file instead of stdout.
+    #[arg(long, short)]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -204,7 +230,7 @@ enum TechniquesAction {
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-enum Level {
+pub enum Level {
     Light,
     Medium,
     Heavy,
@@ -224,6 +250,19 @@ fn main() -> ExitCode {
         // In quiet mode, disable colored output entirely.
         colored::control::set_override(false);
     }
+
+    // Load config file (--config flag overrides default search paths).
+    let _cfg = if let Some(ref path) = cli.config {
+        match config::WafRiftConfig::load_from(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{} {e}", "Config error:".red().bold());
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        config::WafRiftConfig::load()
+    };
 
     let quiet = cli.quiet;
     match cli.command {
@@ -279,6 +318,9 @@ fn main() -> ExitCode {
         Some(Commands::Replay(args)) => replay::run_replay(args),
         Some(Commands::Report(args)) => report::run_report(args),
         Some(Commands::Init(args)) => init_cmd::run_init(args),
+        Some(Commands::Seed(args)) => seed::run_seed(args),
+        Some(Commands::ImportCurl(args)) => import_curl::run_import_curl(args),
+        Some(Commands::Bank(args)) => bank::run_bank(args),
     }
 }
 /// Interactive TUI — the default experience when running `wafrift` with no args.
@@ -396,7 +438,7 @@ fn run_interactive() -> ExitCode {
                             .add_modifier(Modifier::ITALIC),
                     ),
                     Span::raw("   ·   "),
-                    Span::styled("v0.1.0", Style::default().fg(Color::DarkGray)),
+                    Span::styled(concat!("v", env!("CARGO_PKG_VERSION")), Style::default().fg(Color::DarkGray)),
                 ]),
             ];
             let header = Paragraph::new(header_text);
@@ -654,13 +696,26 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
 
     if quiet {
         // JSON output: one object per line (NDJSON)
+        let mut buf = String::new();
         for variant in &variants {
             let obj = json!({
                 "payload": variant.payload,
                 "techniques": variant.techniques,
                 "confidence": variant.confidence,
             });
-            println!("{obj}");
+            if args.output.is_some() {
+                buf.push_str(&obj.to_string());
+                buf.push('\n');
+            } else {
+                println!("{obj}");
+            }
+        }
+        if let Some(ref path) = args.output {
+            if let Err(e) = std::fs::write(path, &buf) {
+                eprintln!("failed to write evade output to {}: {e}", path.display());
+                return ExitCode::from(1);
+            }
+            eprintln!("evade results written to {}", path.display());
         }
     } else {
         println!(
