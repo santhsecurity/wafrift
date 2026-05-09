@@ -1,6 +1,5 @@
 //! Session handling tests — cookie jars, CSRF extraction, injection.
 
-use reqwest::cookie::CookieStore;
 use wafrift_transport::session::{extract_csrf, inject_csrf, load_jar, save_jar, SessionError};
 use wafrift_types::session::CsrfInjectionLocation;
 use wafrift_types::Request;
@@ -131,7 +130,7 @@ fn save_and_load_jar_roundtrip() {
     jar.add_cookie_str("session=abc123; Path=/; Secure", &url);
 
     save_jar(&jar, &tmp).unwrap();
-    let loaded = load_jar(&tmp).unwrap();
+    let _loaded = load_jar(&tmp).unwrap();
 
     // Jar loaded successfully (persistence is a stub; this verifies no panic)
     assert!(tmp.exists());

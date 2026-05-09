@@ -13,6 +13,7 @@ fn valid_rs256_jwt() -> String {
     format!("{}.{}.sig", header, payload)
 }
 
+#[allow(dead_code)]
 fn valid_hs256_jwt() -> String {
     let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);

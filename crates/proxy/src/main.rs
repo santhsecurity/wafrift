@@ -1374,7 +1374,7 @@ async fn forward_wafrift_request(
     let conn_fwd = collect_connection_header_names(&evasion_result.request.headers);
     let max = limits.max_upstream_response_bytes;
 
-    let mut status_code: u16 = 0;
+    let status_code: u16;
     let (mut response_builder, buf) = if let Some(sc) = stealth() {
         let mut filtered_headers = Vec::with_capacity(evasion_result.request.headers.len());
         for (k, v) in &evasion_result.request.headers {

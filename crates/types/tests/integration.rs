@@ -4,9 +4,9 @@ use wafrift_types::discovery::{DiscoveredEndpoint, DiscoverySource, InjectionPoi
 use wafrift_types::explanation::{DiffHunk, Explanation, ExplanationMode, RuleAttribution};
 use wafrift_types::format::BodyFormat;
 use wafrift_types::injection_context::{ContextualEncodeError, InjectionContext};
-use wafrift_types::oob::{OobCanary, OobConfig, OobConfirmation, OobInteraction, OobProvider};
+use wafrift_types::oob::{OobCanary, OobConfirmation, OobInteraction, OobProvider};
 use wafrift_types::session::{CsrfInjectionLocation, JwtManipulation, SessionConfig};
-use wafrift_types::{Method, Request, Technique};
+use wafrift_types::{Method, Technique};
 
 // ── InjectionContext ───────────────────────────────────────────────────────
 

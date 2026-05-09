@@ -1,8 +1,6 @@
 //! Explanation engine tests — rule attribution and bypass explanation.
 
 use wafrift_detect::explain::explain_block;
-use wafrift_types::explanation::RuleAttribution;
-use wafrift_types::verdict::Verdict;
 
 // We need a DetectedWaf for testing; construct a minimal one
 fn fake_waf(name: &str) -> wafrift_detect::DetectedWaf {

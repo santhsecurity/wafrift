@@ -1,6 +1,6 @@
 //! Adversarial tests for context-aware encoding — edge cases, injections, boundaries.
 
-use wafrift_encoding::contextual::{encode_in_context, validate_in_context};
+use wafrift_encoding::contextual::encode_in_context;
 use wafrift_encoding::Strategy;
 use wafrift_types::injection_context::InjectionContext;
 
