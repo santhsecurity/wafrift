@@ -148,11 +148,49 @@ struct Args {
 
 type SharedState = Arc<Mutex<ProxyState>>;
 
+/// Simple per-key warning throttle so high-rate scanners (sqlmap,
+/// ffuf) don't flood the logs with identical messages.
+struct WarnThrottle {
+    cooldown: Duration,
+    last: std::sync::Mutex<HashMap<String, Instant>>,
+}
+
+impl WarnThrottle {
+    fn new(cooldown_secs: u64) -> Self {
+        Self {
+            cooldown: Duration::from_secs(cooldown_secs),
+            last: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Returns true if at least `cooldown` has elapsed since the last
+    /// warning with this key. The key should encode both the message
+    /// category and the host (or other dimension) being warned about.
+    fn should_warn(&self, key: &str) -> bool {
+        let mut map = match self.last.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let now = Instant::now();
+        if let Some(last) = map.get(key) {
+            if now.duration_since(*last) < self.cooldown {
+                return false;
+            }
+        }
+        map.insert(key.to_string(), now);
+        true
+    }
+}
+
 /// Mutable proxy state shared across connections.
 #[derive(Default)]
 struct ProxyState {
     /// Per-host evasion state.
     hosts: HashMap<String, HostState>,
+    /// FIFO queue tracking host insertion order. Used for deterministic
+    /// eviction when the map exceeds its cap — prevents arbitrary
+    /// HashMap-bucket-order removal from discarding active hosts.
+    host_fifo: VecDeque<String>,
     /// Total requests proxied.
     total_scanned: u32,
     /// Total WAF blocks observed.
@@ -276,7 +314,7 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
 fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
     let mut restored = 0usize;
     for (host, persisted) in bank.hosts {
-        let hs = state.hosts.entry(host).or_default();
+        let hs = state.hosts.entry(host.clone()).or_default();
         if !persisted.proven_winners.is_empty() {
             hs.proven_winners = persisted.proven_winners;
             hs.discovery_complete = true;
@@ -288,6 +326,9 @@ fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
         if persisted.waf_name.is_some() {
             hs.waf_name = persisted.waf_name;
             hs.waf_confirmed = true;
+        }
+        if !state.host_fifo.contains(&host) {
+            state.host_fifo.push_back(host);
         }
     }
     restored
@@ -717,15 +758,22 @@ async fn forward_wafrift_request(
         let mut st = state.lock().await;
         st.total_scanned += 1;
 
-        // Prevent unbounded memory growth from arbitrary Host headers (DoS vector)
-        if st.hosts.len() >= 10_000
-            && !st.hosts.contains_key(&host)
-            && let Some(key_to_remove) = st.hosts.keys().next().cloned()
-        {
-            st.hosts.remove(&key_to_remove);
+        // Prevent unbounded memory growth from arbitrary Host headers (DoS vector).
+        // Evict the oldest host (FIFO) rather than an arbitrary HashMap bucket.
+        if st.hosts.len() >= 10_000 && !st.hosts.contains_key(&host) {
+            while let Some(key_to_remove) = st.host_fifo.pop_front() {
+                if st.hosts.remove(&key_to_remove).is_some() {
+                    break;
+                }
+                // If the key was already gone (stale FIFO entry), keep popping.
+            }
         }
 
+        let is_new = !st.hosts.contains_key(&host);
         let hs = st.hosts.entry(host.clone()).or_default();
+        if is_new {
+            st.host_fifo.push_back(host.clone());
+        }
 
         // Apply default escalation if requested.
         if let Some(esc) = &default_escalation {
