@@ -16,6 +16,10 @@ wafrift-strategy = { workspace = true }
 wafrift-transport = { workspace = true }
 wafrift-encoding = { workspace = true }
 wafrift-detect = { workspace = true }
+# body_padding lives in wafrift-evolution (the natural home for evasion
+# mutators). Pulled in to apply the 8KB/16KB cloud-WAF inspection
+# bypass before the upstream forward.
+wafrift-evolution = { workspace = true }
 tokio.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
@@ -38,6 +42,13 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 moka = { workspace = true }
 dirs = { workspace = true }
+http = { workspace = true }
+thiserror = { workspace = true }
+# Terminal dashboard (--tui). ratatui + crossterm are workspace deps,
+# already pulled in by wafrift-cli, so we don't add a new transitive
+# tree — just turn them on for the proxy binary.
+ratatui = { workspace = true }
+crossterm = { workspace = true }
 
 [features]
 default = []

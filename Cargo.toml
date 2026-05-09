@@ -80,7 +80,13 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Firefox / Safari / Edge ClientHello bytes-for-bytes via BoringSSL.
 # Default builds do NOT pull this in (no boring-sys); only consumers
 # that enable `tls-impersonate` pay the dep cost.
-rquest = { version = "5", default-features = false, features = ["impersonate"] }
+#
+# Note: rquest 5.x removed the standalone `impersonate` feature gate —
+# browser impersonation is built into the default feature set. We list
+# only what StealthClient actually needs (cookies + common encodings +
+# stream) so we don't drag in async-WebSocket/socks/etc. on the hot
+# path.
+rquest = { version = "5", default-features = false, features = ["cookies", "gzip", "brotli", "json", "charset", "stream"] }
 http = "1"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
