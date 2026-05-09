@@ -168,6 +168,31 @@ wafrift scan --target https://target.com --payload "' UNION SELECT 1--" \
 wafrift report --only-host target.com --output writeup.md
 ```
 
+### 🗺️ Discovery — "I have an OpenAPI spec / GraphQL endpoint, find injection points"
+
+```bash
+# Parse an OpenAPI 2.0/3.x JSON spec into structured injection points
+wafrift discover --spec api.json --format json --output endpoints.json
+
+# Probe a GraphQL server's introspection schema
+wafrift discover --target https://api.example.com/graphql --introspect
+
+# Differential parameter mining against a single endpoint
+wafrift discover --target https://app.example.com/search \
+  --mine-params --wordlist /path/to/burp-parameter-names.txt
+
+# Combine modes; results are deduplicated by (method, url) and emit
+# `DiscoveredEndpoint` JSON suitable for piping into `wafrift scan`.
+wafrift discover --spec api.json --target https://app.example.com \
+  --introspect --mine-params --wordlist params.txt --format json
+```
+
+Each injection point carries its `ParameterLocation` (Query / Path /
+Header / Cookie / Body), `InjectionContext` (`JsonString` /
+`UrlQuery` / `XmlText` / `MultipartField` / etc.) inferred from the
+spec's media type, and a `required` flag — letting `wafrift scan`
+pick context-aware encodings instead of guessing.
+
 ### 🔴 Red Team — "Persistent evasion against the same WAF"
 
 ```bash
