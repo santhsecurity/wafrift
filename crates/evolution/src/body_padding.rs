@@ -36,11 +36,30 @@ pub const PAD_KEY: &str = "_wafrift_pad";
 pub const MIN_USEFUL_PAD: usize = 4 * 1024;
 
 /// Generate `n` bytes of inert ASCII filler.
+///
+/// Uses a deterministic xorshift PRNG over `[a-z0-9]` so the padding
+/// looks like normal junk parameter content. A run-of-A filler trips
+/// Naxsi's `BIG_REQUEST` heuristic and ModSecurity's `RX` rules that
+/// flag long single-character sequences. Random-looking lowercase
+/// alphanumeric is the same alphabet wordlists use, so the WAF
+/// classifies it as boring.
+///
+/// Determinism matters for tests + reproducibility: the same `n`
+/// always produces the same bytes, so a developer staring at a
+/// captured request can match it against the test fixture.
 fn fill(n: usize) -> Vec<u8> {
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut v = Vec::with_capacity(n);
-    let cycle = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    for i in 0..n {
-        v.push(cycle[i % cycle.len()]);
+    // xorshift64* — small, deterministic, no dep on `rand`. Seed is a
+    // mash of `n` so different padding sizes don't share prefixes.
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15u64
+        .wrapping_add(n as u64)
+        .wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    for _ in 0..n {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        v.push(ALPHABET[(state as usize) % ALPHABET.len()]);
     }
     v
 }
@@ -320,10 +339,50 @@ mod tests {
     fn fill_is_deterministic_and_inert() {
         let v = fill(8 * 1024);
         assert_eq!(v.len(), 8 * 1024);
-        // No SQL/XSS/shell metacharacters.
+        // Lowercase alphanumeric only — no SQL/XSS/shell metacharacters.
         for &b in &v {
-            assert!(b.is_ascii_alphabetic(), "byte {b:#x} not alphabetic");
+            assert!(
+                (b.is_ascii_lowercase() || b.is_ascii_digit()),
+                "byte {b:#x} ({}) outside [a-z0-9]",
+                b as char
+            );
         }
+        // Determinism: same n → same bytes.
+        assert_eq!(fill(8 * 1024), v);
+    }
+
+    #[test]
+    fn fill_no_long_runs() {
+        // The whole point of switching from 'A'*N to xorshift is that
+        // RX-based WAFs (naxsi BIG_REQUEST, modsec REQUEST_BODY runs)
+        // flag long single-character sequences. Verify no run of the
+        // same byte exceeds 6 (a defensive ceiling — true xorshift
+        // sometimes produces short repeats but never long ones).
+        let v = fill(64 * 1024);
+        let mut max_run = 1usize;
+        let mut cur_run = 1usize;
+        for w in v.windows(2) {
+            if w[0] == w[1] {
+                cur_run += 1;
+                max_run = max_run.max(cur_run);
+            } else {
+                cur_run = 1;
+            }
+        }
+        assert!(
+            max_run <= 6,
+            "filler has a run of {max_run} same bytes — would trigger WAF run-detection"
+        );
+    }
+
+    #[test]
+    fn fill_distinct_per_size() {
+        // Different requested sizes produce different bytes (the seed
+        // includes n) so two adjacent buffers don't share a prefix
+        // a WAF could fingerprint.
+        let a = fill(8 * 1024);
+        let b = fill(8 * 1024 + 1);
+        assert_ne!(&a[..32], &b[..32]);
     }
 
     #[test]

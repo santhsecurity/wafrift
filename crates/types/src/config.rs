@@ -33,6 +33,14 @@ pub struct EvasionConfig {
     /// Manual origin bypass mapping from Host to IP.
     #[serde(default)]
     pub origin_bypass: std::collections::HashMap<String, std::net::IpAddr>,
+    /// Body padding (bytes) — pre-pend N bytes of inert filler to
+    /// JSON / form / multipart bodies so the malicious payload sits
+    /// past cloud-WAF inspection windows (Cloudflare Pro 8 KB, AWS
+    /// WAF 16 KB). 0 disables padding entirely. Anything below
+    /// `wafrift_evolution::body_padding::MIN_USEFUL_PAD` is silently
+    /// skipped at strategy time.
+    #[serde(default)]
+    pub body_padding_bytes: usize,
 }
 
 impl Default for EvasionConfig {
@@ -49,6 +57,7 @@ impl Default for EvasionConfig {
             insecure_tls: false,
             proxies: Vec::new(),
             origin_bypass: std::collections::HashMap::new(),
+            body_padding_bytes: 0,
         }
     }
 }
@@ -69,6 +78,7 @@ impl EvasionConfig {
             insecure_tls: false,
             proxies: Vec::new(),
             origin_bypass: std::collections::HashMap::new(),
+            body_padding_bytes: 0,
         }
     }
 
@@ -87,6 +97,9 @@ impl EvasionConfig {
             insecure_tls: false,
             proxies: Vec::new(),
             origin_bypass: std::collections::HashMap::new(),
+            // Default to AWS-WAF-default-tier (16 KB) — covers
+            // Cloudflare Pro (8 KB), AWS WAF default, Akamai default.
+            body_padding_bytes: 16 * 1024,
         }
     }
 

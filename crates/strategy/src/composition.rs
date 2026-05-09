@@ -22,6 +22,13 @@ pub enum EvasionLayer {
     Smuggling,
     /// HTTP/2 frame manipulation.
     H2,
+    /// Body-size inspection bypass: pre-pend N bytes of inert filler so
+    /// the malicious payload sits past the cloud-WAF inspection window
+    /// (Cloudflare Pro 8 KB, AWS WAF 16 KB, Akamai 8 KB). Runs LAST in
+    /// the pipeline because it operates on the assembled body bytes —
+    /// any layer that re-builds the body (Encoding, ContentType,
+    /// Smuggling) must complete first.
+    BodyPadding,
 }
 
 impl EvasionLayer {
@@ -35,6 +42,9 @@ impl EvasionLayer {
             Self::Header => &[],
             Self::Smuggling => &[Self::ContentType, Self::Header],
             Self::H2 => &[Self::Header],
+            // BodyPadding mutates the assembled body bytes, so any
+            // layer that re-builds the body must be done first.
+            Self::BodyPadding => &[Self::Encoding, Self::ContentType, Self::Grammar],
         }
     }
 
@@ -120,5 +130,44 @@ mod tests {
     fn smuggling_requires_content_type() {
         let seq = vec![EvasionLayer::Header, EvasionLayer::Smuggling];
         assert!(!is_valid_sequence(&seq));
+    }
+
+    #[test]
+    fn body_padding_must_come_after_body_mutators() {
+        let valid = vec![
+            EvasionLayer::Grammar,
+            EvasionLayer::Encoding,
+            EvasionLayer::ContentType,
+            EvasionLayer::BodyPadding,
+        ];
+        assert!(is_valid_sequence(&valid));
+
+        // Wrong order: padding before content-type would be wiped out
+        // by the content-type rebuild.
+        let invalid = vec![
+            EvasionLayer::Grammar,
+            EvasionLayer::BodyPadding,
+            EvasionLayer::ContentType,
+        ];
+        assert!(!is_valid_sequence(&invalid));
+    }
+
+    #[test]
+    fn body_padding_canonicalizes_to_end() {
+        // is_valid_sequence requires ALL listed prereqs to exist, so
+        // for BodyPadding we need all three (Encoding, ContentType,
+        // Grammar) in the sequence.
+        let mut seq = vec![
+            EvasionLayer::ContentType,
+            EvasionLayer::Grammar,
+            EvasionLayer::BodyPadding,
+            EvasionLayer::Encoding,
+        ];
+        canonicalize(&mut seq);
+        assert!(
+            is_valid_sequence(&seq),
+            "canonicalize did not produce a valid sequence: {seq:?}"
+        );
+        assert_eq!(seq.last(), Some(&EvasionLayer::BodyPadding));
     }
 }
