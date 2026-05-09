@@ -27,6 +27,10 @@ regex = { workspace = true }
 urlencoding = { workspace = true }
 wafrift-pool = { workspace = true, optional = true }
 rquest = { workspace = true, optional = true }
+# Companion crate carrying the actual browser-emulation profiles
+# (Chrome131, Firefox133, etc.) split out of rquest in 5.x. Gated
+# behind the same tls-impersonate feature.
+rquest-util = { workspace = true, optional = true }
 # Required by `tls-impersonate` (StealthClient bytes_stream loop).
 # Also pulled in transitively by reqwest in default builds, so this
 # explicit declaration doesn't bloat anything.
@@ -42,7 +46,7 @@ origin-bypass = []
 # `--tls-impersonate chrome131` (et al.) on scan/proxy paths produces
 # a ClientHello that JA3-matches a real Chrome 131. Pulls in boring-sys
 # (C build); not on by default. See docs/TLS_PARITY.md.
-tls-impersonate = ["dep:rquest", "dep:futures-util"]
+tls-impersonate = ["dep:rquest", "dep:rquest-util", "dep:futures-util"]
 
 [dev-dependencies]
 proptest = { workspace = true }

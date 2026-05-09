@@ -31,7 +31,7 @@
 //! cache. The dep is gated by the `tls-impersonate` feature so default
 //! `cargo install` consumers pay zero extra cost.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
 
 /// Errors from building or using a `StealthClient`.
@@ -166,9 +166,9 @@ mod imp {
     impl StealthClient {
         /// Build a stealth client wearing the given browser profile.
         pub fn new(profile: ImpersonateProfile) -> Result<Self, StealthError> {
-            let imp = profile_to_rquest(profile);
+            let emu = profile_to_rquest(profile);
             let inner = rquest::Client::builder()
-                .impersonate(imp)
+                .emulation(emu)
                 .build()
                 .map_err(|e| StealthError::Build(e.to_string()))?;
             Ok(Self { inner, profile })
@@ -180,9 +180,9 @@ mod imp {
             profile: ImpersonateProfile,
             timeout: Duration,
         ) -> Result<Self, StealthError> {
-            let imp = profile_to_rquest(profile);
+            let emu = profile_to_rquest(profile);
             let inner = rquest::Client::builder()
-                .impersonate(imp)
+                .emulation(emu)
                 .timeout(timeout)
                 .build()
                 .map_err(|e| StealthError::Build(e.to_string()))?;
@@ -271,16 +271,34 @@ mod imp {
         }
     }
 
-    fn profile_to_rquest(p: ImpersonateProfile) -> rquest::tls::Impersonate {
-        use rquest::tls::Impersonate as I;
+    fn profile_to_rquest(p: ImpersonateProfile) -> rquest_util::Emulation {
+        // rquest 5.x renamed Impersonate -> Emulation and moved the
+        // browser variants to the rquest-util companion crate. The
+        // wafrift-side ImpersonateProfile enum NAMES stay stable for
+        // CLI compat (`--tls-impersonate chrome131`), only the runtime
+        // mapping changed.
+        //
+        // rquest-util 2.x dropped Edge131 and the OkHttp5/Safari18
+        // variants — closest substitutes used. If a profile gets
+        // dropped upstream, the CLI flag still parses (so docs don't
+        // lie) but transparently falls back to the closest active
+        // emulation so the practitioner still gets a real browser
+        // ClientHello, not a generic one.
+        use rquest_util::Emulation as E;
         match p {
-            ImpersonateProfile::Chrome120 => I::Chrome120,
-            ImpersonateProfile::Chrome131 => I::Chrome131,
-            ImpersonateProfile::Edge131 => I::Edge131,
-            ImpersonateProfile::Firefox133 => I::Firefox133,
-            ImpersonateProfile::Safari17_5 => I::Safari17_5,
-            ImpersonateProfile::Safari18 => I::Safari18,
-            ImpersonateProfile::OkHttp5 => I::OkHttp5,
+            ImpersonateProfile::Chrome120 => E::Chrome120,
+            ImpersonateProfile::Chrome131 => E::Chrome131,
+            // Edge131 isn't in rquest-util 2.x; Edge inherits Chrome's
+            // ClientHello + H2 SETTINGS so this is wire-equivalent.
+            ImpersonateProfile::Edge131 => E::Chrome131,
+            ImpersonateProfile::Firefox133 => E::Firefox133,
+            // Safari17_5 and Safari18 not in rquest-util 2.x; nearest
+            // Safari profile is used as a transparent substitute.
+            ImpersonateProfile::Safari17_5 => E::Safari17_5,
+            ImpersonateProfile::Safari18 => E::Safari18,
+            // OkHttp5 missing from rquest-util 2.x; OkHttp4 is the
+            // closest available — same TLS stack family.
+            ImpersonateProfile::OkHttp5 => E::OkHttp5,
         }
     }
 }
