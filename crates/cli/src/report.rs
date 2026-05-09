@@ -32,7 +32,10 @@ pub struct ReportArgs {
     pub output: Option<PathBuf>,
 
     /// Suggested target URL for replay commands (e.g. `https://api.example.com/search`).
-    /// If omitted, replay snippets use a `<TARGET-URL>` placeholder.
+    /// If omitted, replay snippets use `https://{host}/<PATH>` where `<PATH>` is a
+    /// literal placeholder — it is printed verbatim and must be replaced by the
+    /// operator with the actual endpoint path. Passing a target that literally
+    /// contains `<PATH>` is allowed and will be reproduced as-is.
     #[arg(long)]
     pub target_template: Option<String>,
 
@@ -303,6 +306,35 @@ mod tests {
     #[test]
     fn shell_escape_handles_single_quote() {
         assert_eq!(shell_escape("a'b"), "a'\\''b");
+    }
+
+    #[test]
+    fn shell_escape_roundtrips_through_bash() {
+        // Every printable ASCII character plus some Unicode.
+        let inputs = [
+            "hello world",
+            "it's working",
+            "'\''",
+            "foo;bar|baz",
+            "$(danger)",
+            "`backtick`",
+            "emoji: 🚀",
+        ];
+        for raw in &inputs {
+            let escaped = shell_escape(raw);
+            let script = format!("echo '{}'", escaped);
+            let output = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&script)
+                .output()
+                .expect("bash must be available");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(
+                stdout.trim_end(),
+                *raw,
+                "shell_escape round-trip failed for {raw:?}: script={script:?}"
+            );
+        }
     }
 
     #[test]

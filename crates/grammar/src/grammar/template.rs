@@ -115,7 +115,7 @@ fn get_rules() -> &'static TemplateRules {
     static RULES: OnceLock<TemplateRules> = OnceLock::new();
     RULES.get_or_init(|| {
         toml::from_str(TEMPLATE_RULES_TOML).unwrap_or_else(|e| {
-            eprintln!("warn: invalid TOML in rules/templates.toml: {e}");
+            tracing::warn!(error = %e, "invalid TOML in rules/templates.toml");
             TemplateRules::default()
         })
     })

@@ -161,6 +161,76 @@ wafrift-proxy --listen 127.0.0.1:8080 --mitm --mitm-ca-dir ./mitm-ca
 
 Point your scanner at the proxy — all traffic is automatically transformed to bypass WAF rules. The proxy learns per-host: discovery → rotation → drift detection → re-discovery. With **`--mitm`**, TLS on `CONNECT` is terminated so HTTPS requests go through the same evasion path (authorized targets only).
 
+#### Scope filters (don't break login flows / static assets)
+
+By default the proxy evades **every** request, which is the wrong shape when you've pointed Burp at it and are also browsing the application normally. Scope filters let you keep wafrift active only where you want it; everything else is forwarded verbatim with no evasion, no gene-bank update, no detection.
+
+```bash
+# Only evade traffic to *.example.com on JSON API endpoints,
+# leave login + static assets untouched.
+wafrift-proxy --listen 127.0.0.1:8080 --mitm \
+  --only-host '*.example.com' \
+  --skip-path '/static/*,/oauth/*,/login,/favicon.ico' \
+  --only-method 'POST,PUT,PATCH,DELETE'
+```
+
+Patterns use a tiny ASCII glob grammar (`*` matches any run, `?` matches one byte, case-insensitive). `--skip-host`/`--skip-path` are evaluated **after** `--only-host`/`--only-path`.
+
+#### Per-host rate limiting (don't accidentally DoS the target)
+
+```bash
+# Token bucket: 5 req/s per upstream host, burst of 10.
+wafrift-proxy --listen 127.0.0.1:8080 --mitm \
+  --max-rps-per-host 5 --max-rps-per-host-burst 10
+```
+
+#### Live findings (curl the proxy mid-session)
+
+```bash
+# Loopback-only, peer-loopback gated.
+curl http://127.0.0.1:8080/_wafrift/findings.md   # markdown writeup
+curl http://127.0.0.1:8080/_wafrift/status        # JSON (schema_version + per-host stats)
+```
+
+### End-to-end practitioner walkthrough (5 min)
+
+```bash
+# 1. Scaffold a config in the current directory (commented out — pure no-op until you edit).
+wafrift init
+
+# 2. Generate the MITM CA (auto-installs in OS trust store on Linux/macOS where possible;
+#    falls through to printed instructions on Windows).
+wafrift-proxy --write-mitm-ca-dir ~/.wafrift/mitm-ca
+
+# 3. Run the proxy in front of your client (Burp / browser / sqlmap / curl).
+wafrift-proxy --listen 127.0.0.1:8080 --mitm \
+  --only-host '*.target.tld' \
+  --skip-path '/static/*,/healthz' \
+  --max-rps-per-host 5 \
+  --max-evade-retries 3 \
+  --gene-bank-path ~/.wafrift/target.json
+
+# 4. Drive your client normally. Watch findings land in real time:
+curl -s http://127.0.0.1:8080/_wafrift/findings.md
+
+# 5. Render a pentest-shaped report from the gene bank.
+wafrift report --proxy-bank ~/.wafrift/target.json --output engagement.md
+
+# 6. Reproduce any individual finding deterministically (returns exit 0 = bypass, 2 = blocked).
+wafrift replay \
+  --target 'https://api.target.tld/search' \
+  --param q --payload "1' OR 1=1-- " \
+  --from-host 'api.target.tld' --proxy-bank ~/.wafrift/target.json
+
+# 7. Gate regressions in CI: snapshot bench output, compare future runs.
+wafrift bench-waf --target modsec-pl4 --strategies all --output current.json
+wafrift bench-diff --baseline baseline.json --current current.json --bypass-drop-pp 2
+```
+
+#### Authorisation
+
+`wafrift-proxy` refuses upstream targets in private/loopback/RFC1918/link-local ranges by default; pass `--allow-private-upstream` only against lab targets you own. `wafrift replay` and the differential probes send genuinely exploitable strings — only run them against systems you control or have explicit written authorisation to test.
+
 ## Architecture
 
 ```

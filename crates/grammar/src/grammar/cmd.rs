@@ -120,7 +120,7 @@ fn get_rules() -> &'static CmdPayloadRules {
     static RULES: OnceLock<CmdPayloadRules> = OnceLock::new();
     RULES.get_or_init(|| {
         toml::from_str(CMD_PAYLOADS_TOML).unwrap_or_else(|e| {
-            eprintln!("warn: invalid TOML in rules/cmd/payloads.toml: {e}");
+            tracing::warn!(error = %e, "invalid TOML in rules/cmd/payloads.toml");
             CmdPayloadRules::default()
         })
     })

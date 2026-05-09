@@ -111,7 +111,7 @@ fn get_rules() -> &'static SqlOperatorRules {
     static RULES: OnceLock<SqlOperatorRules> = OnceLock::new();
     RULES.get_or_init(|| {
         toml::from_str(SQL_OPERATORS_TOML).unwrap_or_else(|e| {
-            eprintln!("warn: invalid TOML in rules/sql/operators.toml: {e}");
+            tracing::warn!(error = %e, "invalid TOML in rules/sql/operators.toml");
             SqlOperatorRules::default()
         })
     })

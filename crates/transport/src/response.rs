@@ -59,6 +59,13 @@ pub fn is_waf_block(status: u16, body: &[u8]) -> bool {
         return true;
     }
 
+    // 404 pages commonly contain WAF-ish strings like "forbidden" or
+    // "access denied" in custom error pages (e.g. nginx/Apache defaults).
+    // Do not misclassify them as WAF blocks.
+    if status == 404 {
+        return false;
+    }
+
     // Body-based detection (check first 4KB)
     let scan_limit = body.len().min(4096);
     let body_str = String::from_utf8_lossy(&body[..scan_limit]).to_ascii_lowercase();
@@ -275,5 +282,22 @@ mod tests {
     #[test]
     fn detect_challenges() {
         assert!(is_waf_block(200, b"challenge-platform"));
+    }
+
+    #[test]
+    fn ffuf_404_with_wafish_strings_not_blocked() {
+        // Directory bruteforcing produces many 404s whose bodies may
+        // contain "forbidden", "access denied", etc. These must NOT be
+        // misclassified as WAF blocks.
+        assert!(!is_waf_block(404, b"Forbidden - you cannot access this resource"));
+        assert!(!is_waf_block(404, b"Access Denied - page not found"));
+        assert!(!is_waf_block(404, b"Request blocked - this path does not exist"));
+        assert!(!is_waf_block(404, b"<html><h1>Not Found</h1><p>Access to /admin is forbidden</p></html>"));
+    }
+
+    #[test]
+    fn normal_404_empty_body_not_blocked() {
+        assert!(!is_waf_block(404, b""));
+        assert!(!is_waf_block(404, b"Not Found"));
     }
 }
