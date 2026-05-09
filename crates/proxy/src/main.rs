@@ -199,12 +199,9 @@ struct PersistedGeneBank {
 
 fn default_gene_bank_path(supplied: &str) -> Option<std::path::PathBuf> {
     if supplied.is_empty() {
-        // Default: ~/.wafrift/gene-bank.json. If $HOME is unset, disable.
-        let home = std::env::var_os("HOME")?;
-        let p = std::path::PathBuf::from(home)
-            .join(".wafrift")
-            .join("gene-bank.json");
-        Some(p)
+        // Default: $XDG_CONFIG_HOME/wafrift/gene-bank.json (or platform equivalent).
+        // If config_dir cannot be determined, disable persistence.
+        dirs::config_dir().map(|d| d.join("wafrift").join("gene-bank.json"))
     } else if supplied == "off" || supplied == "-" {
         None
     } else {
