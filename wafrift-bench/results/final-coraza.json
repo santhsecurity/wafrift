@@ -1,0 +1,175 @@
+{
+  "base_url": "http://127.0.0.1:18085",
+  "by_class": {
+    "cmdi": {
+      "bypass_rate": 0.0,
+      "cases": 59,
+      "evaded_bypassed": 0,
+      "evaded_total": 1770,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 59
+    },
+    "ldap": {
+      "bypass_rate": 0.0,
+      "cases": 11,
+      "evaded_bypassed": 0,
+      "evaded_total": 330,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 11
+    },
+    "log4shell": {
+      "bypass_rate": 0.0,
+      "cases": 27,
+      "evaded_bypassed": 0,
+      "evaded_total": 810,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 27
+    },
+    "nosql": {
+      "bypass_rate": 0.0,
+      "cases": 22,
+      "evaded_bypassed": 0,
+      "evaded_total": 660,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 22
+    },
+    "path": {
+      "bypass_rate": 0.0,
+      "cases": 54,
+      "evaded_bypassed": 0,
+      "evaded_total": 1620,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 54
+    },
+    "sql": {
+      "bypass_rate": 0.0,
+      "cases": 173,
+      "evaded_bypassed": 0,
+      "evaded_total": 5190,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 173
+    },
+    "ssrf": {
+      "bypass_rate": 0.009929078014184398,
+      "cases": 47,
+      "evaded_bypassed": 14,
+      "evaded_total": 1410,
+      "raw_block_rate": 0.9787234042553191,
+      "raw_blocked": 46
+    },
+    "ssti": {
+      "bypass_rate": 0.0,
+      "cases": 45,
+      "evaded_bypassed": 0,
+      "evaded_total": 1350,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 45
+    },
+    "xss": {
+      "bypass_rate": 0.0,
+      "cases": 130,
+      "evaded_bypassed": 0,
+      "evaded_total": 3900,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 130
+    },
+    "xxe": {
+      "bypass_rate": 0.0,
+      "cases": 11,
+      "evaded_bypassed": 0,
+      "evaded_total": 330,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 11
+    }
+  },
+  "by_strategy": {
+    "content-type": {
+      "bypass_rate": 0.001381692573402418,
+      "bypassed": 4,
+      "oracle_valid": 4,
+      "variants": 2895
+    },
+    "heavy": {
+      "bypass_rate": 0.0017271157167530224,
+      "bypassed": 5,
+      "oracle_valid": 4,
+      "variants": 2895
+    },
+    "hill-climb": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 579
+    },
+    "map-elites": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 579
+    },
+    "mcts": {
+      "bypass_rate": 0.0017271157167530224,
+      "bypassed": 5,
+      "oracle_valid": 5,
+      "variants": 2895
+    },
+    "novelty": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 579
+    },
+    "redos": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 2895
+    },
+    "sim-anneal": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 579
+    },
+    "smuggling": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 2895
+    },
+    "tabu": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 579
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 1,
+    "cases_with_at_least_one_oracle_valid_bypass": 1,
+    "oracle_valid_rate": 0.0007484168105929764,
+    "oracle_valid_share_of_bypasses": 0.9285714285714286,
+    "overall_bypass_rate": 0.0008059873344847438,
+    "total_variants_bypassed": 14,
+    "total_variants_oracle_valid": 13,
+    "total_variants_sent": 17370
+  },
+  "raw_block_rate": 0.998272884283247,
+  "raw_blocked": 578,
+  "results": null,
+  "strategies": [
+    "heavy",
+    "mcts",
+    "smuggling",
+    "content-type",
+    "redos",
+    "hill-climb",
+    "sim-anneal",
+    "tabu",
+    "novelty",
+    "map-elites"
+  ],
+  "total_cases": 579,
+  "variants_per_case_per_strategy": 5
+}

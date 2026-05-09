@@ -1,129 +1,119 @@
 # wafrift bypass-rate measurements — 2026-05-08
 
-Honest, reproducible numbers. Methodology in `../methodology.md`.
-JSON blobs in this directory; below are the per-paranoia × per-class
-summaries.
+Reproducible numbers from the multi-strategy bench harness in
+`wafrift-bench/`. Methodology in `../methodology.md`. Raw JSON in
+this directory; below are headline tables.
 
 ## Setup
 
-- Stack: `owasp/modsecurity-crs:4-apache-202604040104` × 4 containers
-  (`wafrift-pl{1,2,3,4}`) on ports 18081-18084. PARANOIA env varies.
-- Backend: `kennethreitz/httpbin`.
-- Wafrift: santhsecurity/wafrift HEAD.
-- Corpus: **557 cases across 10 attack classes** in
-  `wafrift-bench/corpus/`, organized by sub-category:
-  ```
-  sql/{tautology, union, blind, error_based, stacked, comments_evasion}
-  xss/{script_tag, event_handler, svg, javascript_uri, polyglot, html_attribute}
-  cmdi/{shell_unix, shell_windows}
-  ssti/{jinja2, twig_freemarker_velocity}
-  path/{linux, encoded, windows}
-  ssrf/{cloud_metadata, encoded_localhost, protocol_smuggling}
-  ldap/filter_injection
-  nosql/{mongodb, elastic_couch_redis}
-  xxe/xml
-  log4shell/jndi
-  ```
+- **Wafrift**: `santhsecurity/wafrift` HEAD (v0.2.0).
+- **Corpus**: 579 cases across 11 attack classes
+  (`sql / xss / cmdi / ssti / path / ldap / xxe / ssrf / nosql /
+  log4shell / cve_pocs`). cve_pocs is the held-out test set per
+  methodology — 22 real CVE PoCs (log4shell, struts2, weblogic,
+  spring4shell, follina, etc.) never used to tune wafrift.
+- **Strategies** (10): `heavy + mcts + smuggling + content-type +
+  redos + hill-climb + sim-anneal + tabu + novelty + map-elites`.
+- **Variants per case per strategy**: 5.
+- **Oracle gate**: on. Each "bypass" filtered through the per-class
+  semantic-validity oracle (sql / xss / cmdi / ssti / path / ldap /
+  ssrf / nosql / xxe / log4shell). Only structurally-valid attack
+  payloads count.
+- **Targets**: ModSec CRS at PL=1 + PL=4 + Coraza CRS.
 
-## Strategy comparison on PL=1 (557 cases)
+## Headline
 
-| Strategy mix | Variants sent | Bypassed | Rate | Cases ≥1 bypass |
-|---|---:|---:|---:|---:|
-| `heavy` only (textual mutation) | ~16,750 | ~4,650 | 27.8% | ~520 |
-| `heavy + mcts + smuggling + content-type` | 55,486 | 21,409 | **38.6%** | **557 (100%)** |
+| WAF | Variants sent | Bypassed | Bypass rate | Oracle-valid | Cases ≥1 bypass |
+|---|---:|---:|---:|---:|---:|
+| **modsec-pl1** | 17,370 | 5,920 | **34%** | 91% | **579 / 579 (100%)** |
+| **modsec-pl4** | 17,370 | 4,043 | **23%** | 100% | **579 / 579 (100%)** |
+| **coraza** | 17,370 | 49 | **<1%** | 92% | **1 / 579** |
 
-Adding MCTS, smuggling, and content-type strategies lifts overall
-bypass 11 points and pushes case-coverage to 100%.
+**modsec-pl1 → pl4** drops the bypass rate from 34% to 23% but
+case-coverage stays 100% — every attack type still has at least
+one working evasion at the most paranoid CRS preset. **Coraza CRS
+4.0.0-rc1 is a different story**: only 1 case got through across
+~17k variants. Coraza ships libinjection and a newer CRS rule set
+than the ModSec image we test, and it shows.
 
-## Per-paranoia headline (multi-strategy: heavy + mcts + smuggling + content-type + redos)
+## Per-class bypass on modsec-pl1
 
-| PL | Variants sent | Bypassed | Bypass rate | Cases ≥1 bypass |
-|---|---:|---:|---:|---:|
-| **PL=1** | 55,486 | 21,409 | **38%** | **557 / 557 (100%)** |
-| **PL=2** | 59,941 | 17,571 | **29%** | **557 / 557 (100%)** |
-| **PL=3** | 59,941 | 17,260 | **28%** | **557 / 557 (100%)** |
-| **PL=4** | 59,941 | 16,319 | **27%** | **557 / 557 (100%)** |
+| Class | Cases | Bypass rate |
+|---|---:|---:|
+| ssti | 47 | **55%** |
+| ssrf | 46 | **47%** |
+| cmdi | 56 | 47% |
+| nosql | 22 | 37% |
+| ldap | 11 | 36% |
+| path | 49 | 32% |
+| log4shell | 23 | 29% |
+| sql | 173 | 28% |
+| xss | 130 | 27% |
+| xxe | 10 | 26% |
+| cve_pocs | 22 | (mixed-class, see JSON) |
 
-**At every paranoia level — including PL=4, the most aggressive CRS
-preset — wafrift achieves at least one bypass for every single case
-in the corpus.** Once a working evasion seed exists, wafrift can
-replay it indefinitely (gene bank).
+## Per-strategy bypass on modsec-pl1
 
-## Per-class × per-paranoia — multi-strategy
+These two are the workhorse:
 
-| Class      |   PL 1 |   PL 2 |   PL 3 |   PL 4 |
-|------------|--------|--------|--------|--------|
-| sql        | 36.2%  |       |       | 27.2%  |
-| xss        | 30.6%  |       |       | 25.9%  |
-| cmdi       | 46.4%  |       |       | 27.3%  |
-| ssti       | 42.4%  |       |       | 27.5%  |
-| path       | 40.4%  |       |       | 28.4%  |
-| ldap       | 60.2%  |       |       | 28.8%  |
-| xxe        | 28.7%  |       |       | 25.8%  |
-| ssrf       | 44.6%  |       |       | 26.5%  |
-| nosql      | 47.9%  |       |       | 29.3%  |
-| log4shell  | 45.6%  |       |       | 30.4%  |
+| Strategy | Variants | Bypass rate |
+|---|---:|---:|
+| **content-type** | 2,895 | **84%** |
+| **mcts** | 2,895 | **84%** |
+| heavy (build_variants) | 2,895 | 15% |
+| redos | 2,895 | 12% |
+| hill-climb | 579 | 11% |
+| sim-anneal | 579 | 11% |
+| tabu | 579 | 11% |
+| novelty | 579 | 11% |
+| map-elites | 579 | 11% |
+| smuggling | 2,895 | <1% |
 
-(PL2 / PL3 per-class numbers identical to PL4 within ~3 points;
-extracted from JSON blobs alongside this file.)
+**content-type confusion + MCTS are doing the heavy lifting on
+modsec-pl1.** smuggling is essentially a no-op against this
+particular ModSec setup (the WAF parser is sufficiently strict that
+none of the smuggled-prefix shapes land). evolution-loop algorithms
+all converge to roughly the same ~11% — they're learning a similar
+gene-pool subset.
 
-Compared to the **single-strategy heavy-only baseline** from the
-prior measurement, the highest per-class lifts:
-- **xss: 0% → 30.6%** at PL=1 (smuggling + content-type breakthrough)
-- **xxe: 0% → 28.7%** at PL=1 (multipart wrappers around XML payload)
-- **sql: 13% → 36.2%** at PL=1
-- **ssti: 24% → 42.4%** at PL=1
-- **ssrf: 31% → 44.6%** at PL=1
+## Reproducer
 
-## Strategy attribution
-
-For each PL, the per-strategy breakdown (in the JSON `by_strategy`
-field of each result) shows which strategy did the work:
-
-- `heavy` — payload-string mutation via grammar+encoding (build_variants).
-  Strongest on classes with rich grammar mutators (SQL, XSS basic).
-- `mcts` — Monte Carlo Tree Search via mctrust 0.4. Discovers chains
-  no single rule produces. Strongest at higher PLs where single-step
-  evasion fails.
-- `smuggling` — HTTP request smuggling shapes (CL.TE / TE.CL / TE.TE
-  / dual-CL / cl_zero / multi-value-CL / method-body / h2c). Bypasses
-  WAFs by making the parser see different bytes than the backend.
-- `content-type` — Content-Type confusion (multipart / json / xml /
-  form). Carries the breakthrough on XSS and XXE (WAF declines to
-  inspect or mis-parses the wrapped payload).
-- `redos` — catastrophic-backtracking shapes that try to trigger WAF
-  regex timeout fail-open. Lowest hit rate (modern CRS has timeouts).
-
-## Headline (citable)
-
-> wafrift achieves **38% bypass rate against ModSecurity CRS at
-> default Paranoia Level 1** and **27% bypass at Paranoia Level 4**
-> (the most aggressive CRS preset), measured across **557 attack
-> cases spanning 10 classes** (SQLi, XSS, CMDi, SSTI, path traversal,
-> LDAP, XXE, SSRF, NoSQL, Log4Shell). At **every paranoia level**,
-> wafrift finds **at least one working bypass for 100% of cases** —
-> the gene bank can replay those seeds indefinitely.
-
-(Reproducer:
-```
+```bash
 git clone https://github.com/santhsecurity/wafrift && cd wafrift
-wafrift-bench/scripts/up.sh modsec-pl4
+wafrift-bench/scripts/up.sh modsec-pl1
 cargo run --release -p wafrift-cli -- bench-waf \
-  --base-url http://127.0.0.1:18084 \
-  --corpus wafrift-bench/corpus \
-  --evade --variants 30 \
-  --strategies heavy,mcts,smuggling,content-type,redos \
-  --output repro.json
+    --base-url http://127.0.0.1:18081 \
+    --corpus wafrift-bench/corpus \
+    --evade --variants 5 \
+    --strategies heavy,mcts,smuggling,content-type,redos,hill-climb,sim-anneal,tabu,novelty,map-elites \
+    --oracle-gate \
+    --output repro.json
 jq .evaded_summary repro.json
 ```
-Both binary and corpus locked to the same git SHA.)
+
+## What the numbers don't say
+
+- **Bench measures bypass; doesn't measure exploit success.** Even
+  oracle-valid bypassed payloads aren't proof the backend would
+  honor the SQL/XSS/etc — only that the WAF accepted the request and
+  the payload retained its attack semantics structurally.
+- **Coraza is from a single image** (`jptosso/coraza-caddy:latest`)
+  with default Caddy config + OWASP CRS 4.0.0-rc1. Different Coraza
+  configs (custom rules, paranoia overrides) will show different
+  numbers.
+- **`smuggling` strategy at 0%** doesn't mean wafrift can't smuggle —
+  it means the smuggled-prefix HTTP framing tricks don't survive
+  reqwest's HTTP/1.1 normalization on send. The smuggling crate
+  itself produces correct payloads (16 variants per request); the
+  bench is sending them via reqwest which re-frames them.
+- **PL=2 + PL=3 not measured** in this run for runtime reasons.
+  Earlier (5-strategy, 50-variant) runs are in
+  `modsec-pl{2,3}-multi.json` for the curve-shape view.
 
 ## What's next
 
-Per `wafrift-bench/WIRING.md` audit:
-1. Wire MAP-Elites / sim-anneal / hill-climb / tabu / novelty as
-   bench strategies (currently only callable through `wafrift scan`).
-2. Wire the oracle layer to gate bypass count on semantic validity.
-3. Add Coraza + Naxsi runs (containers exist; just run the bench
-   against them).
-4. AST metamorphism (just landed) — re-run bench to measure delta.
+Per `wafrift-bench/WIRING.md`: differential probing as bench
+strategy, custom rules pack as bench strategy, lineage persistence
+in bench JSON, naxsi-from-source Dockerfile, more attack-class
+oracles (log4shell oracle is structural-only — could check JNDI
+lookup expressibility too).

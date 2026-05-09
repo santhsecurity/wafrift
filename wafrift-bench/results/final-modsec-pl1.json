@@ -1,0 +1,175 @@
+{
+  "base_url": "http://127.0.0.1:18081",
+  "by_class": {
+    "cmdi": {
+      "bypass_rate": 0.4774011299435028,
+      "cases": 59,
+      "evaded_bypassed": 845,
+      "evaded_total": 1770,
+      "raw_block_rate": 0.6949152542372882,
+      "raw_blocked": 41
+    },
+    "ldap": {
+      "bypass_rate": 0.36666666666666664,
+      "cases": 11,
+      "evaded_bypassed": 121,
+      "evaded_total": 330,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 11
+    },
+    "log4shell": {
+      "bypass_rate": 0.291358024691358,
+      "cases": 27,
+      "evaded_bypassed": 236,
+      "evaded_total": 810,
+      "raw_block_rate": 0.9629629629629629,
+      "raw_blocked": 26
+    },
+    "nosql": {
+      "bypass_rate": 0.37272727272727274,
+      "cases": 22,
+      "evaded_bypassed": 246,
+      "evaded_total": 660,
+      "raw_block_rate": 0.8181818181818182,
+      "raw_blocked": 18
+    },
+    "path": {
+      "bypass_rate": 0.3271604938271605,
+      "cases": 54,
+      "evaded_bypassed": 530,
+      "evaded_total": 1620,
+      "raw_block_rate": 0.9259259259259259,
+      "raw_blocked": 50
+    },
+    "sql": {
+      "bypass_rate": 0.2857418111753372,
+      "cases": 173,
+      "evaded_bypassed": 1483,
+      "evaded_total": 5190,
+      "raw_block_rate": 0.9421965317919075,
+      "raw_blocked": 163
+    },
+    "ssrf": {
+      "bypass_rate": 0.4773049645390071,
+      "cases": 47,
+      "evaded_bypassed": 673,
+      "evaded_total": 1410,
+      "raw_block_rate": 0.8297872340425532,
+      "raw_blocked": 39
+    },
+    "ssti": {
+      "bypass_rate": 0.5548148148148148,
+      "cases": 45,
+      "evaded_bypassed": 749,
+      "evaded_total": 1350,
+      "raw_block_rate": 0.5555555555555556,
+      "raw_blocked": 25
+    },
+    "xss": {
+      "bypass_rate": 0.2733333333333333,
+      "cases": 130,
+      "evaded_bypassed": 1066,
+      "evaded_total": 3900,
+      "raw_block_rate": 0.9923076923076923,
+      "raw_blocked": 129
+    },
+    "xxe": {
+      "bypass_rate": 0.2696969696969697,
+      "cases": 11,
+      "evaded_bypassed": 89,
+      "evaded_total": 330,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 11
+    }
+  },
+  "by_strategy": {
+    "content-type": {
+      "bypass_rate": 0.8497409326424871,
+      "bypassed": 2460,
+      "oracle_valid": 2460,
+      "variants": 2895
+    },
+    "heavy": {
+      "bypass_rate": 0.15613126079447323,
+      "bypassed": 452,
+      "oracle_valid": 271,
+      "variants": 2895
+    },
+    "hill-climb": {
+      "bypass_rate": 0.11398963730569948,
+      "bypassed": 66,
+      "oracle_valid": 40,
+      "variants": 579
+    },
+    "map-elites": {
+      "bypass_rate": 0.11053540587219343,
+      "bypassed": 64,
+      "oracle_valid": 34,
+      "variants": 579
+    },
+    "mcts": {
+      "bypass_rate": 0.8459412780656304,
+      "bypassed": 2449,
+      "oracle_valid": 2449,
+      "variants": 2895
+    },
+    "novelty": {
+      "bypass_rate": 0.11053540587219343,
+      "bypassed": 64,
+      "oracle_valid": 34,
+      "variants": 579
+    },
+    "redos": {
+      "bypass_rate": 0.12124352331606218,
+      "bypassed": 351,
+      "oracle_valid": 165,
+      "variants": 2895
+    },
+    "sim-anneal": {
+      "bypass_rate": 0.11398963730569948,
+      "bypassed": 66,
+      "oracle_valid": 40,
+      "variants": 579
+    },
+    "smuggling": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 2895
+    },
+    "tabu": {
+      "bypass_rate": 0.11398963730569948,
+      "bypassed": 66,
+      "oracle_valid": 40,
+      "variants": 579
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 579,
+    "cases_with_at_least_one_oracle_valid_bypass": 579,
+    "oracle_valid_rate": 0.3185377086931491,
+    "oracle_valid_share_of_bypasses": 0.9163630341172574,
+    "overall_bypass_rate": 0.34761082325849163,
+    "total_variants_bypassed": 6038,
+    "total_variants_oracle_valid": 5533,
+    "total_variants_sent": 17370
+  },
+  "raw_block_rate": 0.8860103626943006,
+  "raw_blocked": 513,
+  "results": null,
+  "strategies": [
+    "heavy",
+    "mcts",
+    "smuggling",
+    "content-type",
+    "redos",
+    "hill-climb",
+    "sim-anneal",
+    "tabu",
+    "novelty",
+    "map-elites"
+  ],
+  "total_cases": 579,
+  "variants_per_case_per_strategy": 5
+}
