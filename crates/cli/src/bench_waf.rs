@@ -323,7 +323,13 @@ fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
 }
 
 pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{} failed to start tokio runtime: {e}", "error:".red().bold());
+            return ExitCode::from(1);
+        }
+    };
     match rt.block_on(run_bench_waf_async(args)) {
         Ok(code) => code,
         Err(e) => {
