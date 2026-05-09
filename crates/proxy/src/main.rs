@@ -1595,20 +1595,46 @@ fn render_live_findings(state: &ProxyState) -> String {
 
     out.push_str("## Hosts with proven bypasses\n\n");
     for (host, hs) in hosts_with_winners {
-        out.push_str(&format!("### `{host}`\n\n"));
-        if let Some(waf) = &hs.waf_name {
+        // Hostnames come from Host headers — attacker-controllable in
+        // every relevant threat model. If a host contains backticks,
+        // pipes, or asterisks, they'd be interpreted as markdown
+        // formatting (or worse, raw HTML in renderers that allow it)
+        // and the local /_wafrift/findings.md endpoint would become a
+        // stored-markdown-injection sink. Sanitise to the printable-
+        // ASCII subset of valid host characters before interpolating.
+        let host_md = sanitize_for_markdown(host);
+        let waf_md = hs.waf_name.as_deref().map(sanitize_for_markdown);
+        out.push_str(&format!("### `{host_md}`\n\n"));
+        if let Some(waf) = &waf_md {
             out.push_str(&format!("**Identified WAF:** {waf}\n\n"));
         }
         out.push_str("**Working techniques:**\n\n");
         for t in &hs.proven_winners {
-            out.push_str(&format!("- `{t}`\n"));
+            out.push_str(&format!("- `{}`\n", sanitize_for_markdown(t)));
         }
         out.push('\n');
         out.push_str(&format!(
-            "**Reproduce:** `wafrift replay --target 'https://{host}/<PATH>' --param q --payload '<PAYLOAD>' --from-host '{host}'`\n\n",
+            "**Reproduce:** `wafrift replay --target 'https://{host_md}/<PATH>' --param q --payload '<PAYLOAD>' --from-host '{host_md}'`\n\n",
         ));
     }
     out
+}
+
+/// Replace markdown- and shell-special characters with `_` so attacker-
+/// controlled strings (host headers, technique pool keys round-tripped
+/// through gene bank) cannot break out of the rendered markdown.
+fn sanitize_for_markdown(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric()
+                || matches!(c, '.' | '-' | '_' | ':' | '/' | '+' | '@')
+            {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Extract the host:port from a URI authority.
