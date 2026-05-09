@@ -1,0 +1,24 @@
+[[waf]]
+name = "Cloudbric"
+vendor = "Penta Security"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:cloudbric"
+[[waf.signature]]
+  body_regex = "<title>Cloudbric.{0,5}?ERROR!"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Your request was blocked by Cloudbric"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "please contact Cloudbric Support"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "cloudbric\\.zendesk\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Cloudbric Help Center"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "malformed request syntax.{0,4}?invalid request message framing.{0,4}?or deceptive request routing"
+  weight = 0.4

@@ -198,8 +198,15 @@ impl Environment for WafRiftEnv {
                     && let Some(ref body) = self.req.body
                     && crate::strategy::is_text_payload(&self.req)
                 {
-                    let encoded = encoding::encode(body.as_slice(), strategy);
-                    self.req.body = Some(encoded.expect("Encoding strategy failed").into_bytes());
+                    // If the encoding fails (rare — typically only on the
+                    // synthetic strategies that require body shapes the
+                    // current request does not have), skip silently rather
+                    // than panic the whole MCTS rollout. The action gets
+                    // negative feedback via the WAF block-or-not, so the
+                    // tree learns to avoid this combination.
+                    if let Ok(encoded) = encoding::encode(body.as_slice(), strategy) {
+                        self.req.body = Some(encoded.into_bytes());
+                    }
                 }
             }
             TechniqueAction::GrammarMutate(rule_name) => {

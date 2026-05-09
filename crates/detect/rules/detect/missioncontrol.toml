@@ -1,0 +1,10 @@
+[[waf]]
+name = "Mission Control Shield"
+vendor = "Mission Control"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:missioncontrol"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Mission Control Application Shield"
+  weight = 0.5

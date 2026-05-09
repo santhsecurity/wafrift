@@ -45,9 +45,17 @@ wafrift bench-waf --base-url http://127.0.0.1:18081 --evade --variants 10
 # 4. Restrict to a single attack class
 wafrift bench-waf --base-url http://127.0.0.1:18081 --evade --class sql
 
-# 5. Try all strategies
+# 5. Try all strategies (the keyword `all` expands to every selectable
+#    strategy: heavy / mcts / smuggling / content-type / redos /
+#    hill-climb / sim-anneal / tabu / novelty / map-elites /
+#    differential)
 wafrift bench-waf --base-url http://127.0.0.1:18081 --evade \
-  --strategies light,medium,heavy,mcts --variants 5
+  --strategies all --variants 5
+
+# 5b. Rule-coverage probe (the inverse of bypass-rate: which probes
+#     does the WAF NOT block? Useful to find rule-coverage gaps).
+wafrift bench-waf --base-url http://127.0.0.1:18081 --evade \
+  --strategies differential --variants 50
 
 # 6. JSON for CI / regression tracking
 wafrift bench-waf --base-url http://127.0.0.1:18081 --evade \

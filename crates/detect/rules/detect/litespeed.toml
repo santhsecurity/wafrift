@@ -1,0 +1,19 @@
+[[waf]]
+name = "LiteSpeed"
+vendor = "LiteSpeed Technologies"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:litespeed"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "LiteSpeed"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Proudly powered by litespeed web server"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "www\\.litespeedtech\\.com/error\\-page"
+  weight = 0.4
+[[waf.signature]]
+  status_code = 403
+  weight = 0.2

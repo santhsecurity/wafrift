@@ -1,0 +1,10 @@
+[[waf]]
+name = "Scutum"
+vendor = "Secure Sky Technology Inc."
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:scutum"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Scutum"
+  weight = 0.5

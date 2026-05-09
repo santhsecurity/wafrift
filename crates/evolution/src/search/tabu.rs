@@ -90,10 +90,16 @@ impl SearchAlgorithm for TabuSearch {
             self.eval_counter += 1;
             let candidate = self.neighbor(rng);
             let hash = candidate.hash();
-            // Aspiration: allow tabu if it beats current best
+            // Tabu check. The aspiration criterion ("allow a tabu move
+            // if it beats the current best") is intentionally NOT
+            // applied here: candidate has fitness == 0.0 because it
+            // hasn't been evaluated yet, so the comparison would
+            // always be false and the algorithm would deadlock when
+            // every neighbour is tabu. Aspiration belongs in
+            // submit_evaluations, where fitness is real. Removing it
+            // here matches the SimulatedAnnealing/HillClimbing flow.
             let is_tabu = self.tabu_set.contains(&hash);
-            let beats_best = candidate.fitness > self.best.fitness;
-            if !is_tabu || beats_best {
+            if !is_tabu {
                 out.push(EvalCandidate {
                     id: self.eval_counter,
                     chromosome: candidate,

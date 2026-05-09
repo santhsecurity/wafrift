@@ -112,10 +112,27 @@ impl SearchAlgorithm for NoveltySearch {
             }
         }
 
-        // Add to archive based on novelty
+        // Add to archive based on novelty. Cap the archive at 10_000
+        // to prevent unbounded growth on long-running scans (every
+        // novel candidate would otherwise stay alive forever, leaking
+        // memory until OOM). When full, evict the least-novel entry
+        // by score so the highest-novelty history is retained.
+        const ARCHIVE_CAP: usize = 10_000;
         for candidate in evaluated {
             let score = self.novelty_score(&candidate);
             if score > self.threshold {
+                if self.archive.len() >= ARCHIVE_CAP
+                    && let Some((min_idx, _)) = self
+                        .archive
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| (i, self.novelty_score(c)))
+                        .min_by(|(_, a), (_, b)| {
+                            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                {
+                    self.archive.swap_remove(min_idx);
+                }
                 self.archive.push(candidate.clone());
             }
             self.population.push(candidate);

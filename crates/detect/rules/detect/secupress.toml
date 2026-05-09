@@ -1,0 +1,9 @@
+[[waf]]
+name = "SecuPress WP Security"
+vendor = "SecuPress"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:secupress"
+[[waf.signature]]
+  body_regex = "<(title|h\\d{1})>SecuPress"
+  weight = 0.4

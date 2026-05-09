@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 use tracing::{error, info, warn};
 
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -28,8 +28,11 @@ use wafrift_proxy::hop_by_hop::{
     should_strip_proxy_header,
 };
 use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
+use wafrift_proxy::rate_limit::RateLimiter;
+use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
-    UpstreamPolicy, assert_connect_target_allowed, assert_forward_url_allowed,
+    BogonFilteringResolver, UpstreamPolicy, assert_connect_target_allowed,
+    assert_forward_url_allowed,
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
@@ -122,6 +125,43 @@ struct Args {
     /// Default 60. 0 disables periodic flush (still flushes on signal).
     #[arg(long, default_value_t = 60)]
     gene_bank_flush_interval_secs: u64,
+
+    /// Restrict evasion to requests whose Host matches one of the listed
+    /// glob patterns (e.g. `*.example.com`). Empty = no host filter.
+    /// Out-of-scope requests are forwarded verbatim with no evasion,
+    /// no gene-bank update, no detection. Repeatable / comma-separated.
+    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    only_host: Vec<String>,
+
+    /// Bypass evasion for requests whose Host matches one of the listed
+    /// glob patterns. Evaluated AFTER `--only-host`.
+    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    skip_host: Vec<String>,
+
+    /// Restrict evasion to requests whose path matches one of the listed
+    /// glob patterns (e.g. `/api/*`).
+    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    only_path: Vec<String>,
+
+    /// Bypass evasion for requests whose path matches one of the listed
+    /// glob patterns (e.g. `/static/*`, `/oauth/*`, `/favicon.ico`).
+    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    skip_path: Vec<String>,
+
+    /// Restrict evasion to the listed HTTP methods (e.g. `POST,PUT`).
+    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    only_method: Vec<String>,
+
+    /// Per-host requests-per-second cap. Token bucket with burst =
+    /// `--max-rps-per-host-burst` (defaults to the rps value).
+    /// 0 = unlimited (default).
+    #[arg(long, default_value_t = 0.0)]
+    max_rps_per_host: f64,
+
+    /// Burst capacity for `--max-rps-per-host`. Defaults to the rps
+    /// value when 0; ignored when rps is 0.
+    #[arg(long, default_value_t = 0.0)]
+    max_rps_per_host_burst: f64,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
@@ -204,9 +244,16 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
         );
     }
     let json = serde_json::to_string_pretty(&bank)?;
-    // Atomic write via tempfile rename.
+    // Atomic, durable write via tempfile + fsync + rename + parent fsync.
+    // Without the fsyncs a system crash between write and rename can leave
+    // the renamed file zero-length or partially flushed.
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(json.as_bytes())?;
+        f.sync_all()?;
+    }
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -235,7 +282,16 @@ use wafrift_proxy::extract_host_from_header;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
+    // Honor RUST_LOG so operators can dial verbosity without recompiling.
+    // Default: `info,wafrift_proxy=info` — quiet enough for production
+    // logs, loud enough for first-run debugging. `RUST_LOG=debug` for
+    // deep inspection.
+    use tracing_subscriber::EnvFilter;
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
     let mut args = Args::parse();
 
     if let Some(dir) = &args.write_mitm_ca_dir {
@@ -338,24 +394,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let default_escalation = args.escalation.clone();
     let mitm_enabled = args.mitm;
 
-    // S1, S2 fix: Create a single global client with timeout and TLS rules
+    let policy = Arc::new(UpstreamPolicy {
+        allow_private_upstream: args.allow_private_upstream,
+        insecure_open_upstream: args.insecure_open_upstream,
+    });
+
+    // Single global client. Custom resolver re-runs the bogon filter on
+    // every connection-time DNS lookup, closing the DNS-rebinding TOCTOU
+    // between the policy check and reqwest's own resolution. Without
+    // this, attacker-controlled DNS could return a public IP at the
+    // policy check then 169.254.169.254 / 127.0.0.1 / RFC1918 at fetch
+    // time.
     let global_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(config.insecure_tls)
         .timeout(std::time::Duration::from_secs(30))
+        .dns_resolver(Arc::new(BogonFilteringResolver {
+            policy: policy.clone(),
+        }))
         .build()
         .unwrap_or_else(|e| {
             error!("reqwest client build failed: {e}");
             std::process::exit(1);
         });
-
-    let policy = Arc::new(UpstreamPolicy {
-        allow_private_upstream: args.allow_private_upstream,
-        insecure_open_upstream: args.insecure_open_upstream,
-    });
     let limits = Arc::new(ProxyLimits {
         max_upstream_response_bytes: args.max_upstream_response_bytes,
         max_evade_retries: args.max_evade_retries,
     });
+    let scope = Arc::new(ScopeFilter::new(
+        args.only_host.clone(),
+        args.skip_host.clone(),
+        args.only_path.clone(),
+        args.skip_path.clone(),
+        args.only_method.clone(),
+    ));
+    if !scope.is_empty() {
+        info!(
+            only_host = ?args.only_host,
+            skip_host = ?args.skip_host,
+            only_path = ?args.only_path,
+            skip_path = ?args.skip_path,
+            only_method = ?args.only_method,
+            "scope filter active — out-of-scope requests pass through unchanged"
+        );
+    }
+    let rate_limiter = RateLimiter::new(args.max_rps_per_host, args.max_rps_per_host_burst);
+    if !rate_limiter.is_unlimited() {
+        info!(
+            rps = args.max_rps_per_host,
+            burst = if args.max_rps_per_host_burst > 0.0 {
+                args.max_rps_per_host_burst
+            } else {
+                args.max_rps_per_host
+            },
+            "per-host rate limiter active"
+        );
+    }
     let conn_sem = Arc::new(Semaphore::new(args.max_concurrent_connections));
 
     if args.insecure_open_upstream {
@@ -434,7 +527,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(p) => p,
             Err(_) => continue,
         };
-        let (stream, _) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await?;
         let io = TokioIo::new(stream);
         let shared_state = shared_state.clone();
         let config = config.clone();
@@ -443,6 +536,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mitm_ca = mitm_ca.clone();
         let policy = policy.clone();
         let limits = limits.clone();
+        let scope = scope.clone();
+        let rate_limiter = rate_limiter.clone();
+
+        // Per-connection peer-loopback gate for /_wafrift/status. The
+        // bind-address check (expose_wafrift_status) is necessary but
+        // not sufficient: a reverse proxy or socat fronting wafrift on
+        // loopback would otherwise leak host names and proven winners
+        // to external callers. Require BOTH bind AND peer to be
+        // loopback before exposing the status endpoint.
+        let expose_status_per_conn = expose_wafrift_status && peer.ip().is_loopback();
 
         tokio::task::spawn(async move {
             let _permit = permit;
@@ -462,7 +565,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             mitm_ca.clone(),
                             policy.clone(),
                             limits.clone(),
-                            expose_wafrift_status,
+                            scope.clone(),
+                            rate_limiter.clone(),
+                            expose_status_per_conn,
                         )
                     }),
                 )
@@ -657,7 +762,13 @@ async fn forward_wafrift_request(
 
     let conn_fwd = collect_connection_header_names(&evasion_result.request.headers);
     for (k, v) in &evasion_result.request.headers {
-        if k.eq_ignore_ascii_case("host") || should_strip_proxy_header(k, &conn_fwd) {
+        if k.eq_ignore_ascii_case("host")
+            // Strip Content-Length: evasion may have mutated the body. Reqwest
+            // recalculates the correct length from the body bytes; a stale
+            // CL header would mismatch and either smuggle or truncate.
+            || k.eq_ignore_ascii_case("content-length")
+            || should_strip_proxy_header(k, &conn_fwd)
+        {
             continue;
         }
         builder = builder.header(k.as_str(), v.as_str());
@@ -710,6 +821,51 @@ async fn forward_wafrift_request(
     }
 
     let is_block = is_waf_block(status.as_u16(), &buf);
+
+    // ── WAF identification: which product is in front of us? ────────
+    // Run wafrift-detect against the full upstream response (status +
+    // headers + body slice). On a high-confidence hit, persist the
+    // name to host state so the gene bank can carry it across
+    // restarts and downstream tooling can route to WAF-specific
+    // evasion strategies. Only runs if waf_name isn't already set.
+    let detected_waf = {
+        let st = state.lock().await;
+        st.hosts.get(&host).and_then(|h| h.waf_name.clone())
+    };
+    if detected_waf.is_none() {
+        let header_pairs: Vec<(String, String)> = response_builder
+            .headers_ref()
+            .map(|hm| {
+                hm.iter()
+                    .map(|(k, v)| {
+                        (
+                            k.as_str().to_string(),
+                            v.to_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let body_slice = &buf[..buf.len().min(8192)];
+        let detections =
+            wafrift_detect::waf_detect::detect(status.as_u16(), &header_pairs, body_slice);
+        if let Some(top) = detections.first() {
+            // Threshold: require >=0.5 confidence to commit. Anything
+            // less is a guess and we'd rather stay in discovery.
+            if top.confidence >= 0.5 {
+                let mut st = state.lock().await;
+                if let Some(hs) = st.hosts.get_mut(&host) {
+                    hs.confirm_waf(Some(top.name.clone()));
+                    info!(
+                        host = %host,
+                        waf = %top.name,
+                        confidence = top.confidence,
+                        "WAF identified"
+                    );
+                }
+            }
+        }
+    }
 
     // ── Feedback loop: attribute result to the active technique(s) ───
     {
@@ -764,6 +920,8 @@ async fn mitm_plaintext_request(
     client: reqwest::Client,
     policy: Arc<UpstreamPolicy>,
     limits: Arc<ProxyLimits>,
+    scope: Arc<ScopeFilter>,
+    rate_limiter: Arc<RateLimiter>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // Pin upstream to the CONNECT target; do not follow a different inner `Host:`.
     let sni_host = tls_server_name_from_authority(&connect_authority);
@@ -791,22 +949,19 @@ async fn mitm_plaintext_request(
     let url = format!("https://{}{}", authority, path_and_q);
     let host = sni_host;
 
-    let body_bytes = match req.body_mut().collect().await {
+    // Limit body collection up front — without this, an attacker
+    // streaming an unbounded body would exhaust proxy memory before
+    // any post-collection size check could fire.
+    let limited = Limited::new(req.body_mut(), MAX_PROXY_BODY_BYTES);
+    let body_bytes = match limited.collect().await {
         Ok(b) => b.to_bytes().to_vec(),
-        Err(e) => {
-            warn!(host = %host, error = %e, "mitm: failed to read request body");
+        Err(_) => {
             return Ok(error_response(
-                StatusCode::BAD_REQUEST,
-                "failed to read request body",
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "request body too large",
             ));
         }
     };
-    if body_bytes.len() > MAX_PROXY_BODY_BYTES {
-        return Ok(error_response(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "request body too large",
-        ));
-    }
 
     let raw_headers: Vec<(String, String)> = req
         .headers()
@@ -836,6 +991,20 @@ async fn mitm_plaintext_request(
     };
 
     let log_uri = wafrift_req.url.clone();
+
+    // Per-host rate limit applies to BOTH evade and passthrough paths —
+    // it bounds raw request volume hitting the upstream.
+    rate_limiter.acquire(&host).await;
+
+    let path_for_scope = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.path().to_string())
+        .unwrap_or_else(|| "/".to_string());
+    if !scope.allows(&host, &path_for_scope, &wafrift_req.method) {
+        return forward_passthrough(wafrift_req, host, &client, policy, limits).await;
+    }
+
     forward_with_evade_retry(
         wafrift_req,
         host,
@@ -861,6 +1030,8 @@ async fn mitm_https_session(
     client: reqwest::Client,
     policy: Arc<UpstreamPolicy>,
     limits: Arc<ProxyLimits>,
+    scope: Arc<ScopeFilter>,
+    rate_limiter: Arc<RateLimiter>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tls_name = tls_server_name_from_authority(&connect_authority);
     let acceptor = ca.create_tls_acceptor(&tls_name)?;
@@ -874,6 +1045,8 @@ async fn mitm_https_session(
     let svc_client = client.clone();
     let svc_policy = policy.clone();
     let svc_limits = limits.clone();
+    let svc_scope = scope.clone();
+    let svc_rl = rate_limiter.clone();
     let cauth = connect_authority.clone();
 
     let service = service_fn(move |req: Request<Incoming>| {
@@ -883,6 +1056,8 @@ async fn mitm_https_session(
         let client = svc_client.clone();
         let policy = svc_policy.clone();
         let limits = svc_limits.clone();
+        let scope = svc_scope.clone();
+        let rate_limiter = svc_rl.clone();
         let connect_authority = cauth.clone();
         async move {
             mitm_plaintext_request(
@@ -894,6 +1069,8 @@ async fn mitm_https_session(
                 client,
                 policy,
                 limits,
+                scope,
+                rate_limiter,
             )
             .await
         }
@@ -926,6 +1103,8 @@ async fn proxy(
     mitm_ca: Option<Arc<CertificateAuthority>>,
     policy: Arc<UpstreamPolicy>,
     limits: Arc<ProxyLimits>,
+    scope: Arc<ScopeFilter>,
+    rate_limiter: Arc<RateLimiter>,
     expose_wafrift_status: bool,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // CONNECT: optional TLS MITM (terminate client TLS, evade, forward via HTTPS).
@@ -943,6 +1122,8 @@ async fn proxy(
                 let client = client.clone();
                 let policy = policy.clone();
                 let limits = limits.clone();
+                let scope = scope.clone();
+                let rate_limiter = rate_limiter.clone();
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(req).await {
                         Ok(upgraded) => {
@@ -956,6 +1137,8 @@ async fn proxy(
                                 client,
                                 policy,
                                 limits,
+                                scope,
+                                rate_limiter,
                             )
                             .await
                             {
@@ -983,6 +1166,29 @@ async fn proxy(
             StatusCode::BAD_REQUEST,
             "CONNECT must be to a socket address",
         ));
+    }
+
+    // Live findings endpoint — returns the current gene-bank as a
+    // markdown report. Same loopback gating as /_wafrift/status. Lets
+    // a practitioner `curl http://127.0.0.1:8080/_wafrift/findings.md`
+    // mid-session without dropping out to a separate `wafrift report`
+    // invocation.
+    if req.uri().path() == "/_wafrift/findings.md" {
+        if !expose_wafrift_status {
+            return Ok(error_response(StatusCode::NOT_FOUND, "not found"));
+        }
+        let st = state.lock().await;
+        let md = render_live_findings(&st);
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/markdown; charset=utf-8")
+            .body(Full::new(Bytes::from(md)))
+            .unwrap_or_else(|_| {
+                error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "failed to build findings response",
+                )
+            }));
     }
 
     // Status endpoint — returns JSON stats about the proxy (loopback bind only).
@@ -1032,23 +1238,19 @@ async fn proxy(
         })
         .unwrap_or_else(|| "unknown".to_string());
 
-    // Read body
-    let body_bytes = match req.body_mut().collect().await {
+    // Read body — bounded by MAX_PROXY_BODY_BYTES at stream-read time
+    // so an unbounded streaming body can't exhaust proxy memory before
+    // a post-collection size check would fire.
+    let limited = Limited::new(req.body_mut(), MAX_PROXY_BODY_BYTES);
+    let body_bytes = match limited.collect().await {
         Ok(b) => b.to_bytes().to_vec(),
-        Err(e) => {
-            warn!(host = %host, error = %e, "failed to read request body");
+        Err(_) => {
             return Ok(error_response(
-                StatusCode::BAD_REQUEST,
-                "failed to read request body",
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "request body too large",
             ));
         }
     };
-    if body_bytes.len() > MAX_PROXY_BODY_BYTES {
-        return Ok(error_response(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "request body too large",
-        ));
-    }
 
     let raw_headers: Vec<(String, String)> = req
         .headers()
@@ -1078,6 +1280,18 @@ async fn proxy(
     };
 
     let log_uri = req.uri().to_string();
+
+    rate_limiter.acquire(&host).await;
+
+    let path_for_scope = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.path().to_string())
+        .unwrap_or_else(|| "/".to_string());
+    if !scope.allows(&host, &path_for_scope, &wafrift_req.method) {
+        return forward_passthrough(wafrift_req, host, &client, policy, limits).await;
+    }
+
     forward_with_evade_retry(
         wafrift_req,
         host,
@@ -1092,16 +1306,205 @@ async fn proxy(
     .await
 }
 
+/// Forward a request verbatim with no evasion, no gene-bank update,
+/// no detection. Used when the request is out of the configured scope
+/// (e.g. login flows, oauth callbacks, static assets) so the practitioner
+/// can browse normally with the proxy in front of Burp.
+///
+/// SSRF policy still applies — out-of-scope is a *behavioural* opt-out,
+/// not an authorisation bypass.
+async fn forward_passthrough(
+    req: wafrift_types::Request,
+    host: String,
+    client: &reqwest::Client,
+    policy: Arc<UpstreamPolicy>,
+    limits: Arc<ProxyLimits>,
+) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    if let Err(msg) = assert_forward_url_allowed(&req.url, &policy).await {
+        warn!(host = %host, url = %req.url, "{}", msg);
+        return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+    }
+
+    let method = match reqwest::Method::from_bytes(req.method.as_str().as_bytes()) {
+        Ok(m) => m,
+        Err(_) => {
+            return Ok(error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid HTTP method",
+            ));
+        }
+    };
+    let mut builder = client.request(method, &req.url);
+    let conn_fwd = collect_connection_header_names(&req.headers);
+    for (k, v) in &req.headers {
+        if k.eq_ignore_ascii_case("host")
+            || k.eq_ignore_ascii_case("content-length")
+            || should_strip_proxy_header(k, &conn_fwd)
+        {
+            continue;
+        }
+        builder = builder.header(k.as_str(), v.as_str());
+    }
+    if let Some(b) = req.body {
+        builder = builder.body(b);
+    }
+
+    let resp = match builder.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(host = %host, error = %e, "passthrough forwarding failed");
+            return Ok(error_response(StatusCode::BAD_GATEWAY, "forwarding error"));
+        }
+    };
+
+    let status = resp.status();
+    let conn_resp = collect_connection_header_names_hyper(resp.headers());
+    let mut response_builder = Response::builder().status(status.as_u16());
+    for (k, v) in resp.headers().iter() {
+        if should_strip_proxy_header(k.as_str(), &conn_resp) {
+            continue;
+        }
+        response_builder = response_builder.header(k, v);
+    }
+
+    let max = limits.max_upstream_response_bytes;
+    let mut stream = resp.bytes_stream();
+    let mut buf = Vec::new();
+    while let Some(item) = stream.next().await {
+        let chunk = match item {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(host = %host, error = %e, "upstream body read failed");
+                return Ok(error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "upstream read error",
+                ));
+            }
+        };
+        if buf.len().saturating_add(chunk.len()) > max {
+            return Ok(error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "upstream response too large",
+            ));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    Ok(response_builder
+        .body(Full::new(Bytes::from(buf)))
+        .unwrap_or_else(|_| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to build response",
+            )
+        }))
+}
+
+/// Render an ad-hoc markdown findings report from the current proxy
+/// state. Used by the `/_wafrift/findings.md` endpoint so practitioners
+/// can `curl` a writeup mid-session without exporting + re-importing
+/// through the gene bank file.
+fn render_live_findings(state: &ProxyState) -> String {
+    let mut out = String::new();
+    out.push_str("# wafrift live findings\n\n");
+    out.push_str(&format!(
+        "Total proxied: {} · Total WAF blocks observed: {} · Hosts seen: {}\n\n",
+        state.total_scanned,
+        state.total_blocks,
+        state.hosts.len(),
+    ));
+
+    let mut hosts_with_winners: Vec<(&String, &HostState)> = state
+        .hosts
+        .iter()
+        .filter(|(_, hs)| !hs.proven_winners.is_empty())
+        .collect();
+    hosts_with_winners.sort_by(|a, b| a.0.cmp(b.0));
+
+    if hosts_with_winners.is_empty() {
+        out.push_str("_No bypasses discovered yet — keep traffic flowing through the proxy._\n");
+        return out;
+    }
+
+    out.push_str("## Hosts with proven bypasses\n\n");
+    for (host, hs) in hosts_with_winners {
+        out.push_str(&format!("### `{host}`\n\n"));
+        if let Some(waf) = &hs.waf_name {
+            out.push_str(&format!("**Identified WAF:** {waf}\n\n"));
+        }
+        out.push_str("**Working techniques:**\n\n");
+        for t in &hs.proven_winners {
+            out.push_str(&format!("- `{t}`\n"));
+        }
+        out.push('\n');
+        out.push_str(&format!(
+            "**Reproduce:** `wafrift replay --target 'https://{host}/<PATH>' --param q --payload '<PAYLOAD>' --from-host '{host}'`\n\n",
+        ));
+    }
+    out
+}
+
 /// Extract the host:port from a URI authority.
 fn host_addr(uri: &hyper::Uri) -> Option<String> {
     uri.authority().map(|auth| auth.to_string())
 }
 
-/// Bidirectional tunnel for CONNECT (HTTPS pass-through).
+/// Cap on bytes transferred per direction per CONNECT tunnel. Prevents
+/// a client from streaming gigabytes through the proxy under a single
+/// CONNECT — without this, `copy_bidirectional` runs unbounded and
+/// MAX_PROXY_BODY_BYTES / max_upstream_response_bytes (which guard the
+/// HTTP-mode paths) do not apply. 2 GiB is generous for legitimate
+/// long-lived TLS sessions while still blocking sustained exfil.
+const MAX_TUNNEL_BYTES_PER_DIRECTION: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Bidirectional tunnel for CONNECT (HTTPS pass-through). Per-direction
+/// byte counter aborts the copy when either side exceeds the cap.
 async fn tunnel(upgraded: Upgraded, addr: String) -> std::io::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut server = TcpStream::connect(addr).await?;
     let mut upgraded = TokioIo::new(upgraded);
-    tokio::io::copy_bidirectional(&mut upgraded, &mut server).await?;
+    let (mut up_r, mut up_w) = tokio::io::split(&mut upgraded);
+    let (mut sv_r, mut sv_w) = server.split();
+
+    // Each direction owns its own bounded copy loop. When either trips
+    // the byte cap, drop both halves and return a clean error.
+    let to_server = async {
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut total: u64 = 0;
+        loop {
+            let n = up_r.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            total = total.saturating_add(n as u64);
+            if total > MAX_TUNNEL_BYTES_PER_DIRECTION {
+                return Err(std::io::Error::other(
+                    "tunnel exceeded byte cap (client→server)",
+                ));
+            }
+            sv_w.write_all(&buf[..n]).await?;
+        }
+        Ok::<(), std::io::Error>(())
+    };
+    let to_client = async {
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut total: u64 = 0;
+        loop {
+            let n = sv_r.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            total = total.saturating_add(n as u64);
+            if total > MAX_TUNNEL_BYTES_PER_DIRECTION {
+                return Err(std::io::Error::other(
+                    "tunnel exceeded byte cap (server→client)",
+                ));
+            }
+            up_w.write_all(&buf[..n]).await?;
+        }
+        Ok::<(), std::io::Error>(())
+    };
+    tokio::try_join!(to_server, to_client)?;
     Ok(())
 }
 

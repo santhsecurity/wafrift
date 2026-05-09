@@ -107,15 +107,22 @@ impl IntelligenceLoop {
         self.evolution.batch_candidates(n)
     }
 
-    /// Record evolution feedback.
+    /// Record evolution feedback. An out-of-range `chromosome_index`
+    /// indicates a state-machine bug between caller and engine — log
+    /// loudly via tracing rather than swallowing the error silently.
     pub fn record_feedback(&mut self, chromosome_index: usize, passed: bool) {
-        let _ = self.evolution.record_feedback(chromosome_index, passed);
+        if let Err(e) = self.evolution.record_feedback(chromosome_index, passed) {
+            tracing::warn!(?e, chromosome_index, "evolution.record_feedback rejected — likely stale chromosome index");
+        }
         self.feedback_count += 1;
     }
 
-    /// Record rich verdict feedback.
+    /// Record rich verdict feedback. Same error semantics as
+    /// `record_feedback`.
     pub fn record_verdict(&mut self, chromosome_index: usize, verdict: &OracleVerdict) {
-        let _ = self.evolution.record_verdict(chromosome_index, verdict);
+        if let Err(e) = self.evolution.record_verdict(chromosome_index, verdict) {
+            tracing::warn!(?e, chromosome_index, "evolution.record_verdict rejected — likely stale chromosome index");
+        }
         self.feedback_count += 1;
     }
 

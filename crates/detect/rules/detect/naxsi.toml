@@ -1,0 +1,12 @@
+[[waf]]
+name = "NAXSI"
+vendor = "NBS Systems"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:naxsi"
+[[waf.signature]]
+  body_regex = "blocked by naxsi"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "naxsi blocked information"
+  weight = 0.4

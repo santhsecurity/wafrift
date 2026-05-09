@@ -1,0 +1,10 @@
+[[waf]]
+name = "Beluga CDN"
+vendor = "Beluga"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:beluga"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Beluga"
+  weight = 0.5

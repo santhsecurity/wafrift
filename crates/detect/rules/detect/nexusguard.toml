@@ -1,0 +1,12 @@
+[[waf]]
+name = "NexusGuard Firewall"
+vendor = "NexusGuard"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:nexusguard"
+[[waf.signature]]
+  body_regex = "Powered by Nexusguard"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "nexusguard\\.com/wafpage/.+#\\d{3};"
+  weight = 0.4

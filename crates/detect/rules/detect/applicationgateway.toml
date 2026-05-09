@@ -1,0 +1,12 @@
+[[waf]]
+name = "Azure Application Gateway"
+vendor = "Microsoft"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:applicationgateway"
+[[waf.signature]]
+  body_regex = "<center>Microsoft-Azure-Application-Gateway/v2</center>"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<h1>403 Forbidden</h1>"
+  weight = 0.4

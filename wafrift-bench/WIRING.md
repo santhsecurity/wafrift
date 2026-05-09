@@ -35,6 +35,7 @@ The bench harness exercises:
 | `smuggling` | smuggling::all_payloads (CL.TE/TE.CL/TE.TE/dual-CL/cl_zero/multi-value-CL/method-body/h2c) | HTTP smuggling shapes |
 | `content-type` | content_type::generate_variants_from_body (multipart, JSON, XML, ...) | parser-discrepancy attack |
 | `redos` | inline catastrophic-backtracking shape generator | regex DoS / fail-open trigger |
+| `differential` | evolution::differential::generate_probes filtered by class | rule-fingerprint coverage probe |
 
 ## What's wired into the proxy binary
 
@@ -110,28 +111,42 @@ sqlmap's payloads get evade-wrapped on the fly.
    confluence, spring4shell, follina, apache traversal, etc.).
 8. ✅ **BunkerWeb compose** — added `bunkerity/scheduler` +
    `redis:7-alpine` companion services so modsec actually engages.
+11. ✅ **Naxsi-from-source bench target** — vendored Dockerfile builds
+    nginx 1.27.4 + naxsi 1.6 from source (no public naxsi image
+    exists). Bench-grade `naxsi.conf` runs LearningMode OFF and routes
+    block to a 403. `wafrift-bench/scripts/up.sh naxsi` brings it up
+    on `:18087`. Build is ~5 min cold, sub-second warm. Closes the
+    naxsi-from-source open item.
+10. ✅ **Lineage persistence** — `--lineage-output PATH` collects every
+    successful evolution-strategy bypass as a
+    `wafrift_evolution::lineage::BypassEntry` (genes + lineage trace +
+    fitness + payload-hash) and dumps the deduplicated `BypassCorpus`
+    JSONL on bench completion. Each entry is replayable: gene tuple
+    reconstructs the wire payload, lineage trace records every mutation
+    step. Only the search-loop strategies populate it (static strategies
+    have no chromosome).
+9. ✅ **Differential probing as bench strategy** —
+   `--strategies differential` runs class-filtered probe payloads from
+   `evolution::differential::generate_probes` against the target. A probe
+   that comes back unblocked tells you which signature your WAF doesn't
+   have — the inverse of bypass-rate measurement, useful for rule-coverage
+   gap analysis. Class → probe-family map: sql/nosql → SQL probes, xss →
+   XSS probes, cmdi/ssti → CMD probes, path → CMD path probes, others
+   (xxe/log4shell) → baseline-only.
 
 **Open / next-step**
 
-- **Differential probing as bench strategy** — `evolution::differential`
-  builds probe payloads to fingerprint exact WAF rule boundaries.
-  Not exposed as a `--strategies differential` mode yet.
 - **Custom rules in bench** — `evolution::custom_rules` lets users
   drop their own technique TOMLs into the gene bank. No bench mode
   for "test cases against this user-supplied rule pack".
-- **Lineage persistence** — `evolution::lineage` records mutation
-  chains. Bench logs `bypass_techniques` summary but doesn't persist
-  the full lineage tree (would let users replay any single bypass
-  exactly from the JSON).
+- *(closed — see #10 below)*
 - **Persistent gene bank in proxy** — `wafrift-proxy` HostState lives
   only in-memory; restart loses winner pool. Add JSON checkpoint to
   `~/.wafrift/gene-bank.json`, load on start, save on signal-or-tick.
 - **Wafrift-proxy graceful shutdown** — SIGTERM/SIGINT today drops
   pool + state. Add signal handler that flushes gene bank, drains
   in-flight requests, exits cleanly.
-- **Naxsi from source** — replaced with BunkerWeb because no public
-  naxsi docker image exists. naxsi-from-source Dockerfile remains
-  open for true positive-security model coverage.
+- *(closed — see #11 below)*
 - **Transport feature gates** — `origin-bypass`, `gossan-integration`
   off by default in `wafrift-cli`. (proxy-pool now on by default —
   see closed item #5.) Decision on enabling the others depends on
@@ -147,11 +162,11 @@ sqlmap's payloads get evade-wrapped on the fly.
 ## Verification snippets
 
 ```bash
-# Confirm all 5 wired strategies fire on PL1
+# Confirm every wired strategy fires on PL1
 wafrift-bench/scripts/up.sh modsec-pl1
 wafrift bench-waf --base-url http://127.0.0.1:18081 \
     --corpus wafrift-bench/corpus --evade \
-    --strategies heavy,mcts,smuggling,content-type,redos \
+    --strategies all \
     --variants 5 --format json | jq '.evaded_summary'
 
 # Confirm proxy actually evades when fronted

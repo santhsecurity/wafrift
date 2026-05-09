@@ -1,0 +1,23 @@
+[[waf]]
+name = "Yundun"
+vendor = "Yundun"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:yundun"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "YUNDUN"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-cache"
+  header_regex = "YUNDUN"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Blocked by YUNDUN Cloud WAF"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "yundun\\.com/yd[-_]http[_-]error/"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "www\\.yundun\\.com/(static/js/fingerprint\\d{1}?\\.js)?"
+  weight = 0.4

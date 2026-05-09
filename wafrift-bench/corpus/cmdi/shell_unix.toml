@@ -187,6 +187,6 @@ class = "cmdi"
 payload = "\rid\r"
 
 [[case]]
-id = "tab_separated"
+id = "tab_separated_cmdi"
 class = "cmdi"
 payload = ";\tid"

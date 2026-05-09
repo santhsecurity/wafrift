@@ -1,0 +1,12 @@
+[[waf]]
+name = "UEWaf"
+vendor = "UCloud"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:uewaf"
+[[waf.signature]]
+  body_regex = "/uewaf_deny_pages/default/img/"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "ucloud\\.cn"
+  weight = 0.4

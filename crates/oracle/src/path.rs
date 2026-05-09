@@ -20,7 +20,7 @@ pub struct PathOracle;
 // ──────────────────────────────────────────────
 
 /// Compile-time embedded TOML rules for path traversal.
-const PATH_TRAVERSAL_TOML: &str = include_str!("../../../rules/path_traversal/sequences.toml");
+const PATH_TRAVERSAL_TOML: &str = include_str!("../rules/path_traversal/sequences.toml");
 
 /// Traversal sequence definition from TOML.
 #[derive(Debug, Clone, Deserialize)]

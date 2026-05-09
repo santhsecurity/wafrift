@@ -11,6 +11,8 @@
 //! attack-class subdirs (sql/, xss/, cmdi/, ssti/, path/, ...). Each
 //! case carries `id`, `class`, `payload`, optional `mode` + `description`.
 
+#![allow(clippy::too_many_arguments)]
+
 use colored::Colorize;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -22,7 +24,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 use wafrift_content_type::generate_variants_from_body;
+use wafrift_evolution::differential::{Probe, ProbeTarget, generate_probes};
 use wafrift_evolution::evolution::{EvolutionEngine, GenePool};
+use wafrift_evolution::lineage::{BypassCorpus, BypassEntry};
 use wafrift_evolution::types::Budget;
 use wafrift_grammar::grammar::{self, PayloadType};
 use wafrift_oracle::cmdi::CmdiOracle;
@@ -41,6 +45,23 @@ use wafrift_types::{Method, Request};
 use crate::Level;
 use crate::helpers::{Variant, build_variants, max_mutations_for_level, strategies_for_level};
 
+/// Canonical list of every selectable bench strategy. `--strategies all`
+/// expands to this. Keep in dependency-light → expensive order so that
+/// output JSON has a sensible default sort.
+const ALL_STRATEGIES: &[&str] = &[
+    "heavy",
+    "mcts",
+    "smuggling",
+    "content-type",
+    "redos",
+    "hill-climb",
+    "sim-anneal",
+    "tabu",
+    "novelty",
+    "map-elites",
+    "differential",
+];
+
 #[derive(Debug, clap::Args)]
 pub struct BenchWafArgs {
     /// Base URL of the WAF target (e.g. http://127.0.0.1:18081).
@@ -49,7 +70,10 @@ pub struct BenchWafArgs {
     pub base_url: Option<String>,
 
     /// Single TOML corpus file OR directory of TOML files (recursive).
-    /// Defaults to the bundled bench corpus.
+    /// Defaults to the in-tree bench corpus path; if you installed
+    /// wafrift via `cargo install` (no checkout), pass `--corpus` to a
+    /// directory you cloned from
+    /// https://github.com/santhsecurity/wafrift/tree/main/wafrift-bench/corpus
     #[arg(long, default_value = "wafrift-bench/corpus")]
     pub corpus: PathBuf,
 
@@ -69,6 +93,7 @@ pub struct BenchWafArgs {
     pub variants: usize,
 
     /// Comma-separated list of evasion strategies. Default: heavy.
+    /// Pass `--strategies all` to run the full set in one shot.
     /// Available:
     ///   light / medium / heavy   — payload-string mutation via build_variants
     ///   mcts                      — Monte Carlo Tree Search over actions (mctrust)
@@ -77,6 +102,8 @@ pub struct BenchWafArgs {
     ///   redos                     — wrap payload in catastrophic-backtracking patterns
     ///   hill-climb / sim-anneal / tabu / novelty / map-elites
     ///                              — feedback-driven search via wafrift-evolution
+    ///   differential              — class-filtered probes from wafrift-evolution::differential
+    ///                              (rule-fingerprint coverage; "what does this WAF NOT block")
     #[arg(long, value_delimiter = ',', default_value = "heavy")]
     pub strategies: Vec<String>,
 
@@ -125,6 +152,24 @@ pub struct BenchWafArgs {
     /// at half-speed. 0 disables. Default 50.
     #[arg(long, default_value_t = 50)]
     pub adaptive_pause_after_errors: u32,
+
+    /// Just validate the corpus and exit — load every TOML, check every
+    /// case has a unique id + non-empty payload + a known class, then
+    /// report counts and exit. Doesn't connect to the WAF target. Useful
+    /// in CI to catch corpus drift without standing a WAF up.
+    #[arg(long, default_value_t = false)]
+    pub validate_only: bool,
+
+    /// Persist successful evolution-strategy bypasses (genes + lineage trace)
+    /// to this JSON file as a `BypassCorpus`. Each entry is replayable: the
+    /// gene tuple is enough to reconstruct the exact wire payload, and the
+    /// lineage trace records every mutation step that led to it. When unset,
+    /// bypasses still count toward the headline rate but are not persisted.
+    /// Only the search-loop strategies (hill-climb / sim-anneal / tabu /
+    /// novelty / map-elites) populate lineage — the static strategies have
+    /// no chromosome.
+    #[arg(long)]
+    pub lineage_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,7 +307,8 @@ fn is_valid_xxe(_original: &str, transformed: &str) -> bool {
 fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
     let lower = transformed.to_ascii_lowercase();
     // Direct or partially-obfuscated forms.
-    let has_jndi_ref = lower.contains("${jndi:")
+    
+    lower.contains("${jndi:")
         || lower.contains("ndi:ldap")
         || lower.contains("ndi:rmi")
         || lower.contains("ndi:dns")
@@ -273,8 +319,7 @@ fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
         || lower.contains("ndi:ldaps")
         // URL-encoded ${
         || lower.contains("%24%7bjndi")
-        || lower.contains("%2524%257bjndi");
-    has_jndi_ref
+        || lower.contains("%2524%257bjndi")
 }
 
 pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
@@ -297,12 +342,60 @@ fn resolve_base_url(args: &BenchWafArgs) -> String {
         .unwrap_or_else(|_| "http://127.0.0.1:18081".into())
 }
 
+/// Static set of attack classes accepted in the bench corpus. Anything else
+/// is treated as a typo (better to fail loud than silently miscategorize).
+const KNOWN_CLASSES: &[&str] = &[
+    "sql", "xss", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql", "xxe",
+    "log4shell", "cve_pocs",
+];
+
+fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
+    use std::collections::{BTreeMap, HashSet};
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut by_class: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut errors: Vec<String> = Vec::new();
+    for case in cases {
+        if !seen.insert(&case.id) {
+            errors.push(format!("duplicate id: {}", case.id));
+        }
+        if case.payload.is_empty() {
+            errors.push(format!("empty payload: {}", case.id));
+        }
+        if !KNOWN_CLASSES.contains(&case.class.as_str()) {
+            errors.push(format!(
+                "unknown class {:?} on {} (must be one of {:?})",
+                case.class, case.id, KNOWN_CLASSES
+            ));
+        }
+        *by_class.entry(case.class.as_str()).or_insert(0) += 1;
+    }
+    println!("corpus integrity:");
+    println!("  total cases: {}", cases.len());
+    for (cls, n) in &by_class {
+        println!("  {:>10}: {n}", cls);
+    }
+    if errors.is_empty() {
+        println!("OK ({} cases)", cases.len());
+        Ok(ExitCode::SUCCESS)
+    } else {
+        for e in &errors {
+            eprintln!("  ERROR: {e}");
+        }
+        eprintln!("{} corpus error(s)", errors.len());
+        Ok(ExitCode::from(4))
+    }
+}
+
 fn load_corpus(path: &Path) -> Result<Vec<BenchCase>, String> {
     let mut all = Vec::new();
     walk_corpus(path, &mut all)?;
     if all.is_empty() {
         return Err(format!(
-            "no cases found at {} (expected *.toml files)",
+            "no cases found at {} (expected *.toml files).\n  \
+             Hint: clone the bundled corpus from \
+             https://github.com/santhsecurity/wafrift/tree/main/wafrift-bench/corpus \
+             or pass --corpus PATH to a directory of TOML files matching the schema in \
+             wafrift-bench/corpus/sql/blind.toml.",
             path.display()
         ));
     }
@@ -441,16 +534,35 @@ fn build_request_for_payload(base_url: &str, mode: &str, payload: &str) -> Reque
     }
 }
 
-async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
+async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String> {
+    // `--strategies all` expands to every selectable strategy. Lets a user
+    // type one keyword instead of remembering the 11-element list. Keeps
+    // user-supplied order otherwise (output ordering matters for diffs).
+    if args.strategies.iter().any(|s| s == "all") {
+        args.strategies = ALL_STRATEGIES.iter().map(|s| s.to_string()).collect();
+    }
+
     let base_url = resolve_base_url(&args);
     let mut cases = load_corpus(&args.corpus)?;
+
+    // --validate-only: run corpus integrity checks then exit. Doesn't
+    // need a live WAF target; intended for CI gating on corpus PRs.
+    if args.validate_only {
+        return validate_corpus_and_exit(&cases);
+    }
 
     if !args.class.is_empty() {
         let want: std::collections::HashSet<&str> = args.class.iter().map(String::as_str).collect();
         cases.retain(|c| want.contains(c.class.as_str()));
     }
     if cases.is_empty() {
-        return Err("no cases match the requested classes".into());
+        return Err(format!(
+            "no cases match the requested classes {:?}. \
+             Hint: omit --class to run every class, or pick from the set printed by \
+             `wafrift bench-waf --validate-only --corpus {}` (look at the per-class counts).",
+            args.class,
+            args.corpus.display()
+        ));
     }
 
     // Pick a randomized real-browser User-Agent (vs. the obvious
@@ -497,6 +609,10 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
 
     let mut results: Vec<CaseResult> = Vec::with_capacity(cases.len());
 
+    // Bypass corpus: collected when --lineage-output is set. Flushed once at
+    // end of bench so a partial-run kill still loses only the in-flight case.
+    let mut bypass_corpus: Option<BypassCorpus> = args.lineage_output.as_ref().map(|_| BypassCorpus::new());
+
     use std::sync::atomic::Ordering;
 
     for (idx, case) in cases.iter().enumerate() {
@@ -532,7 +648,7 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
         };
 
         let evaded = if args.evade {
-            Some(run_evade(&client, case, &base_url, &args).await?)
+            Some(run_evade(&client, case, &base_url, &args, &mut bypass_corpus).await?)
         } else {
             None
         };
@@ -545,6 +661,20 @@ async fn run_bench_waf_async(args: BenchWafArgs) -> Result<ExitCode, String> {
             raw_latency_ms,
             evaded,
         });
+    }
+
+    // Persist evolution-strategy bypass corpus (lineage-replayable). Single
+    // atomic write at end so a torn run never leaves a half-corpus on disk.
+    if let (Some(path), Some(corpus)) = (args.lineage_output.as_ref(), bypass_corpus.as_ref()) {
+        if let Err(e) = corpus.save(path) {
+            eprintln!("warn: lineage corpus write to {} failed: {e:?}", path.display());
+        } else {
+            eprintln!(
+                "wrote {} bypass entries (lineage-traced) to {}",
+                corpus.entries.len(),
+                path.display()
+            );
+        }
     }
 
     emit_report(&base_url, &args, &results)?;
@@ -570,6 +700,7 @@ async fn run_evade(
     case: &BenchCase,
     base_url: &str,
     args: &BenchWafArgs,
+    bypass_corpus: &mut Option<BypassCorpus>,
 ) -> Result<EvadeResult, String> {
     let mut by_strategy: BTreeMap<String, StrategyStat> = BTreeMap::new();
     let mut total = 0;
@@ -656,12 +787,26 @@ async fn run_evade(
                     &mut total,
                     &mut bypassed,
                     &mut bypass_techs,
+                    bypass_corpus,
+                )
+                .await
+            }
+            "differential" => {
+                run_differential_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
                 )
                 .await
             }
             other => {
                 eprintln!(
-                    "warn: unknown strategy {other:?} (light/medium/heavy/mcts/smuggling/content-type/redos/hill-climb/sim-anneal/tabu/novelty/map-elites)"
+                    "warn: unknown strategy {other:?} (light/medium/heavy/mcts/smuggling/content-type/redos/hill-climb/sim-anneal/tabu/novelty/map-elites/differential)"
                 );
                 StrategyStat::default()
             }
@@ -770,6 +915,7 @@ async fn run_evolution_strategy(
     total: &mut usize,
     bypassed: &mut usize,
     bypass_techs: &mut Vec<String>,
+    bypass_corpus: &mut Option<BypassCorpus>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
     let algo_name = match strat {
@@ -783,8 +929,10 @@ async fn run_evolution_strategy(
     let payload_type = class_to_payload_type(&case.class);
     let rng = StdRng::seed_from_u64(0xC0FFEE);
     let gene_pool = GenePool::default_wafrift();
-    let mut budget = Budget::default();
-    budget.max_requests = args.variants.saturating_mul(4);
+    let budget = Budget {
+        max_requests: args.variants.saturating_mul(4),
+        ..Default::default()
+    };
 
     let mut engine = match EvolutionEngine::with_algorithm(algo_name, gene_pool, rng, budget) {
         Ok(e) => e,
@@ -798,13 +946,18 @@ async fn run_evolution_strategy(
         if *total > 0 && args.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
         }
-        let (idx, rendered_payload, technique_label) = match engine.next_candidate() {
-            Some((i, c)) => {
-                let (p, l) = render_chromosome(c, &case.payload, payload_type);
-                (i, p, l)
-            }
-            None => break,
-        };
+        let (idx, rendered_payload, technique_label, chromosome_snapshot) =
+            match engine.next_candidate() {
+                Some((i, c)) => {
+                    let (p, l) = render_chromosome(c, &case.payload, payload_type);
+                    // Snapshot the chromosome (genes + lineage) for replay
+                    // before we lose the borrow on the next loop iteration.
+                    // Only when corpus collection is on — saves a clone otherwise.
+                    let snap = bypass_corpus.as_ref().map(|_| c.clone());
+                    (i, p, l, snap)
+                }
+                None => break,
+            };
         let req = build_request_for_payload(base_url, &case.mode, &rendered_payload);
         stat.variants += 1;
         *total += 1;
@@ -824,6 +977,13 @@ async fn run_evolution_strategy(
                 stat.oracle_valid += 1;
             }
             bypass_techs.push(format!("{strat}:{technique_label}"));
+            if let (Some(corpus), Some(chromo)) =
+                (bypass_corpus.as_mut(), chromosome_snapshot.as_ref())
+            {
+                let entry =
+                    BypassEntry::from_chromosome(chromo, Some(format!("{strat}::{}", case.id)));
+                corpus.add(entry);
+            }
         }
     }
     if stat.variants > 0 {
@@ -867,9 +1027,8 @@ fn render_chromosome(
                 .find(|s| s.as_str() == v.as_str())
                 .copied()
                 .and_then(|s| {
-                    encoding::encode(&intel_payload, s).ok().map(|enc| {
+                    encoding::encode(&intel_payload, s).ok().inspect(|_enc| {
                         techniques.push(format!("enc:{}", s.as_str()));
-                        enc
                     })
                 })
         })
@@ -1092,6 +1251,85 @@ async fn run_redos_strategy(
     stat
 }
 
+/// Filter `wafrift-evolution` differential probes to those that target the
+/// rule family for `class`. Returns the static probe set on first call.
+fn class_probes(class: &str) -> Vec<Probe> {
+    generate_probes()
+        .into_iter()
+        .filter(|p| {
+            matches!(
+                (&p.tests, class),
+                (
+                    ProbeTarget::SqlKeyword(_)
+                        | ProbeTarget::SqlOperator(_)
+                        | ProbeTarget::SqlComment(_)
+                        | ProbeTarget::SqlQuote
+                        | ProbeTarget::SqlTautology(_),
+                    "sql" | "nosql"
+                ) | (
+                    ProbeTarget::XssTag(_)
+                        | ProbeTarget::XssEvent(_)
+                        | ProbeTarget::XssExecFunction(_),
+                    "xss"
+                ) | (
+                    ProbeTarget::CmdSeparator(_) | ProbeTarget::CmdCommand(_),
+                    "cmdi" | "ssti"
+                ) | (ProbeTarget::CmdPath(_), "path" | "cmdi")
+                    | (ProbeTarget::Baseline, _)
+            )
+        })
+        .collect()
+}
+
+/// `differential`: probe the WAF with class-relevant rule-fingerprint
+/// payloads from `wafrift-evolution::differential::generate_probes`. A
+/// probe that comes back unblocked tells you which signature your WAF
+/// does NOT have — the inverse of bypass-rate measurement, useful for
+/// rule-coverage gap analysis.
+async fn run_differential_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let probes = class_probes(&case.class);
+    if probes.is_empty() {
+        // No probe family for this class (e.g. xxe, log4shell). Don't lie
+        // with a 0/0 bypass rate — return an empty stat.
+        return stat;
+    }
+
+    for probe in probes.iter().take(args.variants.max(1)) {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let req = build_request_for_payload(base_url, &case.mode, &probe.payload);
+        stat.variants += 1;
+        *total += 1;
+        match send(client, &req, args.timeout_secs).await {
+            Ok((_s, blocked, _l)) if !blocked => {
+                stat.bypassed += 1;
+                *bypassed += 1;
+                // Probes are class-fingerprint payloads, not full attacks —
+                // oracle validity is not the right gate. Count probe
+                // identification instead.
+                bypass_techs.push(format!("{strat}:{}", probe.description));
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
 fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> Result<(), String> {
     // Aggregate by class.
     let mut by_class: BTreeMap<String, Vec<&CaseResult>> = BTreeMap::new();
@@ -1131,6 +1369,7 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         "evade_mode": args.evade,
         "strategies": args.strategies,
         "variants_per_case_per_strategy": args.variants,
+        "lineage_output": args.lineage_output.as_ref().map(|p| p.display().to_string()),
         "total_cases": results.len(),
         "raw_blocked": results.iter().filter(|r| r.raw_blocked).count(),
         "raw_block_rate": results.iter().filter(|r| r.raw_blocked).count() as f64
@@ -1288,5 +1527,138 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..n.saturating_sub(1)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn class_probes_sql_has_keywords_and_baseline() {
+        let probes = class_probes("sql");
+        assert!(!probes.is_empty(), "sql class must have probes");
+        assert!(
+            probes
+                .iter()
+                .any(|p| matches!(p.tests, ProbeTarget::SqlKeyword(_))),
+            "sql probes must include keyword family"
+        );
+        assert!(
+            probes
+                .iter()
+                .any(|p| matches!(p.tests, ProbeTarget::Baseline)),
+            "every class probe set must include a baseline so unblock=baseline-passes is recorded"
+        );
+        // Negative — sql probe set must NOT contain xss or cmd probes.
+        assert!(
+            !probes
+                .iter()
+                .any(|p| matches!(p.tests, ProbeTarget::XssTag(_) | ProbeTarget::CmdSeparator(_))),
+            "sql probe set must not bleed xss/cmd families"
+        );
+    }
+
+    #[test]
+    fn class_probes_xss_only_returns_xss_family() {
+        let probes = class_probes("xss");
+        assert!(!probes.is_empty());
+        for p in &probes {
+            assert!(
+                matches!(
+                    p.tests,
+                    ProbeTarget::XssTag(_)
+                        | ProbeTarget::XssEvent(_)
+                        | ProbeTarget::XssExecFunction(_)
+                        | ProbeTarget::Baseline
+                ),
+                "xss probes must be xss-family + baseline only, got {:?}",
+                p.tests
+            );
+        }
+    }
+
+    #[test]
+    fn all_strategies_constant_includes_every_dispatched_arm() {
+        // If a new strategy is added to the dispatch match in `run_evade`
+        // but not to `ALL_STRATEGIES`, `--strategies all` would silently
+        // omit it. This guards that.
+        for required in &[
+            "heavy",
+            "mcts",
+            "smuggling",
+            "content-type",
+            "redos",
+            "hill-climb",
+            "sim-anneal",
+            "tabu",
+            "novelty",
+            "map-elites",
+            "differential",
+        ] {
+            assert!(
+                ALL_STRATEGIES.contains(required),
+                "ALL_STRATEGIES is missing {required:?} — `--strategies all` would skip it"
+            );
+        }
+    }
+
+    fn case(id: &str, class: &str, payload: &str) -> BenchCase {
+        BenchCase {
+            id: id.into(),
+            class: class.into(),
+            payload: payload.into(),
+            mode: "body_form_q".into(),
+            description: String::new(),
+        }
+    }
+
+    #[test]
+    fn validate_corpus_flags_duplicate_id() {
+        let cases = vec![
+            case("a", "sql", "1=1"),
+            case("a", "xss", "<script>"),
+        ];
+        let code = validate_corpus_and_exit(&cases).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+    }
+
+    #[test]
+    fn validate_corpus_flags_unknown_class() {
+        let cases = vec![case("a", "definitelynot", "x")];
+        let code = validate_corpus_and_exit(&cases).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+    }
+
+    #[test]
+    fn validate_corpus_flags_empty_payload() {
+        let cases = vec![case("a", "sql", "")];
+        let code = validate_corpus_and_exit(&cases).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+    }
+
+    #[test]
+    fn validate_corpus_passes_clean_set() {
+        let cases = vec![
+            case("a", "sql", "1=1"),
+            case("b", "xss", "<script>"),
+            case("c", "log4shell", "${jndi:ldap://x}"),
+        ];
+        let code = validate_corpus_and_exit(&cases).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn class_probes_unknown_class_yields_only_baseline() {
+        // Classes with no rule-fingerprint family (xxe / log4shell / ssrf)
+        // should fall through to baseline-only — never zero, so the
+        // strategy doesn't divide-by-zero downstream.
+        let probes = class_probes("log4shell");
+        assert!(
+            probes
+                .iter()
+                .all(|p| matches!(p.tests, ProbeTarget::Baseline)),
+            "unknown classes must yield only baseline probes"
+        );
     }
 }

@@ -1,0 +1,10 @@
+[[waf]]
+name = "ChinaCache Load Balancer"
+vendor = "ChinaCache"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:chinacache"
+[[waf.signature]]
+  header_name = "powered-by-chinacache"
+  header_regex = ".+"
+  weight = 0.5

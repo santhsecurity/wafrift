@@ -1,0 +1,27 @@
+[[waf]]
+name = "UTM Web Protection"
+vendor = "Sophos"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:sophos"
+[[waf.signature]]
+  body_regex = "www\\.sophos\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Powered by.?(Sophos)? UTM Web Protection"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<title>Access to the requested URL was blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Access to the requested URL was blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "incident was logged with the following log identifier"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Inbound Anomaly Score exceeded"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Your cache administrator is"
+  weight = 0.4

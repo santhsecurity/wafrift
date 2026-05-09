@@ -131,6 +131,14 @@ pub fn crlf_request_smuggle(path: &str, smuggled_path: &str) -> H2Evasion {
     }
 }
 
+/// Build a regular-header CRLF injection probe.
+///
+/// **Deliberately unsanitised.** This function exists *to* produce
+/// CRLF-injected payloads — it's the technique under test, not a bug.
+/// Callers must only pass this through HTTP/2 codecs that tolerate
+/// the injection (HPACK rejects it; raw frame writers do not). For
+/// every other H2Evasion helper, header inputs ARE sanitised — see
+/// the contract on `authority_host_mismatch`.
 pub fn crlf_in_regular_header(header: &str, value: &str) -> H2Evasion {
     H2Evasion {
         name: "H2 CRLF Regular Header",
@@ -167,21 +175,32 @@ pub fn mixed_case_headers() -> Vec<H2Evasion> {
 }
 
 pub fn authority_host_mismatch(safe_host: &str, target_host: &str) -> H2Evasion {
+    // Sanitise both host inputs — every other public function in this
+    // module that takes user strings runs sanitize_input first, except
+    // crlf_in_regular_header / crlf_in_pseudo_headers which deliberately
+    // inject CRLF as the technique under test. Without this, a caller
+    // passing `safe_host = "example.com\r\nX-Injected: 1"` would get a
+    // CRLF-injected header pair through the `headers` Vec, bypassing
+    // the same sanitisation used everywhere else.
+    let safe_host = sanitize_input(safe_host).unwrap_or_default();
+    let target_host = sanitize_input(target_host).unwrap_or_default();
     H2Evasion {
         name: "H2 Authority/Host Mismatch",
         description: "Set :authority to safe host but add Host header pointing to target",
-        pseudo_headers: vec![(":authority".into(), safe_host.into())],
-        headers: vec![("host".into(), target_host.into())],
+        pseudo_headers: vec![(":authority".into(), safe_host)],
+        headers: vec![("host".into(), target_host)],
         ..evasion("", "", H2TargetFlaw::PseudoHeaderMismatch)
     }
 }
 
 pub fn double_host(primary: &str, secondary: &str) -> H2Evasion {
+    let primary = sanitize_input(primary).unwrap_or_default();
+    let secondary = sanitize_input(secondary).unwrap_or_default();
     H2Evasion {
         name: "H2 Double Host",
         description: "Send :authority and Host header with different values",
-        pseudo_headers: vec![(":authority".into(), primary.into())],
-        headers: vec![("host".into(), secondary.into())],
+        pseudo_headers: vec![(":authority".into(), primary)],
+        headers: vec![("host".into(), secondary)],
         ..evasion("", "", H2TargetFlaw::PseudoHeaderMismatch)
     }
 }

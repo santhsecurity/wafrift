@@ -111,8 +111,22 @@ fn valid_evasion_strategies() -> Vec<String> {
     values
 }
 
-/// Load custom rules from a TOML string.
+/// Maximum byte length of an accepted custom-rules TOML payload.
+/// Prevents OOM / stack overflow on malicious deeply-nested input
+/// (toml::from_str does not enforce a built-in size or depth limit).
+/// 1 MiB is generous for any realistic ruleset.
+const MAX_CUSTOM_RULES_BYTES: usize = 1024 * 1024;
+
+/// Load custom rules from a TOML string. Inputs larger than 1 MiB are
+/// rejected before parsing to bound memory + parse time.
 pub fn load_rules(toml_str: &str) -> std::result::Result<CustomRulesFile, String> {
+    if toml_str.len() > MAX_CUSTOM_RULES_BYTES {
+        return Err(format!(
+            "custom rules TOML rejected: {} bytes exceeds maximum of {} bytes",
+            toml_str.len(),
+            MAX_CUSTOM_RULES_BYTES
+        ));
+    }
     let rules: CustomRulesFile =
         toml::from_str(toml_str).map_err(|e| format!("failed to parse custom rules TOML: {e}"))?;
     validate_rules(&rules)?;

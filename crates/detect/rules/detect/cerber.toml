@@ -1,0 +1,21 @@
+[[waf]]
+name = "WP Cerber Security"
+vendor = "Cerber Tech"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:cerber"
+[[waf.signature]]
+  body_regex = "your request looks suspicious or similar to automated"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "our server stopped processing your request"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "We.re sorry.{0,10}?you are not allowed to proceed"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "requests from spam posting software"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<title>403 Access Forbidden"
+  weight = 0.4

@@ -107,7 +107,7 @@ impl Default for TemplateRules {
 }
 
 /// Compile-time embedded TOML rules for reliability.
-const TEMPLATE_RULES_TOML: &str = include_str!("../../../../rules/templates.toml");
+const TEMPLATE_RULES_TOML: &str = include_str!("../../rules/templates.toml");
 
 /// Parse the embedded TOML rules once at first access.
 fn get_rules() -> &'static TemplateRules {

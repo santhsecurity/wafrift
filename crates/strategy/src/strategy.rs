@@ -308,8 +308,28 @@ fn build_mcts_result(env: WafRiftEnv, _config: &EvasionConfig) -> Option<Evasion
 /// that gives the production proxy + scan loop the AlphaGo-for-WAFs spirit
 /// without forcing every callsite to know about MCTS.
 ///
+/// **First-contact behavior.** With `state.blocks == 0` (no telemetry
+/// yet) the function deliberately skips MCTS and runs the classic
+/// pipeline. MCTS without prior block signal explores blindly and
+/// usually picks worse than the heuristic pipeline; let the WAF reject
+/// once, capture the block, then upgrade to tree search. If you want
+/// MCTS on every request regardless of state, call `evade_mcts`
+/// directly.
+///
 /// MCTS depth is derived from host state's block count: more blocks ->
 /// deeper search (capped at 5).
+///
+/// **When to choose this vs the others:**
+/// - `evade` — pure heuristic pipeline. Cheapest. Use when you don't
+///   care about adaptation (one-shot scan, tiny budget).
+/// - `evade_mcts` — bare MCTS over the action space. Use when you have
+///   a fixed depth budget and want it spent on tree search.
+/// - `evade_smart` — this. Heuristic on first contact, MCTS once
+///   blocked. Default for the production proxy + `wafrift scan`.
+/// - `evade_adaptive` — heuristic pipeline with explicit `EvasionPlan`.
+///   Use when caller wants to dictate technique order from outside.
+/// - `evade_intelligent` — heuristic pipeline + the full
+///   `IntelligenceLoop` (differential probing + advisor). Heaviest.
 #[must_use]
 pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig) -> EvasionResult {
     // Without prior block signal, there's nothing for MCTS to learn from yet.

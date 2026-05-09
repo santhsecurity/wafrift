@@ -1,0 +1,209 @@
+# Command Injection Oracle Rules
+# Structural validation patterns for command injection detection
+
+# Command separators that break out of the current shell context
+[[cmd_separator]]
+pattern = ";"
+description = "Semicolon command terminator"
+
+[[cmd_separator]]
+pattern = "|"
+description = "Pipe operator"
+
+[[cmd_separator]]
+pattern = "&&"
+description = "Logical AND (execute if previous succeeds)"
+
+[[cmd_separator]]
+pattern = "||"
+description = "Logical OR (execute if previous fails)"
+
+[[cmd_separator]]
+pattern = "\n"
+description = "Newline command separator"
+
+[[cmd_separator]]
+pattern = "`"
+description = "Backtick command substitution"
+
+[[cmd_separator]]
+pattern = "$("
+description = "Dollar-paren command substitution"
+
+[[cmd_separator]]
+pattern = "${"
+description = "Dollar-brace parameter expansion"
+
+# Common commands used in injection payloads
+[[shell_command]]
+name = "cat"
+description = "Concatenate files"
+
+[[shell_command]]
+name = "ls"
+description = "List directory contents"
+
+[[shell_command]]
+name = "id"
+description = "Print user identity"
+
+[[shell_command]]
+name = "whoami"
+description = "Print current username"
+
+[[shell_command]]
+name = "wget"
+description = "Download files via HTTP/FTP"
+
+[[shell_command]]
+name = "curl"
+description = "Transfer data via URLs"
+
+[[shell_command]]
+name = "ping"
+description = "Send ICMP echo requests"
+
+[[shell_command]]
+name = "nc"
+description = "Netcat networking utility"
+
+[[shell_command]]
+name = "bash"
+description = "Bourne-again shell"
+
+[[shell_command]]
+name = "sh"
+description = "Bourne shell"
+
+[[shell_command]]
+name = "python"
+description = "Python interpreter"
+
+[[shell_command]]
+name = "perl"
+description = "Perl interpreter"
+
+[[shell_command]]
+name = "ruby"
+description = "Ruby interpreter"
+
+[[shell_command]]
+name = "php"
+description = "PHP interpreter"
+
+[[shell_command]]
+name = "uname"
+description = "Print system information"
+
+[[shell_command]]
+name = "env"
+description = "Display environment variables"
+
+[[shell_command]]
+name = "printenv"
+description = "Print environment variables"
+
+[[shell_command]]
+name = "nslookup"
+description = "Query DNS servers"
+
+[[shell_command]]
+name = "dig"
+description = "DNS lookup utility"
+
+[[shell_command]]
+name = "ifconfig"
+description = "Configure network interfaces"
+
+[[shell_command]]
+name = "ip"
+description = "IP routing utility"
+
+[[shell_command]]
+name = "sleep"
+description = "Delay execution"
+
+[[shell_command]]
+name = "echo"
+description = "Print text to stdout"
+
+[[shell_command]]
+name = "printf"
+description = "Format and print data"
+
+[[shell_command]]
+name = "head"
+description = "Output first part of files"
+
+[[shell_command]]
+name = "tail"
+description = "Output last part of files"
+
+[[shell_command]]
+name = "grep"
+description = "Pattern matching utility"
+
+[[shell_command]]
+name = "find"
+description = "Search for files"
+
+[[shell_command]]
+name = "chmod"
+description = "Change file permissions"
+
+[[shell_command]]
+name = "chown"
+description = "Change file owner"
+
+[[shell_command]]
+name = "mkdir"
+description = "Create directories"
+
+[[shell_command]]
+name = "rm"
+description = "Remove files"
+
+[[shell_command]]
+name = "cp"
+description = "Copy files"
+
+[[shell_command]]
+name = "mv"
+description = "Move files"
+
+[[shell_command]]
+name = "tar"
+description = "Archive utility"
+
+[[shell_command]]
+name = "xargs"
+description = "Build and execute commands"
+
+# Shell variable substitution and IFS tricks
+[[shell_trick]]
+pattern = "${IFS}"
+description = "Internal Field Separator variable expansion"
+
+[[shell_trick]]
+pattern = "$IFS"
+description = "IFS variable shorthand"
+
+[[shell_trick]]
+pattern = "${PATH}"
+description = "PATH environment variable"
+
+[[shell_trick]]
+pattern = "$PATH"
+description = "PATH variable shorthand"
+
+[[shell_trick]]
+pattern = "\\"
+description = "Backslash line continuation"
+
+[[shell_trick]]
+pattern = "'"
+description = "Single quote (string boundary)"
+
+[[shell_trick]]
+pattern = "\""
+description = "Double quote (string boundary)"

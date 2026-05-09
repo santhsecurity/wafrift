@@ -41,7 +41,7 @@ pub struct CmdMutation {
 // ──────────────────────────────────────────────
 
 /// Compile-time embedded TOML rules for CMD payloads.
-const CMD_PAYLOADS_TOML: &str = include_str!("../../../../rules/cmd/payloads.toml");
+const CMD_PAYLOADS_TOML: &str = include_str!("../../rules/cmd/payloads.toml");
 
 /// Separator definition from TOML.
 #[derive(Debug, Clone, Deserialize)]

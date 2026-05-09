@@ -1,0 +1,21 @@
+[[waf]]
+name = "Anubis"
+vendor = "Techaro"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:anubis"
+[[waf.signature]]
+  body_regex = "/\\.within\\.website/x/cmd/anubis/"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<script id=\"anubis_version\""
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<script id=\"anubis_challenge\""
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Protected by.*Anubis.*From.*Techaro"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "github\\.com/TecharoHQ/anubis"
+  weight = 0.4

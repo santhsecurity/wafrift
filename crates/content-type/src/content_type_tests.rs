@@ -819,4 +819,112 @@ mod tests {
             assert!(!variants.is_empty());
         }
     }
+
+    /// JSON variants must be parseable as strict JSON. Earlier versions
+    /// emitted `\u{:04x}` for code points >= U+10000 (a single 5+ digit
+    /// escape), which is invalid JSON. RFC 8259 requires a UTF-16
+    /// surrogate pair for supplementary-plane characters.
+    #[test]
+    fn json_unicode_escape_supplementary_plane_is_valid_json() {
+        // U+1F600 GRINNING FACE — supplementary plane.
+        let params = vec![("emoji".to_string(), "\u{1F600}".to_string())];
+        let variants = generate_variants(&params);
+        let json = variants
+            .iter()
+            .find(|v| matches!(v.technique, ContentTypeTechnique::JsonUnicodeEscape))
+            .expect("JsonUnicodeEscape variant must exist");
+        let body_str = std::str::from_utf8(&json.body).expect("body is utf-8");
+        // Must contain the surrogate pair, not a single ὠ0.
+        assert!(
+            body_str.contains("\\ud83d\\ude00"),
+            "expected UTF-16 surrogate pair \\ud83d\\ude00, body = {body_str}"
+        );
+        // Must parse as strict JSON.
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&json.body).expect("JSON variant must be strict-valid JSON");
+        assert_eq!(
+            parsed.get("emoji").and_then(|v| v.as_str()),
+            Some("\u{1F600}"),
+            "round-trip: parsed value should equal original char"
+        );
+    }
+
+    #[test]
+    fn json_unicode_escape_bmp_char_uses_4hex_form() {
+        let params = vec![("v".to_string(), "©".to_string())]; // U+00A9
+        let variants = generate_variants(&params);
+        let json = variants
+            .iter()
+            .find(|v| matches!(v.technique, ContentTypeTechnique::JsonUnicodeEscape))
+            .expect("JsonUnicodeEscape variant must exist");
+        let body_str = std::str::from_utf8(&json.body).unwrap();
+        assert!(body_str.contains("\\u00a9"));
+        let parsed: serde_json::Value = serde_json::from_slice(&json.body).unwrap();
+        assert_eq!(parsed.get("v").and_then(|v| v.as_str()), Some("©"));
+    }
+
+    /// CR/LF in form values must NOT escape the multipart part header
+    /// section. Previously these survived raw and let an attacker
+    /// inject a fake part with a chosen Content-Disposition. The fix
+    /// strips CR/LF from values; the smuggled "boundary" no longer
+    /// appears as a real boundary because the only \r\n separators
+    /// remaining are the framework-emitted ones.
+    #[test]
+    fn multipart_strips_crlf_from_value() {
+        let params = vec![(
+            "field".to_string(),
+            "innocent\r\nContent-Disposition: form-data; name=\"smuggled\"\r\n\r\nattacker".to_string(),
+        )];
+        let variants = generate_variants(&params);
+        let mp = variants
+            .iter()
+            .find(|v| matches!(v.technique, ContentTypeTechnique::Multipart))
+            .expect("multipart variant must exist");
+        let body_str = std::str::from_utf8(&mp.body).unwrap();
+        // No raw CR/LF remain inside the value region. A clean single-
+        // part multipart has exactly 5 CR/LFs (boundary, CD header,
+        // header/body separator, body, closing boundary). Any
+        // surviving CR/LF inside the value would push this above 5.
+        let crlf_count = body_str.matches("\r\n").count();
+        assert_eq!(
+            crlf_count, 5,
+            "expected 5 framework CR/LF (no smuggled CR/LF in value), got {crlf_count}; body = {body_str}"
+        );
+        // Parse the multipart properly: extract the boundary token and
+        // count parts. There must be exactly ONE part (only the legit
+        // `field`, never a `smuggled` one). Substring counting on
+        // "Content-Disposition" would be misleading because the smuggled
+        // string survives as inert data inside the value.
+        let boundary_line = body_str
+            .lines()
+            .next()
+            .expect("body must start with boundary line");
+        // Boundary is the line minus the leading "--".
+        assert!(boundary_line.starts_with("--"));
+        let boundary = &boundary_line[2..];
+        // A "part" begins right after each boundary occurrence (excluding the closing one).
+        let part_count = body_str
+            .matches(&format!("--{boundary}\r\n"))
+            .count();
+        assert_eq!(
+            part_count, 1,
+            "expected exactly 1 part (no smuggled part); body = {body_str}"
+        );
+    }
+
+    #[test]
+    fn multipart_escapes_quotes_in_name() {
+        let params = vec![("a\"b".to_string(), "v".to_string())];
+        let variants = generate_variants(&params);
+        let mp = variants
+            .iter()
+            .find(|v| matches!(v.technique, ContentTypeTechnique::Multipart))
+            .expect("multipart variant must exist");
+        let body_str = std::str::from_utf8(&mp.body).unwrap();
+        // Quote in name must be backslash-escaped per RFC 7578 §4.2.
+        assert!(
+            body_str.contains(r#"name="a\"b""#),
+            "embedded quote must be escaped, body = {body_str}"
+        );
+    }
 }

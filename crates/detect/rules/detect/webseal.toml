@@ -1,0 +1,16 @@
+[[waf]]
+name = "WebSEAL"
+vendor = "IBM"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:webseal"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "WebSEAL"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "This is a WebSEAL error message template file"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "WebSEAL server received an invalid HTTP request"
+  weight = 0.4

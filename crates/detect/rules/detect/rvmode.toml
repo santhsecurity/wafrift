@@ -1,0 +1,15 @@
+[[waf]]
+name = "RequestValidationMode"
+vendor = "Microsoft"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:rvmode"
+[[waf.signature]]
+  body_regex = "Request Validation has detected a potentially dangerous client input"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "ASP\\.NET has detected data in the request"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "HttpRequestValidationException"
+  weight = 0.4

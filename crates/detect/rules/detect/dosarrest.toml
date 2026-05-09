@@ -1,0 +1,10 @@
+[[waf]]
+name = "DOSarrest"
+vendor = "DOSarrest Internet Security"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:dosarrest"
+[[waf.signature]]
+  header_name = "x-dis-request-id"
+  header_regex = ".+"
+  weight = 0.5

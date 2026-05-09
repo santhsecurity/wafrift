@@ -57,18 +57,27 @@ pub struct EvolutionEngine {
 
 impl Clone for EvolutionEngine {
     fn clone(&self) -> Self {
-        // Clone via checkpoint/restore for the algorithm, and re-seed RNG from state
-        let alg_bytes = self.algorithm.checkpoint().unwrap_or_default();
+        // Clone via checkpoint/restore. Both calls panic-on-error
+        // because they only fail when invariants are corrupt — the
+        // earlier silent-fallback path produced a clone with the
+        // wrong algorithm + default state, masking the bug. Loud
+        // panic > silent state corruption.
+        let alg_bytes = self
+            .algorithm
+            .checkpoint()
+            .expect("algorithm checkpoint must succeed for a live engine");
         let mut restored = Self::with_algorithm(
             self.algorithm.name(),
             self.gene_pool.clone(),
             self.rng.clone(),
             self.budget,
         )
-        .unwrap_or_else(|_| Self::new(20));
-        let _ = restored.algorithm.restore(&alg_bytes);
+        .expect("re-constructing the same registered algorithm must succeed");
+        restored
+            .algorithm
+            .restore(&alg_bytes)
+            .expect("restoring fresh checkpoint into matching algorithm must succeed");
         restored.cache = LruCache::new(self.cache.cap());
-        // Copy simple fields
         restored.gene_stats = self.gene_stats.clone();
         restored.fitness_history = self.fitness_history.clone();
         restored.stagnation_counter = self.stagnation_counter;
@@ -89,8 +98,14 @@ impl EvolutionEngine {
     }
 
     /// Create a new engine with a seeded RNG.
+    /// `population_size` is clamped to the inclusive range `[1, 10_000]`:
+    /// 0 would leave the selection helpers (tournament/roulette) with
+    /// nothing to index — a contract violation that used to panic.
+    /// 10_000 caps memory at construction so a misconfigured caller
+    /// can't OOM the process by passing `usize::MAX`.
     #[must_use]
     pub fn new_seeded(population_size: usize, seed: u64) -> Self {
+        let population_size = population_size.clamp(1, 10_000);
         let gene_pool = GenePool::default_wafrift();
         let mut rng = StdRng::seed_from_u64(seed);
         let mut population: Vec<Chromosome> = (0..population_size)
@@ -197,10 +212,23 @@ impl EvolutionEngine {
     /// Request a batch of up to `n` candidates for parallel evaluation.
     ///
     /// Checks cache, budget, and target health before returning candidates.
+    /// `n` is also clamped to the remaining `budget.max_requests` headroom
+    /// so a single batch call can never overshoot the hard request budget
+    /// (the underlying algorithm is free to request whatever it likes
+    /// internally; the engine bounds the request count it actually
+    /// surfaces).
     pub fn batch_candidates(&mut self, n: usize) -> Vec<(usize, Chromosome)> {
         if self.should_terminate() || n == 0 {
             return Vec::new();
         }
+        let remaining = self
+            .budget
+            .max_requests
+            .saturating_sub(self.request_count);
+        if remaining == 0 {
+            return Vec::new();
+        }
+        let n = n.min(remaining);
 
         let mut result = Vec::with_capacity(n);
         let mut cached_results = Vec::new();

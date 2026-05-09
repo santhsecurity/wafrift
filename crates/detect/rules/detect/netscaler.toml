@@ -1,0 +1,19 @@
+[[waf]]
+name = "NetScaler AppFirewall"
+vendor = "Citrix Systems"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:netscaler"
+[[waf.signature]]
+  header_name = "via"
+  header_regex = "NS\\-CACHE"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "(NS Transaction|AppFW Session) id"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Violation Category.{0,5}?APPFW_"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Citrix\\|NetScaler"
+  weight = 0.4

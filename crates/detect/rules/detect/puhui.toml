@@ -1,0 +1,10 @@
+[[waf]]
+name = "Puhui"
+vendor = "Puhui"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:puhui"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Puhui[\\-_]?WAF"
+  weight = 0.5

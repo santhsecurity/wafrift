@@ -28,7 +28,7 @@ pub(crate) const WHITESPACE_ALTERNATIVES: &[&str] = &[
 // ──────────────────────────────────────────────
 
 /// Compile-time embedded TOML rules for SQL operators.
-const SQL_OPERATORS_TOML: &str = include_str!("../../../../../rules/sql/operators.toml");
+const SQL_OPERATORS_TOML: &str = include_str!("../../../rules/sql/operators.toml");
 
 /// OR alternative definition from TOML.
 #[derive(Debug, Clone, Deserialize)]

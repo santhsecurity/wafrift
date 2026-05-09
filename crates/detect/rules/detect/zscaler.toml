@@ -1,0 +1,28 @@
+[[waf]]
+name = "ZScaler"
+vendor = "Accenture"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:zscaler"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "ZScaler"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "Access Denied.{0,10}?Accenture Policy"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "policies\\.accenture\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "login\\.zscloud\\.net/img_logo_new1\\.png"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Zscaler to protect you from internet threats"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Internet Security by ZScaler"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Accenture.{0,10}?webfilters indicate that the site likely contains"
+  weight = 0.4

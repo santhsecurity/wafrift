@@ -1,0 +1,14 @@
+[[waf]]
+name = "TransIP Web Firewall"
+vendor = "TransIP"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:transip"
+[[waf.signature]]
+  header_name = "x-transip-backend"
+  header_regex = ".+"
+  weight = 0.5
+[[waf.signature]]
+  header_name = "x-transip-balancer"
+  header_regex = ".+"
+  weight = 0.5

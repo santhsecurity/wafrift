@@ -9,7 +9,16 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
-    let rules_dir = Path::new("../../rules/detect");
+    // Prefer the in-crate vendored copy (the only one that survives a
+    // `cargo publish`); fall back to the workspace tree for monorepo
+    // builds where the vendored copy may be a symlink/missing.
+    let in_crate = Path::new("rules/detect");
+    let workspace = Path::new("../../rules/detect");
+    let rules_dir = if in_crate.is_dir() {
+        in_crate
+    } else {
+        workspace
+    };
 
     if !rules_dir.is_dir() {
         // Not in the workspace tree — skip embedding.  The engine
@@ -60,7 +69,7 @@ fn main() {
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", out_path.display()));
 
     // Re-run if any rule file changes.
-    println!("cargo::rerun-if-changed=../../rules/detect");
+    println!("cargo::rerun-if-changed={}", rules_dir.display());
     for entry in &entries {
         println!("cargo::rerun-if-changed={}", entry.display());
     }

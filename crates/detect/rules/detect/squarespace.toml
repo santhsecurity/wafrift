@@ -1,0 +1,16 @@
+[[waf]]
+name = "Squarespace"
+vendor = "Squarespace"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:squarespace"
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "Squarespace"
+  weight = 0.5
+[[waf.signature]]
+  body_regex = "status\\.squarespace\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "BRICK\\-\\d{2}"
+  weight = 0.4

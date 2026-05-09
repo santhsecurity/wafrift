@@ -41,6 +41,24 @@ pub enum ProbeTarget {
 }
 
 /// Generate the full set of differential analysis probes.
+///
+/// # SAFETY / authorization contract
+///
+/// Probe payloads are NOT inert. They contain genuinely exploitable
+/// strings (`alert(1)`, `eval('x')`, `1=1`, `/etc/passwd`, `;`, `|`,
+/// `||`) — that is the point: a WAF that doesn't block them is the
+/// signal we're measuring. If the WAF fails to block AND the upstream
+/// application is vulnerable, the probe IS the attack. Inert marker
+/// strings (e.g. `wafrift_xss_probe_123`) don't trigger any WAF rule
+/// and would defeat the purpose of differential probing.
+///
+/// **Caller responsibility.** Only call this against:
+///   1. A WAF in front of a known-non-vulnerable backend you control
+///      (the bench target's `kennethreitz/httpbin` fits — it
+///      doesn't actually run JS, exec sh, or query SQL), OR
+///   2. A target you have explicit written authorization to attack.
+///
+/// Wafrift cannot enforce this; the operator must.
 #[must_use]
 pub fn generate_probes() -> Vec<Probe> {
     let mut probes = Vec::new();

@@ -1,0 +1,9 @@
+[[waf]]
+name = "RSFirewall"
+vendor = "RSJoomla!"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:rsfirewall"
+[[waf.signature]]
+  body_regex = "com_rsfirewall_(\\d{3}_forbidden|event)?"
+  weight = 0.4

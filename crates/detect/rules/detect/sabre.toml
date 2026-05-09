@@ -1,0 +1,15 @@
+[[waf]]
+name = "Sabre Firewall"
+vendor = "Sabre"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:sabre"
+[[waf.signature]]
+  body_regex = "dxsupport\\.sabre\\.com"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "<title>Application Firewall Error"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "add some important details to the email for us to investigate"
+  weight = 0.4

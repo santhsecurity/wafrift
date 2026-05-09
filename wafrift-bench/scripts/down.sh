@@ -18,6 +18,6 @@ done
 
 # Belt-and-braces cleanup if compose lost track
 docker stop wafrift-pl1 wafrift-pl2 wafrift-pl3 wafrift-pl4 \
-            wafrift-coraza wafrift-bunkerweb 2>/dev/null || true
+            wafrift-coraza wafrift-bunkerweb wafrift-naxsi 2>/dev/null || true
 docker rm   wafrift-pl1 wafrift-pl2 wafrift-pl3 wafrift-pl4 \
-            wafrift-coraza wafrift-bunkerweb 2>/dev/null || true
+            wafrift-coraza wafrift-bunkerweb wafrift-naxsi 2>/dev/null || true

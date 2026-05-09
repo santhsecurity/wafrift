@@ -18,5 +18,4 @@ toml = { workspace = true }
 sqlparser = { workspace = true }
 
 [dev-dependencies]
-wafrift-oracle = { workspace = true }
 proptest = { workspace = true }

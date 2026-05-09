@@ -1,0 +1,12 @@
+[[waf]]
+name = "Palo Alto Next Gen Firewall"
+vendor = "Palo Alto Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:paloalto"
+[[waf.signature]]
+  body_regex = "Download of virus.spyware blocked"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "Palo Alto Next Generation Security Platform"
+  weight = 0.4

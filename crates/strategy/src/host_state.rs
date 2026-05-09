@@ -205,12 +205,16 @@ impl HostState {
     }
 
     /// Get the next encoding strategy to try (one we haven't tried yet
-    /// and isn't blocklisted).
+    /// and isn't blocklisted). Blocklist comparison uses the canonical
+    /// `Strategy::as_str()` name — same form `record_block_for_many` /
+    /// proxy gene-bank persistence use everywhere else. (Earlier
+    /// versions used `format!("{s:?}")` here, which produced PascalCase
+    /// debug names that did not match the kebab-case strings stored on
+    /// blocklist.)
     #[must_use]
     pub fn next_encoding(&self) -> Option<encoding::Strategy> {
         encoding::all_strategies().into_iter().find(|s| {
-            let name = format!("{s:?}");
-            !self.tried_encodings.contains(s) && !self.blocklisted.contains(&name)
+            !self.tried_encodings.contains(s) && !self.blocklisted.contains(&s.as_str().to_string())
         })
     }
 

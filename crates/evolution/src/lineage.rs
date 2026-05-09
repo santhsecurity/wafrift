@@ -17,6 +17,27 @@ pub struct MutationOp {
     pub operator: String,
 }
 
+/// Compact, transitive-closure-safe snapshot of a parent chromosome's
+/// gene tuple. Stored inside `Lineage::Crossover` / `Lineage::Mutation`
+/// instead of `Arc<Chromosome>` so the lineage tree of a long-running
+/// scan is bounded by `O(genes per chromosome)` per ancestor instead
+/// of `O(full ancestry chain)` — the earlier full-Chromosome arcs
+/// transitively dragged the parent's own `Lineage` field along, so
+/// every grandchild kept its grandparents alive forever and a long
+/// scan would OOM.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ParentSnapshot {
+    pub genes: Vec<(String, String)>,
+}
+
+impl ParentSnapshot {
+    fn from_chromosome(c: &Chromosome) -> Self {
+        Self {
+            genes: c.genes.clone(),
+        }
+    }
+}
+
 /// Lineage of a chromosome: how it was derived from seeds.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Lineage {
@@ -27,10 +48,10 @@ pub enum Lineage {
     },
     /// Created via crossover of two parents.
     Crossover {
-        /// Parent A snapshot.
-        parent_a: Arc<Chromosome>,
-        /// Parent B snapshot.
-        parent_b: Arc<Chromosome>,
+        /// Parent A snapshot — genes only, breaks ancestry chain.
+        parent_a: Arc<ParentSnapshot>,
+        /// Parent B snapshot — genes only, breaks ancestry chain.
+        parent_b: Arc<ParentSnapshot>,
         /// Strategy used.
         strategy: String,
         /// Generation when created.
@@ -38,8 +59,8 @@ pub enum Lineage {
     },
     /// Created via mutation of a single parent.
     Mutation {
-        /// Parent snapshot.
-        parent: Arc<Chromosome>,
+        /// Parent snapshot — genes only, breaks ancestry chain.
+        parent: Arc<ParentSnapshot>,
         /// Log of applied mutation operations.
         log: Vec<MutationOp>,
         /// Generation when created.
@@ -63,8 +84,8 @@ impl Lineage {
         generation: u32,
     ) -> Self {
         Self::Crossover {
-            parent_a: Arc::new(parent_a.clone()),
-            parent_b: Arc::new(parent_b.clone()),
+            parent_a: Arc::new(ParentSnapshot::from_chromosome(parent_a)),
+            parent_b: Arc::new(ParentSnapshot::from_chromosome(parent_b)),
             strategy: strategy.to_string(),
             generation,
         }
@@ -74,7 +95,7 @@ impl Lineage {
     #[must_use]
     pub fn mutation(parent: &Chromosome, log: Vec<MutationOp>, generation: u32) -> Self {
         Self::Mutation {
-            parent: Arc::new(parent.clone()),
+            parent: Arc::new(ParentSnapshot::from_chromosome(parent)),
             log,
             generation,
         }
@@ -150,14 +171,27 @@ impl BypassEntry {
 
     #[must_use]
     pub fn from_chromosome(chromosome: &Chromosome, target_waf: Option<String>) -> Self {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        chromosome.genes.hash(&mut hasher);
-        let hash = hasher.finish();
+        // SHA-256 over a deterministic gene encoding. Earlier versions
+        // used the 64-bit DefaultHasher, which collides via birthday
+        // attack at roughly 2^32 chromosomes — well within reach of a
+        // long-running scan, causing BypassCorpus::add to silently
+        // dedupe distinct bypass discoveries.
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        for (k, v) in &chromosome.genes {
+            hasher.update(k.as_bytes());
+            hasher.update([0u8]); // delimiter so ("ab", "c") != ("a", "bc")
+            hasher.update(v.as_bytes());
+            hasher.update([0u8]);
+        }
+        let digest = hasher.finalize();
+        let payload_hash = digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
 
         Self {
-            payload_hash: format!("{:016x}", hash),
+            payload_hash,
             genes: chromosome.genes.clone(),
             lineage_trace: chromosome.lineage.to_trace(),
             fitness: chromosome.fitness,

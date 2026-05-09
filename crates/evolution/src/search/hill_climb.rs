@@ -78,10 +78,16 @@ impl SearchAlgorithm for HillClimbing {
 
     fn submit_evaluations(&mut self, results: Vec<(u64, OracleVerdict)>) {
         for (_id, verdict) in results {
-            let fitness = verdict.to_fitness();
-            if fitness >= self.current.fitness {
-                let mut next = self.current.clone();
-                next.record_verdict(&verdict);
+            // Record the verdict on a clone first, then compare the
+            // resulting EMA-smoothed fitness — this keeps both sides
+            // of the comparison in the same units. The earlier
+            // approach compared raw verdict.to_fitness() against
+            // self.current.fitness (an EMA), which made the
+            // accept threshold drift higher as `current` accumulated
+            // evaluations and rejected good candidates arbitrarily.
+            let mut next = self.current.clone();
+            next.record_verdict(&verdict);
+            if next.fitness >= self.current.fitness {
                 self.current = next;
                 if self.current.fitness > self.best.fitness {
                     self.best = self.current.clone();

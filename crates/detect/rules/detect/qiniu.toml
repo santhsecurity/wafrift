@@ -1,0 +1,10 @@
+[[waf]]
+name = "Qiniu"
+vendor = "Qiniu CDN"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:qiniu"
+[[waf.signature]]
+  header_name = "x-qiniu-cdn"
+  header_regex = "\\d+?"
+  weight = 0.5

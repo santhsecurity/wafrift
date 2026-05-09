@@ -1,0 +1,12 @@
+[[waf]]
+name = "Cloudfloor"
+vendor = "Cloudfloor DNS"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:cloudfloordns"
+[[waf.signature]]
+  body_regex = "<(title|h\\d{1})>CloudfloorDNS.{0,6}?Web Application Firewall Error"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "www\\.cloudfloordns\\.com/contact"
+  weight = 0.4

@@ -34,11 +34,13 @@ impl EvasionPipeline {
         self
     }
 
-    /// Apply this pipeline to a request, returning the transformed request
-    /// and the techniques that were actually applied.
-    ///
-    /// Note: this is a thin wrapper; the actual application logic lives in
-    /// the strategy engine to keep the pipeline type I/O-free.
+    /// Returns a cloned `Request` and the technique list this pipeline
+    /// declares — it does NOT actually apply the techniques to the
+    /// request bytes. The mutation logic lives in `strategy::evade*`
+    /// (so the `Pipeline` value type stays I/O-free and trivially
+    /// serializable). Call this when you want to surface "the plan"
+    /// to a caller; call `evade_adaptive(&req, cfg, &plan, &state)` to
+    /// actually execute it.
     #[must_use]
     pub fn apply_to(&self, req: &Request) -> (Request, Vec<Technique>) {
         (req.clone(), self.techniques.clone())

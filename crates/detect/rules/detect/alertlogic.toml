@@ -1,0 +1,21 @@
+[[waf]]
+name = "Alert Logic"
+vendor = "Alert Logic"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:alertlogic"
+[[waf.signature]]
+  body_regex = "<(title|h\\d{1})>requested url cannot be found"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "we are sorry.{0,10}?but the page you are looking for cannot be found"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "back to previous page"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "proceed to homepage"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "reference id"
+  weight = 0.4

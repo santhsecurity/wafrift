@@ -4,6 +4,103 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Fixed (in source — release pending)
+
+- **`wafrift-grammar` / `wafrift-oracle` / `wafrift-strategy` rule files
+  vendored into each crate.** Previously, `include_str!` reached up to
+  `<workspace>/rules/...`, which `cargo publish` strips. The grammar
+  crate could not be packaged at all; oracle and strategy depended on
+  grammar so they cascaded. Files now live in `crates/<x>/rules/...`
+  and the include paths point in-crate.
+
+- **`wafrift-detect` build.rs prefers vendored rule copy.**
+  v0.2.0 of `wafrift-detect` on crates.io was packaged with the legacy
+  `../../rules/detect` path that resolved outside the published crate
+  directory; the build script's fallback wrote a one-line empty
+  rule-set so the build succeeded but the published artifact ships an
+  empty WAF detection database. Source is now fixed (build.rs prefers
+  the in-crate `crates/detect/rules/detect/` copy), but the registry
+  artifact at `wafrift-detect@0.2.0` is still empty and needs a
+  coordinated 0.2.1 bump across detect + every consumer that pins
+  `detect = 0.2.0`. Open and unfinished — see internal task #52.
+
+### Added
+
+- **Practitioner-shaped proxy + CLI surface (this round).**
+  - `wafrift-proxy --only-host / --skip-host / --only-path / --skip-path
+    / --only-method` — request-level scope filter with a tiny ASCII glob
+    grammar (`*`, `?`). Out-of-scope requests are forwarded verbatim
+    with no evasion, no gene-bank update, no detection — so dropping
+    the proxy in front of Burp doesn't break login flows, oauth
+    callbacks, or static assets. SSRF policy still applies.
+  - `wafrift-proxy --max-rps-per-host / --max-rps-per-host-burst` —
+    per-host token-bucket rate limiter so accidental hammering during
+    exploration can't DoS a target. Default unlimited.
+  - **`wafrift replay`** — re-fire a saved bypass against a target to
+    prove reproducibility. Pulls the technique pool from explicit
+    `--technique`, the proxy's gene bank (`--from-host`), or the per-WAF
+    GeneBank (`--from-waf`). Exits `2` when the replay is blocked,
+    `0` when it bypasses — directly usable as a CI regression gate.
+  - **`wafrift report`** — render a pentest-ready markdown writeup from
+    the proxy gene bank: per-host WAF, working/blocked techniques, and
+    a copy-paste `wafrift replay` command for each finding. Supports
+    `--only-host` host-glob filtering and `--output <file>`.
+  - **`wafrift init`** — scaffold a commented `.wafrift.toml` so first-
+    run isn't `--help` archaeology. Refuses to overwrite without
+    `--force`. Every key shipped commented-out so the unmodified file
+    is a pure no-op.
+  - **`/_wafrift/findings.md`** — new live findings endpoint on the
+    proxy (loopback-bind + peer-loopback gated, same as
+    `/_wafrift/status`). `curl http://127.0.0.1:8080/_wafrift/findings.md`
+    during a session for a markdown writeup of everything discovered
+    so far.
+
+- **`wafrift bench-waf --validate-only`** — corpus integrity check
+  without standing up a WAF. Verifies every case has a unique id +
+  non-empty payload + a known class (one of sql/xss/cmdi/ssti/path/
+  ldap/ssrf/nosql/xxe/log4shell/cve_pocs); reports counts and exits
+  4 on errors. Caught a real `tab_separated` id collision between
+  `corpus/sql/comments_evasion.toml` and `corpus/cmdi/shell_unix.toml`
+  on first run; renamed to `tab_separated_cmdi`.
+
+- **`wafrift bench-diff`** — new subcommand. Compares two
+  `bench-waf --output` JSON blobs; exits `3` if overall bypass rate
+  drops more than `--bypass-drop-pp` (default 2pp), warns if
+  `raw_block_rate` falls below `--raw-block-floor` (default 0.95,
+  flags WAF-stack-changed not wafrift-bug). CI gate matching the
+  methodology.md regression rules.
+
+- **`wafrift-bench/targets/naxsi/`** — vendored naxsi-from-source
+  bench target. Builds nginx 1.27.4 + naxsi 1.6 from source (no
+  public naxsi docker image exists), bench-grade `naxsi.conf`
+  (LearningMode off, denial → 403), exposed on `:18087`.
+  `wafrift-bench/scripts/{up,down}.sh` updated to handle it. Cold
+  build ~5 min, warm sub-second. Closes the naxsi-from-source open
+  item in `wafrift-bench/WIRING.md`.
+
+- **`bench-waf --lineage-output PATH`** — persists every
+  evolution-strategy bypass (hill-climb / sim-anneal / tabu / novelty /
+  map-elites) as a `wafrift_evolution::lineage::BypassEntry` and saves
+  the deduplicated `BypassCorpus` JSONL on bench completion. Gene
+  tuple is enough to reconstruct the wire payload exactly; the lineage
+  trace records every mutation step. Closes the lineage-persistence
+  open item in `wafrift-bench/WIRING.md`.
+
+- **`bench-waf --strategies all`** — keyword that expands to every
+  selectable strategy. Avoids having to type the 11-element comma list
+  by hand and stays in sync with `ALL_STRATEGIES` (guarded by a unit
+  test so that adding a new strategy without registering it would fail
+  the build).
+
+- **`bench-waf --strategies differential`** — wires
+  `wafrift-evolution::differential::generate_probes` into the bench as
+  an 11th selectable strategy. Sends class-filtered rule-fingerprint
+  probes (sql/nosql → SQL probes, xss → XSS, cmdi/ssti → CMD,
+  path → CMD path, others → baseline-only) and reports which probes the
+  WAF lets through. The inverse of bypass-rate measurement: lets you
+  see where your WAF has rule-coverage gaps. Closes the last open item
+  in `wafrift-bench/WIRING.md`.
+
 ## [0.2.0] — 2026-05-08
 
 Major bench + wiring rewrite. Introduces a real, reproducible

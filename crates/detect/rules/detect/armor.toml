@@ -1,0 +1,12 @@
+[[waf]]
+name = "Armor Defense"
+vendor = "Armor"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "WAFW00F:armor"
+[[waf.signature]]
+  body_regex = "blocked by website protection from armor"
+  weight = 0.4
+[[waf.signature]]
+  body_regex = "please create an armor support ticket"
+  weight = 0.4
