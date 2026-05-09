@@ -157,4 +157,85 @@ mod tests {
         });
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
+
+    #[test]
+    fn raw_block_floor_warns_but_does_not_fail() {
+        // Stack-mismatch path: bypass rate unchanged, but raw_block_rate
+        // dropped below the floor. Per methodology this is a "stack
+        // changed", NOT a wafrift regression — exit must stay 0.
+        let dir = std::env::temp_dir().join("wafrift_bench_diff_test_floor");
+        let _ = std::fs::create_dir_all(&dir);
+        let cur = dir.join("cur.json");
+        let base = dir.join("base.json");
+        write(
+            &base,
+            r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.50}}"#,
+        );
+        write(
+            &cur,
+            r#"{"raw_block_rate":0.80,"evaded_summary":{"overall_bypass_rate":0.50}}"#,
+        );
+        let code = run_bench_diff(BenchDiffArgs {
+            current: cur,
+            baseline: base,
+            bypass_drop_pp: 2.0,
+            raw_block_floor: 0.95,
+        });
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn malformed_baseline_json_returns_exit_1() {
+        let dir = std::env::temp_dir().join("wafrift_bench_diff_test_malformed");
+        let _ = std::fs::create_dir_all(&dir);
+        let cur = dir.join("cur.json");
+        let base = dir.join("base.json");
+        write(&cur, r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.5}}"#);
+        write(&base, "not json at all");
+        let code = run_bench_diff(BenchDiffArgs {
+            current: cur,
+            baseline: base,
+            bypass_drop_pp: 2.0,
+            raw_block_floor: 0.95,
+        });
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(1)));
+    }
+
+    #[test]
+    fn missing_baseline_file_returns_exit_1() {
+        let dir = std::env::temp_dir().join("wafrift_bench_diff_test_missing");
+        let _ = std::fs::create_dir_all(&dir);
+        let cur = dir.join("cur.json");
+        write(&cur, r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.5}}"#);
+        let code = run_bench_diff(BenchDiffArgs {
+            current: cur,
+            baseline: dir.join("does-not-exist.json"),
+            bypass_drop_pp: 2.0,
+            raw_block_floor: 0.95,
+        });
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(1)));
+    }
+
+    #[test]
+    fn empty_evaded_summary_treats_as_zero_bypass() {
+        // Defensive: an old-schema baseline that lacks evaded_summary
+        // should not be mis-read as 0% bypass and trigger a phantom
+        // regression. Currently bypass_rate() returns 0 on missing
+        // pointer — that means base_bypass=0, cur_bypass=anything
+        // gives drop_pp <= 0, so no regression. Pin this with a test.
+        let dir = std::env::temp_dir().join("wafrift_bench_diff_test_old_schema");
+        let _ = std::fs::create_dir_all(&dir);
+        let cur = dir.join("cur.json");
+        let base = dir.join("base.json");
+        write(&cur, r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.30}}"#);
+        write(&base, r#"{"raw_block_rate":1.0}"#); // no evaded_summary
+        let code = run_bench_diff(BenchDiffArgs {
+            current: cur,
+            baseline: base,
+            bypass_drop_pp: 2.0,
+            raw_block_floor: 0.95,
+        });
+        // base_bypass = 0 (missing), cur_bypass = 0.30 → no regression.
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
 }
