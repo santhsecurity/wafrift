@@ -1,0 +1,21 @@
+# Coraza is a Go reimplementation of ModSecurity. The corazawaf/coraza-caddy
+# image fronts an httpbin backend with the OWASP CRS rule set loaded. PL is
+# fixed to CRS default (PL1) — extend Caddyfile to override if needed.
+services:
+  wafrift-coraza:
+    image: corazawaf/coraza-caddy:latest
+    container_name: wafrift-coraza
+    ports:
+      - "18085:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+    networks:
+      - wafrift-coraza
+  backend:
+    image: kennethreitz/httpbin
+    networks:
+      - wafrift-coraza
+networks:
+  wafrift-coraza:

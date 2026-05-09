@@ -1,0 +1,25 @@
+services:
+  wafrift-pl3:
+    image: owasp/modsecurity-crs:4.7.0-apache-alpine-202411240603
+    container_name: wafrift-pl3
+    environment:
+      PARANOIA: "3"
+      ANOMALY_INBOUND: "5"
+      ANOMALY_OUTBOUND: "4"
+      BLOCKING_PARANOIA: "3"
+      DETECTION_PARANOIA: "3"
+      EXECUTING_PARANOIA: "3"
+      SERVER_NAME: "wafrift-bench"
+      BACKEND: "http://backend:80"
+    ports:
+      - "18083:8080"
+    depends_on:
+      - backend
+    networks:
+      - wafrift-pl3
+  backend:
+    image: kennethreitz/httpbin
+    networks:
+      - wafrift-pl3
+networks:
+  wafrift-pl3:
