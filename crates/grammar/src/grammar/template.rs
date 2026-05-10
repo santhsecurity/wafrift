@@ -182,10 +182,21 @@ pub fn detect_type(payload: &str) -> bool {
     let lower = payload.to_ascii_lowercase();
     let rules = get_rules();
 
-    // Check all engine delimiters
+    // Audit (2026-05-10): pre-fix this fired on ANY input containing
+    // a single delimiter character because Smarty / Velocity declare
+    // 1-char delims (`{`, `}`, `#`, `$`). JSON, CSS, C, Python, and
+    // Markdown all false-positived. The fix: ignore single-char
+    // delimiters from the global sweep entirely (Smarty/Velocity rely
+    // on the structured checks further down: `{$`, `{php}`, `#set`,
+    // `$!`, etc.) and accept a multi-char delimiter as a positive
+    // match — those are 2+ characters and unique enough to a template
+    // engine that a benign substring rarely contains them.
     for engine in &rules.engine {
         for delimiter in &engine.delimiters {
-            if payload.contains(delimiter) {
+            if delimiter.chars().count() < 2 {
+                continue; // skip 1-char delims; they FP everywhere
+            }
+            if payload.contains(delimiter.as_str()) {
                 return true;
             }
         }

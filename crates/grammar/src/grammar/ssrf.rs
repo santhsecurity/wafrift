@@ -323,53 +323,139 @@ fn strip_scheme(s: &str) -> &str {
 }
 
 /// Detect whether a payload looks like an SSRF URL or host reference.
+///
+/// Audit (2026-05-10): pre-fix this matched `Chapter 127.5`, `Version
+/// 10.0`, `// TODO`, `http://example.com in docstring` and any other
+/// benign text that happened to share a substring with an SSRF token.
+/// The fix now requires URL-structural context (scheme://, leading //,
+/// or whole-token boundaries) before flagging.
 #[must_use]
 pub fn detect_type(payload: &str) -> bool {
     let lower = payload.to_ascii_lowercase();
 
-    // Scheme-based detection
+    // Scheme-based detection — requires `scheme://`, which is precise
+    // enough to use a substring match.
     if lower.contains("http://")
         || lower.contains("https://")
         || lower.contains("ftp://")
         || lower.contains("file://")
         || lower.contains("gopher://")
         || lower.contains("dict://")
-        || payload.starts_with("//")
+    {
+        return true;
+    }
+    // `payload.starts_with("//")` was a real FP source — `// TODO`,
+    // `// fix me`, doxygen comments. Require it to be followed by
+    // hostname-shaped chars (alnum / dot / colon).
+    if let Some(after) = payload.strip_prefix("//")
+        && let Some(c) = after.chars().next()
+        && (c.is_ascii_alphanumeric() || c == '[')
     {
         return true;
     }
 
-    // IPv4 loopback patterns
+    // IPv4 loopback patterns — already shape-validated.
     if looks_like_ipv4(payload) {
         return true;
     }
 
-    // Known SSRF targets
-    if lower.contains("localhost")
-        || lower.contains("127.")
-        || lower.contains("0.0.0.0")
-        || lower.contains("::1")
-        || lower.contains("[::]")
-        || lower.contains("169.254.169.254")  // AWS/EC2 metadata
-        || lower.contains("metadata.google")
-        || lower.contains("metadata.azure")
-        || lower.contains("100.100.100.200") // Alibaba
-        || lower.contains("168.63.129.16")    // Azure WireServer
-        || lower.contains("kubernetes.default")
-        || lower.contains("172.17.0.1")
-    // Docker bridge
-    {
+    // Whole-token loopback / metadata IPs. `127.` was the worst
+    // offender — it matched any version string or page number. Now
+    // require a hostname-like token boundary.
+    let has_loopback_token = host_token_present(&lower, "localhost")
+        || host_token_present(&lower, "127.0.0.1")
+        || host_token_present(&lower, "0.0.0.0")
+        || host_token_present(&lower, "::1")
+        || host_token_present(&lower, "[::]")
+        || host_token_present(&lower, "169.254.169.254")
+        || host_token_present(&lower, "metadata.google")
+        || host_token_present(&lower, "metadata.azure")
+        || host_token_present(&lower, "100.100.100.200")
+        || host_token_present(&lower, "168.63.129.16")
+        || host_token_present(&lower, "kubernetes.default")
+        || host_token_present(&lower, "172.17.0.1");
+    if has_loopback_token {
         return true;
     }
 
-    // Internal/private IP ranges
-    if lower.contains("10.") || lower.contains("192.168.") {
-        // Check for private range patterns
+    // Internal/private IP ranges — only when the surrounding text
+    // looks like an IP and the substring is bounded as a host token.
+    // Pre-fix `lower.contains("10.")` matched `Java 10.0`, `Section
+    // 10.5`, version strings — anything with "10." in it.
+    let looks_like_private_ip = looks_like_ipv4(payload)
+        && (host_token_starts_with_octet(&lower, "10.")
+            || host_token_starts_with_octet(&lower, "192.168.")
+            || (16..=31).any(|i| host_token_starts_with_octet(&lower, &format!("172.{i}."))));
+    if looks_like_private_ip {
         if is_private_ip(&lower) {
             return true;
         }
     }
 
+    false
+}
+
+/// True if `needle` appears in `haystack` bounded on both sides by
+/// non-host-character bytes. Prevents `127.0.0.1` from matching inside
+/// `Build 127.0.0.1234`, `localhost` inside `localhost-builds.example`,
+/// etc.
+fn host_token_present(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if h.len() < n.len() {
+        return false;
+    }
+    let is_host_char = |b: u8| -> bool {
+        b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b':'
+    };
+    let mut i = 0;
+    while i + n.len() <= h.len() {
+        if &h[i..i + n.len()] == n {
+            let left_ok = i == 0 || !is_host_char(h[i - 1]);
+            let right_ok = i + n.len() == h.len() || !is_host_char(h[i + n.len()]);
+            if left_ok && right_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Like `host_token_present` but for octet prefixes (`10.`, `172.16.`).
+/// The needle MUST start with a digit and be followed by a dot.
+fn host_token_starts_with_octet(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if h.len() < n.len() {
+        return false;
+    }
+    let is_host_char = |b: u8| -> bool {
+        b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b':'
+    };
+    let mut i = 0;
+    while i + n.len() <= h.len() {
+        if &h[i..i + n.len()] == n {
+            let left_ok = i == 0 || !is_host_char(h[i - 1]);
+            // Right side: needle ends in `.` so we just need a digit
+            // to follow (the next octet) — otherwise "10." inside
+            // "Java 10. is too old" would still match.
+            let right_ok = h
+                .get(i + n.len())
+                .map(|b| b.is_ascii_digit())
+                .unwrap_or(false);
+            if left_ok && right_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
     false
 }
 

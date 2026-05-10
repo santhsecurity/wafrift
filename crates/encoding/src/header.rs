@@ -77,15 +77,32 @@ pub fn case_mix(header_name: &str) -> String {
     crate::encoding::keyword::alternating_case(header_name, false)
 }
 
+/// Strip CR (`\r`), LF (`\n`), and NUL (`\0`) from a header value so
+/// the mutator output cannot smuggle a fake header line. Pre-fix every
+/// public mutator embedded `value` verbatim — a caller passing a value
+/// containing `\r\nEvil-Header: pwn` produced response splitting /
+/// request smuggling on the wire. The transport layer assumed these
+/// helpers had already sanitised; the helpers assumed the transport
+/// layer would. Both wrong. Sanitising here closes the gap without an
+/// API break.
+fn sanitize_header_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| *c != '\r' && *c != '\n' && *c != '\0')
+        .collect()
+}
+
 /// Apply tab separator: `Header:\tvalue` instead of `Header: value`.
 #[must_use]
 pub fn tab_separator(header_name: &str, value: &str) -> String {
+    let value = sanitize_header_value(value);
     format!("{header_name}:\t{value}")
 }
 
 /// Apply whitespace padding around the value.
 #[must_use]
 pub fn whitespace_pad(header_name: &str, value: &str) -> String {
+    let value = sanitize_header_value(value);
     let pad_count = rand::random::<usize>() % 4 + 2; // 2–5 spaces
     let left = " ".repeat(pad_count);
     let right = " ".repeat(pad_count);
@@ -120,10 +137,11 @@ pub fn lf_only_line_fold(header_name: &str, value: &str) -> String {
 }
 
 fn line_fold_with_ending(header_name: &str, value: &str, ending: &str) -> String {
+    let value = sanitize_header_value(value);
     if value.len() < 4 {
         return format!("{header_name}: {value}");
     }
-    let mid = char_boundary_near(value, value.len() / 2);
+    let mid = char_boundary_near(&value, value.len() / 2);
     format!(
         "{}: {}{ending}\t{}",
         header_name,
@@ -148,11 +166,12 @@ pub fn lf_only_multi_line_fold(header_name: &str, value: &str) -> String {
 }
 
 fn multi_line_fold_with_ending(header_name: &str, value: &str, ending: &str) -> String {
+    let value = sanitize_header_value(value);
     if value.len() < 6 {
         return format!("{header_name}: {value}");
     }
-    let t1 = char_boundary_near(value, value.len() / 3);
-    let t2 = char_boundary_near(value, value.len() * 2 / 3);
+    let t1 = char_boundary_near(&value, value.len() / 3);
+    let t2 = char_boundary_near(&value, value.len() * 2 / 3);
     format!(
         "{}: {}{ending} {}{ending}\t{}",
         header_name,
@@ -174,9 +193,11 @@ pub fn duplicate_header(
     real_value: &str,
     benign_value: &str,
 ) -> (String, String) {
+    let real = sanitize_header_value(real_value);
+    let benign = sanitize_header_value(benign_value);
     (
-        format!("{header_name}: {benign_value}"),
-        format!("{header_name}: {real_value}"),
+        format!("{header_name}: {benign}"),
+        format!("{header_name}: {real}"),
     )
 }
 
@@ -212,6 +233,7 @@ pub fn null_byte_inject(header_name: &str) -> String {
 /// in the header name field may fail to match.
 #[must_use]
 pub fn trailing_space(header_name: &str, value: &str) -> String {
+    let value = sanitize_header_value(value);
     format!("{header_name} : {value}")
 }
 
@@ -224,7 +246,9 @@ pub fn trailing_space(header_name: &str, value: &str) -> String {
 /// split on the first comma may only inspect `benign`.
 #[must_use]
 pub fn comma_join(header_name: &str, real_value: &str, benign_value: &str) -> String {
-    format!("{header_name}: {benign_value}, {real_value}")
+    let real = sanitize_header_value(real_value);
+    let benign = sanitize_header_value(benign_value);
+    format!("{header_name}: {benign}, {real}")
 }
 
 /// Apply all header obfuscation techniques to a header name/value pair.

