@@ -301,7 +301,16 @@ impl HostState {
     /// Called after every success observation. Checks whether enough
     /// data has been collected to declare discovery complete.
     pub fn evaluate_pools(&mut self) {
-        let total_attempted: u32 = self.technique_stats.iter().map(|(_, _, a)| *a).sum();
+        // Audit (2026-05-10): pre-fix this used `u32::sum()` which can
+        // overflow under sustained scanning (technique_stats.len()
+        // × MAX_TECHNIQUE_STATS attempts each). Lift to u64 so the
+        // total monotonically grows past u32::MAX without panicking
+        // in debug or wrapping in release.
+        let total_attempted: u64 = self
+            .technique_stats
+            .iter()
+            .map(|(_, _, a)| u64::from(*a))
+            .sum();
 
         // Don't declare discovery complete until we have meaningful data.
         if total_attempted < 10 {
