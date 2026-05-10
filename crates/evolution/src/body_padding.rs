@@ -138,6 +138,17 @@ pub fn pad(body: &[u8], content_type: &str, requested_bytes: usize) -> PadOutcom
 }
 
 fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
+    // Hard guard: a body larger than MAX_USEFUL_PAD is never useful
+    // to feed through serde_json::from_slice OR through the
+    // "treat as opaque text and embed as a string" fallback below —
+    // both paths would allocate at least body.len() bytes a second
+    // time. Skip-and-pass-through is correct: cloud-WAF inspection
+    // bypasses target SMALL bodies (the WAF inspects the first 8KB or
+    // 16KB), so padding only matters under the cap. Adversarial
+    // multi-MB bodies are an OOM vector, not a bypass surface.
+    if body.len() > MAX_USEFUL_PAD {
+        return PadOutcome::SkippedOpaque;
+    }
     let pad = fill(requested_bytes);
     // Two shapes:
     // 1. body is empty or not valid JSON → emit `{"_wafrift_pad":"…"}`
