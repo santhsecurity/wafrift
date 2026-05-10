@@ -191,7 +191,7 @@ fn in_flight_chromosomes_lift_diversity_for_single_state_algos() {
     let distinct = mk_chromosome_uniform(&pool, "Z");
     engine
         .in_flight
-        .insert(1, (distinct, std::time::Instant::now()));
+        .insert(1, (1, distinct, std::time::Instant::now()));
     let d = engine.diversity_score();
     assert!(
         d > 0.0,

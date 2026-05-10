@@ -71,7 +71,7 @@ fn clone_starts_with_empty_in_flight_set() {
     let chromosome = baseline_chromosome(&pool);
     engine
         .in_flight
-        .insert(99, (chromosome, std::time::Instant::now()));
+        .insert(99, (99, chromosome, std::time::Instant::now()));
     let cloned = engine.clone();
     assert_eq!(
         cloned.in_flight.len(),

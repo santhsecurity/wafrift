@@ -29,8 +29,17 @@ pub struct EvolutionEngine {
     pub cache: LruCache<String, OracleVerdict>,
     /// Hard budget limits.
     pub budget: Budget,
-    /// Candidates currently being evaluated: ID → (Chromosome, sent_at).
-    pub in_flight: HashMap<u64, (Chromosome, Instant)>,
+    /// Candidates currently being evaluated:
+    ///   engine_eval_id → (algorithm_candidate_id, Chromosome, sent_at).
+    ///
+    /// `algorithm_candidate_id` is the ID the *search algorithm*
+    /// originally minted in `request_evaluations` and the same ID it
+    /// expects to see back in `submit_evaluations`. Population-based
+    /// algorithms (MapElites, NoveltySearch) keep their own private
+    /// `in_flight` keyed by that ID — if we forwarded the engine's
+    /// `eval_id` instead, their lookup misses and the evaluation is
+    /// silently dropped (the grid / archive never gets updated).
+    pub in_flight: HashMap<u64, (u64, Chromosome, Instant)>,
     /// Search statistics.
     pub stats: SearchStats,
     /// Target health monitor.
@@ -264,8 +273,14 @@ impl EvolutionEngine {
                 cached_results.push((candidate.id, verdict));
             } else {
                 let eval_id = self.next_eval_id();
-                self.in_flight
-                    .insert(eval_id, (candidate.chromosome.clone(), Instant::now()));
+                // Pair the engine's eval_id (handed to the caller and
+                // used as the in_flight key) with the algorithm's
+                // own candidate.id (used to look up its private
+                // in_flight on submit). See the in_flight field doc.
+                self.in_flight.insert(
+                    eval_id,
+                    (candidate.id, candidate.chromosome.clone(), Instant::now()),
+                );
                 result.push((eval_id as usize, candidate.chromosome));
             }
         }
@@ -290,7 +305,7 @@ impl EvolutionEngine {
         let mut to_submit: Vec<(u64, OracleVerdict)> = Vec::with_capacity(results.len());
         for (id_usize, verdict) in results {
             let id = id_usize as u64;
-            let (mut chromosome, _sent_at) = self
+            let (algorithm_candidate_id, mut chromosome, _sent_at) = self
                 .in_flight
                 .remove(&id)
                 .ok_or(EvolutionError::InvalidChromosomeIndex(id_usize))?;
@@ -316,7 +331,10 @@ impl EvolutionEngine {
                     .add(BypassEntry::from_chromosome(&chromosome, None));
             }
 
-            to_submit.push((id, verdict));
+            // Forward the *algorithm's* candidate ID, not the engine's
+            // eval_id — population-based algorithms key their own
+            // in_flight by it (see in_flight doc).
+            to_submit.push((algorithm_candidate_id, verdict));
             self.generation_evals += 1;
             self.stats.evaluations += 1;
 
@@ -509,7 +527,7 @@ impl EvolutionEngine {
     #[must_use]
     pub fn diversity_score(&self) -> f64 {
         let mut population = self.algorithm.population_snapshot();
-        for (chromosome, _) in self.in_flight.values() {
+        for (_, chromosome, _) in self.in_flight.values() {
             population.push(chromosome.clone());
         }
         if population.len() >= 2 {
