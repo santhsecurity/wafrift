@@ -209,10 +209,19 @@ fn build_multipart_body(params: &[(String, String)], boundary: &str) -> Vec<u8> 
 #[must_use]
 pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant> {
     let mut variants = Vec::new();
+    // Pre-fix every variant called random_boundary() and never checked
+    // for collisions with the param values. If a param value happened to
+    // contain `--<boundary>` (extremely unlikely with 128-bit hex but
+    // not impossible — and *guaranteed* possible if an attacker knows
+    // the format and crafts the request body), the multipart body would
+    // self-frame and let arbitrary content escape the form parser. We
+    // collect the param value strings once and use unique_boundary —
+    // which already exists, was tested, and was never wired up.
+    let value_refs: Vec<&str> = params.iter().map(|(_, v)| v.as_str()).collect();
 
     // 1. Standard multipart/form-data
     {
-        let boundary = random_boundary();
+        let boundary = unique_boundary(&value_refs);
         let body = build_multipart_body(params, &boundary);
         variants.push(ContentTypeVariant {
             content_type: format!("multipart/form-data; boundary={boundary}"),
@@ -225,7 +234,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
 
     // 2. Multipart with QUOTED boundary (RFC 2046 allows this, many WAFs don't parse it)
     {
-        let boundary = random_boundary();
+        let boundary = unique_boundary(&value_refs);
         let body = build_multipart_body(params, &boundary);
         variants.push(ContentTypeVariant {
             content_type: format!("multipart/form-data; boundary=\"{boundary}\""),
@@ -238,7 +247,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
 
     // 3. Multipart with whitespace around boundary value
     {
-        let boundary = random_boundary();
+        let boundary = unique_boundary(&value_refs);
         let body = build_multipart_body(params, &boundary);
         variants.push(ContentTypeVariant {
             content_type: format!("multipart/form-data; boundary= {boundary} "),
@@ -250,7 +259,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
 
     // 4. Multipart with charset BEFORE boundary (parameter order confusion)
     {
-        let boundary = random_boundary();
+        let boundary = unique_boundary(&value_refs);
         let body = build_multipart_body(params, &boundary);
         variants.push(ContentTypeVariant {
             content_type: format!("multipart/form-data; charset=utf-8; boundary={boundary}"),
@@ -262,8 +271,8 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
 
     // 5. Multipart with DUPLICATE boundary parameter (first vs last wins)
     {
-        let real_boundary = random_boundary();
-        let fake_boundary = random_boundary();
+        let real_boundary = unique_boundary(&value_refs);
+        let fake_boundary = unique_boundary(&value_refs);
         let body = build_multipart_body(params, &real_boundary);
         variants.push(ContentTypeVariant {
             content_type: format!(
@@ -397,7 +406,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
 
     // 10. Mixed Content-Type (multipart body with JSON-style header)
     {
-        let boundary = random_boundary();
+        let boundary = unique_boundary(&value_refs);
         let body = build_multipart_body(params, &boundary);
         variants.push(ContentTypeVariant {
             content_type: format!(
