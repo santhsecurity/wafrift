@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::chunked_decode_consume;
+use common::{parse_http_requests_no_tail, BodyFraming};
 use proptest::prelude::*;
 use wafrift_smuggling::smuggling::te_cl;
 
@@ -16,26 +16,28 @@ fn ensure_crlf_local(s: &str) -> String {
     }
 }
 
-/// Extract HTTP body bytes after first `\r\n\r\n`, then decode chunked framing (RFC TE wins).
+/// Decode the HTTP message body using the same RFC 7230 framing as other integration tests.
 fn decode_te_cl_roundtrip(raw: &[u8]) -> Result<Vec<u8>, String> {
-    let sep = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| "Fix: missing header terminator.".to_string())?;
-    let body_start = sep + 4;
-    let (decoded, consumed) =
-        chunked_decode_consume(&raw[body_start..]).map_err(|e| e.to_string())?;
-    if body_start + consumed != raw.len() {
-        return Err("Fix: trailing bytes after chunked body.".to_string());
+    let reqs = parse_http_requests_no_tail(raw, BodyFraming::Rfc7230).map_err(|e| e.to_string())?;
+    if reqs.len() != 1 {
+        return Err(format!(
+            "Fix: te_cl wire must be exactly one request — got {} messages",
+            reqs.len()
+        ));
     }
-    Ok(decoded)
+    Ok(reqs[0].body.clone())
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(10_000))]
+    #![proptest_config(ProptestConfig {
+        cases: 10_000,
+        failure_persistence: None,
+        .. ProptestConfig::default()
+    })]
 
     #[test]
-    fn prop_te_cl_no_panic_roundtrip_bounded(host in "[a-z]{5,16}\\.invalid", prefix in prop::string::string_regex("[ -~]{0,512}").unwrap()) {
+    fn prop_te_cl_no_panic_roundtrip_bounded(host in "[a-z]{5,16}\\.invalid", raw_inner in prop::collection::vec(32u8..127u8, 1..512)) {
+        let prefix = String::from_utf8(raw_inner).expect("ascii");
         prop_assume!(!prefix.contains('\r'));
         prop_assume!(!prefix.contains('\n'));
 
@@ -58,18 +60,17 @@ proptest! {
 }
 
 #[test]
+fn te_cl_single_space_prefix_roundtrips() {
+    let p = te_cl("aaaaa.invalid", " ").expect("encode");
+    let got = decode_te_cl_roundtrip(&p.raw_bytes).expect("decode");
+    assert_eq!(got, b" \r\n");
+}
+
+#[test]
 fn te_cl_manual_negative_identity_mapping_single_chunk_message() {
     let benign = format!(
         "POST / HTTP/1.1\r\nHost: {HOST}\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
     );
-    let sep = benign
-        .as_bytes()
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .unwrap()
-        + 4;
-    let decoded = chunked_decode_consume(&benign.as_bytes()[sep..])
-        .expect("decode")
-        .0;
+    let decoded = decode_te_cl_roundtrip(benign.as_bytes()).expect("decode");
     assert_eq!(decoded, b"abc");
 }
