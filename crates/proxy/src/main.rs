@@ -37,6 +37,7 @@ use wafrift_proxy::upstream_policy::{
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
+use wafrift_types::EvasionResult;
 use wafrift_transport::signal::{BlockClass, ResponseProfileDb};
 
 /// Maximum request body buffered per message (plain HTTP + MITM plaintext).
@@ -284,6 +285,18 @@ struct Args {
     /// is robust to percent-encoded query values.
     #[arg(long = "mutate-url", default_value_t = false)]
     mutate_url: bool,
+
+    /// Install the captchaforge headless-browser solver into the
+    /// challenge store so Cloudflare / Turnstile / hCaptcha responses
+    /// are auto-solved instead of waiting for an operator prompt.
+    ///
+    /// Requires the binary to be built with `--features captchaforge`
+    /// (which pulls chromiumoxide). Without that feature the flag is
+    /// accepted but the binary exits with an actionable hint at
+    /// startup so cron jobs fail loudly rather than silently degrading
+    /// to "no solver".
+    #[arg(long = "captchaforge", default_value_t = false)]
+    captchaforge: bool,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
@@ -968,6 +981,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // Captchaforge bridge — installs the headless-browser solver into
+    // ChallengeStore. The bridge crate is feature-gated behind
+    // `captchaforge` because it pulls chromiumoxide. Builds without
+    // the feature accept the flag but exit with a clear hint so cron
+    // jobs fail loudly rather than silently degrading to "no solver".
+    if args.captchaforge {
+        #[cfg(feature = "captchaforge")]
+        {
+            if let Err(e) = wafrift_captchaforge_bridge::install_global_solver().await {
+                error!("--captchaforge: solver install failed: {e}");
+                return Err(format!("captchaforge install failed: {e}").into());
+            }
+            info!(
+                "--captchaforge: headless-browser solver installed into ChallengeStore. \
+                 Cloudflare/Turnstile/hCaptcha responses will be auto-solved via captchaforge."
+            );
+        }
+        #[cfg(not(feature = "captchaforge"))]
+        {
+            error!(
+                "--captchaforge requires the binary to be built with `--features captchaforge`. \
+                 Rebuild with `cargo build --release --features captchaforge` and retry."
+            );
+            return Err("--captchaforge requires the captchaforge feature".into());
+        }
+    }
+
     // Body padding — applied per request, controlled by an atomic so
     // there's no per-request lock contention on the hot path.
     if args.body_padding_bytes > 0 {
@@ -1275,6 +1315,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Returns `None` for URLs without `://` (relative, malformed) — the
 /// caller leaves the URL alone in that case rather than risking a
 /// mutation that breaks routing.
+/// Convert a `HeaderValue` to `String`, logging a warning if the
+/// bytes are not valid UTF-8 (in which case the lossy replacement
+/// characters are preserved so the proxy can keep running).
+fn header_value_to_string(name: &str, value: &hyper::header::HeaderValue) -> String {
+    match String::from_utf8(value.as_bytes().to_vec()) {
+        Ok(s) => s,
+        Err(_) => {
+            let lossy = String::from_utf8_lossy(value.as_bytes()).to_string();
+            tracing::warn!(header = %name, "header value contains invalid UTF-8; using lossy conversion");
+            lossy
+        }
+    }
+}
+
 fn split_url_for_mutation(url: &str) -> Option<(String, String)> {
     let scheme_end = url.find("://")?;
     let after_scheme = &url[scheme_end + 3..];
@@ -1462,7 +1516,16 @@ async fn forward_wafrift_request(
             replay_state,
             winner_name,
         } => {
-            let result = evade(&wafrift_req, &replay_state, &config);
+            let req = wafrift_req.clone();
+            let req_fallback = req.clone();
+            let state = replay_state.clone();
+            let cfg = (*config).clone();
+            let result = tokio::task::spawn_blocking(move || evade(&req, &state, &cfg))
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!(error = %e, "evade task panicked");
+                    EvasionResult::new(req_fallback, vec![], String::new())
+                });
             let mut keys: Vec<String> = result
                 .techniques
                 .iter()
@@ -1474,7 +1537,16 @@ async fn forward_wafrift_request(
             (result, keys)
         }
         EvadePlan::Discovery { host_state } => {
-            let result = evade_smart(&wafrift_req, &host_state, &config);
+            let req = wafrift_req.clone();
+            let req_fallback = req.clone();
+            let state = host_state.clone();
+            let cfg = (*config).clone();
+            let result = tokio::task::spawn_blocking(move || evade_smart(&req, &state, &cfg))
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!(error = %e, "evade_smart task panicked");
+                    EvasionResult::new(req_fallback, vec![], String::new())
+                });
             let keys: Vec<String> = result
                 .techniques
                 .iter()
@@ -1503,23 +1575,23 @@ async fn forward_wafrift_request(
     // mutating the path's last segment is reserved for the more
     // aggressive `evade_smart` URL-aware variants and is not
     // something a passive proxy should do silently.
-    if MUTATE_URL_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-        if let Some((scheme_authority, path_and_query)) = split_url_for_mutation(
+    if MUTATE_URL_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+        && let Some((scheme_authority, path_and_query)) = split_url_for_mutation(
             &evasion_result.request.url,
-        ) {
-            let cfg = wafrift_encoding::url_mutate::UrlMutateConfig::default();
-            let (mutated_pq, _techniques) =
-                wafrift_encoding::url_mutate::mutate_url(&path_and_query, &cfg);
-            if mutated_pq != path_and_query {
-                let new_url = format!("{scheme_authority}{mutated_pq}");
-                debug!(
-                    host = %host,
-                    from = %path_and_query,
-                    to = %mutated_pq,
-                    "url mutation applied"
-                );
-                evasion_result.request.url = new_url;
-            }
+        )
+    {
+        let cfg = wafrift_encoding::url_mutate::UrlMutateConfig::default();
+        let (mutated_pq, _techniques) =
+            wafrift_encoding::url_mutate::mutate_url(&path_and_query, &cfg);
+        if mutated_pq != path_and_query {
+            let new_url = format!("{scheme_authority}{mutated_pq}");
+            debug!(
+                host = %host,
+                from = %path_and_query,
+                to = %mutated_pq,
+                "url mutation applied"
+            );
+            evasion_result.request.url = new_url;
         }
     }
 
@@ -2084,7 +2156,7 @@ async fn mitm_plaintext_request(
         .map(|(k, v)| {
             (
                 k.as_str().to_string(),
-                String::from_utf8_lossy(v.as_bytes()).to_string(),
+                header_value_to_string(k.as_str(), v),
             )
         })
         .collect();
@@ -2398,7 +2470,7 @@ async fn proxy(
         .map(|(k, v)| {
             (
                 k.as_str().to_string(),
-                String::from_utf8_lossy(v.as_bytes()).to_string(),
+                header_value_to_string(k.as_str(), v),
             )
         })
         .collect();
