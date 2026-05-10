@@ -209,6 +209,27 @@ mod imp {
             body: Option<&[u8]>,
             max_body: usize,
         ) -> Result<StealthResponse, StealthError> {
+            // Audit (2026-05-10): rquest 5.x doesn't expose a custom-
+            // resolver hook the way reqwest does, so we cannot install
+            // BogonFilteringResolver here. As a defence-in-depth, we
+            // upfront-reject any URL whose host is a literal IP that
+            // falls in the bogon set — that closes the most common
+            // operator footgun (typing 127.0.0.1 with --tls-impersonate
+            // on by mistake) and the all-too-easy direct-IMDS attack
+            // (169.254.169.254). DNS-rebinding via hostnames is still
+            // the caller's responsibility on this code path; document
+            // the gap loudly in the README of any consumer of stealth.
+            if let Ok(parsed) = url.parse::<rquest::Url>()
+                && let Some(host) = parsed.host_str()
+                && let Ok(ip) = host.parse::<std::net::IpAddr>()
+                && is_bogon_ip(ip)
+            {
+                return Err(StealthError::Transport(format!(
+                    "stealth refuses literal-IP upstream {ip} (private/loopback/CGN/Teredo). \
+                     If you intentionally target a lab address, route via reqwest with \
+                     --allow-private-upstream instead."
+                )));
+            }
             let method = match method.to_ascii_uppercase().as_str() {
                 "GET" => rquest::Method::GET,
                 "POST" => rquest::Method::POST,
@@ -268,6 +289,47 @@ mod imp {
                 body,
                 latency: start.elapsed(),
             })
+        }
+    }
+
+    /// Standalone bogon check duplicated from wafrift-proxy's
+    /// upstream_policy because that crate sits ABOVE wafrift-transport
+    /// in the dependency graph. Keep the two implementations in sync
+    /// — the audit_extras tests in proxy guard the canonical version.
+    fn is_bogon_ip(ip: std::net::IpAddr) -> bool {
+        use std::net::IpAddr;
+        match ip {
+            IpAddr::V4(v) => {
+                if v.is_private()
+                    || v.is_loopback()
+                    || v.is_link_local()
+                    || v.is_broadcast()
+                    || v.is_documentation()
+                    || v.is_unspecified()
+                {
+                    return true;
+                }
+                let o = v.octets();
+                (o[0] == 100 && (o[1] & 0xc0) == 0x40) // CGN 100.64/10
+                    || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0/24
+                    || (o[0] == 198 && (o[1] & 0xfe) == 18) // benchmark 198.18/15
+                    || (o[0] == 169 && o[1] == 254 && o[2] == 169 && o[3] == 254) // IMDS
+            }
+            IpAddr::V6(v) => {
+                if let Some(m) = v.to_ipv4_mapped() {
+                    return is_bogon_ip(IpAddr::V4(m));
+                }
+                let segs = v.segments();
+                v.is_loopback()
+                    || v.is_multicast()
+                    || v.is_unspecified()
+                    || v.is_unique_local()
+                    || v.is_unicast_link_local()
+                    || (segs[0] == 0x2001 && segs[1] == 0x0db8) // doc
+                    || (segs[0] == 0x2001 && segs[1] == 0x0000) // Teredo
+                    || (segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020) // ORCHIDv2
+                    || (segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0) // discard
+            }
         }
     }
 

@@ -76,9 +76,18 @@ pub enum ChallengeKind {
 impl ChallengeKind {
     /// Whether this kind is in scope for cookie-replay solving (vs
     /// requiring a human).
+    ///
+    /// Audit (2026-05-10): added AwsWaf — `extract_clearance_cookie`
+    /// already recognised `aws-waf-token` and stored it in the cookie
+    /// store, but `is_cookie_solvable() == false` meant `dispatch`
+    /// would always escalate to the operator instead of replaying the
+    /// captured token. The cookie was being thrown away after capture.
     #[must_use]
     pub fn is_cookie_solvable(self) -> bool {
-        matches!(self, Self::CloudflareManaged | Self::AkamaiBmp)
+        matches!(
+            self,
+            Self::CloudflareManaged | Self::AkamaiBmp | Self::AwsWaf
+        )
     }
 
     /// Stable string label for telemetry / logs.
@@ -262,15 +271,36 @@ impl ChallengeStore {
 
     /// Snapshot of the active cookie for `host`, or `None` if absent
     /// or expired.
+    ///
+    /// Audit (2026-05-10): when an expired entry was observed here it
+    /// was returned-as-None but left in the map. A high-churn host that
+    /// kept writing expiring cookies (or an attacker spraying short-
+    /// TTL Set-Cookies) could grow `by_host` indefinitely. We now
+    /// upgrade to a write lock and remove the expired entry inline.
     #[must_use]
     pub fn get(&self, host: &str) -> Option<String> {
         let key = normalize_host(host);
-        let inner = poison_recover_read(&self.inner, "ChallengeStore::get");
-        let entry = inner.by_host.get(&key)?;
-        if Instant::now() >= entry.expires_at {
-            return None;
+        let now = Instant::now();
+        // Fast-path read first.
+        {
+            let inner = poison_recover_read(&self.inner, "ChallengeStore::get");
+            if let Some(entry) = inner.by_host.get(&key)
+                && now < entry.expires_at
+            {
+                return Some(entry.cookie_header.clone());
+            }
         }
-        Some(entry.cookie_header.clone())
+        // Slow path: either missing OR expired. Take the write lock,
+        // re-check, and remove if expired.
+        let mut inner = poison_recover_write(&self.inner, "ChallengeStore::get");
+        let expired = inner
+            .by_host
+            .get(&key)
+            .is_some_and(|e| now >= e.expires_at);
+        if expired {
+            inner.by_host.remove(&key);
+        }
+        None
     }
 
     /// Record a freshly captured clearance cookie for `host`.
@@ -613,10 +643,16 @@ fn classify_inner(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
     {
         return ChallengeKind::CloudflareManaged;
     }
-    if lower_body.contains("_abck") || server.contains("akamai") {
+    // Audit (2026-05-10): server-header alone false-positives on every
+    // CDN-served 200. `Server: AkamaiGHost` ships on legitimate static
+    // assets too, and treating that as a challenge made the dispatcher
+    // park every Akamai response with `SolveAction::Wait`. Require a
+    // body keyword as the primary signal; server-header now only acts
+    // as a corroborating signal alongside it.
+    if lower_body.contains("_abck") {
         return ChallengeKind::AkamaiBmp;
     }
-    if lower_body.contains("aws-waf-token") || server.contains("awselb") {
+    if lower_body.contains("aws-waf-token") {
         return ChallengeKind::AwsWaf;
     }
     ChallengeKind::Unknown
@@ -683,7 +719,19 @@ pub fn extract_clearance_cookie_scoped(
                 }
                 if k.trim().eq_ignore_ascii_case("Domain") {
                     let v = v.strip_prefix('.').unwrap_or(v);
-                    if !v.is_empty() {
+                    // Audit (2026-05-10): reject Domain values that
+                    // contain `:`. RFC 6265 §5.2.3 makes Domain a
+                    // hostname, never a host:port — but the previous
+                    // code silently kept the `:port` suffix, enabling
+                    // domain-confusion (cookie scoped to `evil.com:8080`
+                    // matched a request to `evil.com`). Also reject
+                    // anything containing `/`, `?`, or whitespace.
+                    let domain_ok = !v.is_empty()
+                        && !v.contains(':')
+                        && !v.contains('/')
+                        && !v.contains('?')
+                        && !v.chars().any(char::is_whitespace);
+                    if domain_ok {
                         scope.domain = Some(v.to_string());
                     }
                 } else if k.trim().eq_ignore_ascii_case("Path")
@@ -1058,13 +1106,18 @@ mod tests {
     // ── ChallengeKind helpers ─────────────────────────────
 
     #[test]
-    fn kind_is_cookie_solvable_only_for_cf_managed_and_akamai() {
+    fn cookie_solvable_aligned_with_extract_clearance_cookie() {
+        // The extract_clearance_cookie path stores cookies for
+        // CloudflareManaged, AkamaiBmp, AND AwsWaf (`aws-waf-token`).
+        // is_cookie_solvable must include all three or the AwsWaf
+        // captures get thrown away on dispatch.
         assert!(ChallengeKind::CloudflareManaged.is_cookie_solvable());
         assert!(ChallengeKind::AkamaiBmp.is_cookie_solvable());
+        assert!(ChallengeKind::AwsWaf.is_cookie_solvable());
+        // Interactive widgets stay operator-only.
         assert!(!ChallengeKind::Turnstile.is_cookie_solvable());
         assert!(!ChallengeKind::Hcaptcha.is_cookie_solvable());
         assert!(!ChallengeKind::Recaptcha.is_cookie_solvable());
-        assert!(!ChallengeKind::AwsWaf.is_cookie_solvable());
         assert!(!ChallengeKind::Unknown.is_cookie_solvable());
     }
 }

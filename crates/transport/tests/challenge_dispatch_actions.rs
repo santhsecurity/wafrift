@@ -38,7 +38,10 @@ fn dispatch_matrix_without_cookie_interactive_kinds_escalate() {
         ChallengeKind::Turnstile,
         ChallengeKind::Hcaptcha,
         ChallengeKind::Recaptcha,
-        ChallengeKind::AwsWaf,
+        // AwsWaf moved to cookie-solvable in the 2026-05-10 audit
+        // because extract_clearance_cookie already stored aws-waf-token
+        // entries — the previous escalate-only path silently discarded
+        // captured tokens.
         ChallengeKind::Unknown,
     ] {
         let action = dispatch("escalate-target.test", kind, &store);

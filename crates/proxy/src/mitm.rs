@@ -119,19 +119,7 @@ impl CertificateAuthority {
     pub fn issue_server_cert(&self, tls_server_name: &str) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
         let issuer = Issuer::from_ca_cert_pem(&self.cert_pem, &self.key_pair)
             .context("Issuer::from_ca_cert_pem")?;
-        let mut leaf_params =
-            CertificateParams::new(vec![tls_server_name.to_string()]).context("leaf params")?;
-        leaf_params.is_ca = IsCa::NoCa;
-        leaf_params.use_authority_key_identifier_extension = true;
-        leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
-        leaf_params.key_usages = vec![
-            KeyUsagePurpose::DigitalSignature,
-            KeyUsagePurpose::KeyEncipherment,
-        ];
-        let mut dn = DistinguishedName::new();
-        dn.push(DnType::CommonName, tls_server_name);
-        leaf_params.distinguished_name = dn;
-
+        let leaf_params = leaf_params_for(tls_server_name)?;
         let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("leaf key")?;
         let leaf_cert = leaf_params
             .signed_by(&leaf_key, &issuer)
@@ -154,24 +142,11 @@ impl CertificateAuthority {
     ) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
         let issuer = Issuer::from_ca_cert_pem(&self.cert_pem, &self.key_pair)
             .context("Issuer::from_ca_cert_pem")?;
-        let mut leaf_params =
-            CertificateParams::new(vec![tls_server_name.to_string()]).context("leaf params")?;
-        leaf_params.is_ca = IsCa::NoCa;
-        leaf_params.use_authority_key_identifier_extension = true;
-        leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
-        leaf_params.key_usages = vec![
-            KeyUsagePurpose::DigitalSignature,
-            KeyUsagePurpose::KeyEncipherment,
-        ];
-        let mut dn = DistinguishedName::new();
-        dn.push(DnType::CommonName, tls_server_name);
-        leaf_params.distinguished_name = dn;
-
+        let leaf_params = leaf_params_for(tls_server_name)?;
         let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("leaf key")?;
         let leaf_cert = leaf_params
             .signed_by(&leaf_key, &issuer)
             .context("sign leaf cert")?;
-
         Ok((leaf_cert.der().to_vec(), leaf_key.serialize_der()))
     }
 
@@ -205,6 +180,32 @@ impl CertificateAuthority {
 
         Ok(TlsAcceptor::from(Arc::new(config)))
     }
+}
+
+/// Build the leaf-cert params with a 397-day validity window pinned
+/// to `now - 5 min` .. `now + 397 days`.
+///
+/// Audit (2026-05-10): pre-fix the leaf inherited rcgen's default
+/// 10-year validity. Modern browsers reject leafs over ~398 days, so
+/// any practitioner who installed the wafrift CA in a real browser
+/// would see TLS errors on every MITM session before traffic flowed.
+fn leaf_params_for(tls_server_name: &str) -> anyhow::Result<CertificateParams> {
+    let mut leaf_params =
+        CertificateParams::new(vec![tls_server_name.to_string()]).context("leaf params")?;
+    leaf_params.is_ca = IsCa::NoCa;
+    leaf_params.use_authority_key_identifier_extension = true;
+    leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    leaf_params.key_usages = vec![
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyEncipherment,
+    ];
+    let now = time::OffsetDateTime::now_utc();
+    leaf_params.not_before = now - time::Duration::minutes(5);
+    leaf_params.not_after = now + time::Duration::days(397);
+    let mut dn = DistinguishedName::new();
+    dn.push(DnType::CommonName, tls_server_name);
+    leaf_params.distinguished_name = dn;
+    Ok(leaf_params)
 }
 
 /// Check if a request is a CONNECT request for HTTPS proxying.
