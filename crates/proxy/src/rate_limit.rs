@@ -16,6 +16,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
+/// Hard cap on tracked hosts before we evict the least-recently-used.
+/// Prevents an attacker (or even a legit long-running session that
+/// crawls thousands of unique hosts) from growing the buckets map
+/// unboundedly and OOMing the proxy.
+const MAX_TRACKED_HOSTS: usize = 4096;
+
 #[derive(Debug, Clone, Copy)]
 struct HostBucket {
     tokens: f64,
@@ -64,6 +70,20 @@ impl RateLimiter {
             let wait = {
                 let mut buckets = self.buckets.lock().await;
                 let now = Instant::now();
+                // Pre-fix: every unique hostname permanently grew the
+                // map. An attacker connecting to N distinct hostnames
+                // (or a long-running browser session crawling thousands
+                // of CDN edges) would unboundedly leak memory. Cap +
+                // LRU-ish eviction keeps the working set bounded.
+                if !buckets.contains_key(host) && buckets.len() >= MAX_TRACKED_HOSTS {
+                    if let Some(oldest_host) = buckets
+                        .iter()
+                        .min_by_key(|(_, b)| b.last)
+                        .map(|(h, _)| h.clone())
+                    {
+                        buckets.remove(&oldest_host);
+                    }
+                }
                 let bucket = buckets.entry(host.to_string()).or_insert(HostBucket {
                     tokens: self.burst,
                     last: now,
@@ -83,6 +103,13 @@ impl RateLimiter {
             let bounded = wait.min(Duration::from_secs(1));
             tokio::time::sleep(bounded).await;
         }
+    }
+
+    /// Number of currently tracked hosts. Exposed for tests and the
+    /// `wafrift-proxy stats` command — never higher than
+    /// `MAX_TRACKED_HOSTS`.
+    pub async fn tracked_host_count(&self) -> usize {
+        self.buckets.lock().await.len()
     }
 }
 
