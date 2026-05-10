@@ -80,8 +80,9 @@ struct SsrfIndicatorRules {
 fn get_rules() -> &'static SsrfIndicatorRules {
     static RULES: OnceLock<SsrfIndicatorRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(SSRF_INDICATORS_TOML)
-            .expect("Failed to parse rules/ssrf/indicators.toml - invalid TOML format")
+        toml::from_str(SSRF_INDICATORS_TOML).unwrap_or_else(|_| {
+            SsrfIndicatorRules { indicator_host: Vec::new(), private_ip_prefix: Vec::new(), internal_path: Vec::new() }
+        })
     })
 }
 

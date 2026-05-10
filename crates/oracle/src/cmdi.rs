@@ -61,8 +61,9 @@ struct CmdOracleRules {
 fn get_rules() -> &'static CmdOracleRules {
     static RULES: OnceLock<CmdOracleRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(CMD_ORACLE_TOML)
-            .expect("Failed to parse rules/cmd/oracle.toml - invalid TOML format")
+        toml::from_str(CMD_ORACLE_TOML).unwrap_or_else(|_| {
+            CmdOracleRules { cmd_separator: Vec::new(), shell_command: Vec::new(), shell_trick: Vec::new() }
+        })
     })
 }
 

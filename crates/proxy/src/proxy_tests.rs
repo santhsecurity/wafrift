@@ -552,6 +552,7 @@ fn default_args() -> Args {
         no_conn_reuse: false,
         tui: false,
         mutate_url: false,
+        captchaforge: false,
     }
 }
 

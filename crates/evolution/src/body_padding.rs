@@ -198,7 +198,10 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
         return PadOutcome::SkippedOpaque;
     };
     // If the original was valid JSON but not an object, wrap with `payload`.
-    let wrapped = if serde_json::from_slice::<serde_json::Value>(body).is_ok() {
+    // Reject absurdly large bodies before parsing to prevent OOM.
+    let wrapped = if body.len() <= MAX_USEFUL_PAD
+        && serde_json::from_slice::<serde_json::Value>(body).is_ok()
+    {
         format!("{{\"{PAD_KEY}\":\"{pad_str}\",\"payload\":{original}}}")
     } else {
         // Treat original as opaque text and embed as a string.
@@ -573,5 +576,19 @@ mod tests {
             assert!(looks_padded(&bytes));
         }
         assert!(!looks_padded(b"plain old body"));
+    }
+
+    #[test]
+    fn oversized_json_body_does_not_oom() {
+        // A JSON array body larger than MAX_USEFUL_PAD should be skipped
+        // rather than fed to serde_json::from_slice and OOMing.
+        let huge = "x".repeat(MAX_USEFUL_PAD + 1024);
+        let body = format!("[{huge}]");
+        let out = pad(body.as_bytes(), "application/json", 8 * 1024);
+        // Should skip (not panic, not OOM)
+        assert!(
+            matches!(out, PadOutcome::SkippedOpaque | PadOutcome::SkippedTooSmall),
+            "oversized JSON body should be skipped, got {out:?}"
+        );
     }
 }

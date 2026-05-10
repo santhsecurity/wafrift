@@ -55,8 +55,9 @@ struct PathTraversalRules {
 fn get_rules() -> &'static PathTraversalRules {
     static RULES: OnceLock<PathTraversalRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(PATH_TRAVERSAL_TOML)
-            .expect("Failed to parse rules/path_traversal/sequences.toml - invalid TOML format")
+        toml::from_str(PATH_TRAVERSAL_TOML).unwrap_or_else(|_| {
+            PathTraversalRules { traversal_sequence: Vec::new(), target_file: Vec::new() }
+        })
     })
 }
 

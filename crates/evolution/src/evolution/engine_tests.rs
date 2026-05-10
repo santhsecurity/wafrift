@@ -349,6 +349,17 @@ fn batch_evaluation_parallel() {
 }
 
 #[test]
+fn checkpoint_load_rejects_oversized_file() {
+    let tmp = std::env::temp_dir().join("wafrift_evolution_test_oversized.json");
+    let junk = "x".repeat(crate::types::MAX_CHECKPOINT_BYTES + 1);
+    std::fs::write(&tmp, junk).unwrap();
+    let mut engine = EvolutionEngine::new(10);
+    let result = engine.load_checkpoint(&tmp);
+    assert!(result.is_err(), "should reject checkpoint > MAX_CHECKPOINT_BYTES");
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
 fn lineage_no_cycles() {
     use crate::evolution::Chromosome;
     use crate::lineage::Lineage;

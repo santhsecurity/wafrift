@@ -30,6 +30,9 @@ toml = { workspace = true }
 fs4 = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [features]
 default = []
 
