@@ -77,8 +77,21 @@ impl UrlStrategy {
     /// mutated raw form (already URL-safe — caller does not re-encode).
     #[must_use]
     pub fn apply(self, value: &str) -> String {
+        self.apply_bytes(value.as_bytes())
+    }
+
+    /// Byte-clean variant of [`Self::apply`] for percent-encoding
+    /// strategies. Lets callers run a non-UTF-8 byte sequence (e.g.
+    /// the raw bytes from a percent-decode on `%FF%FE`) through the
+    /// pipeline without it being silently rewritten to U+FFFD by
+    /// `String::from_utf8_lossy`. Each strategy that only operates
+    /// on bytes (PercentEncodeAggressive, DoublePercentEncode) is
+    /// byte-pure here. Strategies that need character semantics
+    /// (NonCanonicalSpaces) lossy-convert internally.
+    #[must_use]
+    pub fn apply_bytes(self, value: &[u8]) -> String {
         match self {
-            Self::PercentEncodeAggressive => percent_encode_aggressive(value),
+            Self::PercentEncodeAggressive => percent_encode_aggressive_bytes(value),
             Self::DoublePercentEncode => {
                 // Two passes of aggressive percent-encoding can blow
                 // up to roughly 9× the input size on worst-case
@@ -86,12 +99,19 @@ impl UrlStrategy {
                 // so a malicious caller can't OOM via a 100 MB
                 // string asking for 900 MB of output.
                 if value.len() > MAX_DOUBLE_ENCODE_INPUT {
-                    return percent_encode_aggressive(value);
+                    return percent_encode_aggressive_bytes(value);
                 }
-                percent_encode_aggressive(&percent_encode_aggressive(value))
+                let first = percent_encode_aggressive_bytes(value);
+                percent_encode_aggressive_bytes(first.as_bytes())
             }
-            Self::NonCanonicalSpaces => non_canonical_spaces(value),
-            Self::Hpp => value.to_string(),
+            Self::NonCanonicalSpaces => {
+                // NonCanonicalSpaces is char-based by design (its
+                // rules target Unicode whitespace + ASCII glyphs);
+                // lossy-convert here so the str path stays sane.
+                let s = String::from_utf8_lossy(value);
+                non_canonical_spaces(&s)
+            }
+            Self::Hpp => String::from_utf8_lossy(value).into_owned(),
         }
     }
 
@@ -194,12 +214,12 @@ fn mutate_last_segment(path: &str, strategy: UrlStrategy) -> Option<String> {
         return None;
     }
     // Decode pre-existing percent escapes BEFORE re-applying the
-    // mutation strategy. Otherwise a tail like `admin%2Ephp` gets
-    // double-encoded to `admin%252Ephp` (the %2E is read as the
-    // literal three bytes `%`, `2`, `E` and each is re-encoded).
-    // Same shape as the query-value path which already decodes.
-    let decoded = percent_decode_lossy(tail);
-    let mutated = strategy.apply(&decoded);
+    // mutation strategy, into raw bytes (NOT through from_utf8_lossy)
+    // so that `%FF%FE` and other non-UTF-8 byte sequences survive
+    // the round-trip instead of being silently mangled into U+FFFD
+    // sequences (`%EF%BF%BD`).
+    let decoded = percent_decode_bytes(tail);
+    let mutated = strategy.apply_bytes(&decoded);
     Some(format!("{head}{mutated}"))
 }
 
@@ -231,10 +251,12 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
             }
             // Form-decode `+` to space BEFORE percent-decoding so
             // application/x-www-form-urlencoded semantics survive
-            // the mutation pipeline.
+            // the mutation pipeline. Decode into raw bytes (NOT
+            // from_utf8_lossy) so non-UTF-8 escapes survive — see
+            // percent_decode_bytes for the U+FFFD-avoidance rationale.
             let form_decoded = value.replace('+', " ");
-            let decoded = percent_decode_lossy(&form_decoded);
-            let mutated = strategy.apply(&decoded);
+            let decoded = percent_decode_bytes(&form_decoded);
+            let mutated = strategy.apply_bytes(&decoded);
             out.push(format!("{name}={mutated}"));
             applied = true;
         } else {
@@ -248,8 +270,16 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
 /// is encoded. Drops the URL safe-list (`-._~`) intentionally — those
 /// are the bytes signatures most often fail to canonicalise.
 fn percent_encode_aggressive(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for &b in s.as_bytes() {
+    percent_encode_aggressive_bytes(s.as_bytes())
+}
+
+/// Byte-clean variant of [`percent_encode_aggressive`]. Used by the
+/// byte-pipeline paths so non-UTF-8 input bytes (which a real
+/// `%FF%FE`-style WAF-bypass payload contains) survive end-to-end
+/// instead of being silently rewritten to U+FFFD.
+fn percent_encode_aggressive_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().saturating_mul(3));
+    for &b in bytes {
         if b.is_ascii_alphanumeric() {
             out.push(b as char);
         } else {
@@ -275,6 +305,32 @@ fn non_canonical_spaces(s: &str) -> String {
             ')' => out.push_str("%29"),
             other => out.push(other),
         }
+    }
+    out
+}
+
+/// Decode `%xx` escapes into raw bytes, treating invalid sequences
+/// (lone `%`, `%G1`) as literal. Unlike [`percent_decode_lossy`],
+/// this never round-trips through `from_utf8_lossy` so non-UTF-8
+/// byte sequences (e.g. `%FF%FE`, overlong UTF-8 `%C0%AF`) survive
+/// intact. The downstream encoders re-emit them as exact `%XX`
+/// pairs instead of mangling them into `%EF%BF%BD` (U+FFFD), which
+/// is what removes WAF-bypass vectors.
+fn percent_decode_bytes(s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(h), Some(l)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2]))
+        {
+            out.push(h * 16 + l);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
     }
     out
 }
