@@ -173,7 +173,7 @@ impl ChallengeStore {
         };
         self.inner
             .write()
-            .expect("ChallengeStore poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .by_host
             .insert(host.into(), entry);
     }
@@ -183,7 +183,7 @@ impl ChallengeStore {
     pub fn forget(&self, host: &str) {
         self.inner
             .write()
-            .expect("ChallengeStore poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .by_host
             .remove(host);
     }

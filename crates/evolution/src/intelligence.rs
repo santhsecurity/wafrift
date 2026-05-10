@@ -381,7 +381,7 @@ mod tests {
         let mut sent = 0;
         for _ in 0..20 {
             match il.step(Feedback::Passed) {
-                LoopAction::SendProbe(_) | LoopAction::SendPayload(_) => {
+                LoopAction::SendProbe(_) | LoopAction::SendPayload(_) | LoopAction::SaveCheckpoint => {
                     sent += 1;
                 }
                 LoopAction::Terminate(TerminationReason::BudgetExhausted) => {
@@ -421,18 +421,26 @@ mod tests {
     #[test]
     fn always_blocking_oracle_still_terminates() {
         // Adversarial scenario: every single payload is blocked.
-        // The engine must still terminate gracefully.
-        let mut il = IntelligenceLoop::with_budget(5, 0, Budget::default());
+        // The engine must still terminate gracefully via budget exhaustion.
+        let mut il = IntelligenceLoop::with_budget(
+            5,
+            0,
+            Budget {
+                max_requests: 50,
+                max_generations: 10,
+                ..Budget::default()
+            },
+        );
         let mut iterations = 0;
         loop {
             match il.step(Feedback::Blocked) {
-                LoopAction::SendProbe(_) | LoopAction::SendPayload(_) => {
+                LoopAction::SendProbe(_) | LoopAction::SendPayload(_) | LoopAction::SaveCheckpoint => {
                     iterations += 1;
                 }
                 LoopAction::Terminate(_) => break,
             }
-            if iterations > 1000 {
-                panic!("engine did not terminate within 1000 iterations");
+            if iterations > 500 {
+                panic!("engine did not terminate within 500 iterations (budget was 50)");
             }
         }
     }

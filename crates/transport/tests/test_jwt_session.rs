@@ -4,6 +4,7 @@
 //! - `transport/src/jwt.rs` — `manipulate()` had ZERO tests
 //! - `transport/src/session.rs` — `load_jar`, `save_jar`, `extract_csrf`, `inject_csrf` had ZERO tests
 
+use base64::Engine;
 use std::io::Write;
 
 // ──────────────────────────────────────────────
@@ -141,47 +142,69 @@ fn jwt_manipulate_jwk_embed_invalid_json_falls_back_to_null() {
 // Session adversarial tests
 // ──────────────────────────────────────────────
 
+fn tmp_path(suffix: &str) -> std::path::PathBuf {
+    let pid = std::process::id();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::path::PathBuf::from(format!("/tmp/wafrift_test_{pid}_{ts}_{suffix}"))
+}
+
 #[test]
 fn session_load_jar_missing_file_returns_empty() {
-    let path = std::path::PathBuf::from("/tmp/nonexistent_cookie_jar_12345.txt");
+    let path = tmp_path("missing_jar.txt");
     let jar = wafrift_transport::session::load_jar(&path);
     assert!(jar.is_ok());
 }
 
 #[test]
 fn session_load_jar_corrupt_line() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# comment").unwrap();
-    writeln!(tmp, "bad line without separator").unwrap();
-    let result = wafrift_transport::session::load_jar(tmp.path());
+    let path = tmp_path("corrupt_jar.txt");
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "# comment").unwrap();
+        writeln!(f, "bad line without separator").unwrap();
+    }
+    let result = wafrift_transport::session::load_jar(&path);
     assert!(result.is_err());
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn session_load_jar_invalid_url() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "sessionid=abc | not-a-url").unwrap();
-    let result = wafrift_transport::session::load_jar(tmp.path());
+    let path = tmp_path("invalid_url_jar.txt");
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "sessionid=abc | not-a-url").unwrap();
+    }
+    let result = wafrift_transport::session::load_jar(&path);
     assert!(result.is_err());
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn session_load_jar_valid_line() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# wafrift cookie jar").unwrap();
-    writeln!(tmp, "sessionid=abc123 | https://example.com/").unwrap();
-    let result = wafrift_transport::session::load_jar(tmp.path());
+    let path = tmp_path("valid_jar.txt");
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "# wafrift cookie jar").unwrap();
+        writeln!(f, "sessionid=abc123 | https://example.com/").unwrap();
+    }
+    let result = wafrift_transport::session::load_jar(&path);
     assert!(result.is_ok());
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn session_save_jar_creates_file() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp_path("save_jar.txt");
     let jar = reqwest::cookie::Jar::default();
-    let result = wafrift_transport::session::save_jar(&jar, tmp.path());
+    let result = wafrift_transport::session::save_jar(&jar, &path);
     assert!(result.is_ok());
-    let contents = std::fs::read_to_string(tmp.path()).unwrap();
+    let contents = std::fs::read_to_string(&path).unwrap();
     assert!(contents.contains("wafrift cookie jar"));
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

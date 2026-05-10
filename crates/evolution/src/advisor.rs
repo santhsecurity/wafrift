@@ -119,7 +119,10 @@ fn parse_strategy(name: &str) -> Option<encoding::Strategy> {
 }
 
 fn load_default_rules() -> AdvisorRules {
-    toml::from_str(DEFAULT_ADVISOR_TOML).expect("embedded advisor TOML is valid")
+    toml::from_str(DEFAULT_ADVISOR_TOML).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "embedded advisor TOML failed to parse; returning empty rules");
+        AdvisorRules { waf: Vec::new() }
+    })
 }
 
 fn match_waf(name: &str, rules: &AdvisorRules) -> Option<WafAdviceRule> {

@@ -380,7 +380,10 @@ impl Default for EvasionClient {
                     wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
                 ))
                 .build()
-                .expect("even minimal reqwest client must build");
+                .unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "minimal reqwest client failed, using fallback");
+                    reqwest::Client::new()
+                });
             Self {
                 inner: reqwest_client,
                 config: EvasionConfig::default(),
