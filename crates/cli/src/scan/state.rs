@@ -2,8 +2,12 @@
 //!
 //! Each pipeline step receives `&mut ScanState` to read/update counters and
 //! accumulators without needing a 20-argument function signature.
+//!
+//! This module is the in-flight target of the scan-pipeline split — the
+//! scaffold types are intentionally kept unconstructed until the
+//! pipeline rewrite reaches them, so clippy's never-constructed lints
+//! are silenced at the module level rather than the type level.
 
-// Infrastructure for incremental pipeline step extraction — not yet consumed.
 #![allow(dead_code)]
 
 use std::collections::HashSet;
@@ -18,6 +22,7 @@ use wafrift_strategy::learning_cache::LearningCache;
 use crate::helpers::Variant;
 
 /// Mutable scan state accumulated across pipeline steps.
+#[allow(dead_code)]
 pub(crate) struct ScanState {
     // ── Counters ───────────────────────────────────────────────────────
     pub bypassed: u32,
@@ -48,6 +53,7 @@ pub(crate) struct ScanState {
     pub advisor_strategies: Vec<Strategy>,
 }
 
+#[allow(dead_code)]
 impl ScanState {
     pub fn new() -> Self {
         Self {
@@ -76,6 +82,7 @@ impl ScanState {
 }
 
 /// Immutable scan configuration extracted from CLI args.
+#[allow(dead_code)]
 pub(crate) struct ScanConfig<'a> {
     pub target: &'a str,
     pub param: &'a str,

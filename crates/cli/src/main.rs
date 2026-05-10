@@ -14,6 +14,7 @@ use wafrift_strategy::gene_bank::GeneBank;
 mod bank;
 mod bench_diff;
 mod bench_waf;
+mod bypass_probe;
 mod config;
 mod discover_cmd;
 mod egress_example;
@@ -109,6 +110,12 @@ enum Commands {
     ImportCurl(import_curl::ImportCurlArgs),
     /// Manage gene-banks: list / export / import.
     Bank(bank::BankArgs),
+    /// Differential bypass scanner against a single protected URL.
+    /// Fires 136 auth-bypass header probes + path-routing-disagreement
+    /// variants + HTTP method overrides; reports any probe that diverges
+    /// from the baseline response. The Tsai-class vuln finder.
+    #[command(name = "bypass-probe")]
+    BypassProbe(bypass_probe::BypassProbeArgs),
     /// Generate a troff man page for `wafrift` (and optionally subcommands).
     Man(ManArgs),
 }
@@ -345,6 +352,13 @@ fn main() -> ExitCode {
         Some(Commands::Seed(args)) => seed::run_seed(args),
         Some(Commands::ImportCurl(args)) => import_curl::run_import_curl(args),
         Some(Commands::Bank(args)) => bank::run_bank(args),
+        Some(Commands::BypassProbe(args)) => match bypass_probe::run_bypass_probe(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("bypass-probe failed: {e}");
+                ExitCode::from(1)
+            }
+        },
         Some(Commands::Man(args)) => run_man(args),
     }
 }
