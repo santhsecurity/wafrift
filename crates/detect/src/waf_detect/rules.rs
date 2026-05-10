@@ -11,6 +11,17 @@
 //! Header and cookie patterns remain per-signature `Regex` objects
 //! because the scan input is small (a few header values) and pattern
 //! count per-header is low.
+//!
+//! # Signature provenance
+//!
+//! The catalog under `rules/detect/*.toml` is derived from the
+//! [wafw00f](https://github.com/EnableSecurity/wafw00f) project
+//! (BSD-3-Clause) plus selective contributions from
+//! [identYwaf](https://github.com/stamparm/identYwaf) (MIT) and
+//! locally researched additions. Every rule carries a `source`
+//! field (`WAFW00F:<plugin>`, `IDENTYWAF:<probe>`, or
+//! `wafrift:<context>`) that points back at the originating
+//! plugin/probe so signature provenance is auditable.
 
 use once_cell::sync::Lazy;
 use regex::{Regex, RegexSet};
@@ -164,7 +175,7 @@ impl RuleEngine {
     /// 2. **Filesystem fallback** — walks `rules/detect/` at relative
     ///    paths.  Used during development when you want hot-reload
     ///    via [`reload`].
-    pub fn load_embedded() -> Result<Self, RulesError> {
+    pub fn load_embedded() -> Result<Self, DetectRulesError> {
         let mut engine = RuleEngine {
             rules: HashMap::new(),
             names: Vec::new(),
@@ -195,7 +206,7 @@ impl RuleEngine {
             }
 
             if !loaded {
-                return Err(RulesError::Io(std::io::Error::new(
+                return Err(DetectRulesError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     "rules/detect directory not found and no embedded rules available",
                 )));
@@ -211,12 +222,12 @@ impl RuleEngine {
     /// Parse a TOML string containing `[[waf]]` entries.
     ///
     /// Used by both the compile-time embedded path and hot-reload.
-    pub fn load_from_str(&mut self, toml_content: &str) -> Result<(), RulesError> {
+    pub fn load_from_str(&mut self, toml_content: &str) -> Result<(), DetectRulesError> {
         let raw: RawRuleDb = toml::from_str(toml_content)
-            .map_err(|e| RulesError::Parse(format!("embedded rules: {e}")))?;
+            .map_err(|e| DetectRulesError::Parse(format!("embedded rules: {e}")))?;
         for waf in raw.waf {
             let compiled = Self::compile_waf(waf)
-                .map_err(|e| RulesError::Parse(format!("embedded rules: {e}")))?;
+                .map_err(|e| DetectRulesError::Parse(format!("embedded rules: {e}")))?;
             let key = compiled.name.clone();
             if !self.rules.contains_key(&key) {
                 self.names.push(key.clone());
@@ -227,7 +238,7 @@ impl RuleEngine {
     }
 
     /// Load all `.toml` files from a directory.
-    pub fn load_directory(&mut self, path: &std::path::Path) -> Result<(), RulesError> {
+    pub fn load_directory(&mut self, path: &std::path::Path) -> Result<(), DetectRulesError> {
         let mut entries: Vec<_> = std::fs::read_dir(path)?
             .filter_map(|e| e.ok())
             .filter(|e| {
@@ -243,10 +254,10 @@ impl RuleEngine {
         for entry in entries {
             let content = std::fs::read_to_string(&entry)?;
             let raw: RawRuleDb = toml::from_str(&content)
-                .map_err(|e| RulesError::Parse(format!("{}: {e}", entry.display())))?;
+                .map_err(|e| DetectRulesError::Parse(format!("{}: {e}", entry.display())))?;
             for waf in raw.waf {
                 let compiled = Self::compile_waf(waf)
-                    .map_err(|e| RulesError::Parse(format!("{}: {e}", entry.display())))?;
+                    .map_err(|e| DetectRulesError::Parse(format!("{}: {e}", entry.display())))?;
                 let key = compiled.name.clone();
                 if !self.rules.contains_key(&key) {
                     self.names.push(key.clone());
@@ -299,7 +310,7 @@ impl RuleEngine {
     ///
     /// Must be called after all rules are loaded.  Populates
     /// `body_regex_set`, `body_pattern_map`, and `body_regexes`.
-    fn compile_body_regex_set(&mut self) -> Result<(), RulesError> {
+    fn compile_body_regex_set(&mut self) -> Result<(), DetectRulesError> {
         let mut patterns: Vec<String> = Vec::new();
         let mut map: Vec<BodyPatternRef> = Vec::new();
         let mut regexes: Vec<Regex> = Vec::new();
@@ -321,7 +332,7 @@ impl RuleEngine {
 
         if !patterns.is_empty() {
             let set = RegexSet::new(&patterns)
-                .map_err(|e| RulesError::Parse(format!("failed to compile body RegexSet: {e}")))?;
+                .map_err(|e| DetectRulesError::Parse(format!("failed to compile body RegexSet: {e}")))?;
             self.body_regex_set = Some(set);
         }
 
@@ -491,7 +502,7 @@ pub struct DetectedWaf {
 
 /// Errors that can occur while loading rules.
 #[derive(Debug, thiserror::Error)]
-pub enum RulesError {
+pub enum DetectRulesError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("parse error: {0}")]
@@ -508,9 +519,9 @@ where
 }
 
 /// Reload the global rule engine from disk.
-pub fn reload() -> Result<(), RulesError> {
+pub fn reload() -> Result<(), DetectRulesError> {
     let new_engine = RuleEngine::load_embedded()?;
-    let mut guard = RULE_DB.write().expect("RULE_DB poisoned");
+    let mut guard = RULE_DB.write().map_err(|e| DetectRulesError::Parse(format!("RULE_DB poisoned: {e}")))?;
     *guard = new_engine;
     Ok(())
 }
@@ -600,4 +611,154 @@ pub fn detect_with_config(
         }
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_TOML: &str = r#"
+[[waf]]
+name = "TestWAF"
+vendor = "test"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion"]
+
+[[waf.signature]]
+header_name = "x-test-waf"
+header_regex = "active"
+weight = 0.9
+
+[[waf.signature]]
+body_regex = "blocked by test"
+weight = 0.95
+
+[[waf.signature]]
+status_code = 403
+weight = 0.5
+
+[[waf]]
+name = "AnotherWAF"
+vendor = "another"
+confidence_threshold = 0.5
+evasions = ["DoubleUrlEncode"]
+
+[[waf.signature]]
+body_regex = "another waf"
+weight = 0.6
+"#;
+
+    fn test_engine() -> RuleEngine {
+        let mut engine = RuleEngine::default();
+        engine.load_from_str(TEST_TOML).expect("load test toml");
+        engine.compile_body_regex_set().expect("compile regex set");
+        engine
+    }
+
+    #[test]
+    fn load_from_str_populates_rules() {
+        let engine = test_engine();
+        assert_eq!(engine.len(), 2);
+        assert!(!engine.is_empty());
+    }
+
+    #[test]
+    fn detect_by_header() {
+        let engine = test_engine();
+        let headers = vec![("x-test-waf".into(), "active".into())];
+        let results = engine.detect(200, &headers, "OK");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "TestWAF");
+        assert!(results[0].confidence >= 0.9);
+    }
+
+    #[test]
+    fn detect_by_body() {
+        let engine = test_engine();
+        let headers: Vec<(String, String)> = vec![];
+        let results = engine.detect(200, &headers, "you are blocked by test engine");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "TestWAF");
+        assert!(results[0].confidence >= 0.95);
+    }
+
+    #[test]
+    fn detect_by_status() {
+        let engine = test_engine();
+        let headers: Vec<(String, String)> = vec![];
+        let results = engine.detect(403, &headers, "");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "TestWAF");
+    }
+
+    #[test]
+    fn detect_no_match() {
+        let engine = test_engine();
+        let headers = vec![("server".into(), "nginx".into())];
+        let results = engine.detect(200, &headers, "Welcome");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn detect_confidence_threshold_filters_body_only() {
+        let engine = test_engine();
+        // AnotherWAF needs 0.5 threshold, body regex gives 0.6
+        let results = engine.detect(200, &[], "another waf detected");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "AnotherWAF");
+    }
+
+    #[test]
+    fn evasions_for_known_waf() {
+        let engine = test_engine();
+        let evasions = engine.evasions_for("TestWAF");
+        assert_eq!(evasions.len(), 2);
+        assert!(evasions.contains(&"CaseAlternation"));
+    }
+
+    #[test]
+    fn evasions_for_unknown_waf_empty() {
+        let engine = test_engine();
+        assert!(engine.evasions_for("Unknown").is_empty());
+    }
+
+    #[test]
+    fn detect_body_only_needs_higher_threshold() {
+        let mut engine = RuleEngine::default();
+        engine.load_from_str(r#"
+[[waf]]
+name = "LowConfWAF"
+vendor = "test"
+confidence_threshold = 0.1
+
+[[waf.signature]]
+body_regex = "blocked"
+weight = 0.4
+"#).expect("load");
+        engine.compile_body_regex_set().expect("compile");
+
+        // body-only match with weight 0.4 < BODY_ONLY_MIN_CONFIDENCE (0.5)
+        let results = engine.detect(200, &[], "blocked");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn empty_engine_returns_empty() {
+        let engine = RuleEngine::default();
+        assert!(engine.is_empty());
+        assert_eq!(engine.len(), 0);
+        let results = engine.detect(200, &[], "body");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn detect_sorts_by_confidence_desc() {
+        let engine = test_engine();
+        // TestWAF matches header (0.9) + body (0.95) = 1.85
+        // AnotherWAF matches body (0.6)
+        let headers = vec![("x-test-waf".into(), "active".into())];
+        let results = engine.detect(200, &headers, "blocked by test and another waf");
+        assert!(!results.is_empty());
+        assert_eq!(results[0].name, "TestWAF");
+    }
 }

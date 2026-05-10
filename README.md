@@ -541,7 +541,7 @@ let encoded = encode(b"' OR 1=1--", Strategy::UnicodeEscape)?;
 
 ## Community Rules (Tier B)
 
-WAF signatures, evasion pipelines, and smuggling probes live as TOML files in `rules/`. Adding a new WAF = 5 lines of TOML, no Rust knowledge:
+WAF signatures, evasion pipelines, and smuggling probes live as TOML files in `rules/`. The detection catalog (160+ WAFs) is derived from [wafw00f](https://github.com/EnableSecurity/wafw00f) (BSD-3-Clause) plus selective contributions from [identYwaf](https://github.com/stamparm/identYwaf) (MIT) and locally researched additions; every TOML rule carries a `source` field pointing back at its origin. Adding a new WAF = 5 lines of TOML, no Rust knowledge:
 
 ```toml
 # rules/detect/mywaf.toml
