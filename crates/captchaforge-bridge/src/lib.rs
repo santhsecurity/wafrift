@@ -18,6 +18,9 @@ use tokio::sync::Mutex;
 
 use wafrift_transport::challenge::{ChallengeKind, ChallengeStore};
 
+/// Whether `install_global_solver` has completed its first-ever run.
+static SOLVER_INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
 /// Result of a single bridge solve attempt.
 #[derive(Debug, Clone)]
 pub struct BridgeOutcome {
@@ -57,6 +60,11 @@ impl Default for BridgeConfig {
 /// captcha was detected (likely a JS-only CF managed challenge that
 /// the cookie just needs time to land for), and `Err` on chromium /
 /// solver / network failures.
+///
+/// If the `CHROMIUM_PATH` environment variable is set, the binary at
+/// that path is used instead of auto-detection. Setting it to a
+/// non-existent path forces an immediate error, which is useful in
+/// tests that verify the not-available code path.
 pub async fn solve_in_browser(
     challenge_html: &str,
     target_url: &str,
@@ -67,6 +75,9 @@ pub async fn solve_in_browser(
     let mut browser_cfg_builder = BrowserConfig::builder();
     if !cfg.headless {
         browser_cfg_builder = browser_cfg_builder.with_head();
+    }
+    if let Ok(path) = std::env::var("CHROMIUM_PATH") {
+        browser_cfg_builder = browser_cfg_builder.chrome_executable(path);
     }
     let browser_cfg = browser_cfg_builder
         .build()
@@ -164,15 +175,23 @@ pub async fn solve_and_record(
 ) -> Result<Option<BridgeOutcome>> {
     let outcome = solve_in_browser(challenge_html, target_url, cfg).await?;
     if let Some(ref o) = outcome {
-        store.record(host.to_string(), o.cookie_header.clone(), o.kind, None);
-        tracing::info!(
-            host = %host,
-            kind = %o.kind.label(),
-            elapsed_ms = o.elapsed_ms,
-            "captchaforge bridge captured clearance cookie"
-        );
+        record_into_store(store, host, o);
     }
     Ok(outcome)
+}
+
+/// Record a `BridgeOutcome` into the `ChallengeStore` for `host`.
+///
+/// Split out from `solve_and_record` so the store-recording path can
+/// be tested independently of the browser-launch path.
+pub fn record_into_store(store: &ChallengeStore, host: &str, outcome: &BridgeOutcome) {
+    store.record(host.to_string(), outcome.cookie_header.clone(), outcome.kind, None);
+    tracing::info!(
+        host = %host,
+        kind = %outcome.kind.label(),
+        elapsed_ms = outcome.elapsed_ms,
+        "captchaforge bridge captured clearance cookie"
+    );
 }
 
 /// Process-wide global bridge configuration handle. Lazy so a
@@ -199,18 +218,34 @@ pub async fn current_config() -> BridgeConfig {
     handle.lock().await.clone()
 }
 
+/// Whether `install_global_solver` completed its first-ever installation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallOutcome {
+    /// This call performed the first installation.
+    Installed,
+    /// A prior call already installed; this call is a no-op.
+    AlreadyInstalled,
+}
+
 /// Marker function future wafrift binaries call from `main` to
-/// announce the bridge is active. Today this only logs — real wiring
-/// (subscribing the bridge into the proxy's challenge dispatch path)
-/// is left to the binary so the lib doesn't pull in proxy types.
-pub async fn install_global_solver() -> Result<()> {
-    let cfg = current_config().await;
-    tracing::info!(
-        timeout_ms = cfg.solve_timeout_ms,
-        headless = cfg.headless,
-        "captchaforge bridge installed"
-    );
-    Ok(())
+/// announce the bridge is active. The first caller performs the
+/// install and receives [`InstallOutcome::Installed`]; every
+/// subsequent caller receives [`InstallOutcome::AlreadyInstalled`].
+/// Thread-safe via `OnceCell`.
+pub async fn install_global_solver() -> Result<InstallOutcome> {
+    // SOLVER_INSTALLED uses OnceLock — exactly one thread wins `set`.
+    let outcome = if SOLVER_INSTALLED.set(()).is_ok() {
+        let cfg = current_config().await;
+        tracing::info!(
+            timeout_ms = cfg.solve_timeout_ms,
+            headless = cfg.headless,
+            "captchaforge bridge installed"
+        );
+        InstallOutcome::Installed
+    } else {
+        InstallOutcome::AlreadyInstalled
+    };
+    Ok(outcome)
 }
 
 #[cfg(test)]

@@ -54,19 +54,23 @@ crossterm = { workspace = true }
 # falls back to writing /tmp/wafrift-yank-N.curl when arboard fails.
 arboard = { workspace = true, optional = true }
 # Optional captchaforge bridge — pulls chromiumoxide. Default builds
-# do NOT include this; opt in with `--features captchaforge` to make
-# `--captchaforge` actually solve managed challenges. Without it the
+# do NOT include this; opt in with `--features captchaforge`. Without it the
 # flag is rejected at clap-parse time with an actionable hint.
 wafrift-captchaforge-bridge = { workspace = true, optional = true }
+
+[dev-dependencies]
+assert_cmd = { version = "2.1", default-features = false, features = ["color"] }
+axum = { version = "0.7", default-features = false, features = ["tokio", "http1", "http2"] }
+base64 = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream", "json", "system-proxy"] }
 
 [features]
 default = ["clipboard"]
 clipboard = ["dep:arboard"]
 # When enabled at build time, the proxy gains a `--captchaforge` flag
-# that installs the headless-browser solver into ChallengeStore so
-# Cloudflare/Turnstile/hCaptcha responses are auto-solved instead of
-# falling back to operator-prompt. Pulls chromiumoxide, so it's
-# behind a feature flag — default proxy stays lean.
+# that installs the headless-browser solver into ChallengeStore. Without
+# this feature the flag is rejected at startup and the binary exits
+# cleanly with an actionable hint to rebuild.
 captchaforge = ["dep:wafrift-captchaforge-bridge"]
 # Forwards the wafrift-transport `tls-impersonate` feature so that
 # `wafrift-proxy --tls-impersonate <profile>` actually engages the
