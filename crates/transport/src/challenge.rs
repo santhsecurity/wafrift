@@ -572,16 +572,19 @@ pub const CLASSIFY_BODY_SCAN_CAP: usize = 64 * 1024;
 /// then defaults to `EscalateToOperator` rather than acting on a
 /// guess.
 ///
-/// Only the first [`CLASSIFY_BODY_SCAN_CAP`] bytes of `body` are
-/// scanned. A multi-MB upstream response (e.g. a streamed PDF or a
-/// CDN-cached HTML page that happens to mention "turnstile") would
-/// otherwise force a body-sized lowercase allocation on every call.
-///
-/// Prefer [`classify_with_status`] when the HTTP status code is
-/// available — passing the status lets the classifier reject the
-/// false-positive case where a benign 200 OK page mentions
-/// "turnstile" or "hcaptcha" in its body (e.g. a blog post about
-/// captcha bypass) and would otherwise be treated as a challenge.
+/// **Use [`classify_with_status`] instead.** Audit (2026-05-10): this
+/// shim ignores the HTTP status, which means a benign 200 OK page
+/// mentioning "turnstile" or "hcaptcha" in its body (a blog post
+/// about captcha bypass, an admin doc page, this project's own
+/// README) gets misclassified as a challenge and parks dispatch in
+/// `Wait`. The status-aware variant gates body-keyword matches on
+/// 4xx/5xx responses where a challenge is actually possible. This
+/// function is kept only for the binary-compat needs of the older
+/// CLI flow; new callers should always use `classify_with_status`.
+#[deprecated(
+    since = "0.2.9",
+    note = "use classify_with_status — passing status=0 would silently bypass the challenge-status guard and false-positive on benign 200s"
+)]
 #[must_use]
 pub fn classify(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
     // Back-compat shim: status = 0 means "caller didn't tell us" →
