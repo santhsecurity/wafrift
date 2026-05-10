@@ -484,7 +484,7 @@ fn encode_layered_double() {
 fn encode_layered_all_strategies() {
     let strategies = encoding::all_strategies();
     let input = "SELECT";
-    let result = encoding::encode_layered(input, &strategies).unwrap();
+    let result = encoding::encode_layered(input, strategies).unwrap();
     // Should not panic and produce some transformation
     assert!(!result.is_empty());
 }

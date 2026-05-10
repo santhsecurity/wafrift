@@ -310,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn replay_writes_curl_file_with_replay_prefix() {
         // Ensure autoexec is OFF for this test regardless of env.
         // SAFETY: tests run sequentially within a process so this is

@@ -269,6 +269,7 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
 /// Aggressive percent-encoding: every byte that is not `[A-Za-z0-9]`
 /// is encoded. Drops the URL safe-list (`-._~`) intentionally — those
 /// are the bytes signatures most often fail to canonicalise.
+#[allow(dead_code)]
 fn percent_encode_aggressive(s: &str) -> String {
     percent_encode_aggressive_bytes(s.as_bytes())
 }
@@ -337,6 +338,7 @@ fn percent_decode_bytes(s: &str) -> Vec<u8> {
 
 /// Decode `%xx` escapes lossily, treating invalid sequences as
 /// literal. Returns `Cow::Borrowed` when nothing needed decoding.
+#[allow(dead_code)]
 fn percent_decode_lossy(s: &str) -> Cow<'_, str> {
     if !s.contains('%') {
         return Cow::Borrowed(s);

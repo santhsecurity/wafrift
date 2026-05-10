@@ -78,7 +78,6 @@ pub fn draw(f: &mut Frame, area: Rect, state: &State) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::tui::state::{Event, State};
 
     fn req(host: &str, bypassed: bool) -> Event {

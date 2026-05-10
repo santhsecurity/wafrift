@@ -202,6 +202,29 @@ impl SearchAlgorithm for NoveltySearch {
     }
 }
 
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let mut prev = vec![0; b_chars.len() + 1];
+    let mut curr = vec![0; b_chars.len() + 1];
+    for (j, slot) in prev.iter_mut().enumerate().take(b_chars.len() + 1) {
+        *slot = j;
+    }
+    for i in 1..=a_chars.len() {
+        curr[0] = i;
+        for j in 1..=b_chars.len() {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b_chars.len()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,10 +365,15 @@ mod tests {
     fn should_terminate_respects_budget() {
         let alg = NoveltySearch::new(5, 0.3);
         let budget = Budget::default_wafrift();
-        let mut stats = SearchStats::default();
-        stats.generation = budget.max_generations - 1;
+        let stats = SearchStats {
+            generation: budget.max_generations - 1,
+            ..SearchStats::default()
+        };
         assert!(!alg.should_terminate(&stats, &budget));
-        stats.generation = budget.max_generations;
+        let stats = SearchStats {
+            generation: budget.max_generations,
+            ..SearchStats::default()
+        };
         assert!(alg.should_terminate(&stats, &budget));
     }
 
@@ -378,27 +406,4 @@ mod tests {
         assert_eq!(super::levenshtein_distance("a", ""), 1);
         assert_eq!(super::levenshtein_distance("", "b"), 1);
     }
-}
-
-fn levenshtein_distance(a: &str, b: &str) -> usize {
-    let a_chars: Vec<char> = a.chars().collect();
-    let b_chars: Vec<char> = b.chars().collect();
-    let mut prev = vec![0; b_chars.len() + 1];
-    let mut curr = vec![0; b_chars.len() + 1];
-    for (j, slot) in prev.iter_mut().enumerate().take(b_chars.len() + 1) {
-        *slot = j;
-    }
-    for i in 1..=a_chars.len() {
-        curr[0] = i;
-        for j in 1..=b_chars.len() {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] {
-                0
-            } else {
-                1
-            };
-            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[b_chars.len()]
 }

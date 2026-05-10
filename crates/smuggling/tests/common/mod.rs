@@ -80,11 +80,10 @@ fn header_names_contains_chunked(headers: &[(String, String)]) -> bool {
 fn last_content_length(headers: &[(String, String)]) -> Option<usize> {
     let mut last = None;
     for (k, v) in headers {
-        if k.eq_ignore_ascii_case("content-length") {
-            if let Ok(n) = v.trim().parse::<usize>() {
+        if k.eq_ignore_ascii_case("content-length")
+            && let Ok(n) = v.trim().parse::<usize>() {
                 last = Some(n);
             }
-        }
     }
     last
 }
@@ -145,21 +144,19 @@ pub fn chunked_decode_consume(data: &[u8]) -> Result<(Vec<u8>, usize), ParseErro
 
 fn consume_body(
     framing: BodyFraming,
-    method: &[u8],
+    _method: &[u8],
     headers: &[(String, String)],
     body_slice: &[u8],
 ) -> Result<(Vec<u8>, usize), ParseError> {
     match framing {
         BodyFraming::Rfc7230 => {
             if header_names_contains_chunked(headers) {
-                chunked_decode_consume(body_slice).map(|(d, n)| (d, n))
+                chunked_decode_consume(body_slice)
             } else if let Some(n) = last_content_length(headers) {
                 if body_slice.len() < n {
                     return Err(ParseError::Incomplete);
                 }
                 Ok((body_slice[..n].to_vec(), n))
-            } else if method_implies_body(method) {
-                Ok((Vec::new(), 0))
             } else {
                 Ok((Vec::new(), 0))
             }
@@ -170,8 +167,6 @@ fn consume_body(
                     return Err(ParseError::Incomplete);
                 }
                 Ok((body_slice[..n].to_vec(), n))
-            } else if method_implies_body(method) {
-                Ok((Vec::new(), 0))
             } else {
                 Ok((Vec::new(), 0))
             }
@@ -266,8 +261,8 @@ pub fn tcp_capture_one_payload(payload: &[u8]) -> Result<Vec<u8>, std::io::Error
     client.write_all(payload)?;
     client.shutdown(Shutdown::Write)?;
 
-    let inner = handle
+    
+    handle
         .join()
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "server thread panicked"))?;
-    inner
+        .map_err(|_| std::io::Error::other("server thread panicked"))?
 }

@@ -12,6 +12,7 @@ pub fn pick_free_port() -> io::Result<u16> {
     listener.local_addr().map(|addr| addr.port())
 }
 
+#[allow(dead_code)]
 pub async fn start_proxy_with_output(port: u16, args: &[&str]) -> io::Result<Output> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_wafrift-proxy"));
     cmd.arg("--listen")
@@ -63,6 +64,7 @@ pub async fn wait_for_listen(
     }
 }
 
+#[allow(dead_code)]
 pub fn proxy_client(port: u16) -> Result<reqwest::Client, reqwest::Error> {
     let proxy = format!("http://127.0.0.1:{port}");
     reqwest::Client::builder().proxy(reqwest::Proxy::all(proxy)?).build()

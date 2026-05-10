@@ -432,13 +432,8 @@ mod tests {
             },
         );
         let mut iterations = 0;
-        loop {
-            match il.step(Feedback::Blocked) {
-                LoopAction::SendProbe(_) | LoopAction::SendPayload(_) | LoopAction::SaveCheckpoint => {
-                    iterations += 1;
-                }
-                LoopAction::Terminate(_) => break,
-            }
+        while let LoopAction::SendProbe(_) | LoopAction::SendPayload(_) | LoopAction::SaveCheckpoint = il.step(Feedback::Blocked) {
+            iterations += 1;
             if iterations > 500 {
                 panic!("engine did not terminate within 500 iterations (budget was 50)");
             }

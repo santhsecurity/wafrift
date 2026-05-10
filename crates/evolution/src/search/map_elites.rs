@@ -336,10 +336,15 @@ mod tests {
     fn should_terminate_respects_budget() {
         let alg = MapElites::new();
         let budget = Budget::default_wafrift();
-        let mut stats = SearchStats::default();
-        stats.evaluations = budget.max_requests - 1;
+        let stats = SearchStats {
+            evaluations: budget.max_requests - 1,
+            ..SearchStats::default()
+        };
         assert!(!alg.should_terminate(&stats, &budget));
-        stats.evaluations = budget.max_requests;
+        let stats = SearchStats {
+            evaluations: budget.max_requests,
+            ..SearchStats::default()
+        };
         assert!(alg.should_terminate(&stats, &budget));
     }
 

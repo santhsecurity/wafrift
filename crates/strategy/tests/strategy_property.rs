@@ -51,8 +51,10 @@ proptest! {
         let req = Request::post("https://example.com/api", body.into_bytes())
             .header("Content-Type", "application/x-www-form-urlencoded");
 
-        let mut state = HostState::default();
-        state.last_success = Some(Technique::PayloadEncoding("CaseAlternation".to_string()));
+        let state = HostState {
+            last_success: Some(Technique::PayloadEncoding("CaseAlternation".to_string())),
+            ..HostState::default()
+        };
 
         let result1 = evade(&req, &state, &deterministic_config());
         let result2 = evade(&result1.request, &state, &deterministic_config());
