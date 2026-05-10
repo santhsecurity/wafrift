@@ -62,11 +62,13 @@ const MAX_FORM_BODY_SIZE: usize = 8 * 1024 * 1024;
 /// Only segments containing `=` are considered valid key-value pairs.
 /// Plain text without `=` delimiters is skipped.
 ///
-/// **UTF-8 handling.** Invalid UTF-8 bytes are rejected (returns the
-/// pairs successfully parsed before the failure) rather than silently
-/// replaced with U+FFFD. The earlier lossy decode could produce
-/// variants that diverged from how the upstream form decoder would
-/// have rejected the body, masking real parser-discrepancy attacks.
+/// **UTF-8 handling.** Invalid UTF-8 bytes are rejected — the function
+/// returns an empty `Vec` rather than partial pairs. (Audit
+/// 2026-05-10: a previous version of this docstring claimed "returns
+/// the pairs successfully parsed before the failure" which was a lie
+/// — the actual code aborts the whole parse on the first non-UTF-8
+/// byte. The lie was caught reading code-vs-docs in batch 6 of the
+/// credibility audit.)
 ///
 /// **Size guarding.** Bodies larger than [`MAX_FORM_BODY_SIZE`] are
 /// rejected (empty vector returned) to prevent memory exhaustion on
