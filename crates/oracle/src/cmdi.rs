@@ -105,26 +105,74 @@ fn shell_tricks() -> &'static [String] {
 }
 
 /// Returns true if `text` contains `word` as a whole word.
+///
+/// Byte-level case-insensitive: NEVER allocates a lowercase copy of
+/// the input. Pre-fix this called `text.to_ascii_lowercase()` (and
+/// `part.to_ascii_lowercase()` in the inner loop) once per shell
+/// command tested — a 10 MB payload × 40 commands triggered ~400 MB
+/// of temporary heap growth on every oracle call. Now O(text.len())
+/// scan with constant extra space.
 fn contains_word(text: &str, word: &str) -> bool {
-    let word_lower = word.to_ascii_lowercase();
-    text.split(|c: char| {
-        c.is_ascii_whitespace()
-            || matches!(
-                c,
-                ';' | '|' | '&' | '`' | '$' | '(' | ')' | '<' | '>' | '\'' | '"'
-            )
-            || c == '\0'
-    })
-    .any(|part| {
-        let part = part.trim_start_matches('/');
-        let part_lower = part.to_ascii_lowercase();
-        part_lower == word_lower
-            || part_lower.starts_with(&word_lower)
-                && part_lower.len() > word_lower.len()
-                && part_lower[word_lower.len()..].starts_with(|c: char| {
-                    c.is_ascii_whitespace() || c == '-' || c == '/' || c == '(' || c == '$'
-                })
-    })
+    let word_bytes = word.as_bytes();
+    if word_bytes.is_empty() {
+        return false;
+    }
+    let bytes = text.as_bytes();
+    let is_separator = |b: u8| -> bool {
+        matches!(
+            b,
+            b' ' | b'\t'
+                | b'\n'
+                | b'\r'
+                | b';'
+                | b'|'
+                | b'&'
+                | b'`'
+                | b'$'
+                | b'('
+                | b')'
+                | b'<'
+                | b'>'
+                | b'\''
+                | b'"'
+                | 0
+        )
+    };
+    let is_word_boundary_after = |b: u8| -> bool {
+        is_separator(b) || matches!(b, b'-' | b'/' | b'(' | b'$')
+    };
+    let mut i = 0;
+    while i < bytes.len() {
+        // Skip separators.
+        while i < bytes.len() && is_separator(bytes[i]) {
+            i += 1;
+        }
+        // Strip leading slashes (whole-word `cat` matches `/cat`).
+        while i < bytes.len() && bytes[i] == b'/' {
+            i += 1;
+        }
+        let part_start = i;
+        while i < bytes.len() && !is_separator(bytes[i]) {
+            i += 1;
+        }
+        let part = &bytes[part_start..i];
+        if part.len() >= word_bytes.len() {
+            // Case-insensitive prefix match — byte-level, no alloc.
+            let prefix_match = part[..word_bytes.len()]
+                .iter()
+                .zip(word_bytes.iter())
+                .all(|(a, b)| a.eq_ignore_ascii_case(b));
+            if prefix_match {
+                if part.len() == word_bytes.len() {
+                    return true;
+                }
+                if is_word_boundary_after(part[word_bytes.len()]) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Checks whether a payload contains command injection structure.

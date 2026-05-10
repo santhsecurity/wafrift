@@ -155,7 +155,13 @@ impl LearningCache {
     pub fn keys(&self) -> Vec<CacheKey> {
         self.entries
             .keys()
-            .filter_map(|s| serde_json::from_str(s).ok())
+            .filter_map(|s| match serde_json::from_str(s) {
+                Ok(k) => Some(k),
+                Err(e) => {
+                    tracing::warn!(key = %s, error = %e, "learning cache key parse failed");
+                    None
+                }
+            })
             .collect()
     }
 }

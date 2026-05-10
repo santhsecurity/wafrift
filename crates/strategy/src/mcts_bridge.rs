@@ -103,7 +103,13 @@ impl WafRiftEnv {
             .as_ref()
             .filter(|_| crate::strategy::is_text_payload(&req))
             .and_then(|body| {
-                let body_str = std::str::from_utf8(body).ok()?;
+                let body_str = match std::str::from_utf8(body) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "MCTS bridge skipped non-UTF-8 body");
+                        return None;
+                    }
+                };
                 // Extract parameter values for mutation
                 let payload = body_str
                     .split('&')

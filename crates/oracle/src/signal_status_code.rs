@@ -41,7 +41,19 @@ pub fn classify_status_code(code: u16) -> (Verdict, Signal) {
             // provisional until body markers resolve it.
             (Verdict::rate_limited(vec![signal.clone()]), signal)
         }
-        _ => (Verdict::allowed(vec![signal.clone()]), signal),
+        // Catch-all: be conservative. Unknown 4xx codes are more likely to be
+        // WAF blocks than benign responses; unknown 5xx are server errors.
+        // 1xx/2xx/3xx that weren't matched above are treated as allowed.
+        other => {
+            let verdict = if (400..=499).contains(&other) {
+                Verdict::blocked(vec![signal.clone()])
+            } else if (500..=599).contains(&other) {
+                Verdict::server_error(vec![signal.clone()])
+            } else {
+                Verdict::allowed(vec![signal.clone()])
+            };
+            (verdict, signal)
+        }
     }
 }
 
@@ -141,10 +153,29 @@ mod tests {
     }
 
     #[test]
-    fn unknown_codes_are_allowed() {
-        for code in [100, 301, 302, 400, 404, 409, 411, 416, 451, 501, 505, 599] {
+    fn unknown_2xx_and_3xx_are_allowed() {
+        for code in [100, 301, 302, 303, 307] {
             let (v, _) = classify_status_code(code);
-            assert!(v.is_allowed(), "{code} should be allowed by default");
+            assert!(v.is_allowed(), "{code} should be allowed");
+        }
+    }
+
+    #[test]
+    fn unknown_4xx_are_blocked() {
+        for code in [400, 404, 409, 411, 416, 451] {
+            let (v, _) = classify_status_code(code);
+            assert!(v.is_blocked(), "{code} should be blocked (unknown 4xx)");
+        }
+    }
+
+    #[test]
+    fn unknown_5xx_are_server_error() {
+        for code in [501, 505, 599] {
+            let (v, _) = classify_status_code(code);
+            assert!(
+                matches!(v, Verdict::ServerError { .. }),
+                "{code} should be server_error"
+            );
         }
     }
 }

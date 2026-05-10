@@ -83,6 +83,25 @@ pub fn active_probe(
     }
 }
 
+/// Weight when 100 % of probes are blocked.
+const ALL_BLOCKED_WEIGHT: f64 = 0.50;
+/// Weight when ≥50 % of probes are blocked.
+const MAJORITY_BLOCKED_WEIGHT: f64 = 0.30;
+/// Threshold for "majority" of probes blocked.
+const MAJORITY_BLOCKED_THRESHOLD: f64 = 0.50;
+/// Weight for high average drift (≥0.6).
+const HIGH_DRIFT_WEIGHT: f64 = 0.30;
+/// Weight for moderate average drift (≥0.4).
+const MODERATE_DRIFT_WEIGHT: f64 = 0.20;
+/// Threshold for high average drift.
+const HIGH_DRIFT_THRESHOLD: f64 = 0.60;
+/// Threshold for moderate average drift.
+const MODERATE_DRIFT_THRESHOLD: f64 = 0.40;
+/// Weight for uniform 4xx status across all probes.
+const UNIFORM_BLOCK_STATUS_WEIGHT: f64 = 0.10;
+/// Weight when the title tag changes on every probe.
+const UNIVERSAL_TITLE_CHANGE_WEIGHT: f64 = 0.20;
+
 /// Classify a collection of probe results into likely WAF detections.
 ///
 /// The classifier looks at drift patterns across the probe set and
@@ -100,20 +119,20 @@ pub fn classify_drift(results: &[ProbeResult]) -> Vec<DetectedWaf> {
     let block_rate = blocked_count as f64 / total as f64;
 
     if block_rate >= 1.0 {
-        score += 0.5;
+        score += ALL_BLOCKED_WEIGHT;
         indicators.push("all probes blocked".into());
-    } else if block_rate >= 0.5 {
-        score += 0.3;
+    } else if block_rate >= MAJORITY_BLOCKED_THRESHOLD {
+        score += MAJORITY_BLOCKED_WEIGHT;
         indicators.push("majority of probes blocked".into());
     }
 
     // High average drift score
     let avg_drift: f64 = results.iter().map(|r| r.drift.score).sum::<f64>() / total as f64;
-    if avg_drift >= 0.6 {
-        score += 0.3;
+    if avg_drift >= HIGH_DRIFT_THRESHOLD {
+        score += HIGH_DRIFT_WEIGHT;
         indicators.push(format!("high avg drift {:.0}%", avg_drift * 100.0));
-    } else if avg_drift >= 0.4 {
-        score += 0.2;
+    } else if avg_drift >= MODERATE_DRIFT_THRESHOLD {
+        score += MODERATE_DRIFT_WEIGHT;
         indicators.push(format!("moderate avg drift {:.0}%", avg_drift * 100.0));
     }
 
@@ -125,7 +144,7 @@ pub fn classify_drift(results: &[ProbeResult]) -> Vec<DetectedWaf> {
         .flatten()
         && status >= 400
     {
-        score += 0.1;
+        score += UNIFORM_BLOCK_STATUS_WEIGHT;
         indicators.push(format!("uniform block status {status}"));
     }
 
@@ -135,7 +154,7 @@ pub fn classify_drift(results: &[ProbeResult]) -> Vec<DetectedWaf> {
         .filter(|r| r.drift.changed.contains(&"title_tag"))
         .count();
     if title_changes == total {
-        score += 0.2;
+        score += UNIVERSAL_TITLE_CHANGE_WEIGHT;
         indicators.push("title changed on every probe".into());
     }
 

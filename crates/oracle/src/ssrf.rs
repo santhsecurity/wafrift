@@ -139,10 +139,19 @@ fn has_ssrf_structure(payload: &str) -> bool {
         return false;
     }
 
-    // Check for SSRF indicator hosts
-    let has_indicator_host = ssrf_indicator_hosts()
-        .iter()
-        .any(|host| contains_ascii_insensitive(payload, host));
+    // Check for SSRF indicator hosts. Single-character indicator
+    // tokens (the legitimate "0" → "0.0.0.0" shorthand) MUST be
+    // matched as a complete host token, not a substring — otherwise
+    // any URL containing the digit '0' (e.g. /page?id=100) trips
+    // the indicator. Multi-character indicators are still substring
+    // matched for compatibility with the existing rule shapes.
+    let has_indicator_host = ssrf_indicator_hosts().iter().any(|host| {
+        if host.len() <= 2 {
+            host_is_complete_token(payload, host)
+        } else {
+            contains_ascii_insensitive(payload, host)
+        }
+    });
 
     // Check for private IP prefixes
     let has_private_ip = private_ip_prefixes().iter().any(|prefix| {

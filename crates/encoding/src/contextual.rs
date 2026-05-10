@@ -272,6 +272,46 @@ pub fn validate_in_context(
                 }
             }
         }
+        // Contexts below have no validation rules yet. Adding an explicit
+        // arm for each ensures the compiler warns us when a new variant is
+        // added so we can decide whether it needs validation.
+        InjectionContext::PlainBody => {
+            // Plain body accepts any byte sequence; nothing to validate.
+        }
+        InjectionContext::XmlCdata => {
+            // TODO: validate that payload doesn't contain `]]>` which
+            // would terminate the CDATA section prematurely.
+        }
+        InjectionContext::XmlText => {
+            // TODO: validate that payload doesn't contain `<` or `&`
+            // unless they are proper entities.
+        }
+        InjectionContext::HtmlAttribute => {
+            // TODO: validate that payload doesn't contain unescaped quotes
+            // matching the attribute delimiter.
+        }
+        InjectionContext::HtmlText => {
+            // TODO: validate that payload doesn't contain `<` or `&`
+            // unless they are proper HTML entities.
+        }
+        InjectionContext::UrlQuery | InjectionContext::UrlPath | InjectionContext::UrlFragment => {
+            // URL components are validated by percent-encoding step later;
+            // raw payload can contain any bytes here.
+        }
+        InjectionContext::HeaderValue => {
+            // Header values are validated by the header obfuscation layer;
+            // CRLF injection is guarded at the transport level.
+        }
+        InjectionContext::CookieValue => {
+            // Cookie values accept most printable ASCII; validation is
+            // handled by the cookie encoding layer.
+        }
+        InjectionContext::MultipartField | InjectionContext::MultipartFileName => {
+            // Multipart boundaries are managed by the form encoder;
+            // individual field values have no additional constraints.
+        }
+        // InjectionContext is #[non_exhaustive]; future variants default to
+        // no validation until explicit rules are added.
         _ => {}
     }
     Ok(())

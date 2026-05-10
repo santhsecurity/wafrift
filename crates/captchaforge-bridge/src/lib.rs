@@ -105,7 +105,9 @@ pub async fn solve_in_browser(
              document.open(); document.write({escaped}); document.close();",
             target_url.replace('\'', "\\'")
         );
-        page.evaluate(setup).await.ok(); // best-effort
+        if let Err(e) = page.evaluate(setup).await {
+            tracing::warn!(error = %e, "captchaforge-bridge page.evaluate best-effort failed");
+        }
 
         let info = captchaforge::detect::detect(&page)
             .await

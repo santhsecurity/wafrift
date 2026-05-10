@@ -90,9 +90,8 @@ pub(crate) async fn run_scan(
     let max_mutations = max_mutations_for_level(args.level);
 
     // Gene bank: re-order strategies so historically proven ones go first.
-    let gene_seed_names: Vec<String> = GeneBank::open_default()
-        .ok()
-        .and_then(|mut bank| {
+    let gene_seed_names: Vec<String> = match GeneBank::open_default() {
+        Ok(mut bank) => {
             // Try "Unknown" as fallback since WAF detection hasn't run yet.
             // We'll also re-check after detection.
             let all_names: Vec<String> = bank
@@ -105,12 +104,20 @@ pub(crate) async fn run_scan(
                 })
                 .collect();
             if all_names.is_empty() {
-                None
+                vec![]
             } else {
-                Some(all_names)
+                all_names
             }
-        })
-        .unwrap_or_default();
+        }
+        Err(e) => {
+            eprintln!(
+                "{} {}",
+                "Gene bank warning:".yellow().bold(),
+                format!("failed to open: {e}")
+            );
+            vec![]
+        }
+    };
 
     if !gene_seed_names.is_empty() {
         // Move strategies that match gene bank winners to the front.
@@ -276,7 +283,17 @@ pub(crate) async fn run_scan(
     let advisor_strategies = evasion_plan.encoding_strategies.clone();
 
     // Learning cache: load historical winning pipelines.
-    let mut learning_cache = LearningCache::open_default().ok();
+    let mut learning_cache = match LearningCache::open_default() {
+        Ok(cache) => Some(cache),
+        Err(e) => {
+            eprintln!(
+                "{} {}",
+                "Learning cache warning:".yellow().bold(),
+                format!("failed to open: {e}")
+            );
+            None
+        }
+    };
     let payload_type_str = format!("{payload_type:?}");
     if let Some(ref cache) = learning_cache {
         let key = CacheKey::new(&waf_name, &payload_type_str);
@@ -449,7 +466,17 @@ pub(crate) async fn run_scan(
                         encoding::all_strategies()
                             .iter()
                             .find(|s| s.as_str() == enc_name.as_str())
-                            .and_then(|s| encoding::encode(&args.payload, *s).ok())
+                            .and_then(|s| match encoding::encode(&args.payload, *s) {
+                                Ok(enc) => Some(enc),
+                                Err(e) => {
+                                    eprintln!(
+                                        "{} {}",
+                                        "Encoding warning:".yellow().bold(),
+                                        format!("{enc_name} failed: {e}")
+                                    );
+                                    None
+                                }
+                            })
                     }
                     _ => None,
                 };
