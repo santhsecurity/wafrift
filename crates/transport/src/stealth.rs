@@ -209,27 +209,88 @@ mod imp {
             body: Option<&[u8]>,
             max_body: usize,
         ) -> Result<StealthResponse, StealthError> {
-            // Audit (2026-05-10): rquest 5.x doesn't expose a custom-
-            // resolver hook the way reqwest does, so we cannot install
-            // BogonFilteringResolver here. As a defence-in-depth, we
-            // upfront-reject any URL whose host is a literal IP that
-            // falls in the bogon set — that closes the most common
-            // operator footgun (typing 127.0.0.1 with --tls-impersonate
-            // on by mistake) and the all-too-easy direct-IMDS attack
-            // (169.254.169.254). DNS-rebinding via hostnames is still
-            // the caller's responsibility on this code path; document
-            // the gap loudly in the README of any consumer of stealth.
-            if let Ok(parsed) = url.parse::<rquest::Url>()
-                && let Some(host) = parsed.host_str()
-                && let Ok(ip) = host.parse::<std::net::IpAddr>()
-                && is_bogon_ip(ip)
-            {
+            // Audit (2026-05-10): rquest 5.x DOES expose
+            // .resolve_to_addrs() on ClientBuilder, but only at builder
+            // time — not per-request. We use it to close the
+            // hostname-DNS-rebinding gap by:
+            //   1. Pre-resolving the host via tokio::net::lookup_host.
+            //   2. Filtering out every bogon address (private,
+            //      loopback, CGN, Teredo, IMDS, etc.).
+            //   3. If anything remains, building a per-request rquest
+            //      client whose resolver is pinned to the validated
+            //      addresses — rquest never does its own DNS lookup,
+            //      so a record flip between our check and rquest's
+            //      original lookup is impossible.
+            //   4. If NOTHING remains, return Err — every advertised
+            //      address was a bogon and we refuse to fetch.
+            //
+            // Connection reuse is sacrificed (one client per request
+            // on this path), but stealth is typically used for one
+            // request per target during scan, so the win is much
+            // bigger than the loss.
+            //
+            // The literal-IP check stays as the cheap fast-path
+            // (avoids the DNS round-trip when the URL is already an IP).
+            let parsed = url
+                .parse::<rquest::Url>()
+                .map_err(|e| StealthError::Transport(format!("invalid URL: {e}")))?;
+            let host = parsed
+                .host_str()
+                .ok_or_else(|| StealthError::Transport("URL has no host".to_string()))?
+                .to_string();
+            let port = parsed.port_or_known_default().unwrap_or(443);
+
+            // Fast-path literal-IP check.
+            if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+                if is_bogon_ip(ip) {
+                    return Err(StealthError::Transport(format!(
+                        "stealth refuses literal-IP upstream {ip} (private/loopback/CGN/Teredo). \
+                         Route via reqwest + --allow-private-upstream for intentional lab targets."
+                    )));
+                }
+                // Literal IP, not a bogon — just use the existing client.
+                return self
+                    .send_inner(&self.inner, method, url, headers, body, max_body)
+                    .await;
+            }
+
+            // Hostname path: pre-resolve + filter + build per-request client.
+            let lookups = tokio::net::lookup_host((host.as_str(), port))
+                .await
+                .map_err(|e| {
+                    StealthError::Transport(format!("DNS resolution failed for {host}: {e}"))
+                })?;
+            let validated: Vec<std::net::SocketAddr> = lookups
+                .into_iter()
+                .filter(|sa| !is_bogon_ip(sa.ip()))
+                .collect();
+            if validated.is_empty() {
                 return Err(StealthError::Transport(format!(
-                    "stealth refuses literal-IP upstream {ip} (private/loopback/CGN/Teredo). \
-                     If you intentionally target a lab address, route via reqwest with \
-                     --allow-private-upstream instead."
+                    "stealth refused {host}: every resolved address is in the bogon set \
+                     (DNS rebinding refused / IMDS / RFC1918)"
                 )));
             }
+            // Build per-request client with rquest's resolver pinned
+            // to our validated addresses. rquest will then use these
+            // exact SocketAddrs without any further DNS lookup.
+            let pinned = rquest::Client::builder()
+                .emulation(profile_to_rquest(self.profile))
+                .resolve_to_addrs(host.as_str(), &validated)
+                .build()
+                .map_err(|e| StealthError::Transport(e.to_string()))?;
+            self.send_inner(&pinned, method, url, headers, body, max_body)
+                .await
+        }
+
+        async fn send_inner(
+            &self,
+            client: &rquest::Client,
+            method: &str,
+            url: &str,
+            headers: &[(String, String)],
+            body: Option<&[u8]>,
+            max_body: usize,
+        ) -> Result<StealthResponse, StealthError> {
             let method = match method.to_ascii_uppercase().as_str() {
                 "GET" => rquest::Method::GET,
                 "POST" => rquest::Method::POST,
@@ -244,7 +305,7 @@ mod imp {
                     )));
                 }
             };
-            let mut req = self.inner.request(method, url);
+            let mut req = client.request(method, url);
             for (k, v) in headers {
                 req = req.header(k.as_str(), v.as_str());
             }

@@ -2928,6 +2928,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "psl"
+version = "2.1.208"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bde51f827dca976f8f9a8c91329a3193114dc076b8012a1ee3624f1588c3582"
+dependencies = [
+ "psl-types",
+]
+
+[[package]]
 name = "psl-types"
 version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4896,6 +4905,7 @@ dependencies = [
  "futures-util",
  "http",
  "proptest",
+ "psl",
  "regex",
  "reqwest 0.12.28",
  "rquest",

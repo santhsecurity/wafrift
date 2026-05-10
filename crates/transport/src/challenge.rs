@@ -792,18 +792,26 @@ pub fn extract_clearance_cookie_scoped(
                 if k.trim().eq_ignore_ascii_case("Domain") {
                     let v = v.strip_prefix('.').unwrap_or(v);
                     // Audit (2026-05-10): reject Domain values that
-                    // contain `:`. RFC 6265 §5.2.3 makes Domain a
-                    // hostname, never a host:port — but the previous
-                    // code silently kept the `:port` suffix, enabling
-                    // domain-confusion (cookie scoped to `evil.com:8080`
-                    // matched a request to `evil.com`). Also reject
-                    // anything containing `/`, `?`, or whitespace.
-                    let domain_ok = !v.is_empty()
+                    // contain `:` (port), `/`, `?`, whitespace, OR
+                    // whose effective TLD equals the value itself
+                    // (PSL guard). RFC 6265 §5.2.3 makes Domain a
+                    // hostname; pre-fix the parser silently accepted
+                    // `Domain=evil.com:8080` (matched bare `evil.com`)
+                    // and `Domain=co.uk` (would replay on EVERY
+                    // co.uk site — supercookie). The PSL check
+                    // catches the supercookie case across all 2000+
+                    // public suffixes the `psl` crate ships.
+                    let shape_ok = !v.is_empty()
                         && !v.contains(':')
                         && !v.contains('/')
                         && !v.contains('?')
                         && !v.chars().any(char::is_whitespace);
-                    if domain_ok {
+                    let psl_ok = if shape_ok {
+                        is_safe_cookie_domain(v)
+                    } else {
+                        false
+                    };
+                    if psl_ok {
                         scope.domain = Some(v.to_string());
                     }
                 } else if k.trim().eq_ignore_ascii_case("Path")
@@ -825,6 +833,36 @@ fn is_safe_cookie_value(value: &str) -> bool {
     !value
         .bytes()
         .any(|b| b == b'\r' || b == b'\n' || b == 0 || b == b';')
+}
+
+/// True if `domain` is a safe Cookie Domain attribute value — i.e.
+/// it is NOT itself a public suffix (eTLD). Pre-fix `Domain=co.uk`,
+/// `Domain=com`, `Domain=github.io`, etc. were silently accepted and
+/// would let a captured cookie replay on EVERY site under that
+/// suffix (the classic "supercookie" vulnerability documented by
+/// RFC 6265 §5.2.3 and Mozilla's PSL project).
+///
+/// Uses the embedded Public Suffix List from the `psl` crate so we
+/// don't ship a hardcoded eTLD blocklist that goes stale.
+fn is_safe_cookie_domain(domain: &str) -> bool {
+    use psl::Psl;
+    // psl operates on bytes; non-ASCII Domains are punycode by spec.
+    let bytes = domain.as_bytes();
+    let list = psl::List;
+    // suffix() returns the eTLD portion (e.g. `co.uk` for
+    // `bbc.co.uk`). When the Domain value IS the eTLD, the suffix
+    // bytes equal the input bytes — that's the supercookie case.
+    match list.suffix(bytes) {
+        Some(suffix) => {
+            // Reject if Domain equals the eTLD exactly.
+            suffix.as_bytes() != bytes
+        }
+        None => {
+            // Couldn't parse — be conservative and reject. Real
+            // cookies always have a parseable hostname.
+            false
+        }
+    }
 }
 
 /// Decide what to do given a verdict-classified challenge response.

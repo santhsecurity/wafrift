@@ -163,57 +163,83 @@ const MARKDOWN_PAYLOADS: &[&str] = &[
 // ──────────────────────────────────────────────
 
 /// Check whether the payload contains any XSS-relevant signals.
+///
+/// Audit (2026-05-10): pre-fix this fired on benign substrings like
+/// `window.onerror` in code documentation, `confirm(...)` in API
+/// docs, or HTML tag names in security-write-ups. The mutator then
+/// emitted XSS variants from non-XSS input — wasted work the
+/// scanner reported as if it were a real probe. Now we score
+/// signals: STRONG (a real `<tag attr=` or `javascript:` URL) is
+/// worth 2 points, WEAK (bare exec function name without
+/// surrounding tag context, lone event-handler keyword) is worth 1.
+/// Need >= 2 to count. A docstring containing only `confirm(` no
+/// longer triggers; a docstring containing `<script>confirm(1)` does.
 fn has_xss_signals(payload: &str) -> bool {
     let lower = payload.to_ascii_lowercase();
-    [
+
+    let mut score = 0u32;
+
+    // STRONG signals — anything that requires a markup or JS-URL
+    // context to appear in source text. Two points each.
+    let strong = [
         "<script",
-        "</script",
-        "onerror",
-        "onload",
-        "onclick",
-        "onfocus",
-        "onmouseover",
-        "alert(",
-        "confirm(",
-        "prompt(",
-        "javascript:",
-        "<img",
+        "</script>",
+        "<img ",
         "<svg",
         "<iframe",
         "<body",
-        "document.cookie",
-        "eval(",
-        "onbegin",
-        "ontoggle",
-        "onstart",
-        "srcdoc",
         "<math",
         "<mtext",
         "<details",
-        "<video",
-        "<audio",
+        "<video ",
+        "<audio ",
         "<marquee",
-        "<object",
+        "<object ",
         "<form",
-        "<select",
         "<textarea",
         "<keygen",
         "<embed",
-        "<style",
-        "<link",
-        "<div",
-        "<a ",
-        "<table",
-        "<caption",
         "<noscript",
         "<foreignobject",
+        "javascript:",
+        "data:text/html",
         "[x](javascript:",
         "![x](javascript:",
         "onerror=",
         "onload=",
-    ]
-    .iter()
-    .any(|sig| lower.contains(sig))
+        "onclick=",
+        "onfocus=",
+        "onmouseover=",
+        "onbegin=",
+        "ontoggle=",
+        "onstart=",
+        "srcdoc=",
+    ];
+    for sig in &strong {
+        if lower.contains(sig) {
+            score = score.saturating_add(2);
+        }
+    }
+
+    // WEAK signals — function-name substrings that show up in
+    // perfectly innocent contexts (API docs, security write-ups,
+    // log lines). One point each. On their own, NOT enough; combine
+    // with a strong signal or each other to cross the threshold.
+    let weak = [
+        "alert(",
+        "confirm(",
+        "prompt(",
+        "eval(",
+        "document.cookie",
+        "window.location",
+    ];
+    for sig in &weak {
+        if lower.contains(sig) {
+            score = score.saturating_add(1);
+        }
+    }
+
+    score >= 2
 }
 
 /// Generate grammar-aware mutations of an XSS payload.

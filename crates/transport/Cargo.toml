@@ -25,6 +25,7 @@ bytes = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
 urlencoding = { workspace = true }
+psl = "2"
 wafrift-pool = { workspace = true, optional = true }
 rquest = { workspace = true, optional = true }
 # Companion crate carrying the actual browser-emulation profiles
