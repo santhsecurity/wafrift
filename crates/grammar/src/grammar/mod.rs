@@ -413,17 +413,23 @@ pub fn mutate_as(
                     });
                 }
             }
+            // Defense-in-depth: never exceed the documented contract.
+            results.truncate(max_mutations);
             results
         }
-        PayloadType::Xss => xss::mutate(payload, max_mutations)
-            .into_iter()
-            .map(|m| GrammarMutation {
-                payload: m.payload,
-                payload_type: PayloadType::Xss,
-                description: m.description,
-                rules_applied: m.rules_applied,
-            })
-            .collect(),
+        PayloadType::Xss => {
+            let mut results: Vec<GrammarMutation> = xss::mutate(payload, max_mutations)
+                .into_iter()
+                .map(|m| GrammarMutation {
+                    payload: m.payload,
+                    payload_type: PayloadType::Xss,
+                    description: m.description,
+                    rules_applied: m.rules_applied,
+                })
+                .collect();
+            results.truncate(max_mutations);
+            results
+        }
         PayloadType::CommandInjection => {
             let mut results = Vec::new();
             let per = max_mutations / 2 + max_mutations % 2;
