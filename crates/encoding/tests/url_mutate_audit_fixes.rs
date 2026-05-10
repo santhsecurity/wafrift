@@ -135,3 +135,84 @@ fn last_path_segment_without_pre_encoding_still_works() {
         "clean `.php` must encode to %2E.php; got: {out}"
     );
 }
+
+// ── MEDIUM: full URL input must not be mutated ───────────────────
+
+#[test]
+fn full_url_with_scheme_is_passed_through_unchanged() {
+    let cfg = UrlMutateConfig {
+        mutate_query_values: true,
+        mutate_last_path_segment: true,
+        strategy: UrlStrategy::PercentEncodeAggressive,
+    };
+    let input = "https://example.com/p?q=1";
+    let (out, techniques) = mutate_url(input, &cfg);
+    assert_eq!(out, input, "full URLs must pass through unchanged");
+    assert!(
+        techniques.is_empty(),
+        "no techniques should fire on a rejected full URL"
+    );
+}
+
+#[test]
+fn protocol_relative_url_is_passed_through_unchanged() {
+    let cfg = UrlMutateConfig::default();
+    let input = "//cdn.example.com/asset.js?v=1";
+    let (out, techniques) = mutate_url(input, &cfg);
+    assert_eq!(out, input);
+    assert!(techniques.is_empty());
+}
+
+// ── MEDIUM: + in query value is form-decoded to space first ──────
+
+#[test]
+fn plus_in_query_value_is_decoded_to_space_before_mutation() {
+    let cfg = UrlMutateConfig {
+        mutate_query_values: true,
+        mutate_last_path_segment: false,
+        strategy: UrlStrategy::PercentEncodeAggressive,
+    };
+    // `q=1+1` form-decoded → `q=1 1` → aggressive-encoded → `q=1%201`
+    let (out, _) = mutate_url("/?q=1+1", &cfg);
+    assert!(
+        out.contains("%20"),
+        "+ must form-decode to space (which then encodes as %20); got: {out}"
+    );
+    assert!(
+        !out.contains("%2B"),
+        "+ must NOT be re-encoded as a literal %2B; got: {out}"
+    );
+}
+
+// ── MEDIUM: && separators are preserved (not collapsed) ──────────
+
+#[test]
+fn double_ampersand_preserves_empty_parameter() {
+    let cfg = UrlMutateConfig {
+        mutate_query_values: true,
+        mutate_last_path_segment: false,
+        strategy: UrlStrategy::PercentEncodeAggressive,
+    };
+    // `a=1&&b=2` must stay `a=1&&b=2` (the empty middle pair is
+    // significant to PHP/Rails parsers). The `&&` is preserved, but
+    // value mutation still applies to the non-empty pairs.
+    let (out, _) = mutate_url("/?a=1&&b=2", &cfg);
+    assert!(
+        out.contains("&&") || out.starts_with("/?a=1&&b="),
+        "consecutive ampersands must be preserved; got: {out}"
+    );
+}
+
+#[test]
+fn leading_ampersand_in_query_is_preserved() {
+    let cfg = UrlMutateConfig {
+        mutate_query_values: true,
+        mutate_last_path_segment: false,
+        strategy: UrlStrategy::PercentEncodeAggressive,
+    };
+    let (out, _) = mutate_url("/?&a=1", &cfg);
+    assert!(
+        out.starts_with("/?&"),
+        "leading & must be preserved; got: {out}"
+    );
+}

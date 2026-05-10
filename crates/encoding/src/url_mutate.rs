@@ -119,6 +119,20 @@ impl UrlStrategy {
 /// Never panics, never returns empty for non-empty input.
 #[must_use]
 pub fn mutate_url(path_and_query: &str, cfg: &UrlMutateConfig) -> (String, Vec<&'static str>) {
+    // Reject full URLs (with scheme://host/...) at the boundary —
+    // mutate_url's contract is "path-and-query only". Pre-fix a full
+    // URL got split on '?' such that the scheme + host leaked into
+    // the "path" and got mutated, e.g. `https://example.com/p?q=1`
+    // had `https://example.com/p` percent-encoded as the last path
+    // segment. The caller almost certainly meant to pass the
+    // path-and-query directly; pass-through is the safe behaviour.
+    if path_and_query.starts_with("http://")
+        || path_and_query.starts_with("https://")
+        || path_and_query.starts_with("//")
+    {
+        return (path_and_query.to_string(), Vec::new());
+    }
+
     // Split off any #fragment FIRST so query mutation can't encode the
     // '#' delimiter and destroy fragment routing. Pre-fix the
     // mutator turned `/p?q=1#frag` into `/p?q=1%23frag`, which the
@@ -191,11 +205,23 @@ fn mutate_last_segment(path: &str, strategy: UrlStrategy) -> Option<String> {
 
 /// Mutate every `name=value` pair, leaving `name` alone and mutating
 /// `value`. Pairs without `=` (bare flags) are passed through.
+///
+/// Empty pairs (consecutive `&&` separators) are PRESERVED rather
+/// than collapsed — some upstream frameworks (e.g. PHP, Rails 5+)
+/// treat them as distinct empty parameters, so collapsing changes
+/// the parsed parameter count.
+///
+/// `+` in a query value is interpreted as space per RFC 1866 form
+/// encoding before the strategy is applied — otherwise `q=1+1`
+/// would be mutated as if `+` were a literal plus sign.
 fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
     let mut out = Vec::with_capacity(8);
     let mut applied = false;
     for pair in query.split('&') {
         if pair.is_empty() {
+            // Preserve `&&` so the upstream sees the original
+            // parameter count.
+            out.push(String::new());
             continue;
         }
         if let Some((name, value)) = pair.split_once('=') {
@@ -203,7 +229,11 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
                 out.push(format!("{name}="));
                 continue;
             }
-            let decoded = percent_decode_lossy(value);
+            // Form-decode `+` to space BEFORE percent-decoding so
+            // application/x-www-form-urlencoded semantics survive
+            // the mutation pipeline.
+            let form_decoded = value.replace('+', " ");
+            let decoded = percent_decode_lossy(&form_decoded);
             let mutated = strategy.apply(&decoded);
             out.push(format!("{name}={mutated}"));
             applied = true;
