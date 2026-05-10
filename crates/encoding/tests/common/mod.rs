@@ -1,5 +1,7 @@
 //! Shared fixtures and explicit output caps for mutator integration tests.
 
+#![allow(dead_code)]
+
 use wafrift_encoding::encoding::strategy::Strategy;
 
 pub const ONE_MB: usize = 1024 * 1024;
@@ -48,6 +50,8 @@ pub fn max_encoded_output_bytes(strategy: Strategy, input_len: usize) -> usize {
         Strategy::UnmagicQuotes => input_len.saturating_mul(6),
         Strategy::FullwidthEncode => input_len.saturating_mul(5),
         Strategy::HomoglyphEncode => input_len.saturating_mul(5),
+        #[allow(unreachable_patterns)]
+        _ => input_len.saturating_mul(40).saturating_add(1_048_576),
     }
 }
 
