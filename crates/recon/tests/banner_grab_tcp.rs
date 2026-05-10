@@ -75,15 +75,8 @@ async fn smtp_multiline_negative_still_classifies_first_line() {
 }
 
 #[tokio::test]
-async def tcp_connect_deadline_returns_actionable_err() {
-    // No server listening on this port on loopback — should fail quickly with connect deadline.
-    let cfg = ActiveProbeConfig {
-        tcp_connect_timeout: Duration::from_millis(80),
-        tcp_read_timeout: Duration::from_secs(2),
-        max_banner_bytes: 128,
-        ..ActiveProbeConfig::default()
-    };
+async fn closed_port_negative_returns_io_not_panic() {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 1));
-    let err = probe_tcp_banner(addr, &cfg).await.unwrap_err();
-    assert!(matches!(err, ReconProbeError::TcpConnectDeadline { .. }));
+    let err = probe_tcp_banner(addr, &tcp_config()).await.unwrap_err();
+    assert!(matches!(err, ReconProbeError::Io(_)));
 }

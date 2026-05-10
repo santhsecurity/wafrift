@@ -43,15 +43,15 @@ pub async fn probe_tcp_banner(
         let mut total = 0usize;
         loop {
             if total >= max {
-                break Ok(total);
+                return Ok::<usize, std::io::Error>(total);
             }
             let n = stream.read(&mut buf[total..]).await?;
             if n == 0 {
-                break Ok(total);
+                return Ok(total);
             }
             total += n;
             if buf[..total].contains(&b'\n') {
-                break Ok(total);
+                return Ok(total);
             }
         }
     };

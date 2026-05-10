@@ -88,15 +88,15 @@ impl HeaderRules {
             let Some(value) = headers.get(rule.header_key.as_str()) else {
                 continue;
             };
-            if let Some(prefix) = &rule.value_prefix {
-                if !starts_with_ascii_ci(value, prefix) {
-                    continue;
-                }
+            if let Some(prefix) = &rule.value_prefix
+                && !starts_with_ascii_ci(value, prefix)
+            {
+                continue;
             }
-            if let Some(needle) = &rule.value_contains {
-                if !contains_ascii_ci(value, needle) {
-                    continue;
-                }
+            if let Some(needle) = &rule.value_contains
+                && !contains_ascii_ci(value, needle)
+            {
+                continue;
             }
             tags.push(StackTag {
                 family: rule.family,
