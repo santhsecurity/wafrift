@@ -4,7 +4,7 @@
 
 use ed25519_dalek::{Signature, SigningKey as Ed25519SigningKey, Verifier, VerifyingKey};
 use rand_core::OsRng;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 /// Hex-encoded verifying (public) key. 64 hex chars.
@@ -54,10 +54,31 @@ pub enum RegistryError {
 ///
 /// Wraps the keypair so `sign()` can produce a signature and the
 /// matching public key is recoverable via [`Self::verifying_key_hex`].
-#[derive(Debug, Serialize, Deserialize)]
+///
+/// `Deserialize` is implemented manually and routes through
+/// [`Self::from_secret_hex`] so loading a key from JSON cannot produce
+/// a `SigningKey` with malformed hex (which would panic later inside
+/// `verifying_key_hex` / `sign_bytes` on the constructor-checked
+/// unwraps). The derive would otherwise accept any string and arm a
+/// panic-on-first-use bomb.
+#[derive(Debug, Serialize)]
 pub struct SigningKey {
     /// Hex-encoded 32-byte secret. NEVER log this.
     secret_hex: String,
+}
+
+impl<'de> Deserialize<'de> for SigningKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            secret_hex: String,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Self::from_secret_hex(&wire.secret_hex).map_err(serde::de::Error::custom)
+    }
 }
 
 impl SigningKey {
