@@ -365,14 +365,6 @@ fn build_mcts_result(env: WafRiftEnv, config: &EvasionConfig) -> Option<EvasionR
 ///   Use when caller wants to dictate technique order from outside.
 /// - `evade_intelligent` — heuristic pipeline + the full
 ///   `IntelligenceLoop` (differential probing + advisor). Heaviest.
-/// Bodies above this threshold skip MCTS and use the classic heuristic
-/// pipeline. MCTS runs 500 iterations and each iteration clones the
-/// full request, so on a 100 KB POST the search alone allocates tens
-/// of MB and consumes seconds of CPU; on a 1 MB body it OOMs the
-/// proxy. Real injection payloads are KB-range — anything larger is a
-/// file upload / JSON blob where header & URL evasion is enough.
-pub const MCTS_BODY_BUDGET: usize = 16 * 1024;
-
 pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig) -> EvasionResult {
     // Without prior block signal, there's nothing for MCTS to learn from yet.
     // Use the classic pipeline for the first request to a new host.
@@ -390,6 +382,14 @@ pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig)
     // MCTS bailed (e.g., empty action space) — fall back to classic evade.
     evade(request, state, config)
 }
+
+/// Bodies above this threshold skip MCTS and use the classic heuristic
+/// pipeline. MCTS runs 500 iterations and each iteration clones the
+/// full request, so on a 100 KB POST the search alone allocates tens
+/// of MB and consumes seconds of CPU; on a 1 MB body it OOMs the
+/// proxy. Real injection payloads are KB-range — anything larger is a
+/// file upload / JSON blob where header & URL evasion is enough.
+pub const MCTS_BODY_BUDGET: usize = 16 * 1024;
 
 #[must_use]
 pub fn evade_adaptive(
@@ -589,7 +589,10 @@ fn apply_layered_encoding(
         return;
     }
     let Some(ref body) = req.body else { return };
-    let body_str = String::from_utf8_lossy(body);
+    let body_str = match std::str::from_utf8(body) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
 
     let pairs: Vec<(String, String)> = body_str
         .split('&')
