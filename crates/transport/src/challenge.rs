@@ -439,15 +439,36 @@ pub fn dispatch(host: &str, kind: ChallengeKind, store: &ChallengeStore) -> Solv
     }
     if kind.is_cookie_solvable() {
         // We don't (yet) auto-solve — wait for an external sensor /
-        // browser to populate the store.
+        // browser to populate the store. Add ±25% jitter to the
+        // 2-second base so N concurrent waiters for the same host
+        // don't all retry in the same instant (thundering herd
+        // against the upstream after the cookie lands).
         return SolveAction::Wait {
-            delay: Duration::from_secs(2),
+            delay: jittered_wait(Duration::from_secs(2)),
         };
     }
     SolveAction::EscalateToOperator {
         kind,
         reason: format!("{} requires interactive solve", kind.label()),
     }
+}
+
+/// Apply ±25% pseudo-random jitter to `base` so concurrent callers
+/// scheduling the same backoff don't all retry at the same wall
+/// time. Uses Instant::now() nanos as the entropy source so we
+/// don't pull in a dedicated RNG dep on this hot path.
+#[must_use]
+fn jittered_wait(base: Duration) -> Duration {
+    use std::time::SystemTime;
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0);
+    // jitter ∈ [-25%, +25%]
+    let half_range = base.as_millis() as u64 / 2; // 25% of base in ms
+    let offset = (nanos % (half_range.saturating_mul(2).max(1))) as i64 - half_range as i64;
+    let new_ms = (base.as_millis() as i64 + offset).max(1) as u64;
+    Duration::from_millis(new_ms)
 }
 
 /// Marker type for the future JS-challenge auto-solver. Kept as an

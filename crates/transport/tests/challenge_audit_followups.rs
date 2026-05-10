@@ -7,7 +7,8 @@
 use std::thread;
 use std::time::Duration;
 use wafrift_transport::challenge::{
-    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, classify, classify_with_status,
+    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, SolveAction, classify,
+    classify_with_status, dispatch,
 };
 
 // ── HIGH: classify body OOM ─────────────────────────────────────
@@ -209,4 +210,40 @@ fn classify_status_zero_is_back_compat_scan() {
         ChallengeKind::Turnstile,
         "status=0 sentinel must scan regardless"
     );
+}
+
+// ── MEDIUM: dispatch wait jitter (no synchronised retry burst) ──
+
+#[test]
+fn dispatch_wait_delay_has_jitter() {
+    // Run dispatch 50 times for the same host+kind. The base wait
+    // is 2 seconds; ±25% jitter means individual delays must vary
+    // across runs. Pre-fix the delay was the EXACT 2s every time
+    // and 50 callers would retry in lockstep against the upstream.
+    let s = ChallengeStore::new();
+    let mut delays_ms = std::collections::HashSet::new();
+    for _ in 0..50 {
+        // Tiny sleep so the per-call SystemTime nanos drift between
+        // calls — without this the loop runs faster than the system
+        // clock can deliver distinct nanos and we'd miss the jitter.
+        thread::sleep(Duration::from_millis(2));
+        match dispatch("h.test", ChallengeKind::CloudflareManaged, &s) {
+            SolveAction::Wait { delay } => {
+                delays_ms.insert(delay.as_millis());
+            }
+            other => panic!("expected Wait, got {other:?}"),
+        }
+    }
+    assert!(
+        delays_ms.len() > 1,
+        "dispatch Wait delay must vary across calls (got {} distinct ms values across 50 runs); \
+         pre-fix all 50 callers would retry at the exact same instant",
+        delays_ms.len()
+    );
+    for ms in &delays_ms {
+        assert!(
+            (1000..=3000).contains(&(*ms as u64)),
+            "jittered delay must stay within reasonable bounds; got {ms}ms"
+        );
+    }
 }
