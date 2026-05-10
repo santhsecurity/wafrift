@@ -213,7 +213,26 @@ pub fn classify(payload: &str) -> PayloadType {
         } else if path_traversal::detect_type(payload) {
             PayloadType::PathTraversal
         } else {
-            PayloadType::CommandInjection
+            // Pre-fix this fell through to CommandInjection even with no
+            // separator. A bare `/etc/passwd` or `/bin/ls` token is path
+            // disclosure / LFI, not command injection — without `; | &
+            // && || $() ` `${IFS}` we cannot claim the shell was reached.
+            // Try the remaining specific types before defaulting.
+            if ldap::detect_type(payload) {
+                PayloadType::Ldap
+            } else if ssrf::detect_type(payload) {
+                PayloadType::Ssrf
+            } else if template::detect_type(payload) {
+                PayloadType::TemplateInjection
+            } else if mongo::detect_type(payload)
+                || elastic::detect_type(payload)
+                || redis::detect_type(payload)
+                || cassandra::detect_type(payload)
+            {
+                PayloadType::NoSql
+            } else {
+                PayloadType::Unknown
+            }
         }
     } else {
         // No core type match — check extended types
@@ -237,14 +256,66 @@ pub fn classify(payload: &str) -> PayloadType {
     }
 }
 
-/// Check if a string contains a common shell command.
+/// Check if a string contains a common shell command as a whole token.
+///
+/// Pre-fix this used `.contains()` substring matching, so short command
+/// names like `id` and `nc` matched as substrings inside ordinary words —
+/// `consider`, `validate`, `android`, `since`, `concert`. The classifier
+/// would then mis-route benign text as command injection.
 fn contains_shell_command(s: &str) -> bool {
-    let commands = [
-        "cat ", "ls ", "id", "whoami", "wget ", "curl ", "ping ", "nc ", "bash", " sh", "python",
-        "perl", "ruby", "php", "uname", "env", "printenv", "nslookup", "dig ", "ifconfig",
-        "ip addr",
+    // Patterns that already include a trailing space act as their own
+    // boundary on the right. The remaining bare commands need whole-word
+    // matching.
+    let prefixed = ["cat ", "ls ", "wget ", "curl ", "ping ", "nc ", "dig "];
+    if prefixed.iter().any(|cmd| s.contains(cmd)) {
+        return true;
+    }
+    let bare = [
+        "id", "whoami", "bash", "sh", "python", "perl", "ruby", "php", "uname", "env", "printenv",
+        "nslookup", "ifconfig", "ip addr",
     ];
-    commands.iter().any(|cmd| s.contains(cmd))
+    let bytes = s.as_bytes();
+    let is_boundary = |b: u8| -> bool {
+        matches!(
+            b,
+            b' ' | b'\t'
+                | b'\n'
+                | b'\r'
+                | b';'
+                | b'|'
+                | b'&'
+                | b'`'
+                | b'$'
+                | b'('
+                | b')'
+                | b'<'
+                | b'>'
+                | b'\''
+                | b'"'
+                | b'/'
+                | b'\\'
+                | 0
+        )
+    };
+    bare.iter().any(|cmd| {
+        let cmd_bytes = cmd.as_bytes();
+        if cmd_bytes.is_empty() || bytes.len() < cmd_bytes.len() {
+            return false;
+        }
+        let mut i = 0;
+        while i + cmd_bytes.len() <= bytes.len() {
+            if bytes[i..i + cmd_bytes.len()] == *cmd_bytes {
+                let left_ok = i == 0 || is_boundary(bytes[i - 1]);
+                let right_ok =
+                    i + cmd_bytes.len() == bytes.len() || is_boundary(bytes[i + cmd_bytes.len()]);
+                if left_ok && right_ok {
+                    return true;
+                }
+            }
+            i += 1;
+        }
+        false
+    })
 }
 
 /// Generate grammar-aware mutations for any payload.
