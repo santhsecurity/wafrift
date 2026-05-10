@@ -4255,6 +4255,7 @@ dependencies = [
  "wafrift-encoding",
  "wafrift-evolution",
  "wafrift-fingerprint",
+ "wafrift-genome-registry",
  "wafrift-grammar",
  "wafrift-oracle",
  "wafrift-recon",
