@@ -14,6 +14,12 @@ pub enum SessionError {
     CsrfTokenNotFound { url: String },
     #[error("Auth header invalid: {header}")]
     AuthHeaderInvalid { header: String },
+    #[error("io error on {path}: {source}")]
+    Io {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Load a cookie jar from disk.
@@ -36,14 +42,9 @@ pub fn load_jar(path: &Path) -> Result<Jar, SessionError> {
     if !path.exists() {
         return Ok(jar);
     }
-    let contents = std::fs::read_to_string(path).map_err(|e| {
-        {
-            SessionError::CookieJarCorrupt {
-                path: path.display().to_string(),
-                line: 0,
-            }
-        }
-        .map_io(e)
+    let contents = std::fs::read_to_string(path).map_err(|e| SessionError::Io {
+        path: path.display().to_string(),
+        source: e,
     })?;
     for (lineno, line) in contents.lines().enumerate() {
         let line = line.trim();
@@ -82,33 +83,20 @@ pub fn save_jar(_jar: &Jar, path: &Path) -> Result<(), SessionError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            SessionError::CookieJarCorrupt {
-                path: path.display().to_string(),
-                line: 0,
-            }
-            .map_io(e)
+        std::fs::create_dir_all(parent).map_err(|e| SessionError::Io {
+            path: path.display().to_string(),
+            source: e,
         })?;
     }
     let header = "# wafrift cookie jar v1\n# format: Set-Cookie | https://origin/\n";
-    std::fs::write(path, header).map_err(|e| {
-        SessionError::CookieJarCorrupt {
-            path: path.display().to_string(),
-            line: 0,
-        }
-        .map_io(e)
+    std::fs::write(path, header).map_err(|e| SessionError::Io {
+        path: path.display().to_string(),
+        source: e,
     })?;
     Ok(())
 }
 
-impl SessionError {
-    fn map_io(self, _e: std::io::Error) -> Self {
-        // Preserve the variant; io error details are absorbed into
-        // the existing `path`/`line` fields. (Adding a real Io variant
-        // would change the public API for callers who match on it.)
-        self
-    }
-}
+
 
 pub fn extract_csrf(response_body: &str, regex: &regex::Regex) -> Result<String, SessionError> {
     if let Some(m) = regex.captures(response_body).and_then(|c| c.get(1))

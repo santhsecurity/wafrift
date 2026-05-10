@@ -185,6 +185,7 @@ impl TamperStrategy for NullByteTamper {
 
     fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
         crate::encoding::structural::null_byte_inject(payload)
+            .expect("payload is &str so always valid UTF-8")
     }
 
     fn aggressiveness(&self) -> f64 {
@@ -206,6 +207,7 @@ impl TamperStrategy for OverlongUtf8Tamper {
 
     fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
         crate::encoding::structural::overlong_utf8(payload)
+            .expect("payload is &str so always valid UTF-8")
     }
 
     fn aggressiveness(&self) -> f64 {

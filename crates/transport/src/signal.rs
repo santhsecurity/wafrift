@@ -267,7 +267,7 @@ impl ResponseProfileDb {
                 }
             }
 
-            if score > 0 && (best_match.is_none() || score > best_match.unwrap().0) {
+            if score > 0 && best_match.is_none_or(|(best_score, _)| score > best_score) {
                 best_match = Some((score, profile));
             }
         }

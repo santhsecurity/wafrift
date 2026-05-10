@@ -1,0 +1,212 @@
+[meta]
+date = "2026-05-10"
+methodology = """
+For each workspace crate: source LoC, integration test LoC, inline
+test count. Crates with high src and zero/low tests/ are gaps.
+Crates with adversarial test coverage but no negative-twin / property
+/ cross-file tests are partial gaps.
+"""
+
+# ── CRITICAL gaps: high src, zero or near-zero integration tests ─────
+
+[[gap]]
+crate = "smuggling"
+src_loc = 2868
+tests_dir_loc = 0
+inline_tests = 89
+severity = "critical"
+why = """
+The smuggling crate is the engine for HTTP request smuggling
+(CL.0 / CL.TE / TE.TE / TE.CL / chunked-edge). Inline tests cover
+encoder roundtrips but there's no integration coverage proving the
+encoded payloads land as smuggled requests at a real upstream. A
+regression here is silent — the proxy keeps working, the WAF
+keeps blocking, but the smuggling vector that was supposed to bypass
+is just no-op'd.
+"""
+needed = [
+    "tests/cl_0_smuggling.rs — assert chunked body with CL=0 reaches upstream as two requests",
+    "tests/cl_te_smuggling.rs — CL+TE conflict, prove front-end uses CL while back-end uses TE",
+    "tests/te_te_smuggling.rs — duplicate TE headers with one obfuscated",
+    "tests/chunked_edge.rs — 0-size chunks, trailing CRLF games, chunk-extension abuse",
+    "tests/property_smuggling.rs — proptest 10k cases: any payload + smuggling encoding round-trips at the wire",
+]
+
+[[gap]]
+crate = "proxy"
+src_loc = 9719
+tests_dir_loc = 19
+inline_tests = 208
+severity = "critical"
+why = """
+9.7K LoC of proxy code with 19 LoC of integration tests. Inline
+tests are unit-level (auth header parsing, cert generation). The
+end-to-end path (client → MITM → evade → upstream → MITM → client)
+has no test that walks the full pipeline through the real binary.
+Every regression in the forward path is invisible until production.
+"""
+needed = [
+    "tests/forward_path_e2e.rs — real proxy binary, mock upstream (axum), assert evasion applied + response unchanged",
+    "tests/mitm_cert_chain.rs — generated CA + per-host leaf, openssl s_client verifies chain",
+    "tests/intercept_rendezvous.rs — INTERCEPT_MODE drains queue on toggle-off, no leaks",
+    "tests/mutate_url_pipeline.rs — --mutate-url end-to-end: GET /search?q=1' OR '1 → upstream sees percent-encoded",
+    "tests/captchaforge_install.rs — --captchaforge succeeds with feature on, errors with feature off",
+    "tests/challenge_replay.rs — Cloudflare clearance cookie captured + reattached on next req to same host",
+]
+
+[[gap]]
+crate = "recon"
+src_loc = 1381
+tests_dir_loc = 0
+inline_tests = 35
+severity = "high"
+why = """
+recon owns active probing — header sweeps, banner grabs, technology
+fingerprint cross-checks. Inline tests cover parse helpers; nothing
+exercises the network probing layer with a real (mock) target.
+"""
+needed = [
+    "tests/header_probe_axum.rs — axum mock upstream returns canned headers, assert classifications",
+    "tests/banner_grab_tcp.rs — tokio::net::TcpListener serving canned banners",
+    "tests/timeout_robustness.rs — slow server, assert recon honours timeout + doesn't hang",
+    "tests/probe_idempotency.rs — same target twice, byte-equal results",
+]
+
+[[gap]]
+crate = "fingerprint"
+src_loc = 927
+tests_dir_loc = 0
+inline_tests = 27
+severity = "high"
+why = """
+fingerprint exposes the WAF-detection rules adapted from wafw00f.
+Inline tests verify rule parsing. There is NO corpus test that
+walks a vendored set of real WAF response signatures through the
+detector and asserts the right WAF is named. Without this, a regex
+typo in any of the 70+ wafw00f-derived rules silently skips the WAF.
+"""
+needed = [
+    "tests/wafw00f_corpus.rs — vendored signature corpus (one file per WAF), assert detect() names the WAF",
+    "tests/attribution_chain.rs — assert citation back to wafw00f survives detection (regression for stripped attribution)",
+    "tests/false_positive_corpus.rs — non-WAF responses (plain nginx/apache/cloudfront), assert zero detections",
+    "tests/cross_signature_priority.rs — overlapping signatures (CF + Akamai both match), assert deterministic priority",
+]
+
+[[gap]]
+crate = "captchaforge-bridge"
+src_loc = 268
+tests_dir_loc = 0
+inline_tests = 2
+severity = "high"
+why = """
+The bridge is the only thing that connects wafrift's challenge flow
+to a real headless browser. 2 inline smoke tests is not coverage.
+We need: (a) chromium-unavailable graceful degradation, (b) timeout
+honouring, (c) cookie-extraction round-trip into ChallengeStore,
+(d) global-config OnceCell semantics.
+"""
+needed = [
+    "tests/chromium_missing.rs — set CHROMIUM_PATH to /nonexistent, assert error within timeout, no panic",
+    "tests/timeout_honoured.rs — solve_in_browser with 1s timeout against unresponsive challenge, assert timeout exit",
+    "tests/store_roundtrip.rs — solve_and_record writes cookie into ChallengeStore for the right host",
+    "tests/global_config_oncecell.rs — concurrent install_global_solver, assert single install, deterministic config",
+]
+
+# ── HIGH gaps: existing test directory but lacks adversarial / negative-twin coverage ─
+
+[[gap]]
+crate = "strategy"
+src_loc = 5430
+tests_dir_loc = 66
+inline_tests = 137
+severity = "high"
+why = """
+strategy is the orchestrator (evade chains, oracle integration,
+host-state caching). 66 LoC of integration tests = thin. Pipeline
+regressions (e.g. encoding chain order swapped, oracle short-circuit
+broken) need explicit coverage.
+"""
+needed = [
+    "tests/evade_chain_order.rs — assert encoders apply in declared order; reordering breaks the test",
+    "tests/host_state_caching.rs — same host twice, second pass uses cache + skips reconnaissance",
+    "tests/oracle_shortcircuit.rs — OracleVerdict::Allowed early-exits the chain",
+    "tests/strategy_property.rs — proptest 10k payloads through evade(), assert no panic + idempotent under double-evade",
+]
+
+[[gap]]
+crate = "grammar"
+src_loc = 8409
+tests_dir_loc = 130
+inline_tests = 286
+severity = "high"
+why = """
+grammar (SQL/HTML/CSS/path/cmd injection mutators) has good inline
+coverage of grammar rules but only 130 LoC of integration tests.
+Cross-grammar interactions (SQL inside JSON inside URL-encoded)
+have no adversarial coverage.
+"""
+needed = [
+    "tests/sql_in_json_in_url.rs — nested encoding chains, assert decode-by-WAF still finds vuln",
+    "tests/grammar_property.rs — proptest 10k mutations preserve semantic equivalence (parsed form unchanged)",
+    "tests/grammar_max_depth.rs — recursion ceiling enforced, deeply-nested input doesn't stack-overflow",
+    "tests/cross_grammar_priority.rs — same payload through 3 grammar mutators, assert deterministic order",
+]
+
+[[gap]]
+crate = "evolution"
+src_loc = 7677
+tests_dir_loc = 647
+inline_tests = 178
+severity = "medium"
+why = """
+647 LoC of tests + the recent diversity_score / engine_clone tests
+(17 + 12) leave evolution in the best test shape of any crate.
+Remaining gap is robustness: panic-paths under bad genomes,
+multi-thread shared-engine race conditions beyond the existing
+tokio::test, and search-algorithm correctness invariants.
+"""
+needed = [
+    "tests/engine_panic_audit.rs — feed malformed Chromosome, assert engine returns Err not panics",
+    "tests/shared_engine_stress.rs — 100 concurrent submit_evaluations, assert cache + corpus consistent",
+    "tests/search_algorithm_invariants.rs — proptest: best fitness is monotonic non-decreasing across generations",
+]
+
+[[gap]]
+crate = "genome-registry"
+src_loc = 645
+tests_dir_loc = 0
+inline_tests = 22
+severity = "medium"
+why = """
+22 inline tests cover signing/verifying/trust-list happy paths.
+Adversarial coverage missing: cross-version genome compat, malformed
+signatures, key revocation semantics, bundle-tampering detection.
+"""
+needed = [
+    "tests/cross_version_compat.rs — bundle signed with v0.2.2 schema verifies under v0.2.3",
+    "tests/tamper_detection.rs — flip one byte in signed bundle, assert verify() returns Err",
+    "tests/key_revocation.rs — trust list revokes a publisher; previously-signed bundles fail verify",
+    "tests/bundle_property.rs — proptest 10k random bundles round-trip via sign+verify",
+]
+
+# ── ROBUSTNESS gaps: not test-shaped, but issues to fix-and-test ─
+
+[[robustness]]
+file = "crates/encoding/src/url_mutate.rs"
+issue = "PercentEncodeAggressive does not encode bytes in the URL safe-set; verify with property test against multi-WAF corpus"
+proof_test = "tests/url_mutate_signature_evasion.rs"
+
+[[robustness]]
+file = "crates/proxy/src/main.rs"
+issue = "INTERCEPT_TIMEOUT 30s — assert no leak when caller drops Receiver mid-decision"
+proof_test = "tests/intercept_drop_safety.rs"
+
+[[robustness]]
+file = "crates/transport/src/challenge.rs"
+issue = "ChallengeStore is never garbage-collected; entries persist forever even after target rotates IPs / clearance expires"
+proof_test = "tests/challenge_store_ttl.rs"
+
+[[robustness]]
+file = "crates/evolution/src/evolution/engine.rs"
+issue = "in_flight HashMap can grow unbounded if submit_evaluations is never called; needs TTL or eviction"
+proof_test = "tests/in_flight_eviction.rs"

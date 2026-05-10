@@ -35,8 +35,9 @@ pub use wafrift_types::escalation::EscalationLevel;
 fn parse_named_encoding(name: &str) -> Option<encoding::Strategy> {
     let raw = name.strip_prefix("encoding:").unwrap_or(name);
     encoding::all_strategies()
-        .into_iter()
-        .find(|strategy| strategy.as_str() == raw || format!("{strategy:?}") == raw)
+        .iter()
+        .copied()
+        .find(|strategy| strategy.as_str() == raw)
 }
 
 fn current_winner(state: &HostState) -> Option<&str> {
@@ -629,11 +630,15 @@ fn apply_layered_encoding(
 
     if any_value_changed {
         techniques.push(Technique::PayloadEncoding(strategy.as_str().to_string()));
-        let encoded_body: String = encoded_pairs
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join("&");
+        let mut encoded_body = String::with_capacity(body_str.len() * 2);
+        for (i, (k, v)) in encoded_pairs.iter().enumerate() {
+            if i > 0 {
+                encoded_body.push('&');
+            }
+            encoded_body.push_str(k);
+            encoded_body.push('=');
+            encoded_body.push_str(v);
+        }
         req.body = Some(encoded_body.into_bytes());
     }
 
@@ -706,18 +711,22 @@ fn apply_grammar_mutations(
 
     // Mutate each parameter value that looks like an attack payload
     let mut mutated = false;
-    let new_body: String = pairs
-        .iter()
-        .map(|(key, value)| {
-            if let Some(mutation) = grammar::mutate(value, 3).into_iter().next() {
-                mutated = true;
-                format!("{}={}", key, mutation.payload)
-            } else {
-                format!("{key}={value}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("&");
+    let mut new_body = String::with_capacity(body_str.len() * 2);
+    for (i, (key, value)) in pairs.iter().enumerate() {
+        if i > 0 {
+            new_body.push('&');
+        }
+        if let Some(mutation) = grammar::mutate(value, 3).into_iter().next() {
+            mutated = true;
+            new_body.push_str(key);
+            new_body.push('=');
+            new_body.push_str(&mutation.payload);
+        } else {
+            new_body.push_str(key);
+            new_body.push('=');
+            new_body.push_str(value);
+        }
+    }
 
     if mutated {
         let detect_body = pairs.iter().map(|(_, v)| *v).collect::<Vec<_>>().join(" ");
@@ -867,6 +876,7 @@ fn apply_smuggling_metadata(
         2 => smuggling::te_te(host, "GET /admin HTTP/1.1\r\n", state.blocks as usize),
         _ => smuggling::cl_zero(host, "GET /admin HTTP/1.1\r\n"),
     };
+    let Ok(smuggle) = smuggle else { return; };
 
     req.headers.push((
         "X-Wafrift-Smuggle-Variant".into(),

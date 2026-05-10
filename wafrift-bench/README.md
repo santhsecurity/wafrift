@@ -1,4 +1,4 @@
-# wafrift-bench — honest WAF bypass-rate benchmark
+# wafrift-bench: honest WAF bypass-rate benchmark
 
 This directory ships everything needed to measure wafrift's bypass rate
 against real WAFs running locally in docker, with a corpus organized by
@@ -36,7 +36,7 @@ wafrift-bench/
 wafrift-bench/scripts/up.sh modsec-pl1     # one stack
 wafrift-bench/scripts/up.sh                # all stacks
 
-# 2. Baseline (raw payloads only — verifies WAF blocks naive inputs)
+# 2. Baseline (raw payloads only: verifies WAF blocks naive inputs)
 wafrift bench-waf --base-url http://127.0.0.1:18081
 
 # 3. Real bench: measure wafrift's bypass rate
@@ -87,7 +87,7 @@ Aggregate:
 ## Methodology rules
 
 1. **Raw must be blocked first.** Cases the WAF allows raw are not informative
-   for evasion measurement — exclude them from bypass-rate denominators
+   for evasion measurement: exclude them from bypass-rate denominators
    (the report includes them but they should not be counted as wafrift wins).
 2. **N variants per strategy.** A single bypass is a finding, not a rate.
    Default 5 variants × 1 strategy. Bump for tighter intervals.
@@ -97,7 +97,7 @@ Aggregate:
 4. **Per-WAF, not aggregate.** Always report bypass% per (WAF, paranoia)
    pair. CRS-PL1 and CRS-PL4 are different products.
 5. **Honest baseline.** If the WAF doesn't block the raw payload,
-   wafrift had nothing to bypass — exclude that case.
+   wafrift had nothing to bypass: exclude that case.
 
 ## Adding a payload
 

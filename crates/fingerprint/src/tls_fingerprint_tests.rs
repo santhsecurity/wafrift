@@ -2,8 +2,8 @@
 #[allow(clippy::module_inception)]
 mod tests {
     use crate::tls_fingerprint::{
-        build_cipher_suites, build_extensions, compute_ja3_string, profile_for, profile_summary,
-        profiles, random_profile,
+        build_cipher_suites, build_extensions, build_supported_groups, compute_ja3_string,
+        profile_for, profile_summary, profiles, random_profile,
     };
 
     /// GREASE values for test validation (mirrors private const in parent).
@@ -160,5 +160,38 @@ mod tests {
                 profile.name
             );
         }
+    }
+
+    #[test]
+    fn build_supported_groups_includes_grease_for_chrome() {
+        let p = profile_for("chrome").unwrap();
+        assert!(p.include_grease);
+        let groups = build_supported_groups(p);
+        assert_eq!(groups.len(), p.elliptic_curves.len() + 1);
+        assert!(GREASE_VALUES.contains(&groups[0]));
+    }
+
+    #[test]
+    fn build_supported_groups_no_grease_for_firefox() {
+        let p = profile_for("firefox").unwrap();
+        assert!(!p.include_grease);
+        let groups = build_supported_groups(p);
+        assert_eq!(groups.len(), p.elliptic_curves.len());
+        // All entries should be real curve IDs, not GREASE
+        for g in &groups {
+            assert!(!GREASE_VALUES.contains(g));
+        }
+    }
+
+    #[test]
+    fn build_supported_groups_preserves_order() {
+        let p = profile_for("chrome").unwrap();
+        let groups = build_supported_groups(p);
+        let start = if p.include_grease { 1 } else { 0 };
+        assert_eq!(
+            &groups[start..],
+            p.elliptic_curves,
+            "curve order should be preserved after optional GREASE prefix"
+        );
     }
 }

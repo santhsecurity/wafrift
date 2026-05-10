@@ -146,7 +146,7 @@ impl ChallengeStore {
     /// or expired.
     #[must_use]
     pub fn get(&self, host: &str) -> Option<String> {
-        let inner = self.inner.read().expect("ChallengeStore poisoned");
+        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
         let entry = inner.by_host.get(host)?;
         if Instant::now() >= entry.expires_at {
             return None;
@@ -194,7 +194,7 @@ impl ChallengeStore {
     /// proxies.
     pub fn purge_expired(&self) {
         let now = Instant::now();
-        let mut inner = self.inner.write().expect("ChallengeStore poisoned");
+        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
         inner.by_host.retain(|_, e| now < e.expires_at);
         inner
             .operator_prompted
@@ -205,7 +205,7 @@ impl ChallengeStore {
     /// challenge for `host` — i.e. either no recent prompt has been
     /// emitted, or the cooldown has passed.
     pub fn should_prompt_operator(&self, host: &str) -> bool {
-        let mut inner = self.inner.write().expect("ChallengeStore poisoned");
+        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         match inner.operator_prompted.get(host).copied() {
             Some(prev) if now < prev + OPERATOR_PROMPT_COOLDOWN => false,
@@ -220,7 +220,7 @@ impl ChallengeStore {
     /// Returns `None` if no entry exists (regardless of expiry).
     #[must_use]
     pub fn age(&self, host: &str) -> Option<Duration> {
-        let inner = self.inner.read().expect("ChallengeStore poisoned");
+        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
         inner.by_host.get(host).map(|e| e.captured_at.elapsed())
     }
 
@@ -228,7 +228,7 @@ impl ChallengeStore {
     /// cookie for `host`?
     #[must_use]
     pub fn kind(&self, host: &str) -> Option<ChallengeKind> {
-        let inner = self.inner.read().expect("ChallengeStore poisoned");
+        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
         let e = inner.by_host.get(host)?;
         if Instant::now() >= e.expires_at {
             return None;

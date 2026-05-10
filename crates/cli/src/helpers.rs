@@ -44,9 +44,9 @@ pub(crate) fn parse_headers(raw_headers: &[String]) -> Result<Vec<(String, Strin
 pub fn strategies_for_level(level: Level) -> Vec<Strategy> {
     let all = encoding::all_strategies();
     match level {
-        Level::Light => all.into_iter().take(3).collect(),
-        Level::Medium => all.into_iter().take(6).collect(),
-        Level::Heavy => all,
+        Level::Light => all.iter().copied().take(3).collect(),
+        Level::Medium => all.iter().copied().take(6).collect(),
+        Level::Heavy => all.to_vec(),
     }
 }
 

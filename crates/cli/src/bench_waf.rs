@@ -1136,7 +1136,13 @@ async fn run_smuggling_strategy(
         case.payload.len() + 2,
         urlencoding::encode(&case.payload)
     );
-    let payloads = smuggling_all_payloads(&host, &smuggled);
+    let payloads = match smuggling_all_payloads(&host, &smuggled) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("warn: {} (smuggling) payload generation: {e}", case.id);
+            return stat;
+        }
+    };
     for sp in payloads.iter().take(args.variants) {
         if *total > 0 && args.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;

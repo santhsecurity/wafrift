@@ -586,7 +586,7 @@ fn exact_max_size_allowed() {
 #[test]
 fn all_strategies_work_with_plain_body() {
     let payload = b"' OR 1=1 --";
-    for strategy in wafrift_encoding::all_strategies() {
+    for &strategy in wafrift_encoding::all_strategies() {
         let result = encode_in_context(payload, strategy, InjectionContext::PlainBody);
         assert!(
             result.is_ok(),

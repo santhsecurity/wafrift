@@ -53,7 +53,11 @@ pub fn gene_success_rates_with_threshold(
             (
                 name.as_str(),
                 value.as_str(),
-                f64::from(*successes) / f64::from(*attempts),
+                if *attempts == 0 {
+                    0.0
+                } else {
+                    f64::from(*successes) / f64::from(*attempts)
+                },
             )
         })
         .collect();
@@ -107,9 +111,113 @@ pub fn gene_cooccurrence_stats(
     let mut results: Vec<GenePairStat> = pair_counts
         .into_iter()
         .filter(|(_, (_, total))| *total as usize >= min_cooccurrence)
-        .map(|(pair, (success, total))| (pair.0, pair.1, f64::from(success) / f64::from(total)))
+        .map(|(pair, (success, total))| {
+            let rate = if total == 0 { 0.0 } else { f64::from(success) / f64::from(total) };
+            (pair.0, pair.1, rate)
+        })
         .collect();
 
     results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chrom(fitness: f64, evaluations: u32, genes: Vec<(String, String)>) -> Chromosome {
+        Chromosome {
+            genes,
+            fitness,
+            evaluations,
+            lineage: crate::lineage::Lineage::genesis(0),
+        }
+    }
+
+    #[test]
+    fn update_gene_stats_tracks_attempts() {
+        let mut stats = Vec::new();
+        update_gene_stats(&mut stats, &[("a".into(), "1".into())], true);
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0], ("a".into(), "1".into(), 1, 1));
+        update_gene_stats(&mut stats, &[("a".into(), "1".into())], false);
+        assert_eq!(stats[0], ("a".into(), "1".into(), 1, 2));
+    }
+
+    #[test]
+    fn update_gene_stats_skips_none() {
+        let mut stats = Vec::new();
+        update_gene_stats(&mut stats, &[("a".into(), "None".into())], true);
+        assert!(stats.is_empty());
+    }
+
+    #[test]
+    fn update_gene_stats_multiple_genes() {
+        let mut stats = Vec::new();
+        update_gene_stats(
+            &mut stats,
+            &[("a".into(), "1".into()), ("b".into(), "2".into())],
+            true,
+        );
+        assert_eq!(stats.len(), 2);
+    }
+
+    #[test]
+    fn gene_success_rates_filters_threshold() {
+        let stats = vec![
+            ("a".into(), "1".into(), 1, 1),
+            ("b".into(), "2".into(), 5, 10),
+        ];
+        let rates = gene_success_rates(&stats);
+        // min_attempts = 2, so only b qualifies
+        assert_eq!(rates.len(), 1);
+        assert_eq!(rates[0].0, "b");
+        assert!((rates[0].2 - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn gene_success_rates_sorted_descending() {
+        let stats = vec![
+            ("a".into(), "1".into(), 1, 10),
+            ("b".into(), "2".into(), 9, 10),
+        ];
+        let rates = gene_success_rates_with_threshold(&stats, 0);
+        assert_eq!(rates[0].0, "b");
+        assert_eq!(rates[1].0, "a");
+    }
+
+    #[test]
+    fn gene_cooccurrence_empty_population() {
+        let result = gene_cooccurrence_stats(&[], 1);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn gene_cooccurrence_finds_pairs() {
+        let pop = vec![
+            chrom(0.8, 1, vec![
+                ("a".into(), "1".into()),
+                ("b".into(), "2".into()),
+            ]),
+            chrom(0.9, 1, vec![
+                ("a".into(), "1".into()),
+                ("b".into(), "2".into()),
+            ]),
+        ];
+        let result = gene_cooccurrence_stats(&pop, 1);
+        assert_eq!(result.len(), 1);
+        assert!((result[0].2 - 1.0).abs() < 0.01); // both fitness > 0.5
+    }
+
+    #[test]
+    fn gene_cooccurrence_respects_min_cooccurrence() {
+        let pop = vec![
+            chrom(0.8, 1, vec![
+                ("a".into(), "1".into()),
+                ("b".into(), "2".into()),
+            ]),
+        ];
+        let result = gene_cooccurrence_stats(&pop, 2);
+        assert!(result.is_empty());
+    }
 }

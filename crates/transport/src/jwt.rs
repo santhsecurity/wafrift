@@ -40,8 +40,11 @@ pub fn manipulate(
     match manipulation {
         JwtManipulation::StripAlg => {
             header["alg"] = serde_json::Value::String("none".into());
+            let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
+                reason: format!("header serialization failed: {e}"),
+            })?;
             let new_header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(serde_json::to_vec(&header).unwrap());
+                .encode(header_bytes);
             Ok(format!("{}.{}.", new_header_b64, payload_b64))
         }
         JwtManipulation::Hs256WithKey => {
@@ -50,16 +53,22 @@ pub fn manipulate(
                 return Err(JwtError::UnsupportedAlgorithm { alg: "none".into() });
             }
             header["alg"] = serde_json::Value::String("HS256".into());
+            let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
+                reason: format!("header serialization failed: {e}"),
+            })?;
             let new_header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(serde_json::to_vec(&header).unwrap());
+                .encode(header_bytes);
             // Fake signature for now since we don't have HMAC library in this file
             let sig_b64 = "fakesignature";
             Ok(format!("{}.{}.{}", new_header_b64, payload_b64, sig_b64))
         }
         JwtManipulation::JwkEmbed { jwk } => {
             header["jwk"] = serde_json::from_str(jwk).unwrap_or(serde_json::Value::Null);
+            let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
+                reason: format!("header serialization failed: {e}"),
+            })?;
             let new_header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(serde_json::to_vec(&header).unwrap());
+                .encode(header_bytes);
             Ok(format!("{}.{}.{}", new_header_b64, payload_b64, parts[2]))
         }
     }

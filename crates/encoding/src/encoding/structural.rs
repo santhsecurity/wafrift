@@ -21,13 +21,13 @@ pub struct ChunkedBody {
 ///
 /// **Context**: `php`, `cgi` — only semantically correct for backends using
 /// C-style null-terminated string handling.
-pub fn null_byte_inject(payload: impl AsRef<[u8]>) -> String {
+pub fn null_byte_inject(payload: impl AsRef<[u8]>) -> Result<String, EncodeError> {
     let payload = payload.as_ref();
-    let payload_str = String::from_utf8_lossy(payload);
+    let payload_str = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
     if payload.contains(&b'.') {
-        format!("{payload_str}%00.jpg")
+        Ok(format!("{payload_str}%00.jpg"))
     } else {
-        format!("{payload_str}%00")
+        Ok(format!("{payload_str}%00"))
     }
 }
 
@@ -35,8 +35,9 @@ pub fn null_byte_inject(payload: impl AsRef<[u8]>) -> String {
 ///
 /// **Context**: `iis-6` — only works against specific legacy WAFs/frontends that
 /// normalize overlong sequences rather than rejecting them.
-pub fn overlong_utf8(payload: impl AsRef<[u8]>) -> String {
-    String::from_utf8_lossy(payload.as_ref())
+pub fn overlong_utf8(payload: impl AsRef<[u8]>) -> Result<String, EncodeError> {
+    let text = std::str::from_utf8(payload.as_ref()).map_err(|_| EncodeError::InvalidUtf8)?;
+    Ok(text
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() {
@@ -48,14 +49,15 @@ pub fn overlong_utf8(payload: impl AsRef<[u8]>) -> String {
                 ch.to_string()
             }
         })
-        .collect()
+        .collect())
 }
 
 /// Extended overlong UTF-8 encoding (3-byte) — broader coverage with 3-byte sequences.
 ///
 /// **Context**: `iis-6` — some WAFs reject 2-byte overlongs but accept 3-byte overlongs.
-pub fn overlong_utf8_more(payload: impl AsRef<[u8]>) -> String {
-    String::from_utf8_lossy(payload.as_ref())
+pub fn overlong_utf8_more(payload: impl AsRef<[u8]>) -> Result<String, EncodeError> {
+    let text = std::str::from_utf8(payload.as_ref()).map_err(|_| EncodeError::InvalidUtf8)?;
+    Ok(text
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() {
@@ -67,7 +69,7 @@ pub fn overlong_utf8_more(payload: impl AsRef<[u8]>) -> String {
                 ch.to_string()
             }
         })
-        .collect()
+        .collect())
 }
 
 /// Chunked transfer-encoding split — break payload across HTTP chunks.
@@ -105,18 +107,18 @@ pub fn chunked_split(
 ///
 /// Depending on the server framework, the last value wins (PHP, ASP.NET)
 /// while many WAFs only inspect the first parameter occurrence.
-pub fn parameter_pollute(payload: impl AsRef<[u8]>) -> String {
+pub fn parameter_pollute(payload: impl AsRef<[u8]>) -> Result<String, EncodeError> {
     let payload = payload.as_ref();
-    let payload_str = String::from_utf8_lossy(payload);
+    let payload_str = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
     if let Some(eq_pos) = payload.iter().position(|byte| *byte == b'=') {
-        let key = String::from_utf8_lossy(&payload[..eq_pos]);
-        format!("{key}=safe&{payload_str}")
+        let key = std::str::from_utf8(&payload[..eq_pos]).map_err(|_| EncodeError::InvalidUtf8)?;
+        Ok(format!("{key}=safe&{payload_str}"))
     } else {
         let decoy: String = (0..8)
             .map(|_| rand::random::<u8>() % 26 + b'a')
             .map(|b| b as char)
             .collect();
-        format!("{decoy}=1&{payload_str}")
+        Ok(format!("{decoy}=1&{payload_str}"))
     }
 }
 
@@ -242,30 +244,30 @@ mod tests {
 
     #[test]
     fn null_byte_with_extension() {
-        assert_eq!(null_byte_inject("file.php"), "file.php%00.jpg");
+        assert_eq!(null_byte_inject("file.php").unwrap(), "file.php%00.jpg");
     }
 
     #[test]
     fn null_byte_without_extension() {
-        assert_eq!(null_byte_inject("payload"), "payload%00");
+        assert_eq!(null_byte_inject("payload").unwrap(), "payload%00");
     }
 
     #[test]
     fn overlong_utf8_slash() {
-        let result = overlong_utf8("/");
+        let result = overlong_utf8("/").unwrap();
         assert_eq!(result, "%C0%AF");
     }
 
     #[test]
     fn overlong_utf8_more_slash() {
-        let result = overlong_utf8_more("/");
+        let result = overlong_utf8_more("/").unwrap();
         assert_eq!(result, "%E0%80%AF");
     }
 
     #[test]
     fn chunked_split_produces_valid_chunks() {
         let result = chunked_split("SELECT * FROM users", 3).unwrap();
-        let body = String::from_utf8_lossy(&result.body);
+        let body = String::from_utf8(result.body.clone()).unwrap();
         assert!(body.contains("\r\n"));
         assert!(body.ends_with("0\r\n\r\n"));
         assert_eq!(
@@ -318,14 +320,14 @@ mod tests {
 
     #[test]
     fn parameter_pollution_with_key_value() {
-        let result = parameter_pollute("user=' OR 1=1--");
+        let result = parameter_pollute("user=' OR 1=1--").unwrap();
         assert!(result.starts_with("user=safe&"));
         assert!(result.contains("user=' OR 1=1--"));
     }
 
     #[test]
     fn parameter_pollution_without_equals() {
-        let result = parameter_pollute("payload");
+        let result = parameter_pollute("payload").unwrap();
         assert!(result.ends_with("&payload"));
         assert!(!result.contains("_wafrift_decoy"));
     }

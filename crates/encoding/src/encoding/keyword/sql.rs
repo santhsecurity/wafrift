@@ -1,5 +1,6 @@
 //! SQL-specific obfuscation strategies.
 
+use crate::error::EncodeError;
 use std::fmt::Write as _;
 
 /// Between obfuscation — rewrites `=` and `>` using `BETWEEN` syntax.
@@ -25,12 +26,12 @@ pub fn between_obfuscate(payload: &str) -> String {
 ///
 /// Emits `%bf%27` (or similar) to exploit `addslashes()` when the connection
 /// charset is GBK, Big5, or Shift-JIS.
-pub fn unmagic_quotes(payload: impl AsRef<[u8]>) -> String {
+pub fn unmagic_quotes(payload: impl AsRef<[u8]>) -> Result<String, EncodeError> {
     let payload = payload.as_ref();
-    let payload_str = String::from_utf8_lossy(payload);
+    let payload_str = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
     // The classic sequence is %bf%27 (0xbf 0x27) which forms a valid multi-byte
     // character in GBK/Big5/Shift-JIS, consuming the backslash and leaving the quote.
-    payload_str.replace('\'', "%bf%27")
+    Ok(payload_str.replace('\'', "%bf%27"))
 }
 
 /// Percentage prefix — adds `%` before each character.
@@ -57,7 +58,7 @@ mod tests {
 
     #[test]
     fn unmagic_quotes_basic() {
-        assert_eq!(unmagic_quotes("' OR 1=1--"), "%bf%27 OR 1=1--");
+        assert_eq!(unmagic_quotes("' OR 1=1--").unwrap(), "%bf%27 OR 1=1--");
     }
 
     #[test]

@@ -90,7 +90,7 @@ fn all_features_disabled_no_techniques() {
 #[test]
 fn encoding_all_strategies_nonempty() {
     let payload = "' OR 1=1--";
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         let encoded = encoding::encode(payload, strategy).unwrap();
         assert!(!encoded.is_empty(), "{strategy:?} produced empty");
     }
@@ -142,9 +142,9 @@ fn grammar_mutate_sql_produces_variants() {
 
 #[test]
 fn smuggling_payloads_generated() {
-    let p1 = wafrift_core::smuggling::cl_te("example.com", "GET / HTTP/1.1\r\n");
-    let p2 = wafrift_core::smuggling::te_cl("example.com", "GET / HTTP/1.1\r\n");
-    let p3 = wafrift_core::smuggling::cl_zero("example.com", "GET / HTTP/1.1\r\n");
+    let p1 = wafrift_core::smuggling::cl_te("example.com", "GET / HTTP/1.1\r\n").unwrap();
+    let p2 = wafrift_core::smuggling::te_cl("example.com", "GET / HTTP/1.1\r\n").unwrap();
+    let p3 = wafrift_core::smuggling::cl_zero("example.com", "GET / HTTP/1.1\r\n").unwrap();
     assert!(!p1.raw_bytes.is_empty());
     assert!(!p2.raw_bytes.is_empty());
     assert!(!p3.raw_bytes.is_empty());
@@ -152,7 +152,7 @@ fn smuggling_payloads_generated() {
 
 #[test]
 fn h2_evasions_generated() {
-    let evasions = wafrift_core::h2_evasion::all_evasions("/admin", "example.com");
+    let evasions = wafrift_core::h2_evasion::all_evasions("/admin", "example.com").unwrap();
     assert!(!evasions.is_empty());
 }
 

@@ -29,6 +29,15 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
+/// Maximum length of an individual regex pattern (bytes). Patterns
+/// exceeding this are skipped to mitigate ReDoS and pathological
+/// compilation times from malicious or corrupted rule files.
+const MAX_REGEX_PATTERN_LEN: usize = 4096;
+
+/// Maximum number of body-regex patterns compiled into the global
+/// `RegexSet`. Excess patterns are dropped with a warning.
+const MAX_BODY_REGEX_PATTERNS: usize = 2000;
+
 /// Minimum confidence required for detections based only on body text.
 ///
 /// Body-only matches are easier to spoof with generic wording (for example
@@ -274,16 +283,55 @@ impl RuleEngine {
             let header_regex = sig
                 .header_regex
                 .as_ref()
+                .filter(|p| {
+                    if p.len() > MAX_REGEX_PATTERN_LEN {
+                        tracing::warn!(
+                            waf = %raw.name,
+                            pattern_len = p.len(),
+                            max = MAX_REGEX_PATTERN_LEN,
+                            "skipping oversized header regex"
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .map(|p| Regex::new(p).map_err(|e| format!("bad header regex '{p}': {e}")))
                 .transpose()?;
             let cookie_regex = sig
                 .cookie_regex
                 .as_ref()
+                .filter(|p| {
+                    if p.len() > MAX_REGEX_PATTERN_LEN {
+                        tracing::warn!(
+                            waf = %raw.name,
+                            pattern_len = p.len(),
+                            max = MAX_REGEX_PATTERN_LEN,
+                            "skipping oversized cookie regex"
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .map(|p| Regex::new(p).map_err(|e| format!("bad cookie regex '{p}': {e}")))
                 .transpose()?;
             let body_regex = sig
                 .body_regex
                 .as_ref()
+                .filter(|p| {
+                    if p.len() > MAX_REGEX_PATTERN_LEN {
+                        tracing::warn!(
+                            waf = %raw.name,
+                            pattern_len = p.len(),
+                            max = MAX_REGEX_PATTERN_LEN,
+                            "skipping oversized body regex"
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .map(|p| Regex::new(p).map_err(|e| format!("bad body regex '{p}': {e}")))
                 .transpose()?;
             signatures.push(CompiledSignature {
@@ -319,6 +367,13 @@ impl RuleEngine {
             let rule = &self.rules[name];
             for (sig_idx, sig) in rule.signatures.iter().enumerate() {
                 if let Some(ref re) = sig.body_regex {
+                    if patterns.len() >= MAX_BODY_REGEX_PATTERNS {
+                        tracing::warn!(
+                            limit = MAX_BODY_REGEX_PATTERNS,
+                            "truncating body regex set; some WAF signatures will not match on body text"
+                        );
+                        break;
+                    }
                     patterns.push(re.as_str().to_string());
                     map.push(BodyPatternRef {
                         waf_name: name.clone(),
@@ -327,6 +382,9 @@ impl RuleEngine {
                     });
                     regexes.push(re.clone());
                 }
+            }
+            if patterns.len() >= MAX_BODY_REGEX_PATTERNS {
+                break;
             }
         }
 
@@ -514,7 +572,7 @@ pub fn with_engine<F, R>(f: F) -> R
 where
     F: FnOnce(&RuleEngine) -> R,
 {
-    let guard = RULE_DB.read().expect("RULE_DB poisoned");
+    let guard = RULE_DB.read().unwrap_or_else(|e| e.into_inner());
     f(&guard)
 }
 

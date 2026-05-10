@@ -152,7 +152,7 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
     // with the original payload nested under `payload`, which most
     // permissive APIs ignore as an unknown extra field. If your origin
     // requires a non-object JSON root, prefer form/multipart.
-    let pad_str = String::from_utf8_lossy(&pad);
+    let pad_str = String::from_utf8(pad).expect("fill produces ASCII-only bytes");
     if body.is_empty() {
         let new_body = format!("{{\"{PAD_KEY}\":\"{pad_str}\"}}").into_bytes();
         return PadOutcome::Padded {
@@ -194,13 +194,15 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
         }
     }
     // Non-object JSON (array/string/number) or malformed — wrap.
-    let original = String::from_utf8_lossy(body);
+    let Ok(original) = std::str::from_utf8(body) else {
+        return PadOutcome::SkippedOpaque;
+    };
     // If the original was valid JSON but not an object, wrap with `payload`.
     let wrapped = if serde_json::from_slice::<serde_json::Value>(body).is_ok() {
         format!("{{\"{PAD_KEY}\":\"{pad_str}\",\"payload\":{original}}}")
     } else {
         // Treat original as opaque text and embed as a string.
-        let escaped = serde_json::to_string(&original.as_ref()).unwrap_or_else(|_| "\"\"".into());
+        let escaped = serde_json::to_string(&original).unwrap_or_else(|_| "\"\"".into());
         format!("{{\"{PAD_KEY}\":\"{pad_str}\",\"payload\":{escaped}}}")
     };
     let new_body = wrapped.into_bytes();
@@ -213,7 +215,7 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
 
 fn pad_form(body: &[u8], requested_bytes: usize) -> PadOutcome {
     let pad = fill(requested_bytes);
-    let pad_str = String::from_utf8_lossy(&pad);
+    let pad_str = String::from_utf8(pad).expect("fill produces ASCII-only bytes");
     let new_body = if body.is_empty() {
         format!("{PAD_KEY}={pad_str}").into_bytes()
     } else {

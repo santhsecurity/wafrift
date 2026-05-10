@@ -1,4 +1,4 @@
-# wafrift-bench/targets — local WAF stacks
+# wafrift-bench/targets: local WAF stacks
 
 Each subdirectory is a self-contained docker-compose stack that runs
 **one** WAF in front of an `httpbin` backend so wafrift can attack a
@@ -32,7 +32,7 @@ docker stop wafrift-pl1 wafrift-pl2 wafrift-pl3 wafrift-pl4 \
 
 `httpbin` echoes the request back, including method/path/headers/body.
 The bench harness inspects that echo to confirm the WAF *forwarded*
-the payload — i.e., a 200 with the payload echoed = WAF allowed; a 403
+the payload: i.e., a 200 with the payload echoed = WAF allowed; a 403
 or 406 = WAF blocked. No semantic backend behavior involved, which
 keeps the bench deterministic.
 

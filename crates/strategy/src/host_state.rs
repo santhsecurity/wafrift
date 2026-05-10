@@ -182,8 +182,16 @@ impl HostState {
             .iter()
             .filter(|(_, _, attempts)| *attempts >= 2)
             .max_by(|(_, s1, a1), (_, s2, a2)| {
-                let rate1 = f64::from(*s1) / f64::from(*a1);
-                let rate2 = f64::from(*s2) / f64::from(*a2);
+                let rate1 = if *a1 == 0 {
+                    0.0
+                } else {
+                    f64::from(*s1) / f64::from(*a1)
+                };
+                let rate2 = if *a2 == 0 {
+                    0.0
+                } else {
+                    f64::from(*s2) / f64::from(*a2)
+                };
                 rate1
                     .partial_cmp(&rate2)
                     .unwrap_or(std::cmp::Ordering::Equal)
@@ -231,7 +239,7 @@ impl HostState {
     /// blocklist.)
     #[must_use]
     pub fn next_encoding(&self) -> Option<encoding::Strategy> {
-        encoding::all_strategies().into_iter().find(|s| {
+        encoding::all_strategies().iter().copied().find(|s| {
             !self.tried_encodings.contains(s) && !self.blocklisted.contains(&s.as_str().to_string())
         })
     }

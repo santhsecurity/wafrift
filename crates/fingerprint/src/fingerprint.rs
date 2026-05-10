@@ -149,4 +149,57 @@ mod tests {
         let unique: std::collections::HashSet<&&str> = uas.iter().collect();
         assert_eq!(uas.len(), unique.len(), "Duplicate User-Agent found");
     }
+
+    #[test]
+    fn apply_profile_replaces_all_fingerprint_headers() {
+        let mut headers = vec![
+            ("user-agent".into(), "old-ua".into()),
+            ("accept".into(), "old-accept".into()),
+            ("accept-language".into(), "old-lang".into()),
+            ("accept-encoding".into(), "old-enc".into()),
+            ("sec-fetch-site".into(), "old-site".into()),
+            ("sec-fetch-mode".into(), "old-mode".into()),
+            ("sec-fetch-dest".into(), "old-dest".into()),
+            ("other-header".into(), "keep-me".into()),
+        ];
+        apply_profile(&mut headers, &PROFILES[0]);
+
+        // All fingerprint headers replaced exactly once
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("user-agent")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept-language")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept-encoding")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-site")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-mode")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-dest")).count(), 1);
+
+        // Non-fingerprint header preserved
+        assert!(headers.iter().any(|(k, v)| k == "other-header" && v == "keep-me"));
+    }
+
+    #[test]
+    fn apply_profile_case_insensitive_replacement() {
+        let mut headers = vec![
+            ("USER-AGENT".into(), "old".into()),
+            ("Accept".into(), "old".into()),
+            ("sec-FETCH-MODE".into(), "old".into()),
+        ];
+        apply_profile(&mut headers, &PROFILES[0]);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("user-agent")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept")).count(), 1);
+        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-mode")).count(), 1);
+    }
+
+    #[test]
+    fn apply_profile_adds_missing_headers() {
+        let mut headers = vec![("other".into(), "value".into())];
+        apply_profile(&mut headers, &PROFILES[0]);
+        assert!(headers.iter().any(|(k, _)| k == "User-Agent"));
+        assert!(headers.iter().any(|(k, _)| k == "Accept"));
+        assert!(headers.iter().any(|(k, _)| k == "Accept-Language"));
+        assert!(headers.iter().any(|(k, _)| k == "Accept-Encoding"));
+        assert!(headers.iter().any(|(k, _)| k == "Sec-Fetch-Site"));
+        assert!(headers.iter().any(|(k, _)| k == "Sec-Fetch-Mode"));
+        assert!(headers.iter().any(|(k, _)| k == "Sec-Fetch-Dest"));
+    }
 }

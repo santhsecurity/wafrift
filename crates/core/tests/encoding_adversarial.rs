@@ -614,7 +614,7 @@ fn aggressiveness_ordering() {
 
 #[test]
 fn all_strategies_have_aggressiveness() {
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         let score = encoding::aggressiveness(strategy);
         assert!((0.0..=1.0).contains(&score));
     }

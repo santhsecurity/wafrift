@@ -161,6 +161,14 @@ pub fn sanitize_input(input: &str) -> Result<String, SafetyError> {
     Ok(input.into())
 }
 
+/// Guard that a string contains no CRLF without copying it.
+pub fn guard_no_crlf(input: &str) -> Result<(), SafetyError> {
+    if input.contains('\r') || input.contains('\n') {
+        return Err(SafetyError::HeaderInjection);
+    }
+    Ok(())
+}
+
 /// Guard against absurdly long prefixes that could exceed proxy buffers.
 pub fn guard_prefix_len(prefix: &str, max: usize) -> Result<(), SafetyError> {
     if prefix.len() > max {
@@ -230,6 +238,14 @@ mod tests {
         assert!(sanitize_input("a\nb").is_err());
         assert!(sanitize_input("a\rb").is_err());
         assert!(sanitize_input("safe").is_ok());
+    }
+
+    #[test]
+    fn guard_no_crlf_rejects_newlines() {
+        assert!(guard_no_crlf("a\r\nb").is_err());
+        assert!(guard_no_crlf("a\nb").is_err());
+        assert!(guard_no_crlf("a\rb").is_err());
+        assert!(guard_no_crlf("safe").is_ok());
     }
 
     #[test]

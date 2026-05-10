@@ -1,0 +1,42 @@
+# Community-editable stack fingerprint rules for `wafrift_recon::active`.
+# Each rule matches a single response header (name compared case-insensitively).
+# Optional `value_prefix` / `value_contains` are ASCII case-insensitive.
+
+[[rule]]
+family = "waf"
+id = "cloudflare"
+header = "cf-ray"
+
+[[rule]]
+family = "waf"
+id = "sucuri"
+header = "x-sucuri-id"
+
+[[rule]]
+family = "waf"
+id = "akamai"
+header = "server"
+value_contains = "akamaighost"
+
+[[rule]]
+family = "cdn"
+id = "cloudflare"
+header = "server"
+value_prefix = "cloudflare"
+
+[[rule]]
+family = "cdn"
+id = "fastly"
+header = "x-fastly-request-id"
+
+[[rule]]
+family = "framework"
+id = "express"
+header = "x-powered-by"
+value_contains = "express"
+
+[[rule]]
+family = "framework"
+id = "drupal"
+header = "x-generator"
+value_contains = "drupal"

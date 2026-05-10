@@ -30,17 +30,30 @@ pub fn fitness_statistics(population: &[Chromosome]) -> FitnessStats {
         };
     }
 
-    let min = *evaluated
+    // Filter non-finite values before computing statistics — NaN/Inf
+    // would corrupt min/max/median and make comparisons nonsensical.
+    let finite: Vec<f64> = evaluated.iter().copied().filter(|f| f.is_finite()).collect();
+    if finite.is_empty() {
+        return FitnessStats {
+            min: 0.0,
+            max: 0.0,
+            mean: 0.0,
+            median: 0.0,
+            std_dev: 0.0,
+        };
+    }
+
+    let min = *finite
         .iter()
         .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or(&0.0);
-    let max = *evaluated
+    let max = *finite
         .iter()
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or(&0.0);
-    let mean = evaluated.iter().sum::<f64>() / evaluated.len() as f64;
+    let mean = finite.iter().sum::<f64>() / finite.len() as f64;
 
-    let mut sorted = evaluated.clone();
+    let mut sorted = finite.clone();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = if sorted.len().is_multiple_of(2) {
         f64::midpoint(sorted[sorted.len() / 2 - 1], sorted[sorted.len() / 2])

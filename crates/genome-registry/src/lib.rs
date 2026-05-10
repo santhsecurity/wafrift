@@ -3,7 +3,7 @@
 //! Three primitives:
 //!
 //! - [`Genome`] / [`GenomeBundle`]   wire format for a named pack of
-//!                                   evasion recipes
+//!   evasion recipes
 //! - [`SigningKey`] / [`SignedBundle`]  ed25519 sign + verify
 //! - [`TrustList`]                  publisher allowlist (per-host TOML)
 //!

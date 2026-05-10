@@ -148,7 +148,7 @@ fn matches(selector: &str, leaf: &str) -> bool {
 
 fn all_known_paths() -> Vec<&'static str> {
     let mut paths: Vec<&str> = KNOWN_FAMILIES.to_vec();
-    for s in wafrift_encoding::encoding::all_strategies() {
+    for &s in wafrift_encoding::encoding::all_strategies() {
         paths.push(strategy_path(s));
     }
     paths
@@ -167,7 +167,8 @@ pub fn render_tree() -> String {
     out.push_str("grammar                        (grammar-aware payload mutations)\n");
     out.push_str("encoding\n");
     let mut paths: Vec<&str> = wafrift_encoding::encoding::all_strategies()
-        .into_iter()
+        .iter()
+        .copied()
         .map(strategy_path)
         .collect();
     paths.sort_unstable();
@@ -243,7 +244,7 @@ mod tests {
 
     #[test]
     fn every_strategy_is_mapped() {
-        for s in wafrift_encoding::encoding::all_strategies() {
+        for &s in wafrift_encoding::encoding::all_strategies() {
             let path = strategy_path(s);
             assert_ne!(
                 path, "encoding/_unmapped",
@@ -256,7 +257,8 @@ mod tests {
     fn all_strategies_have_unique_paths() {
         use std::collections::HashSet;
         let paths: Vec<&str> = wafrift_encoding::encoding::all_strategies()
-            .into_iter()
+            .iter()
+            .copied()
             .map(strategy_path)
             .collect();
         let unique: HashSet<&&str> = paths.iter().collect();

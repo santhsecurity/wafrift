@@ -31,7 +31,7 @@
 //! cache. The dep is gated by the `tls-impersonate` feature so default
 //! `cargo install` consumers pay zero extra cost.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
 
 /// Errors from building or using a `StealthClient`.
@@ -353,7 +353,7 @@ impl StealthClient {
 // imports when the feature is off.
 #[cfg(not(feature = "tls-impersonate"))]
 #[allow(dead_code)]
-fn _unused_imports(_: Instant, _: Duration) {}
+fn _unused_imports(_: std::time::Instant, _: Duration) {}
 
 #[cfg(test)]
 mod tests {

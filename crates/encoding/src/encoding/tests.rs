@@ -136,7 +136,7 @@ fn all_strategies_ordered() {
 
 #[test]
 fn empty_payload_all_strategies() {
-    for strategy in all_strategies() {
+    for &strategy in all_strategies() {
         // Every strategy must handle empty input without erroring.
         let result = encode("", strategy);
         assert!(
@@ -389,7 +389,7 @@ fn adversarial_smoke_all_strategies() {
         "UNION SELECT null, null, null",
         "A",
     ];
-    for strategy in all_strategies() {
+    for &strategy in all_strategies() {
         for payload in &payloads {
             let result = encode(payload, strategy);
             assert!(

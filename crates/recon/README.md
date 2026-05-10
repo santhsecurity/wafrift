@@ -21,7 +21,7 @@ differential parameter mining).
 All discovery functions emit `wafrift_types::discovery::DiscoveredEndpoint`,
 which carries the URL, method, and a `Vec<InjectionPoint>` (each
 with `name`, `ParameterLocation`, `InjectionContext`, `required`).
-This is the same type `wafrift scan --from-discovery` consumes — so
+This is the same type `wafrift scan --from-discovery` consumes, so
 the typical workflow is:
 
 ```bash
@@ -33,7 +33,7 @@ wafrift scan --from-discovery endpoints.json --target https://api.example.com/..
 
 - `discover_subdomains_ct` and `discovery::param_miner` send live
   requests against the target. The CT-log query hits crt.sh (a
-  third party) — disable if the engagement contract forbids
+  third party): disable if the engagement contract forbids
   unauthorised third-party data exposure.
 - `param_miner` payloads are inert (`?<word>=wafrift_canary_x9k2`)
   and won't trigger WAF rules. The `differential` *probes* used

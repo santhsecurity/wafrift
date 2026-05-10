@@ -761,7 +761,7 @@ fn strategy_next_encoding_exhaustion() {
     let mut state = HostState::default();
 
     // Mark all encodings as tried
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         state.tried_encodings.push(strategy);
     }
 

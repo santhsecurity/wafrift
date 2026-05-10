@@ -160,7 +160,7 @@ fn f011_null_byte_inject_multibyte_utf8_no_panic() {
 #[test]
 fn f012_oversized_payload_rejected() {
     let huge = vec![b'X'; MAX_PAYLOAD_SIZE + 1];
-    for strategy in wafrift_encoding::all_strategies() {
+    for &strategy in wafrift_encoding::all_strategies() {
         let result = encode(&huge, strategy);
         assert!(
             matches!(result, Err(EncodeError::PayloadTooLarge { .. })),
@@ -197,7 +197,7 @@ fn f013_whitespace_insertion_preserves_keyword_integrity() {
 #[test]
 fn f015_no_panic_on_invalid_utf8() {
     let invalid = b"\x80\x81\x82";
-    for strategy in wafrift_encoding::all_strategies() {
+    for &strategy in wafrift_encoding::all_strategies() {
         let _ = encode(invalid, strategy);
         // Reaching here without panicking is the pass condition.
     }

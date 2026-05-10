@@ -253,8 +253,8 @@ impl GeneBank {
     pub fn save(&mut self, genome: &WafGenome) -> Result<(), GeneBankError> {
         let key = normalize_name(&genome.waf_name);
         let path = self.genome_path(&key);
-        let (lock_file, lock_path) = self.acquire_lock(&path)?;
-        self.write_genome(&path, genome)?;
+        let (lock_file, lock_path) = Self::acquire_lock(&path)?;
+        Self::write_genome(&path, genome)?;
         drop(lock_file);
         let _ = fs::remove_file(&lock_path);
         self.cache.insert(key, genome.clone());
@@ -280,16 +280,16 @@ impl GeneBank {
     ) -> Result<(), GeneBankError> {
         let key = normalize_name(waf_name);
         let path = self.genome_path(&key);
-        let (lock_file, lock_path) = self.acquire_lock(&path)?;
+        let (lock_file, lock_path) = Self::acquire_lock(&path)?;
 
         let mut genome = self
             .cache
             .remove(&key)
-            .or_else(|| self.read_genome_from_disk(&path))
+            .or_else(|| Self::read_genome_from_disk(&path))
             .unwrap_or_else(|| WafGenome::new(waf_name));
 
         genome.merge_session(stats);
-        self.write_genome(&path, &genome)?;
+        Self::write_genome(&path, &genome)?;
         drop(lock_file);
         let _ = fs::remove_file(&lock_path);
         self.cache.insert(key, genome);
@@ -325,7 +325,7 @@ impl GeneBank {
     ///
     /// Returns the locked file handle and the lock file path.
     /// The caller must drop the handle to release the lock.
-    fn acquire_lock(&self, path: &std::path::Path) -> Result<(fs::File, PathBuf), GeneBankError> {
+    fn acquire_lock(path: &std::path::Path) -> Result<(fs::File, PathBuf), GeneBankError> {
         let lock_path = path.with_extension("lock");
         let lock_file = fs::OpenOptions::new()
             .create(true)
@@ -350,7 +350,6 @@ impl GeneBank {
     ///
     /// Does NOT acquire locks — the caller must hold the advisory lock.
     fn write_genome(
-        &self,
         path: &std::path::Path,
         genome: &WafGenome,
     ) -> Result<(), GeneBankError> {
@@ -394,7 +393,7 @@ impl GeneBank {
     }
 
     /// Read a genome from disk, quarantining if corrupt.
-    fn read_genome_from_disk(&self, path: &std::path::Path) -> Option<WafGenome> {
+    fn read_genome_from_disk(path: &std::path::Path) -> Option<WafGenome> {
         if !path.exists() {
             return None;
         }

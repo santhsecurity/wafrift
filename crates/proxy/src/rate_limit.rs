@@ -46,7 +46,7 @@ impl RateLimiter {
     /// Returns true when this limiter is configured to never block.
     #[must_use]
     pub fn is_unlimited(&self) -> bool {
-        self.rps == 0.0
+        self.rps < f64::EPSILON
     }
 
     /// Block until one token is available for `host`.

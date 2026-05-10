@@ -118,9 +118,106 @@ pub fn is_stagnant(fitness_history: &[f64], window_size: usize, threshold: f64) 
 /// Calculate fitness improvement rate.
 #[must_use]
 pub fn fitness_improvement_rate(current: f64, previous: f64) -> f64 {
-    if previous == 0.0 {
+    if previous.abs() < f64::EPSILON {
         if current > 0.0 { f64::INFINITY } else { 0.0 }
     } else {
         (current - previous) / previous
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chrom(fitness: f64, evaluations: u32) -> Chromosome {
+        Chromosome {
+            genes: vec![],
+            fitness,
+            evaluations,
+            lineage: crate::lineage::Lineage::genesis(0),
+        }
+    }
+
+    #[test]
+    fn weighted_fitness_zero_evaluations() {
+        let c = chrom(0.5, 0);
+        assert_eq!(weighted_fitness(&c), 0.0);
+    }
+
+    #[test]
+    fn weighted_fitness_increases_with_evaluations() {
+        let c1 = chrom(0.5, 1);
+        let c2 = chrom(0.5, 10);
+        assert!(weighted_fitness(&c2) > weighted_fitness(&c1));
+    }
+
+    #[test]
+    fn evolutionary_fitness_zero_evaluations() {
+        let c = chrom(0.5, 0);
+        assert_eq!(evolutionary_fitness(&c, &[]), 0.0);
+    }
+
+    #[test]
+    fn evolutionary_fitness_no_active_genes() {
+        let mut c = chrom(0.5, 1);
+        c.genes = vec![("a".into(), "None".into())];
+        let f = evolutionary_fitness(&c, &[]);
+        assert!(f <= 0.35);
+    }
+
+    #[test]
+    fn confidence_weighted_average_empty() {
+        assert_eq!(confidence_weighted_average_fitness(&[]), 0.0);
+    }
+
+    #[test]
+    fn confidence_weighted_average_single() {
+        let pop = vec![chrom(0.5, 4)];
+        assert_eq!(confidence_weighted_average_fitness(&pop), 0.5);
+    }
+
+    #[test]
+    fn average_evaluated_fitness_empty() {
+        assert_eq!(average_evaluated_fitness(&[]), 0.0);
+    }
+
+    #[test]
+    fn average_evaluated_fitness_ignores_unevaluated() {
+        let pop = vec![chrom(0.0, 0), chrom(0.5, 1), chrom(1.0, 1)];
+        assert_eq!(average_evaluated_fitness(&pop), 0.75);
+    }
+
+    #[test]
+    fn has_converged_empty_population() {
+        assert!(!has_converged(&[], 0.01));
+    }
+
+    #[test]
+    fn is_stagnant_short_history() {
+        assert!(!is_stagnant(&[0.1, 0.2], 5, 0.01));
+    }
+
+    #[test]
+    fn is_stagnant_flatline() {
+        let hist = vec![0.5, 0.5, 0.5, 0.5, 0.5];
+        assert!(is_stagnant(&hist, 3, 0.01));
+    }
+
+    #[test]
+    fn is_stagnant_improving() {
+        let hist = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+        assert!(!is_stagnant(&hist, 3, 0.01));
+    }
+
+    #[test]
+    fn fitness_improvement_rate_from_zero() {
+        assert_eq!(fitness_improvement_rate(0.0, 0.0), 0.0);
+        assert_eq!(fitness_improvement_rate(0.5, 0.0), f64::INFINITY);
+    }
+
+    #[test]
+    fn fitness_improvement_rate_normal() {
+        assert!((fitness_improvement_rate(0.6, 0.5) - 0.2).abs() < 0.0001);
+        assert!((fitness_improvement_rate(0.4, 0.5) - (-0.2)).abs() < 0.0001);
     }
 }

@@ -80,7 +80,7 @@ pub fn layered_combinations(depth: usize) -> Vec<Vec<Strategy>> {
     }
 
     let mut current = Vec::new();
-    backtrack(&base, &mut current, &mut results, depth);
+    backtrack(base, &mut current, &mut results, depth);
     results
 }
 
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn aggressiveness_in_valid_range() {
-        for s in all_strategies() {
+        for &s in all_strategies() {
             let a = aggressiveness(s);
             assert!((0.0..=1.0).contains(&a), "aggressiveness for {s:?} out of range: {a}");
         }

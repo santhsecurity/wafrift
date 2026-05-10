@@ -54,22 +54,20 @@ pub fn generate_family_probes(family: ProbeFamily) -> Vec<Probe> {
             },
         ],
         ProbeFamily::Xss => {
-            let mut tags = xss_tag_probes();
-            let mut events = xss_event_probes();
-            let mut funcs = xss_function_probes();
-            vec![
-                tags.remove(0),
-                tags.remove(0),
-                tags.remove(0),
-                events.remove(0),
-                funcs.remove(0),
-                funcs.remove(5.min(funcs.len().saturating_sub(1))),
-            ]
+            let tags = xss_tag_probes();
+            let events = xss_event_probes();
+            let funcs = xss_function_probes();
+            // Gracefully degrade if probe datasets are smaller than expected.
+            let mut out = Vec::with_capacity(6);
+            out.extend(tags.into_iter().take(3));
+            out.extend(events.into_iter().take(1));
+            out.extend(funcs.into_iter().take(1));
+            out
         }
         ProbeFamily::Command => {
-            let mut seps = command_separator_probes();
-            let mut paths = command_path_probes();
-            vec![seps.remove(0), seps.remove(0), paths.remove(0)]
+            let seps = command_separator_probes();
+            let paths = command_path_probes();
+            seps.into_iter().take(2).chain(paths.into_iter().take(1)).collect()
         }
     }
 }

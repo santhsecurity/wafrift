@@ -6,7 +6,7 @@ mod tests {
 
     #[test]
     fn crlf_injection_contains_crlf() {
-        let evasion = crlf_in_pseudo_headers("/search", "X-Injected", "true");
+        let evasion = crlf_in_pseudo_headers("/search", "X-Injected", "true").unwrap();
         let path = evasion
             .pseudo_headers
             .iter()
@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn crlf_request_smuggle_has_two_requests() {
-        let evasion = crlf_request_smuggle("/api/search", "/admin");
+        let evasion = crlf_request_smuggle("/api/search", "/admin").unwrap();
         let path = evasion
             .pseudo_headers
             .iter()
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn all_evasions_non_empty() {
-        let evasions = all_evasions("/api/v1/search", "example.com");
+        let evasions = all_evasions("/api/v1/search", "example.com").unwrap();
         assert!(
             evasions.len() >= 20,
             "expected 20+ evasions, got {}",
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn all_evasions_cover_all_flaws() {
-        let evasions = all_evasions("/", "example.com");
+        let evasions = all_evasions("/", "example.com").unwrap();
         let flaws: HashSet<_> = evasions.iter().map(|e| e.target_flaw).collect();
         assert!(flaws.contains(&H2TargetFlaw::ProtocolDowngrade));
         assert!(flaws.contains(&H2TargetFlaw::PseudoHeaderMismatch));
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn evasion_descriptions_non_empty() {
-        let evasions = all_evasions("/test", "example.com");
+        let evasions = all_evasions("/test", "example.com").unwrap();
         for e in &evasions {
             assert!(!e.description.is_empty());
             assert!(!e.name.is_empty());
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn crlf_targets_protocol_downgrade() {
-        let evasion = crlf_in_pseudo_headers("/", "X-Test", "1");
+        let evasion = crlf_in_pseudo_headers("/", "X-Test", "1").unwrap();
         assert_eq!(evasion.target_flaw, H2TargetFlaw::ProtocolDowngrade);
     }
 

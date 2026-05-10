@@ -288,14 +288,14 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
             let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
             Ok(mysql_versioned_comment(text, 50_000))
         }
-        Strategy::NullByte => Ok(null_byte_inject(payload)),
-        Strategy::OverlongUtf8 => Ok(overlong_utf8(payload)),
-        Strategy::OverlongUtf8More => Ok(overlong_utf8_more(payload)),
+        Strategy::NullByte => Ok(null_byte_inject(payload)?),
+        Strategy::OverlongUtf8 => Ok(overlong_utf8(payload)?),
+        Strategy::OverlongUtf8More => Ok(overlong_utf8_more(payload)?),
         Strategy::ChunkedSplit => {
             let body = chunked_split(payload, 1024)?.body;
             String::from_utf8(body).map_err(|_| EncodeError::InvalidUtf8)
         }
-        Strategy::ParameterPollution => Ok(parameter_pollute(payload)),
+        Strategy::ParameterPollution => Ok(parameter_pollute(payload)?),
         Strategy::Base64Encode => Ok(base64_encode(payload)),
         Strategy::Base64UrlEncode => Ok(base64_url_encode(payload)),
         Strategy::HexEncode => Ok(hex_encode(payload)),
@@ -333,7 +333,7 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
             let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
             Ok(between_obfuscate(text))
         }
-        Strategy::UnmagicQuotes => Ok(unmagic_quotes(payload)),
+        Strategy::UnmagicQuotes => Ok(unmagic_quotes(payload)?),
         Strategy::FullwidthEncode => {
             let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
             Ok(fullwidth_encode(text))
@@ -346,8 +346,7 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
 }
 
 /// All available strategies in escalation order (least aggressive → most aggressive).
-#[must_use]
-pub fn all_strategies() -> Vec<Strategy> {
+static ALL_STRATEGIES: std::sync::LazyLock<Vec<Strategy>> = std::sync::LazyLock::new(|| {
     let mut strategies = vec![
         Strategy::CaseAlternation,
         Strategy::RandomCase,
@@ -391,6 +390,11 @@ pub fn all_strategies() -> Vec<Strategy> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     strategies
+});
+
+#[must_use]
+pub fn all_strategies() -> &'static [Strategy] {
+    &ALL_STRATEGIES
 }
 
 #[cfg(test)]

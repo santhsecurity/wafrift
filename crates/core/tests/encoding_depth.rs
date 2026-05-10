@@ -859,7 +859,7 @@ fn all_strategies_all_payloads_consistency() {
     let xss_payload = "<script>alert(1)</script>";
     let cmd_payload = "; cat /etc/passwd";
 
-    for strategy in encoding::all_strategies() {
+    for &strategy in encoding::all_strategies() {
         if matches!(
             strategy,
             Strategy::RandomCase | Strategy::SpaceToRandomBlank | Strategy::ParameterPollution

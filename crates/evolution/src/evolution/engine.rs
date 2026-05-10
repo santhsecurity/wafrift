@@ -272,7 +272,7 @@ impl EvolutionEngine {
             self.algorithm.submit_evaluations(cached_results);
         }
 
-        self.request_count += result.len();
+        self.request_count = self.request_count.saturating_add(result.len());
         result
     }
 
@@ -392,8 +392,10 @@ impl EvolutionEngine {
         self.stats.generation += 1;
         self.generation_evals = 0;
 
-        if let Some(ref path) = self.checkpoint_path {
-            let _ = self.save_checkpoint(path);
+        if let Some(ref path) = self.checkpoint_path
+            && let Err(e) = self.save_checkpoint(path)
+        {
+            tracing::warn!(error = %e, path = %path.display(), "checkpoint save failed");
         }
     }
 

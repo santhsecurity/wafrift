@@ -237,29 +237,69 @@ impl BypassCorpus {
         }
     }
 
+    /// Maximum corpus file size (bytes). Prevents OOM from
+    /// maliciously large JSONL files.
+    const MAX_CORPUS_BYTES: usize = 256 * 1024 * 1024;
+
+    /// Maximum individual JSONL line length (bytes).
+    const MAX_JSONL_LINE_BYTES: usize = 16 * 1024 * 1024;
+
     /// Save corpus to disk as JSONL (one JSON object per line).
     pub fn save(&self, path: &std::path::Path) -> Result<(), crate::types::EvolutionError> {
         use crate::types::EvolutionError;
-        let mut lines = Vec::new();
+        let mut buf = Vec::new();
         for entry in &self.entries {
             let json = serde_json::to_string(entry)
-                .map_err(|e| EvolutionError::SerializationFailed(e.to_string()))?;
-            lines.push(json);
+                .map_err(EvolutionError::SerializationFailed)?;
+            if json.len() > Self::MAX_JSONL_LINE_BYTES {
+                tracing::warn!(
+                    line_len = json.len(),
+                    max = Self::MAX_JSONL_LINE_BYTES,
+                    "skipping oversized corpus entry"
+                );
+                continue;
+            }
+            if !buf.is_empty() {
+                buf.push(b'\n');
+            }
+            buf.extend_from_slice(json.as_bytes());
+            if buf.len() > Self::MAX_CORPUS_BYTES {
+                return Err(EvolutionError::OversizedData {
+                    context: format!("corpus {}", path.display()),
+                    size: buf.len(),
+                    max: Self::MAX_CORPUS_BYTES,
+                });
+            }
         }
-        std::fs::write(path, lines.join("\n"))
-            .map_err(|e| EvolutionError::SerializationFailed(e.to_string()))?;
+        std::fs::write(path, buf)?;
         Ok(())
     }
 
     /// Load corpus from JSONL.
     pub fn load(path: &std::path::Path) -> Result<Self, crate::types::EvolutionError> {
         use crate::types::EvolutionError;
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| EvolutionError::DeserializationFailed(e.to_string()))?;
+        let meta = std::fs::metadata(path)?;
+        let len = meta.len() as usize;
+        if len > Self::MAX_CORPUS_BYTES {
+            return Err(EvolutionError::OversizedData {
+                context: format!("corpus {}", path.display()),
+                size: len,
+                max: Self::MAX_CORPUS_BYTES,
+            });
+        }
+        let content = std::fs::read_to_string(path)?;
         let mut entries = Vec::new();
         for line in content.lines().filter(|l| !l.trim().is_empty()) {
+            if line.len() > Self::MAX_JSONL_LINE_BYTES {
+                tracing::warn!(
+                    line_len = line.len(),
+                    max = Self::MAX_JSONL_LINE_BYTES,
+                    "skipping oversized corpus line"
+                );
+                continue;
+            }
             let entry: BypassEntry = serde_json::from_str(line)
-                .map_err(|e| EvolutionError::DeserializationFailed(e.to_string()))?;
+                .map_err(EvolutionError::DeserializationFailed)?;
             entries.push(entry);
         }
         Ok(Self {

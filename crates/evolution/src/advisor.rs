@@ -151,7 +151,7 @@ pub fn advise(waf: Option<&DetectedWaf>, drift: Option<&FingerprintDrift>) -> Ev
             apply_rule(&mut plan, &rule);
         } else {
             // Unknown WAF: be aggressive
-            plan.encoding_strategies = encoding::all_strategies();
+            plan.encoding_strategies = encoding::all_strategies().to_vec();
             plan.use_smuggling = true;
             plan.use_h2 = true;
             plan.rationale.push(format!(

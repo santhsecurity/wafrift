@@ -134,11 +134,15 @@ pub enum EvolutionError {
     #[error("target health critical: {0}")]
     TargetHealthCritical(String),
     #[error("serialization failed: {0}")]
-    SerializationFailed(String),
+    SerializationFailed(#[source] serde_json::Error),
     #[error("deserialization failed: {0}")]
-    DeserializationFailed(String),
+    DeserializationFailed(#[source] serde_json::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("search algorithm error: {0}")]
     AlgorithmError(String),
+    #[error("data exceeds size limit: {context} ({size} bytes, max {max})")]
+    OversizedData { context: String, size: usize, max: usize },
 }
 
 /// Reason for terminating evolution.
@@ -317,14 +321,25 @@ impl Default for Deduper {
     }
 }
 
+/// Maximum checkpoint file size (bytes). Prevents OOM from
+/// maliciously large checkpoint files.
+const MAX_CHECKPOINT_BYTES: usize = 512 * 1024 * 1024;
+
 /// Checkpoint persistence helpers.
 pub fn save_checkpoint(
     path: &std::path::Path,
     data: &impl Serialize,
 ) -> Result<(), EvolutionError> {
     let json = serde_json::to_string_pretty(data)
-        .map_err(|e| EvolutionError::SerializationFailed(e.to_string()))?;
-    std::fs::write(path, json).map_err(|e| EvolutionError::SerializationFailed(e.to_string()))?;
+        .map_err(EvolutionError::SerializationFailed)?;
+    if json.len() > MAX_CHECKPOINT_BYTES {
+        return Err(EvolutionError::OversizedData {
+            context: format!("checkpoint {}", path.display()),
+            size: json.len(),
+            max: MAX_CHECKPOINT_BYTES,
+        });
+    }
+    std::fs::write(path, json)?;
     Ok(())
 }
 
@@ -332,7 +347,141 @@ pub fn save_checkpoint(
 pub fn load_checkpoint<T: for<'de> Deserialize<'de>>(
     path: &std::path::Path,
 ) -> Result<T, EvolutionError> {
-    let json = std::fs::read_to_string(path)
-        .map_err(|e| EvolutionError::DeserializationFailed(e.to_string()))?;
-    serde_json::from_str(&json).map_err(|e| EvolutionError::DeserializationFailed(e.to_string()))
+    let meta = std::fs::metadata(path)?;
+    let len = meta.len() as usize;
+    if len > MAX_CHECKPOINT_BYTES {
+        return Err(EvolutionError::OversizedData {
+            context: format!("checkpoint {}", path.display()),
+            size: len,
+            max: MAX_CHECKPOINT_BYTES,
+        });
+    }
+    let json = std::fs::read_to_string(path)?;
+    serde_json::from_str(&json).map_err(EvolutionError::DeserializationFailed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn oracle_verdict_from_bool_true() {
+        let v = OracleVerdict::from_bool(true);
+        assert!(v.passed);
+        assert_eq!(v.triggered_rules, 0);
+        assert_eq!(v.confidence, 1.0);
+    }
+
+    #[test]
+    fn oracle_verdict_from_bool_false() {
+        let v = OracleVerdict::from_bool(false);
+        assert!(!v.passed);
+        assert_eq!(v.triggered_rules, 1);
+    }
+
+    #[test]
+    fn oracle_verdict_fitness_passed_is_one() {
+        let v = OracleVerdict::from_bool(true);
+        // clamped to 1.0 (1.0 base + 0.05 confidence bonus)
+        assert_eq!(v.to_fitness(), 1.0);
+    }
+
+    #[test]
+    fn oracle_verdict_fitness_blocked_penalizes_rules() {
+        let v = OracleVerdict {
+            passed: false,
+            triggered_rules: 5,
+            confidence: 1.0,
+            ..Default::default()
+        };
+        // 0.3 - 0.25 - 0 - 0 + 0.05 = 0.10
+        assert!((v.to_fitness() - 0.10).abs() < 0.01);
+    }
+
+    #[test]
+    fn feedback_to_verdict_passed() {
+        assert!(Feedback::Passed.to_verdict().passed);
+    }
+
+    #[test]
+    fn feedback_to_verdict_target_error() {
+        let v = Feedback::TargetError("timeout".into()).to_verdict();
+        assert!(!v.passed);
+        assert_eq!(v.status_delta, 500);
+        assert_eq!(v.confidence, 0.0);
+    }
+
+    #[test]
+    fn budget_default_wafrift_values() {
+        let b = Budget::default_wafrift();
+        assert_eq!(b.max_requests, 10_000);
+        assert_eq!(b.max_generations, 200);
+        assert_eq!(b.max_time_seconds, 3_600);
+        assert_eq!(b.stagnation_limit, 10);
+    }
+
+    #[test]
+    fn target_health_monitor_starts_healthy() {
+        let h = TargetHealthMonitor::new();
+        assert!(h.is_healthy());
+        assert!(!h.in_backoff());
+        assert_eq!(h.backoff(), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn target_health_monitor_records_errors() {
+        let mut h = TargetHealthMonitor::new();
+        for _ in 0..4 {
+            h.record_error();
+        }
+        assert!(h.is_healthy());
+        assert_eq!(h.backoff(), Duration::from_secs(16));
+        h.record_error();
+        assert!(!h.is_healthy());
+    }
+
+    #[test]
+    fn target_health_monitor_resets_on_success() {
+        let mut h = TargetHealthMonitor::new();
+        h.record_error();
+        h.record_error();
+        h.record_success();
+        assert!(h.is_healthy());
+        assert_eq!(h.backoff(), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn deduper_detects_duplicates() {
+        use crate::evolution::Chromosome;
+        let c1 = Chromosome::new(vec![("a".into(), "1".into())]);
+        let c2 = Chromosome::new(vec![("a".into(), "1".into())]);
+        let c3 = Chromosome::new(vec![("a".into(), "2".into())]);
+
+        let mut d = Deduper::new();
+        assert!(!d.is_duplicate(&c1));
+        d.insert(&c1);
+        assert!(d.is_duplicate(&c2));
+        assert!(!d.is_duplicate(&c3));
+    }
+
+    #[test]
+    fn deduper_insert_many() {
+        use crate::evolution::Chromosome;
+        let c1 = Chromosome::new(vec![("a".into(), "1".into())]);
+        let c2 = Chromosome::new(vec![("b".into(), "2".into())]);
+        let mut d = Deduper::new();
+        d.insert_many(&[c1.clone(), c2.clone()]);
+        assert!(d.is_duplicate(&c1));
+        assert!(d.is_duplicate(&c2));
+    }
+
+    #[test]
+    fn deduper_hash_consistent() {
+        use crate::evolution::Chromosome;
+        let c = Chromosome::new(vec![("x".into(), "y".into())]);
+        let h1 = Deduper::hash_chromosome(&c);
+        let h2 = Deduper::hash_chromosome(&c);
+        assert_eq!(h1, h2);
+    }
 }

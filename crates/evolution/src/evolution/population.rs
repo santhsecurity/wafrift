@@ -241,3 +241,132 @@ pub fn baseline_chromosome(gene_pool: &GenePool) -> Chromosome {
         .collect();
     Chromosome::new(genes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn chromosome_new_zero_fitness() {
+        let c = Chromosome::new(vec![("a".into(), "1".into())]);
+        assert_eq!(c.fitness, 0.0);
+        assert_eq!(c.evaluations, 0);
+    }
+
+    #[test]
+    fn chromosome_record_updates_fitness() {
+        let mut c = Chromosome::new(vec![("a".into(), "1".into())]);
+        c.record(true);
+        assert_eq!(c.evaluations, 1);
+        assert!(c.fitness > 0.0);
+    }
+
+    #[test]
+    fn chromosome_record_verdict_smoothing() {
+        let mut c = Chromosome::new(vec![("a".into(), "1".into())]);
+        c.record_verdict(&crate::types::OracleVerdict::from_bool(true));
+        let f1 = c.fitness;
+        c.record_verdict(&crate::types::OracleVerdict::from_bool(false));
+        assert!(c.fitness < f1);
+    }
+
+    #[test]
+    fn chromosome_gene_lookup() {
+        let c = Chromosome::new(vec![
+            ("encoding".into(), "UrlEncode".into()),
+            ("content_type".into(), "None".into()),
+        ]);
+        assert_eq!(c.gene("encoding"), Some("UrlEncode"));
+        assert_eq!(c.gene("missing"), None);
+    }
+
+    #[test]
+    fn chromosome_has_gene() {
+        let c = Chromosome::new(vec![("encoding".into(), "UrlEncode".into())]);
+        assert!(c.has_gene("encoding"));
+        assert!(!c.has_gene("missing"));
+    }
+
+    #[test]
+    fn chromosome_active_gene_count_skips_none() {
+        let c = Chromosome::new(vec![
+            ("a".into(), "None".into()),
+            ("b".into(), "1".into()),
+            ("c".into(), "None".into()),
+            ("d".into(), "2".into()),
+        ]);
+        assert_eq!(c.active_gene_count(), 2);
+    }
+
+    #[test]
+    fn chromosome_hash_equal_for_equal_genes() {
+        let c1 = Chromosome::new(vec![("a".into(), "1".into()), ("b".into(), "2".into())]);
+        let c2 = Chromosome::new(vec![("a".into(), "1".into()), ("b".into(), "2".into())]);
+        assert_eq!(c1.hash(), c2.hash());
+    }
+
+    #[test]
+    fn chromosome_hash_different_for_different_genes() {
+        let c1 = Chromosome::new(vec![("a".into(), "1".into())]);
+        let c2 = Chromosome::new(vec![("a".into(), "2".into())]);
+        assert_ne!(c1.hash(), c2.hash());
+    }
+
+    #[test]
+    fn gene_pool_default_has_encoding() {
+        let pool = GenePool::default_wafrift();
+        assert!(pool.values_for("encoding").is_some());
+        assert!(pool.values_for("content_type").is_some());
+        assert!(pool.values_for("header_obfuscation").is_some());
+        assert!(pool.values_for("grammar_rule").is_some());
+    }
+
+    #[test]
+    fn gene_pool_gene_names() {
+        let pool = GenePool::default_wafrift();
+        let names = pool.gene_names();
+        assert_eq!(names.len(), 4);
+    }
+
+    #[test]
+    fn gene_pool_random_value_returns_some() {
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(42);
+        assert!(pool.random_value("encoding", &mut rng).is_some());
+    }
+
+    #[test]
+    fn gene_pool_random_value_missing_returns_none() {
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(42);
+        assert!(pool.random_value("missing", &mut rng).is_none());
+    }
+
+    #[test]
+    fn gene_pool_all_values_unique() {
+        let pool = GenePool::default_wafrift();
+        let values = pool.all_values();
+        let unique: std::collections::HashSet<_> = values.iter().collect();
+        assert_eq!(values.len(), unique.len());
+    }
+
+    #[test]
+    fn baseline_chromosome_all_none() {
+        let pool = GenePool::default_wafrift();
+        let c = baseline_chromosome(&pool);
+        for (_, value) in &c.genes {
+            assert_eq!(value, "None");
+        }
+        assert_eq!(c.genes.len(), pool.gene_names().len());
+    }
+
+    #[test]
+    fn random_chromosome_has_all_genes() {
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(42);
+        let c = random_chromosome(&pool, &mut rng);
+        assert_eq!(c.genes.len(), pool.gene_names().len());
+    }
+}

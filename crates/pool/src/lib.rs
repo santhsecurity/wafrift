@@ -4,6 +4,20 @@ use reqwest::Url;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// Errors that can occur when constructing or using a [`ProxyPool`].
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum PoolError {
+    /// One or more proxy URLs could not be parsed.
+    #[error("invalid proxy URL '{url}': {source}")]
+    InvalidUrl {
+        /// The raw URL string that failed parsing.
+        url: String,
+        /// The underlying parse error.
+        #[source]
+        source: url::ParseError,
+    },
+}
+
 /// A thread-safe, round-robin rotating pool of proxy URLs.
 #[derive(Debug, Clone)]
 pub struct ProxyPool {
@@ -18,15 +32,17 @@ impl ProxyPool {
     ///
     /// # Errors
     /// Returns an error string if any proxy URL fails to parse.
-    pub fn new(url_strs: &[String]) -> Result<Option<Self>, String> {
+    pub fn new(url_strs: &[String]) -> Result<Option<Self>, PoolError> {
         if url_strs.is_empty() {
             return Ok(None);
         }
 
         let mut urls = Vec::with_capacity(url_strs.len());
         for url_str in url_strs {
-            let parsed = Url::parse(url_str)
-                .map_err(|e| format!("Invalid proxy URL '{}': {}", url_str, e))?;
+            let parsed = Url::parse(url_str).map_err(|e| PoolError::InvalidUrl {
+                url: url_str.clone(),
+                source: e,
+            })?;
             urls.push(parsed);
         }
 
@@ -70,7 +86,7 @@ mod tests {
     #[test]
     fn new_rejects_invalid_urls() {
         let err = ProxyPool::new(&[String::from("not-a-url")]).expect_err("invalid URL");
-        assert!(err.contains("Invalid proxy URL"));
+        assert!(err.to_string().contains("invalid proxy URL"));
     }
 
     #[test]

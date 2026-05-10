@@ -294,7 +294,7 @@ fn chunked_split_in_header_value_rejected() {
 #[test]
 fn every_strategy_produces_valid_plain_body() {
     let payload = b"<script>alert(1)</script>";
-    for strategy in wafrift_encoding::all_strategies() {
+    for &strategy in wafrift_encoding::all_strategies() {
         let out = encode_in_context(payload, strategy, InjectionContext::PlainBody).unwrap();
         // PlainBody has no structural constraints, so all strategies should succeed
         assert!(
@@ -308,7 +308,7 @@ fn every_strategy_produces_valid_plain_body() {
 #[test]
 fn every_strategy_produces_valid_url_query() {
     let payload = b"hello world";
-    for strategy in wafrift_encoding::all_strategies() {
+    for &strategy in wafrift_encoding::all_strategies() {
         let result = encode_in_context(payload, strategy, InjectionContext::UrlQuery);
         // Most should succeed; some that introduce spaces or special chars may fail
         if let Ok(out) = result {

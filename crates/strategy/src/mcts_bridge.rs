@@ -102,19 +102,19 @@ impl WafRiftEnv {
             .body
             .as_ref()
             .filter(|_| crate::strategy::is_text_payload(&req))
-            .map(|body| {
-                let body_str = String::from_utf8_lossy(body);
+            .and_then(|body| {
+                let body_str = std::str::from_utf8(body).ok()?;
                 // Extract parameter values for mutation
                 let payload = body_str
                     .split('&')
                     .filter_map(|pair| pair.split_once('=').map(|(_, v)| v))
                     .collect::<Vec<_>>()
                     .join(" ");
-                if payload.is_empty() {
-                    grammar::mutate(&body_str, 8)
+                Some(if payload.is_empty() {
+                    grammar::mutate(body_str, 8)
                 } else {
                     grammar::mutate(&payload, 8)
-                }
+                })
             })
             .unwrap_or_default();
 
@@ -193,7 +193,8 @@ impl Environment for WafRiftEnv {
         match action {
             TechniqueAction::Encode(encoding_name) => {
                 if let Some(strategy) = encoding::all_strategies()
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .find(|s| s.as_str() == *encoding_name)
                     && let Some(ref body) = self.req.body
                     && crate::strategy::is_text_payload(&self.req)
@@ -220,7 +221,9 @@ impl Environment for WafRiftEnv {
                     if let Some(ref body) = self.req.body
                         && crate::strategy::is_text_payload(&self.req)
                     {
-                        let body_str = String::from_utf8_lossy(body);
+                        let Ok(body_str) = std::str::from_utf8(body) else {
+                            return;
+                        };
                         // Replace only the first parameter value while preserving
                         // the rest of the form body so the request remains valid.
                         if let Some((first_pair, rest)) = body_str.split_once('&') {
@@ -286,7 +289,10 @@ impl Environment for WafRiftEnv {
             && let Some(ref body) = self.req.body
             && crate::strategy::is_text_payload(&self.req)
         {
-            let body_str = String::from_utf8_lossy(body);
+            let body_str = match std::str::from_utf8(body) {
+                Ok(s) => s,
+                Err(_) => return Outcome::Failure,
+            };
 
             for pair in body_str.split('&') {
                 if let Some((_, v)) = pair.split_once('=') {

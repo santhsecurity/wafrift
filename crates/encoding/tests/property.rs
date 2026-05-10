@@ -140,7 +140,7 @@ fn size_bound_layered_encoding() {
 #[test]
 fn size_bound_all_strategies_reject_oversized() {
     let big = vec![b'X'; MAX_PAYLOAD_SIZE + 1];
-    for strategy in wafrift_encoding::all_strategies() {
+    for &strategy in wafrift_encoding::all_strategies() {
         let result = encode(&big, strategy);
         assert!(
             matches!(result, Err(EncodeError::PayloadTooLarge { .. })),
@@ -152,7 +152,7 @@ fn size_bound_all_strategies_reject_oversized() {
 #[test]
 fn output_size_bounded_for_small_inputs() {
     let payload = "A".repeat(1000);
-    for strategy in wafrift_encoding::all_strategies() {
+    for &strategy in wafrift_encoding::all_strategies() {
         let result = encode(&payload, strategy);
         if let Ok(encoded) = result {
             assert!(
