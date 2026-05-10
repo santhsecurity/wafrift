@@ -6,6 +6,18 @@
 
 > Part of the [Santh](https://santh.dev) security research ecosystem.
 
+> **Status: BETA.** WafRift is under active development and has **not been
+> extensively tested against live production WAFs in the field**. The local
+> WAF stacks under `wafrift-bench/targets/` (ModSecurity PL1–4, Coraza,
+> BunkerWeb, naxsi) are exercised in CI, but coverage of cloud WAFs
+> (Cloudflare, AWS WAF, Akamai, Imperva, Azure Front Door, F5) is still
+> sparse. Treat results from those targets as preliminary.
+>
+> **Pull requests are welcome** — bug reports, evasion techniques, WAF
+> fixtures, and gene-bank submissions especially. See [CONTRIBUTING.md](CONTRIBUTING.md)
+> if it exists; otherwise open an issue or PR directly on
+> [github.com/santhsecurity/wafrift](https://github.com/santhsecurity/wafrift).
+
 **A programmable WAF-evasion engine with per-technique controls, and an evolutionary mode that learns bypasses for you.**
 
 Other tools give you one trick: junk padding, header injection, smuggling, or a static tamper list. WafRift is the union: encoding, grammar-aware mutation, content-type switching, request smuggling, and TLS/HTTP fingerprint rotation. The CLI exposes every encoding strategy and the grammar layer as fine-grained `--only`/`--exclude` selectors; the rest run as part of the default pipeline. Per-host toggle persistence and a Burp Suite control panel are tracked in the [roadmap](docs/GAP_CLOSURE_ROADMAP.md). Turn the engine loose and a search loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses the target WAF and persists winning pipelines to a per-WAF **gene bank** so the next scan starts with zero discovery phase.
