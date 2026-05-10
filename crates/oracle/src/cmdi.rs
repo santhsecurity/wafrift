@@ -8,6 +8,7 @@
 //! If encoding destroys any separator or the command name, the payload
 //! becomes inert text that the shell will reject or ignore.
 
+use crate::ascii_scan::contains_ascii_insensitive;
 use crate::traits::PayloadOracle;
 use serde::Deserialize;
 use std::sync::OnceLock;
@@ -105,31 +106,30 @@ fn shell_tricks() -> &'static [String] {
 
 /// Returns true if `text` contains `word` as a whole word.
 fn contains_word(text: &str, word: &str) -> bool {
-    let text_lower = text.to_ascii_lowercase();
     let word_lower = word.to_ascii_lowercase();
-    text_lower
-        .split(|c: char| {
-            c.is_ascii_whitespace()
-                || matches!(
-                    c,
-                    ';' | '|' | '&' | '`' | '$' | '(' | ')' | '<' | '>' | '\'' | '"'
-                )
-                || c == '\0'
-        })
-        .any(|part| {
-            let part = part.trim_start_matches('/');
-            part == word_lower
-                || part.starts_with(&word_lower)
-                    && part[word_lower.len()..].starts_with(|c: char| {
-                        c.is_ascii_whitespace() || c == '-' || c == '/' || c == '(' || c == '$'
-                    })
-        })
+    text.split(|c: char| {
+        c.is_ascii_whitespace()
+            || matches!(
+                c,
+                ';' | '|' | '&' | '`' | '$' | '(' | ')' | '<' | '>' | '\'' | '"'
+            )
+            || c == '\0'
+    })
+    .any(|part| {
+        let part = part.trim_start_matches('/');
+        let part_lower = part.to_ascii_lowercase();
+        part_lower == word_lower
+            || part_lower.starts_with(&word_lower)
+                && part_lower.len() > word_lower.len()
+                && part_lower[word_lower.len()..].starts_with(|c: char| {
+                    c.is_ascii_whitespace() || c == '-' || c == '/' || c == '(' || c == '$'
+                })
+    })
 }
 
 /// Checks whether a payload contains command injection structure.
 fn has_cmdi_structure(payload: &str) -> bool {
     let payload = payload.trim_end_matches(['\0', '\u{FFFD}']);
-    let lower = payload.to_ascii_lowercase();
 
     // Must have at least one separator
     let has_separator = cmd_separators().iter().any(|sep| payload.contains(sep));
@@ -143,12 +143,12 @@ fn has_cmdi_structure(payload: &str) -> bool {
     let has_shell_trick = shell_tricks().iter().any(|trick| payload.contains(trick));
 
     // Also check for common target paths
-    let has_target_path = lower.contains("/etc/passwd")
-        || lower.contains("/etc/shadow")
-        || lower.contains("/bin/")
-        || lower.contains("/tmp/")
-        || lower.contains("http://")
-        || lower.contains("https://");
+    let has_target_path = contains_ascii_insensitive(payload, "/etc/passwd")
+        || contains_ascii_insensitive(payload, "/etc/shadow")
+        || contains_ascii_insensitive(payload, "/bin/")
+        || contains_ascii_insensitive(payload, "/tmp/")
+        || contains_ascii_insensitive(payload, "http://")
+        || contains_ascii_insensitive(payload, "https://");
 
     // Valid CMDI: separator is always required. Then either a recognized
     // command, a shell trick, or a target path (like /etc/passwd) makes it structural.

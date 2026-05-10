@@ -8,6 +8,7 @@
 //! If encoding destroys the `../` sequences or the target path, the
 //! server won't resolve the file and the traversal fails.
 
+use crate::ascii_scan::contains_ascii_insensitive;
 use crate::traits::PayloadOracle;
 use serde::Deserialize;
 use std::sync::OnceLock;
@@ -87,17 +88,15 @@ fn target_files() -> &'static [String] {
 
 /// Checks whether a payload contains path traversal structure.
 fn has_traversal_structure(payload: &str) -> bool {
-    let lower = payload.to_ascii_lowercase();
-
     // Must have at least one traversal sequence
     let has_traversal = traversal_sequences()
         .iter()
-        .any(|seq| lower.contains(&seq.to_ascii_lowercase()));
+        .any(|seq| contains_ascii_insensitive(payload, seq));
 
     // Must reference at least one target file/path
     let has_target = target_files()
         .iter()
-        .any(|target| lower.contains(&target.to_ascii_lowercase()));
+        .any(|target| contains_ascii_insensitive(payload, target));
 
     // A bare traversal sequence is also valid (attacker may be probing)
     has_traversal || (has_target && payload.contains(".."))
