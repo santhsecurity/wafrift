@@ -224,6 +224,15 @@ impl EvolutionEngine {
         parts.join(";")
     }
 
+    /// Read-only view of the engine's next eval-id counter.
+    /// Exposed so checkpoint round-trip tests can verify the counter
+    /// is preserved across save/load. The field itself stays private
+    /// so external callers can't desync it.
+    #[must_use]
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+
     fn next_eval_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
@@ -448,14 +457,22 @@ impl EvolutionEngine {
             algorithm_name: self.algorithm.name().to_string(),
             algorithm_state: self.algorithm.checkpoint()?,
             gene_pool: self.gene_pool.clone(),
-            rng_seed: 0, // We can't easily extract seed; we rely on algorithm state
+            // The engine-level rng is not serializable; the algorithm
+            // captures its own rng state inside algorithm_state. Any
+            // engine-side draws after a restore will diverge from
+            // pre-crash, but the algorithm's exploration sequence is
+            // preserved.
+            rng_seed: 0,
             budget: self.budget,
             gene_stats: self.gene_stats.clone(),
             fitness_history: self.fitness_history.clone(),
             stagnation_counter: self.stagnation_counter,
             request_count: self.request_count,
             stats: self.stats,
-            schema_version: 1,
+            schema_version: 2,
+            corpus: self.corpus.clone(),
+            next_id: self.next_id,
+            generation_evals: self.generation_evals,
         };
         save_checkpoint(path, &state)
     }
@@ -472,6 +489,11 @@ impl EvolutionEngine {
         self.stagnation_counter = state.stagnation_counter;
         self.request_count = state.request_count;
         self.stats = state.stats;
+        // v2 fields — `#[serde(default)]` on EngineState means a v1
+        // checkpoint loads cleanly with empty corpus / next_id=0.
+        self.corpus = state.corpus;
+        self.next_id = state.next_id;
+        self.generation_evals = state.generation_evals;
         Ok(())
     }
 
@@ -605,6 +627,25 @@ impl EvolutionEngine {
 }
 
 /// Serializable engine state.
+///
+/// Schema version 2 (2026-05-10) adds `corpus`, `next_id`, and
+/// `generation_evals` so a restored engine doesn't lose all of its
+/// bypass discoveries and doesn't reset its eval-id counter (which
+/// would collide with any in-flight evaluation that survived the
+/// crash).
+///
+/// What is intentionally NOT serialized:
+///   - `in_flight`: by definition transient; any pending eval at
+///     checkpoint time is lost on crash, but the corpus capture
+///     above means the *useful* bypasses are preserved.
+///   - `cache`: LRU cache of payload→verdict; recomputable.
+///   - `target_health`: runtime stats; resets on resume.
+///   - `checkpoint_path`: re-injected by the caller after load.
+///   - `pending_single`: legacy sequential API state, transient.
+///   - RNG state: search algorithms each capture their own RNG
+///     state inside `algorithm_state`; the engine-level rng is
+///     used only for next_eval_id minting and gene-pool sampling
+///     when the algorithm doesn't override.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineState {
     pub algorithm_name: String,
@@ -618,6 +659,18 @@ pub struct EngineState {
     pub request_count: usize,
     pub stats: SearchStats,
     pub schema_version: u32,
+    /// Saved bypass discoveries — added in schema_version 2.
+    /// Defaults to empty for v1 checkpoints loaded by a v2 engine.
+    #[serde(default)]
+    pub corpus: BypassCorpus,
+    /// Next eval_id to mint — added in schema_version 2 so a
+    /// restored engine doesn't recycle IDs that may collide with
+    /// any in-flight evaluation that survived the crash.
+    #[serde(default)]
+    pub next_id: u64,
+    /// Evaluations issued in the current generation — added in v2.
+    #[serde(default)]
+    pub generation_evals: usize,
 }
 
 use serde::{Deserialize, Serialize};
