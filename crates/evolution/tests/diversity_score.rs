@@ -109,8 +109,8 @@ fn diversity_monotone_in_pairwise_disagreement() {
             .map(|(name, _)| (name.clone(), "X".to_string()))
             .collect();
         let mut b = a.clone();
-        for i in 0..disagreements.min(a.len()) {
-            b[i].1 = format!("Y{i}");
+        for (i, item) in b.iter_mut().enumerate().take(disagreements.min(a.len())) {
+            item.1 = format!("Y{i}");
         }
         vec![Chromosome::new(a.clone()), Chromosome::new(b)]
     }

@@ -50,9 +50,11 @@ fn stagnation_counter_is_mirrored_into_stats() {
 #[test]
 fn should_terminate_fires_when_stagnation_limit_reached() {
     let mut engine = EvolutionEngine::new(8);
-    let mut budget = Budget::default();
-    budget.stagnation_limit = 3;
-    budget.max_requests = 1_000_000;
+    let budget = Budget {
+        stagnation_limit: 3,
+        max_requests: 1_000_000,
+        ..Budget::default()
+    };
     engine.budget = budget;
 
     for _ in 0..50 {

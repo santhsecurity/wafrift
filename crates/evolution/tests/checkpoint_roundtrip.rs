@@ -15,7 +15,7 @@ use rand::rngs::StdRng;
 use std::path::PathBuf;
 use wafrift_evolution::evolution::{EvolutionEngine, GenePool};
 use wafrift_evolution::lineage::BypassEntry;
-use wafrift_evolution::types::{Budget, OracleVerdict};
+use wafrift_evolution::types::OracleVerdict;
 
 fn tmp_path(name: &str) -> PathBuf {
     let mut p = std::env::temp_dir();

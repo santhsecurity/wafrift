@@ -73,7 +73,7 @@ fn map_elites_grid_fills_through_engine_round_trip() {
     // public surface, but stats.evaluations is incremented inside
     // submit_batch only on the success path.
     assert_eq!(
-        engine.stats.evaluations as usize, total_evals,
+        engine.stats.evaluations, total_evals,
         "submit_batch must update stats.evaluations exactly once per result; \
          pre-fix this still passed because the count is engine-side, but \
          the next assertion is the real bug catcher"
