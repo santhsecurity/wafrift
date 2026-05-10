@@ -35,10 +35,22 @@ pub fn intercept_mode_enabled() -> bool {
     INTERCEPT_MODE.load(Ordering::Relaxed)
 }
 
+/// Serializes the (flip, drain) pair in toggle/set so two concurrent
+/// toggles can't interleave such that the drain runs while another
+/// thread has already flipped intercept back ON. Without this guard
+/// the audit's `test_concurrent_toggle_race` reproduced the
+/// spurious-release bug.
+static MODE_TRANSITION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Toggle intercept-mode and return the new value. When toggling
 /// OFF, drains every pending intercept with `Release` so existing
 /// requests don't wedge.
 pub fn toggle_intercept_mode() -> bool {
+    // Hold MODE_TRANSITION across the entire (read-modify-drain)
+    // sequence — the atomic alone isn't enough because the drain is
+    // a separate observation of the store. Closes the TOCTOU window
+    // identified by the 2026-05-10 audit.
+    let _guard = MODE_TRANSITION.lock().unwrap_or_else(|e| e.into_inner());
     let prev = INTERCEPT_MODE.fetch_xor(true, Ordering::Relaxed);
     let now_on = !prev;
     if !now_on {
@@ -50,6 +62,7 @@ pub fn toggle_intercept_mode() -> bool {
 /// Force intercept-mode to a specific value (test / programmatic
 /// override). Drains pending on transition to OFF.
 pub fn set_intercept_mode(on: bool) {
+    let _guard = MODE_TRANSITION.lock().unwrap_or_else(|e| e.into_inner());
     let prev = INTERCEPT_MODE.swap(on, Ordering::Relaxed);
     if prev && !on {
         let _ = global_store().drain_release();
@@ -147,6 +160,20 @@ impl InterceptStore {
         } else {
             false
         }
+    }
+
+    /// Cancel a pending intercept WITHOUT sending a decision. The
+    /// proxy calls this when the receiver is dropped (client
+    /// disconnected, request timed out before the operator decided)
+    /// so the sender + pending entry don't leak forever in the maps.
+    /// Idempotent.
+    ///
+    /// Returns true if an entry was removed, false if no such id.
+    pub fn cancel(&self, id: u64) -> bool {
+        let mut inner = self.inner.lock().expect("InterceptStore poisoned");
+        let removed_pending = inner.pending.remove(&id).is_some();
+        let removed_sender = inner.senders.remove(&id).is_some();
+        removed_pending || removed_sender
     }
 
     /// Release every pending intercept with `Release`. Used when the
