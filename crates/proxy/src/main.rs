@@ -1016,6 +1016,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.insecure_open_upstream {
         warn!("--insecure-open-upstream: upstream DNS/literal policy checks are disabled");
     }
+    if args.insecure {
+        warn!(
+            "--insecure: upstream TLS certificate verification is disabled — \
+             do NOT use on untrusted networks; an on-path attacker can MITM \
+             every HTTPS connection wafrift makes"
+        );
+    }
 
     // ── Persistent gene bank ────────────────────────────────────────
     let gene_bank_path = default_gene_bank_path(&args.gene_bank_path);
