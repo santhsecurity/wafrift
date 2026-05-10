@@ -312,7 +312,7 @@ fn real_mutation_still_reports_technique() {
     };
     let (_, techniques) = mutate_url("/?q='abc'", &cfg);
     assert!(
-        techniques.iter().any(|t| *t == "url:query_values"),
+        techniques.contains(&"url:query_values"),
         "apostrophe mutation MUST report applied; got: {techniques:?}"
     );
 }

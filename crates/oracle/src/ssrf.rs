@@ -123,6 +123,48 @@ fn internal_path_indicators() -> &'static [String] {
     })
 }
 
+/// Whole-token matcher for short indicator hosts (the "0" shorthand
+/// being the canonical case). A token is bounded by `://`, `/`, `?`,
+/// `#`, `:`, or end-of-string — i.e. the URL grammar boundaries
+/// around an authority. Returns true iff one occurrence of `host`
+/// in `payload` is a complete authority component, ignoring case.
+fn host_is_complete_token(payload: &str, host: &str) -> bool {
+    let host_bytes = host.as_bytes();
+    if host_bytes.is_empty() {
+        return false;
+    }
+    let bytes = payload.as_bytes();
+    let is_boundary = |b: u8| -> bool {
+        // URL authority terminators + scheme separator bytes,
+        // plus IPv6 authority brackets `[` `]`.
+        matches!(
+            b,
+            b'/' | b'?' | b'#' | b':' | b'@' | b'[' | b']' | b' ' | b'\t' | b'\n' | b'\r'
+        )
+    };
+    let mut i = 0;
+    while i + host_bytes.len() <= bytes.len() {
+        let prefix_match = bytes[i..i + host_bytes.len()]
+            .iter()
+            .zip(host_bytes.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b));
+        if prefix_match {
+            // Left boundary: start-of-string OR after `//` OR after a boundary char.
+            let left_ok = i == 0
+                || is_boundary(bytes[i - 1])
+                || (i >= 2 && &bytes[i - 2..i] == b"//");
+            // Right boundary: end-of-string OR boundary char.
+            let right_ok = i + host_bytes.len() == bytes.len()
+                || is_boundary(bytes[i + host_bytes.len()]);
+            if left_ok && right_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Checks whether a payload contains SSRF URL structure.
 fn has_ssrf_structure(payload: &str) -> bool {
     // Protocol-relative URLs are valid SSRF shapes; no need to scan megabyte bodies for indicators.
@@ -492,6 +534,21 @@ mod tests {
         let oracle = SsrfOracle;
         // Just a scheme with no host
         assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "http://",));
+    }
+
+    #[test]
+    fn short_indicator_requires_token_boundary() {
+        // "0" should match when it's a standalone host token
+        assert!(host_is_complete_token("http://0/", "0"));
+        assert!(host_is_complete_token("0", "0"));
+        // "0" should NOT match as a substring inside "100"
+        assert!(!host_is_complete_token("/page?id=100", "0"));
+        // "0" should NOT match as a substring inside "a0b"
+        assert!(!host_is_complete_token("a0b", "0"));
+        // The IPv6 `::` substring inside `abc::def` is not at a
+        // host boundary — the surrounding `c` and `d` are not
+        // authority delimiters.
+        assert!(!host_is_complete_token("abc::def", "::"));
     }
 
     #[test]

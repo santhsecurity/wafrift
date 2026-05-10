@@ -15,7 +15,7 @@ pub(crate) fn contains_ascii_insensitive(haystack: &str, needle: &str) -> bool {
     }
     'outer: for i in 0..=hay.len() - nb.len() {
         for j in 0..nb.len() {
-            if hay[i + j].to_ascii_lowercase() != nb[j].to_ascii_lowercase() {
+            if !hay[i + j].eq_ignore_ascii_case(&nb[j]) {
                 continue 'outer;
             }
         }
