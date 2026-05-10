@@ -1133,3 +1133,45 @@ fn mutate_url_does_not_disturb_alphanumeric_only_query() {
     let mutated_url = format!("{authority}{mutated_pq}");
     assert_eq!(mutated_url, url);
 }
+
+// ── Managed-challenge wiring tests (blocker #115) ──────────────────
+
+#[test]
+fn challenge_store_singleton_is_reusable_across_calls() {
+    let s1 = challenge_store();
+    let s2 = challenge_store();
+    s1.record(
+        "test-singleton.example",
+        "cf_clearance=xyz",
+        wafrift_transport::challenge::ChallengeKind::CloudflareManaged,
+        None,
+    );
+    assert_eq!(
+        s2.get("test-singleton.example"),
+        Some("cf_clearance=xyz".into()),
+        "challenge_store() must return the same shared store on every call"
+    );
+    s1.forget("test-singleton.example");
+}
+
+#[test]
+fn challenge_capture_round_trip_via_extract_and_store() {
+    let store = challenge_store();
+    let host = "challenge-rt.example";
+    store.forget(host);
+    let set_cookie_values = vec![
+        "session=abc; path=/",
+        "cf_clearance=zzz; domain=.example.com; secure; httponly",
+    ];
+    let extracted =
+        wafrift_transport::challenge::extract_clearance_cookie(&set_cookie_values);
+    assert!(extracted.is_some(), "must extract cf_clearance from a Set-Cookie set");
+    let (cookie, kind) = extracted.unwrap();
+    assert_eq!(
+        kind,
+        wafrift_transport::challenge::ChallengeKind::CloudflareManaged
+    );
+    store.record(host, cookie, kind, None);
+    assert_eq!(store.get(host), Some("cf_clearance=zzz".into()));
+    store.forget(host);
+}

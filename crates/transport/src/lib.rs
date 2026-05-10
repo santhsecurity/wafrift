@@ -16,6 +16,7 @@
 //! }
 //! ```
 
+pub mod challenge;
 mod client;
 mod response;
 pub mod signal;
