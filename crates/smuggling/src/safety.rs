@@ -255,6 +255,46 @@ mod tests {
     }
 
     #[test]
+    fn guard_prefix_len_error_variant() {
+        let result = guard_prefix_len(&"A".repeat(100_000), 1000);
+        match result {
+            Err(SafetyError::PrefixTooLong { len, max }) => {
+                assert_eq!(len, 100_000);
+                assert_eq!(max, 1000);
+            }
+            other => panic!("expected PrefixTooLong error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sanitize_input_error_variant() {
+        match sanitize_input("a\r\nb") {
+            Err(SafetyError::HeaderInjection) => {}
+            other => panic!("expected HeaderInjection error, got {other:?}"),
+        }
+        match sanitize_input("a\nb") {
+            Err(SafetyError::HeaderInjection) => {}
+            other => panic!("expected HeaderInjection error, got {other:?}"),
+        }
+        match sanitize_input("safe") {
+            Ok(s) => assert_eq!(s, "safe"),
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn guard_no_crlf_error_variant() {
+        match guard_no_crlf("a\r\nb") {
+            Err(SafetyError::HeaderInjection) => {}
+            other => panic!("expected HeaderInjection error, got {other:?}"),
+        }
+        match guard_no_crlf("safe") {
+            Ok(()) => {}
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn cache_buster_changes() {
         let a = cache_buster();
         let b = cache_buster();

@@ -388,4 +388,108 @@ evasion_strategies = ["tautology_swap", "comment_swap"]
         let rules = load_rules(toml);
         assert!(rules.is_ok(), "Grammar genes should be valid strategies");
     }
+
+    #[test]
+    fn load_rules_rejects_oversized_payload() {
+        let huge = "x".repeat(1024 * 1024 + 1);
+        let result = load_rules(&huge);
+        assert!(result.is_err(), "should reject >1 MiB input");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("exceeds maximum"), "error should mention size limit: {msg}");
+    }
+
+    #[test]
+    fn load_rules_rejects_empty_waf_name() {
+        let toml = r#"
+[[waf]]
+name = "   "
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject empty/whitespace name");
+    }
+
+    #[test]
+    fn load_rules_rejects_invalid_confidence_high() {
+        let toml = r#"
+[[waf]]
+name = "Test"
+[[waf.header_signatures]]
+name = "X-Block"
+confidence = 1.5
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject confidence > 1.0");
+    }
+
+    #[test]
+    fn load_rules_rejects_invalid_confidence_negative() {
+        let toml = r#"
+[[waf]]
+name = "Test"
+[[waf.header_signatures]]
+name = "X-Block"
+confidence = -0.1
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject negative confidence");
+    }
+
+    #[test]
+    fn load_rules_rejects_invalid_status_code_zero() {
+        let toml = r#"
+[[waf]]
+name = "Test"
+block_status_codes = [0]
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject status code 0");
+    }
+
+    #[test]
+    fn load_rules_rejects_invalid_status_code_too_high() {
+        let toml = r#"
+[[waf]]
+name = "Test"
+block_status_codes = [1000]
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject status code > 999");
+    }
+
+    #[test]
+    fn load_rules_rejects_unknown_evasion_strategy() {
+        let toml = r#"
+[[waf]]
+name = "Test"
+evasion_strategies = ["DefinitelyNotRealStrategy123"]
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject unknown evasion strategy");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("unknown evasion_strategy"), "error should name the strategy: {msg}");
+    }
+
+    #[test]
+    fn load_rules_rejects_empty_body_pattern() {
+        let toml = r#"
+[[waf]]
+name = "Test"
+[[waf.body_signatures]]
+pattern = "   "
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject empty/whitespace body pattern");
+    }
+
+    #[test]
+    fn load_rules_rejects_empty_header_name() {
+        let toml = r#"
+[[waf]]
+name = "Test"
+[[waf.header_signatures]]
+name = "   "
+"#;
+        let result = load_rules(toml);
+        assert!(result.is_err(), "should reject empty/whitespace header name");
+    }
 }
