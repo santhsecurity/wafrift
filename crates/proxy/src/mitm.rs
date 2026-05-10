@@ -96,17 +96,38 @@ impl CertificateAuthority {
             // parent dir's ACL, leaving it potentially readable by
             // other users on a shared host. icacls is documented and
             // ships with every supported Windows version since Vista.
+            //
+            // Audit (2026-05-10): pre-fix the icacls status was
+            // discarded with `let _ = ...`. A silent failure here
+            // would leave the CA private key world-readable on a
+            // multi-user box without any operator-visible signal.
+            // We now hard-error if either icacls invocation fails or
+            // exits non-zero.
             use std::process::Command;
             let user = std::env::var("USERNAME").unwrap_or_else(|_| "%USERNAME%".to_string());
-            let _ = Command::new("icacls")
+            let inherit = Command::new("icacls")
                 .arg(&key_path)
                 .arg("/inheritance:r")
-                .status();
-            let _ = Command::new("icacls")
+                .status()
+                .with_context(|| format!("icacls /inheritance:r on {}", key_path.display()))?;
+            if !inherit.success() {
+                anyhow::bail!(
+                    "icacls /inheritance:r on {} failed with status {inherit:?}",
+                    key_path.display()
+                );
+            }
+            let grant = Command::new("icacls")
                 .arg(&key_path)
                 .arg("/grant:r")
                 .arg(format!("{user}:F"))
-                .status();
+                .status()
+                .with_context(|| format!("icacls /grant:r on {}", key_path.display()))?;
+            if !grant.success() {
+                anyhow::bail!(
+                    "icacls /grant:r {user}:F on {} failed with status {grant:?}",
+                    key_path.display()
+                );
+            }
         }
         Ok(())
     }

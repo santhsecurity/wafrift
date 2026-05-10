@@ -104,6 +104,11 @@ impl TrustList {
 
     /// Persist the trust list to disk, creating parent directories
     /// as needed.
+    ///
+    /// Audit (2026-05-10): the file is written with mode 0o600 on
+    /// Unix so other users on a shared host cannot poison the trust
+    /// root by adding their own publisher keys. Pre-fix the file used
+    /// the process umask, leaving it world-readable on most setups.
     pub fn save(&self, path: &Path) -> Result<(), RegistryError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -111,6 +116,21 @@ impl TrustList {
         let body = toml::to_string_pretty(self)
             .map_err(|e| RegistryError::TrustListParse(e.to_string()))?;
         std::fs::write(path, body)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            // Best-effort: a failure to chmod (e.g. on a FUSE mount
+            // that refuses POSIX perms) shouldn't fail the save, but
+            // we surface it so the operator notices.
+            if let Err(e) = std::fs::set_permissions(path, perms) {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "failed to chmod trust list to 0o600 — file may be world-readable"
+                );
+            }
+        }
         Ok(())
     }
 }

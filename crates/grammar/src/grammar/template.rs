@@ -208,6 +208,28 @@ pub fn detect_type(payload: &str) -> bool {
         return true;
     }
 
+    // Velocity (audit 2026-05-10): the engine declares 1-char delims
+    // (`#`, `$`) which we now skip in the global sweep to avoid FPs on
+    // CSS / Markdown / shell. Recover Velocity recall via its real
+    // syntactic markers.
+    if lower.contains("#set(")
+        || lower.contains("#if(")
+        || lower.contains("#foreach(")
+        || lower.contains("#parse(")
+        || lower.contains("#evaluate(")
+        || lower.contains("#include(")
+        || lower.contains("#macro(")
+        || lower.contains("#{")
+        || lower.contains("$class.")
+        || lower.contains("$runtime.")
+        || lower.contains("$context.")
+    {
+        return true;
+    }
+    // (Note: `${` is freemarker — already caught above as a multi-char
+    // delimiter — so we deliberately don't list it here. Adding it
+    // would re-introduce the shell-variable FP `$ ls /tmp/$user/`.)
+
     // Thymeleaf namespace prefix
     if lower.contains("th:") || lower.contains("th-") {
         return true;

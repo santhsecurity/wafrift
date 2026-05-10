@@ -77,29 +77,13 @@ pub trait SearchAlgorithm: Send + Sync + std::fmt::Debug {
 
     /// Deep-clone this algorithm into a fresh trait object.
     ///
-    /// The default implementation falls back to a `checkpoint` →
-    /// `restore` round-trip via serde_json — correct for any
-    /// algorithm that implements those, but slow on large grids /
-    /// archives because every chromosome is JSON-serialised.
-    ///
-    /// Concrete algorithms override this with a direct in-memory
-    /// `Clone` to bypass the serde round-trip — typically 10-100×
-    /// faster on populated state. The override is what
-    /// [`EvolutionEngine::clone`](crate::evolution::EvolutionEngine)
-    /// uses on the proxy path, where allocation spikes from JSON
-    /// were the original blocker.
-    fn clone_box(&self) -> Box<dyn SearchAlgorithm> {
-        // The trait can't construct a fresh same-typed instance
-        // without help from the algorithm registry, so the default
-        // implementation is intentionally a panic for out-of-tree
-        // algorithms — they should override `clone_box` with a real
-        // `Clone`-based path. The 5 in-tree algorithms always
-        // override.
-        panic!(
-            "default clone_box is unreachable for in-tree algorithms; \
-             out-of-tree algorithms must override this method"
-        );
-    }
+    /// Audit (2026-05-10): pre-fix the trait had a default impl that
+    /// panicked with "must override". That panic was reachable from
+    /// any out-of-tree algorithm that forgot to override; calling
+    /// `clone_box` from the proxy path then aborted the whole evade
+    /// pipeline. The fix removes the default — the compiler now
+    /// enforces the override at build time instead.
+    fn clone_box(&self) -> Box<dyn SearchAlgorithm>;
 }
 
 /// Convert non-finite fitness values into a strict worst-case sentinel.

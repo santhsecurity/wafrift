@@ -93,6 +93,28 @@ impl LearningCache {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, LearningCacheError> {
         let path = path.as_ref();
         if path.exists() {
+            // Audit (2026-05-10): pre-fix the cache was loaded with no
+            // size or depth limit on the JSON. A maliciously crafted
+            // ~/.wafrift/learning_cache.json could exhaust memory
+            // (multi-GB file) or stack (deeply nested arrays). Cap the
+            // file at MAX_CACHE_FILE_BYTES; the JSON parser then has
+            // a bounded heap and stack via that bound.
+            const MAX_CACHE_FILE_BYTES: u64 = 16 * 1024 * 1024;
+            let metadata = fs::metadata(path).map_err(LearningCacheError::Io)?;
+            if metadata.len() > MAX_CACHE_FILE_BYTES {
+                tracing::warn!(
+                    path = %path.display(),
+                    bytes = metadata.len(),
+                    cap = MAX_CACHE_FILE_BYTES,
+                    "learning cache file exceeds size cap; moving aside and starting fresh"
+                );
+                let backup = path.with_extension(format!("oversize-{}", current_epoch()));
+                let _ = fs::rename(path, &backup);
+                return Ok(Self {
+                    path: Some(path.to_path_buf()),
+                    entries: HashMap::new(),
+                });
+            }
             let contents = fs::read_to_string(path).map_err(LearningCacheError::Io)?;
             match serde_json::from_str::<LearningCache>(&contents) {
                 Ok(mut cache) => {
