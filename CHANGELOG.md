@@ -4,6 +4,146 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — Tsai-class differential probing (May 9-10, 2026)
+
+- **`wafrift bypass-probe URL`** — new top-level subcommand. Ports the
+  gossan `bypass403::probe` algorithm and wires it to wafrift's much
+  larger probe surface. For every URL, fires:
+    - 136 auth-bypass header probes (`X-Original-URL`, `X-Rewrite-URL`,
+      `X-Forwarded-For` with 7 trusted IPs, method-override family,
+      scheme-trust family, host-trust family)
+    - All `path_traversal::mutate` variants — ~48 per target —
+      including ProxyShell `?@`, semicolon path-param, double-encoded
+      slash, IIS null-truncation, fullwidth-dot Unicode
+    - HTTP method overrides on the wire (GET → POST/PUT/DELETE/PATCH/
+      HEAD/OPTIONS/PROPFIND)
+  Each probe is classified vs the baseline GET; status-flips from
+  401/403 → 200/302 surface as HIGH-severity findings with reproduce-
+  it `curl` one-liners. `--paths-file` walks a list (one path per
+  line). `--concurrency N` (default 8) bounds in-flight probes via a
+  `Semaphore`. `--min-severity low|medium|high` filters output.
+  `--format json` produces a pipeable `{"results": [...]}` envelope.
+
+- **`wafrift_grammar::ssrf::parser_confusion_authority`** — Orange Tsai
+  2017 family. Generates 14 parser-disagreement variants per
+  `(cover, target)` pair using the user's input host as cover and
+  rotating 6 SSRF targets through the userinfo position. Covers
+  basic userinfo, the GitLab CVE-2018-19571 fragment-userinfo
+  pattern (`cover#@target`), Tsai canonical (`cover &@target`),
+  port-then-userinfo, backslash family, `%40` / `%2540` encoded `@`,
+  query-userinfo, path-relative jump, newline / null in authority.
+  Live: every variant fires bypasses 40-80% on bench-waf naxsi.
+
+- **`wafrift_encoding::auth_bypass`** — new module. `auth_bypass_probes
+  (target_path)` returns 136 `(header, value)` probes covering five
+  families: URL-rewrite (X-Original-URL etc., 6 headers), IP-trust
+  spoofing (12 headers × 7 trusted IPs), host-trust override,
+  method-override (GET-past-WAF → PUT/DELETE), scheme-trust. Pure
+  library; `bypass-probe` is the consumer.
+
+- **`wafrift_grammar::path_traversal`: routing-disagreement family**
+  — 16 new variants targeting frontend/backend canonicalisation
+  disagreement: Tomcat semicolon-strip (`/public/..;/etc/passwd`),
+  double-encoded slash, overlong UTF-8 slash, ProxyShell `?@`,
+  IIS null-truncation, trailing-dot/space, fullwidth-dot Unicode.
+
+- **Bench corpus expansion: 579 → 607 cases.**
+    - `wafrift-bench/corpus/ssrf/parser_confusion_authority.toml`
+      (12 canonical Tsai cases)
+    - `wafrift-bench/corpus/path/routing_disagreement.toml`
+      (16 routing-disagreement cases)
+
+### Added — TUI rewrite as MITM live viewer
+
+- **Three tabs**: Flow (default), Overview, Hosts. Switch via `Tab`,
+  `1`/`2`/`3`, or `f`/`o`/`h`.
+- **Flow tab** — bounded ring of 500 requests with per-row coloring
+  by outcome (BYPASS bright-green, BLOCK bright-red, PASS white).
+  `j`/`k` (or `↑`/`↓`) navigate; `g`/`G` jump to first/last; `Enter`
+  toggles a side detail pane that shows the full inspection: outgoing
+  request line + every post-evasion header + body excerpt; incoming
+  status (color-graded by 2xx/3xx/4xx/5xx) + every response header +
+  body excerpt; summary block with WAF, attempts, latency, body
+  padding, TLS profile, technique chain, total response size.
+- **Two sparklines** under the request list — req/s and bypasses/s
+  over the last 60 seconds, with live max-value annotation.
+- **Overview tab** — counters, TLS rotation gauge, WAFs identified
+  with per-product host counts.
+- **Hosts tab** — per-host bypass table sortable by sent count, with
+  bypass-rate color grading (≥75% green, ≥25% yellow, else gray) and
+  identified WAF column.
+- **Footer key-help bar** — context-sensitive bindings per tab.
+- **Memory cap**: 500 records × ~2 KB = ~1 MB worst-case. Body
+  excerpts capped at 1 KB per direction (`MAX_BODY_EXCERPT`).
+- **No emojis.** Pure Unicode box-drawing.
+- **11 new unit tests** covering the new state model, navigation
+  clamp, severity → colour mapping, tab cycle, WAFs-seen counter,
+  reset preserving uptime + tab.
+
+### Fixed — proxy lifecycle, hot path, MITM panic
+
+- **Critical: global `state.lock()` held across `evade()` /
+  `evade_smart()`.** A single 100 KB POST burned 8+ seconds under
+  the lock and serialised every other concurrent request behind it;
+  the proxy then OOM-killed under load. Snapshotted host state into
+  an `EvadePlan`, drop the lock, then run evasion outside.
+  Concurrent burst 50/50 → all HTTP 200 after the fix.
+
+- **MCTS body-size blowup.** `evade_mcts` ran 500 iterations and
+  cloned the full request body each iteration. On a 1 MB body that
+  was a gigabyte of allocations. Added `MCTS_BODY_BUDGET = 16 KiB`
+  and `GRAMMAR_MUTATION_BODY_BUDGET = 64 KiB`. Bodies above the
+  threshold skip the expensive mutation and only get header / URL
+  evasion.
+
+- **`--mitm` HTTPS aborted the worker thread.** rustls 0.23 panics
+  with "no default CryptoProvider installed" on the first TLS
+  handshake. Installing `aws_lc_rs::default_provider().install_default()`
+  at process start fixes the MITM path end-to-end (verified against
+  example.com).
+
+- **`--insecure` now warns at startup.** `--insecure-open-upstream`
+  already emitted a startup WARN; `--insecure` (TLS-cert-disable)
+  was silent. Both flags are dangerous; both should warn.
+
+- **Concurrent gene-bank race fix.** Atomic-write tmp filename now
+  PID + nanosecond suffixed so multiple proxies pointed at the same
+  gene-bank don't race on the same `<path>.tmp` (one rename
+  succeeded; the other got ENOENT). Verified: 4 proxies, 100
+  concurrent reqs, periodic flush → zero "flush failed" warnings.
+
+- **Three more UTF-8 split panics in mutators.** `cmd.rs`
+  `obfuscate_path` (`&file[..2]` on a `★shadow` filename),
+  `cmd.rs` indirection-description truncate, and
+  `binary_search.rs` `&trigger[..50]`. All fixed via
+  `char_indices()`.
+
+- **`origin_hints.rs` `ips[0]` panic** when DNS returned zero IPs.
+  Now returns a clean error.
+
+- **Eleven misplaced test blocks** across the workspace (cassandra,
+  cmd_windows, elastic, mongo, redis, encoding/layered, strategy/
+  pipeline + planner + waf_presets, oracle/signal_status_code,
+  cli/origin_hints) — `#[test]` fns appended after the closing `}`
+  of `mod tests`. They compiled but lived outside `#[cfg(test)]`
+  and polluted the production binary. Wrapped back inside.
+
+- **TUI channel was unbounded.** Switched to bounded `mpsc::channel
+  (10_000)` with `try_send` and a `TUI_DROPPED` atomic counter so
+  the request hot path never blocks on a stalled terminal.
+
+### Diagnostics
+
+- **`cargo clippy --workspace --all-targets -- -D warnings`** is
+  CLEAN (was 5 warnings).
+- **Hot-path unwrap audit**: 20 production hits, all on test code or
+  hardcoded constants where unwrap is provably safe.
+- **Credential leak**: `Authorization` and `Cookie` headers sent
+  through the proxy do NOT appear in any log line (verified live).
+- **`cargo audit`**: 1 transitive advisory — `lru 0.13.0` via
+  `rquest 5.x` (RUSTSEC-2026-0002, unsound `IterMut`). Not a
+  security vuln; wafrift doesn't use the lint-tripped pattern.
+
 ### Added — naxsi-class WAF closures (D5+E2)
 
 - **`wafrift_grammar::sql::quote_free`** — quote / comment / paren-free

