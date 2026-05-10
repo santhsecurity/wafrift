@@ -1,27 +1,36 @@
 //! Integration: `OPERATOR_PROMPT_COOLDOWN` — one prompt slot per normalized host,
 //! no burst re-prompts inside the window.
 
-use wafrift_transport::challenge::{ChallengeKind, ChallengeStore, OPERATOR_PROMPT_COOLDOWN};
+use wafrift_transport::challenge::{
+    ChallengeKind, ChallengeStore, OPERATOR_PROMPT_COOLDOWN, OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN,
+};
 
 #[test]
-fn hundred_distinct_hosts_emit_exactly_one_prompt_each_then_zero_in_cooldown_window() {
+fn distinct_hosts_emit_up_to_global_cap_then_zero_in_cooldown_window() {
+    // The global rolling-window cap (default 30/min) throttles a
+    // simultaneous storm of distinct hosts so the operator isn't
+    // overwhelmed. The first N (≤ cap) prompt; subsequent first-
+    // contact hosts are silently suppressed for the same window;
+    // and within the per-host cooldown, none of the originals
+    // re-prompt either.
     let store = ChallengeStore::new();
     let hosts: Vec<String> = (0..100)
         .map(|i| format!("prompt-isolated-{i}.challenge.test"))
         .collect();
 
-    let mut first_round_prompts = 0u32;
+    let mut first_round_prompts = 0usize;
     for h in &hosts {
         if store.should_prompt_operator(h) {
             first_round_prompts += 1;
         }
     }
     assert_eq!(
-        first_round_prompts, 100,
-        "Fix: each host must see should_prompt_operator == true exactly once on first contact"
+        first_round_prompts, OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN,
+        "Fix: global cap must throttle the storm to {} prompts per 60s",
+        OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN
     );
 
-    let mut second_round_prompts = 0u32;
+    let mut second_round_prompts = 0usize;
     for h in &hosts {
         if store.should_prompt_operator(h) {
             second_round_prompts += 1;
@@ -29,7 +38,8 @@ fn hundred_distinct_hosts_emit_exactly_one_prompt_each_then_zero_in_cooldown_win
     }
     assert_eq!(
         second_round_prompts, 0,
-        "Fix: inside OPERATOR_PROMPT_COOLDOWN ({:?}), no host should re-prompt",
+        "Fix: inside OPERATOR_PROMPT_COOLDOWN ({:?}) no host should re-prompt, \
+         AND the global cap is also still saturated",
         OPERATOR_PROMPT_COOLDOWN
     );
 }
@@ -54,9 +64,16 @@ fn operator_prompt_throttle_collapses_host_case_and_port_to_one_logical_host() {
 
 #[test]
 fn distinct_hosts_do_not_share_each_others_cooldown_buckets() {
+    // Distinct hosts have INDEPENDENT per-host cooldowns — host A's
+    // prompt doesn't blow host B's window. Verified by interleaving
+    // up to the global cap so neither test arm hits the storm
+    // throttle.
     let store = ChallengeStore::new();
+    // OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN is the upper bound; halve
+    // and use 14 of each to stay safely under it (28 < 30).
+    let n = OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN / 2 - 1;
     let mut prompted = 0usize;
-    for i in 0..50 {
+    for i in 0..n {
         let a = format!("bucket-a-{i}.t");
         let b = format!("bucket-b-{i}.t");
         if store.should_prompt_operator(&a) {
@@ -67,8 +84,9 @@ fn distinct_hosts_do_not_share_each_others_cooldown_buckets() {
         }
     }
     assert_eq!(
-        prompted, 100,
-        "Fix: interleaved distinct hosts must each get their first prompt"
+        prompted,
+        n * 2,
+        "Fix: interleaved distinct hosts (under the global cap) must each get their first prompt"
     );
 }
 

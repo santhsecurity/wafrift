@@ -265,7 +265,7 @@ impl ChallengeStore {
     #[must_use]
     pub fn get(&self, host: &str) -> Option<String> {
         let key = normalize_host(host);
-        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
+        let inner = poison_recover_read(&self.inner, "ChallengeStore::get");
         let entry = inner.by_host.get(&key)?;
         if Instant::now() >= entry.expires_at {
             return None;
@@ -314,7 +314,7 @@ impl ChallengeStore {
             secure: scope.secure,
         };
         let key = normalize_host(&host.into());
-        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let mut inner = poison_recover_write(&self.inner, "ChallengeStore::record_scoped");
         inner.by_host.retain(|_, e| now < e.expires_at);
         inner
             .operator_prompted
@@ -337,7 +337,7 @@ impl ChallengeStore {
         is_https: bool,
     ) -> Option<String> {
         let key = normalize_host(host);
-        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
+        let inner = poison_recover_read(&self.inner, "ChallengeStore::get_for_request");
         let entry = inner.by_host.get(&key)?;
         if Instant::now() >= entry.expires_at {
             return None;
@@ -370,11 +370,8 @@ impl ChallengeStore {
     /// suggests the cookie has been invalidated upstream).
     pub fn forget(&self, host: &str) {
         let key = normalize_host(host);
-        self.inner
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .by_host
-            .remove(&key);
+        let mut inner = poison_recover_write(&self.inner, "ChallengeStore::forget");
+        inner.by_host.remove(&key);
     }
 
     /// Capacity-trimming sweep: drop every expired entry. Cheap;
@@ -383,11 +380,14 @@ impl ChallengeStore {
     /// proxies.
     pub fn purge_expired(&self) {
         let now = Instant::now();
-        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let mut inner = poison_recover_write(&self.inner, "ChallengeStore::purge_expired");
         inner.by_host.retain(|_, e| now < e.expires_at);
         inner
             .operator_prompted
             .retain(|_, t| now < *t + OPERATOR_PROMPT_COOLDOWN);
+        inner
+            .solver_in_flight
+            .retain(|_, t| now < *t + SOLVER_INFLIGHT_TTL);
     }
 
     /// Returns `true` if the operator should be prompted about a
@@ -479,7 +479,7 @@ impl ChallengeStore {
     #[must_use]
     pub fn age(&self, host: &str) -> Option<Duration> {
         let key = normalize_host(host);
-        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
+        let inner = poison_recover_read(&self.inner, "ChallengeStore::age");
         inner.by_host.get(&key).map(|e| e.captured_at.elapsed())
     }
 
@@ -488,7 +488,7 @@ impl ChallengeStore {
     #[must_use]
     pub fn kind(&self, host: &str) -> Option<ChallengeKind> {
         let key = normalize_host(host);
-        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
+        let inner = poison_recover_read(&self.inner, "ChallengeStore::kind");
         let e = inner.by_host.get(&key)?;
         if Instant::now() >= e.expires_at {
             return None;
@@ -501,9 +501,7 @@ impl ChallengeStore {
     #[doc(hidden)]
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
+        poison_recover_read(&self.inner, "ChallengeStore::len")
             .by_host
             .len()
     }
@@ -713,14 +711,19 @@ pub fn dispatch(host: &str, kind: ChallengeKind, store: &ChallengeStore) -> Solv
         };
     }
     if kind.is_cookie_solvable() {
-        // We don't (yet) auto-solve — wait for an external sensor /
-        // browser to populate the store. Add ±25% jitter to the
-        // 2-second base so N concurrent waiters for the same host
-        // don't all retry in the same instant (thundering herd
-        // against the upstream after the cookie lands).
-        return SolveAction::Wait {
-            delay: jittered_wait(Duration::from_secs(2)),
+        // Dedup against an already-running solver for this host so
+        // N concurrent requests don't all spawn redundant external
+        // solvers (thundering herd against chromium/captchaforge).
+        // If a solver is in flight, back off LONGER so the second
+        // caller doesn't poll-storm before the first solver lands a
+        // cookie. Otherwise, jittered short wait + the caller is
+        // expected to claim the solver slot via store.mark_solver_pending.
+        let delay = if store.has_solver_pending(host) {
+            jittered_wait(Duration::from_secs(5))
+        } else {
+            jittered_wait(Duration::from_secs(2))
         };
+        return SolveAction::Wait { delay };
     }
     SolveAction::EscalateToOperator {
         kind,
