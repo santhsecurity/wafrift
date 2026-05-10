@@ -592,6 +592,14 @@ fn validate_args(args: &Args) -> Result<(), String> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // rustls 0.23 panics with "no default CryptoProvider installed"
+    // on the first TLS handshake unless one is explicitly registered,
+    // even when the `aws-lc-rs` feature is enabled. Without this the
+    // proxy ABORTS on every HTTPS CONNECT in --mitm mode. Installing
+    // the default at process start fixes both that and any other
+    // rustls usage in transitively-loaded crates.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     // Parse args FIRST so we can route logs to a file when --tui is on
     // (otherwise the tracing subscriber would write to stdout and tear
     // up the TUI's alternate-screen rendering).
@@ -1039,13 +1047,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_path = gene_bank_path.clone();
     tokio::spawn(async move {
         use tokio::signal::unix::{SignalKind, signal};
+        // Surface signal-handler-setup failure instead of silently
+        // dropping the shutdown task — the previous `Err(_) => return`
+        // meant a setup failure left the proxy with NO graceful
+        // shutdown path and no log line explaining why.
         let mut sigterm = match signal(SignalKind::terminate()) {
             Ok(s) => s,
-            Err(_) => return,
+            Err(e) => {
+                warn!(error = %e, "SIGTERM handler setup failed; graceful shutdown disabled");
+                return;
+            }
         };
         let mut sigint = match signal(SignalKind::interrupt()) {
             Ok(s) => s,
-            Err(_) => return,
+            Err(e) => {
+                warn!(error = %e, "SIGINT handler setup failed; graceful shutdown disabled");
+                return;
+            }
         };
         tokio::select! {
             _ = sigterm.recv() => info!("received SIGTERM"),
