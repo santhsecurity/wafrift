@@ -52,6 +52,7 @@ fn all_features_disabled_no_techniques() {
         fingerprint_rotation: false,
         smuggling_enabled: false,
         h2_evasion_enabled: false,
+        mutate_url: false,
         max_attempts: 0,
         insecure_tls: false,
         proxies: vec![],

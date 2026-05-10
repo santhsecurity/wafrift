@@ -199,6 +199,7 @@ fn evade_with_all_config_disabled() {
         grammar_mutations: false,
         smuggling_enabled: false,
         h2_evasion_enabled: false,
+        mutate_url: false,
         max_attempts: 5,
         insecure_tls: false,
         proxies: vec![],
