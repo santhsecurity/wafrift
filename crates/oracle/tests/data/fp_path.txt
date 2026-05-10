@@ -1,0 +1,8 @@
+<<<SAMPLE>>>
+Documentation excerpt: on Debian-derived hosts, hostname resolution consults nsswitch configuration before consulting DNS providers.
+<<<SAMPLE>>>
+{"trace_id":"8f1c2d","message":"upload succeeded","artifact_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+<<<SAMPLE>>>
+Welcome back. Your profile avatar uses Gravatar over HTTPS; avatar URLs never embed filesystem paths.
+<<<SAMPLE>>>
+Release notes: hardened TLS cipher suites, removed legacy CBC chains where negotiation permitted unsafe MAC combinations.

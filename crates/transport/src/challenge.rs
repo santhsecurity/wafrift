@@ -96,6 +96,33 @@ impl ChallengeKind {
     }
 }
 
+/// RFC 6265 cookie scoping attributes captured from a `Set-Cookie`
+/// header. Used by [`ChallengeStore::record_scoped`] to pin where
+/// the captured cookie is allowed to replay.
+#[derive(Debug, Clone, Default)]
+pub struct CookieScope {
+    /// Domain attribute. `None` means host-only (replays only on the
+    /// exact host that captured it). `Some("example.com")` means
+    /// example.com AND any subdomain.
+    pub domain: Option<String>,
+    /// Path attribute. `None` or `Some("/")` means any path. Anything
+    /// else restricts replay to paths that start with the prefix.
+    pub path: Option<String>,
+    /// Secure attribute. When true, the cookie must only replay over
+    /// HTTPS.
+    pub secure: bool,
+}
+
+impl CookieScope {
+    /// The most-restrictive scope: host-only, any path, plain HTTP OK.
+    /// This is what [`ChallengeStore::record`] uses when no scope is
+    /// supplied.
+    #[must_use]
+    pub fn host_only() -> Self {
+        Self::default()
+    }
+}
+
 /// Per-host clearance cookie entry with absolute expiry + RFC 6265
 /// scoping attributes captured from the original `Set-Cookie`.
 #[derive(Debug, Clone)]
@@ -138,7 +165,32 @@ struct ChallengeInner {
     /// of the last prompt. Used to throttle prompts to one per host
     /// per `OPERATOR_PROMPT_COOLDOWN`.
     operator_prompted: HashMap<String, Instant>,
+    /// Hosts with a solver currently in flight. Populated by
+    /// [`ChallengeStore::mark_solver_pending`] and cleared by
+    /// [`ChallengeStore::clear_solver_pending`]. The dispatch path
+    /// inspects this so N concurrent requests to the same host
+    /// don't all spawn a redundant external solver.
+    solver_in_flight: HashMap<String, Instant>,
+    /// Global token bucket for operator prompts. Tracks the
+    /// timestamps of the last `OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN`
+    /// prompts emitted across ALL hosts; if all of them fall in
+    /// the past minute, we suppress further prompts even if the
+    /// per-host cooldown would allow them. Caps a 1000-host
+    /// simultaneous-flip storm to a manageable rate.
+    global_prompt_window: std::collections::VecDeque<Instant>,
 }
+
+/// Maximum operator prompts emitted per rolling 60-second window
+/// across ALL hosts. Hit when N>>1 distinct hosts flip into the
+/// challenge state simultaneously — the per-host cooldown would
+/// otherwise let all N fire at once and overwhelm the operator.
+pub const OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN: usize = 30;
+const GLOBAL_PROMPT_WINDOW: Duration = Duration::from_secs(60);
+
+/// How long a `mark_solver_pending` claim stays valid before another
+/// caller may take over. Solvers that legitimately take longer than
+/// this should call `mark_solver_pending` again to extend.
+pub const SOLVER_INFLIGHT_TTL: Duration = Duration::from_secs(60);
 
 /// Default clearance-cookie TTL when the upstream `Set-Cookie` carries
 /// no explicit `Max-Age`/`Expires`. CF default is 30 minutes; we
@@ -149,6 +201,47 @@ pub const DEFAULT_CLEARANCE_TTL: Duration = Duration::from_secs(30 * 60);
 /// every 5 minutes — avoids noise when an automated retry burst
 /// re-triggers the challenge.
 pub const OPERATOR_PROMPT_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+
+/// Acquire a write lock, surfacing poisoning via tracing::warn!
+/// before recovering. Pre-fix the call sites used `unwrap_or_else(|e|
+/// e.into_inner())` which silently swallowed the panic that
+/// poisoned the lock — making real data-corruption bugs invisible.
+/// Now poisoning is logged with the call site so it shows up in
+/// production logs.
+fn poison_recover_write<'a, T>(
+    lock: &'a std::sync::RwLock<T>,
+    site: &'static str,
+) -> std::sync::RwLockWriteGuard<'a, T> {
+    match lock.write() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            tracing::warn!(
+                site,
+                "wafrift_transport::challenge: recovering from poisoned RwLock (write); \
+                 a previous panic left the lock in an inconsistent state. \
+                 If this fires repeatedly, look for the panic source."
+            );
+            poisoned.into_inner()
+        }
+    }
+}
+
+fn poison_recover_read<'a, T>(
+    lock: &'a std::sync::RwLock<T>,
+    site: &'static str,
+) -> std::sync::RwLockReadGuard<'a, T> {
+    match lock.read() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            tracing::warn!(
+                site,
+                "wafrift_transport::challenge: recovering from poisoned RwLock (read); \
+                 a previous panic left the lock in an inconsistent state."
+            );
+            poisoned.into_inner()
+        }
+    }
+}
 
 /// Normalize a host key so case + optional trailing port don't
 /// scatter entries across multiple slots. DNS is case-insensitive and
@@ -196,15 +289,29 @@ impl ChallengeStore {
         kind: ChallengeKind,
         ttl: Option<Duration>,
     ) {
+        self.record_scoped(host, cookie_header, kind, ttl, CookieScope::host_only());
+    }
+
+    /// Record a clearance cookie with the original `Set-Cookie`
+    /// scoping attributes (Domain / Path / Secure). [`get_for_request`]
+    /// uses the scope to decide whether to replay the cookie.
+    pub fn record_scoped(
+        &self,
+        host: impl Into<String>,
+        cookie_header: impl Into<String>,
+        kind: ChallengeKind,
+        ttl: Option<Duration>,
+        scope: CookieScope,
+    ) {
         let now = Instant::now();
         let entry = CookieEntry {
             cookie_header: cookie_header.into(),
             captured_at: now,
             expires_at: now + ttl.unwrap_or(DEFAULT_CLEARANCE_TTL),
             kind,
-            scope_domain: None,
-            scope_path: None,
-            secure: false,
+            scope_domain: scope.domain.map(|d| normalize_host(&d)),
+            scope_path: scope.path,
+            secure: scope.secure,
         };
         let key = normalize_host(&host.into());
         let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
@@ -213,6 +320,50 @@ impl ChallengeStore {
             .operator_prompted
             .retain(|_, t| now < *t + OPERATOR_PROMPT_COOLDOWN);
         inner.by_host.insert(key, entry);
+    }
+
+    /// Scoped cookie lookup: returns the cookie only if the captured
+    /// scope (Domain / Path / Secure) admits a request for `host`,
+    /// `request_path`, and `is_https`.
+    ///
+    /// The plain [`Self::get`] returns the cookie regardless of
+    /// scope (caller is responsible for matching). New code should
+    /// prefer this method when the request context is available.
+    #[must_use]
+    pub fn get_for_request(
+        &self,
+        host: &str,
+        request_path: &str,
+        is_https: bool,
+    ) -> Option<String> {
+        let key = normalize_host(host);
+        let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
+        let entry = inner.by_host.get(&key)?;
+        if Instant::now() >= entry.expires_at {
+            return None;
+        }
+        // Domain scope: empty/None → host-only (already matched via
+        // by_host key); set → request host must equal it OR be a
+        // subdomain of it.
+        if let Some(domain) = entry.scope_domain.as_deref() {
+            let req_host = key.as_str();
+            let domain_matches = req_host == domain
+                || req_host.ends_with(&format!(".{domain}"));
+            if !domain_matches {
+                return None;
+            }
+        }
+        // Path scope: cookie scoped to /admin/ does NOT replay on /api/.
+        if let Some(path) = entry.scope_path.as_deref()
+            && !request_path.starts_with(path)
+        {
+            return None;
+        }
+        // Secure scope: HTTPS-only cookies must not replay over HTTP.
+        if entry.secure && !is_https {
+            return None;
+        }
+        Some(entry.cookie_header.clone())
     }
 
     /// Drop the entry for `host` (e.g. after observing a 4xx that
@@ -242,16 +393,84 @@ impl ChallengeStore {
     /// Returns `true` if the operator should be prompted about a
     /// challenge for `host` — i.e. either no recent prompt has been
     /// emitted, or the cooldown has passed.
+    ///
+    /// Two-tier throttle:
+    ///   - per-host cooldown of `OPERATOR_PROMPT_COOLDOWN` (5 min)
+    ///   - global rolling-window cap of
+    ///     `OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN` prompts per 60 s
+    ///     across ALL hosts. Hit when N>>1 distinct hosts flip into
+    ///     the challenge state simultaneously — without this, a
+    ///     1000-host storm would emit 1000 prompts at once.
     pub fn should_prompt_operator(&self, host: &str) -> bool {
         let key = normalize_host(host);
-        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let mut inner = poison_recover_write(&self.inner, "should_prompt_operator");
         let now = Instant::now();
+        // Garbage-collect the global rolling window: drop entries
+        // older than 60 s before checking the cap.
+        let cutoff = now.checked_sub(GLOBAL_PROMPT_WINDOW);
+        if let Some(cut) = cutoff {
+            while let Some(front) = inner.global_prompt_window.front() {
+                if *front < cut {
+                    inner.global_prompt_window.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
+        if inner.global_prompt_window.len() >= OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN {
+            return false;
+        }
         match inner.operator_prompted.get(&key).copied() {
             Some(prev) if now < prev + OPERATOR_PROMPT_COOLDOWN => false,
             _ => {
                 inner.operator_prompted.insert(key, now);
+                inner.global_prompt_window.push_back(now);
                 true
             }
+        }
+    }
+
+    /// Claim the "I'm running an external solver for this host" slot.
+    /// Returns true if the claim succeeded (caller should run the
+    /// solver), false if another caller already has the slot
+    /// (caller should fall back to Wait without spawning).
+    ///
+    /// Claims auto-expire after `SOLVER_INFLIGHT_TTL` so a crashed
+    /// solver doesn't permanently lock out retries.
+    pub fn mark_solver_pending(&self, host: &str) -> bool {
+        let key = normalize_host(host);
+        let mut inner = poison_recover_write(&self.inner, "mark_solver_pending");
+        let now = Instant::now();
+        // GC stale claims first.
+        inner
+            .solver_in_flight
+            .retain(|_, t| now < *t + SOLVER_INFLIGHT_TTL);
+        if inner.solver_in_flight.contains_key(&key) {
+            return false;
+        }
+        inner.solver_in_flight.insert(key, now);
+        true
+    }
+
+    /// Release the in-flight solver slot — called after the solver
+    /// either succeeds (cookie now in store) or fails (so the next
+    /// caller can retry without waiting for the TTL).
+    pub fn clear_solver_pending(&self, host: &str) {
+        let key = normalize_host(host);
+        let mut inner = poison_recover_write(&self.inner, "clear_solver_pending");
+        inner.solver_in_flight.remove(&key);
+    }
+
+    /// Read-only check: is a solver already in flight for `host`?
+    /// `dispatch` uses this to decide between Wait and EscalateToOperator.
+    #[must_use]
+    pub fn has_solver_pending(&self, host: &str) -> bool {
+        let key = normalize_host(host);
+        let inner = poison_recover_read(&self.inner, "has_solver_pending");
+        let now = Instant::now();
+        match inner.solver_in_flight.get(&key) {
+            Some(t) => now < *t + SOLVER_INFLIGHT_TTL,
+            None => false,
         }
     }
 
@@ -407,9 +626,21 @@ fn classify_inner(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
 /// HTTP-request-splitting bytes to the upstream.
 #[must_use]
 pub fn extract_clearance_cookie(set_cookie_headers: &[&str]) -> Option<(String, ChallengeKind)> {
+    extract_clearance_cookie_scoped(set_cookie_headers).map(|(c, k, _)| (c, k))
+}
+
+/// Attribute-aware variant: returns the cookie header AND the
+/// scoping attributes ([Domain] / [Path] / [Secure]) parsed from
+/// the original `Set-Cookie`. Pair with
+/// [`ChallengeStore::record_scoped`] to enforce scope on replay.
+#[must_use]
+pub fn extract_clearance_cookie_scoped(
+    set_cookie_headers: &[&str],
+) -> Option<(String, ChallengeKind, CookieScope)> {
     for raw in set_cookie_headers {
         // Each Set-Cookie header is `name=value; attr1; attr2; …`
-        let Some(nv) = raw.split(';').next() else {
+        let mut parts = raw.split(';');
+        let Some(nv) = parts.next() else {
             continue;
         };
         let Some((name, value)) = nv.split_once('=') else {
@@ -428,7 +659,34 @@ pub fn extract_clearance_cookie(set_cookie_headers: &[&str]) -> Option<(String, 
             // Drop silently — never propagate splitable bytes.
             continue;
         }
-        return Some((format!("{name_trim}={value_trim}"), kind));
+        // Parse attributes for scope. Reject ANY attribute value that
+        // contains CRLF / NUL — same defence-in-depth as the cookie
+        // value itself. Unknown attributes are silently ignored.
+        let mut scope = CookieScope::default();
+        for attr in parts {
+            let attr = attr.trim();
+            if attr.eq_ignore_ascii_case("Secure") {
+                scope.secure = true;
+                continue;
+            }
+            if let Some((k, v)) = attr.split_once('=') {
+                let v = v.trim();
+                if !is_safe_cookie_value(v) {
+                    continue;
+                }
+                if k.trim().eq_ignore_ascii_case("Domain") {
+                    let v = v.strip_prefix('.').unwrap_or(v);
+                    if !v.is_empty() {
+                        scope.domain = Some(v.to_string());
+                    }
+                } else if k.trim().eq_ignore_ascii_case("Path") {
+                    if !v.is_empty() {
+                        scope.path = Some(v.to_string());
+                    }
+                }
+            }
+        }
+        return Some((format!("{name_trim}={value_trim}"), kind, scope));
     }
     None
 }

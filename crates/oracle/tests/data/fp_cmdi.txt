@@ -1,0 +1,17 @@
+<<<SAMPLE>>>
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"status":"ok","session":"opaque-token-7f3a","latency_ms":42}
+<<<SAMPLE>>>
+<!DOCTYPE html>
+<html lang="en"><head><title>Acme Store — Catalog</title></head>
+<body><main><h1>Weekly specials</h1><p>Prices exclude tax; shipping may apply.</p></main></body></html>
+<<<SAMPLE>>>
+SQLSTATE[HY000]: integrity constraint violated — duplicate key in primary index on column ref_id
+<<<SAMPLE>>>
+Stack trace (sanitized):
+  at com.example.service.AuthFilter.validate(AuthFilter.java:118)
+  at org.eclipse.jetty.servlet.ServletHandler.doHandle(ServletHandler.java:772)
+<<<SAMPLE>>>
+RFC 7231 compliant caching headers applied; ETag present on representation variant.

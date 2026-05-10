@@ -1,0 +1,8 @@
+<<<SAMPLE>>>
+Our public status page: https://status.example.com — subscribe for incident notifications.
+<<<SAMPLE>>>
+For API details see https://docs.example.org/api/reference#authentication (OAuth2 client credentials).
+<<<SAMPLE>>>
+Content-Security-Policy: default-src 'self'; img-src https://cdn.example.net; connect-src https://api.example.com
+<<<SAMPLE>>>
+Marketing landing copy only; product screenshots hosted at https://cdn.example.com/media/banner.webp
