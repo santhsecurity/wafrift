@@ -288,23 +288,47 @@ pub fn classify(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
 /// of the recognised cookie names appears.
 ///
 /// Returns the formatted `Cookie:` value ready for replay (`name=value`)
-/// or `None` if no clearance cookie was present.
+/// or `None` if no clearance cookie was present, OR if the cookie
+/// value contains characters that would corrupt a downstream `Cookie`
+/// header (CR, LF, NUL, semicolon — RFC 6265 cookie-octet rules).
+/// Silently dropping a malicious cookie is preferable to forwarding
+/// HTTP-request-splitting bytes to the upstream.
 #[must_use]
 pub fn extract_clearance_cookie(set_cookie_headers: &[&str]) -> Option<(String, ChallengeKind)> {
     for raw in set_cookie_headers {
         // Each Set-Cookie header is `name=value; attr1; attr2; …`
-        let nv = raw.split(';').next()?;
-        let (name, value) = nv.split_once('=')?;
+        let Some(nv) = raw.split(';').next() else {
+            continue;
+        };
+        let Some((name, value)) = nv.split_once('=') else {
+            continue;
+        };
         let name_trim = name.trim();
+        let value_trim = value.trim();
         let kind = match name_trim {
             "cf_clearance" => ChallengeKind::CloudflareManaged,
             "_abck" | "ak_bmsc" => ChallengeKind::AkamaiBmp,
             "aws-waf-token" => ChallengeKind::AwsWaf,
             _ => continue,
         };
-        return Some((format!("{}={}", name_trim, value.trim()), kind));
+        if !is_safe_cookie_value(value_trim) {
+            // Malicious upstream tried to inject control characters.
+            // Drop silently — never propagate splitable bytes.
+            continue;
+        }
+        return Some((format!("{name_trim}={value_trim}"), kind));
     }
     None
+}
+
+/// Reject any byte that an HTTP/1.1 parser would treat as a header
+/// terminator (CR, LF, NUL) or as an inline cookie separator (`;`).
+/// Matches RFC 6265 cookie-octet excluding CTLs and the separators
+/// the receiver would re-tokenise on.
+fn is_safe_cookie_value(value: &str) -> bool {
+    !value
+        .bytes()
+        .any(|b| b == b'\r' || b == b'\n' || b == 0 || b == b';')
 }
 
 /// Decide what to do given a verdict-classified challenge response.
