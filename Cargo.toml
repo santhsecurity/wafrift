@@ -115,6 +115,11 @@ regex = "1"
 toml = "0.8"
 ratatui = "0.30"
 crossterm = "0.28"
+# Best-effort clipboard for the proxy TUI's curl-yank action.
+# Default features off so we don't pull X11/wayland deps when the
+# binary is built on a server with no display — the yank action falls
+# back to writing /tmp/wafrift-yank-N.curl.
+arboard = { version = "3", default-features = false }
 dirs = "6"
 proptest = "1.11.0"
 base64 = "0.22.1"
