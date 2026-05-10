@@ -283,12 +283,15 @@ fn obfuscate_path(path: &str) -> Vec<String> {
         .collect();
     variants.push(qmark);
 
-    // Star wildcard on last component
+    // Star wildcard on last component. Split on a UTF-8 char boundary
+    // so a non-ASCII filename (e.g. `★shadow`) doesn't panic on
+    // mid-codepoint slicing — `&file[..2]` is unsafe if the first
+    // character is multi-byte.
     if let Some(last_slash) = path.rfind('/') {
         let dir = &path[..=last_slash];
         let file = &path[last_slash + 1..];
-        if file.len() >= 2 {
-            variants.push(format!("{}{}*", dir, &file[..2]));
+        if let Some((second_char_start, _)) = file.char_indices().nth(2) {
+            variants.push(format!("{}{}*", dir, &file[..second_char_start]));
         }
     }
 
@@ -533,9 +536,18 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdMutation> {
         if results.len() >= max_mutations {
             break;
         }
+        // Truncate description on a UTF-8 boundary — `indirect` embeds
+        // `command`/`args` raw (lines 317-318, 348, 351-352 above), so
+        // a non-ASCII command name would otherwise panic on the
+        // mid-codepoint slice.
+        let desc_end = indirect
+            .char_indices()
+            .take_while(|(idx, _)| *idx < 40)
+            .last()
+            .map_or(0, |(idx, ch)| idx + ch.len_utf8());
         results.push(CmdMutation {
             payload: format!("{separator}{indirect}"),
-            description: format!("indirection: {}", &indirect[..indirect.len().min(40)]),
+            description: format!("indirection: {}", &indirect[..desc_end]),
             rules_applied: vec!["variable_indirection"],
         });
     }

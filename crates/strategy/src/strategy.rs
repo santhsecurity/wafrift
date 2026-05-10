@@ -366,10 +366,22 @@ fn build_mcts_result(env: WafRiftEnv, config: &EvasionConfig) -> Option<EvasionR
 /// - `evade_intelligent` — heuristic pipeline + the full
 ///   `IntelligenceLoop` (differential probing + advisor). Heaviest.
 #[must_use]
+/// Bodies above this threshold skip MCTS and use the classic heuristic
+/// pipeline. MCTS runs 500 iterations and each iteration clones the
+/// full request, so on a 100 KB POST the search alone allocates tens
+/// of MB and consumes seconds of CPU; on a 1 MB body it OOMs the
+/// proxy. Real injection payloads are KB-range — anything larger is a
+/// file upload / JSON blob where header & URL evasion is enough.
+pub const MCTS_BODY_BUDGET: usize = 16 * 1024;
+
 pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig) -> EvasionResult {
     // Without prior block signal, there's nothing for MCTS to learn from yet.
     // Use the classic pipeline for the first request to a new host.
     if state.blocks == 0 {
+        return evade(request, state, config);
+    }
+    // Skip MCTS for large bodies (see MCTS_BODY_BUDGET).
+    if request.body.as_ref().is_some_and(|b| b.len() > MCTS_BODY_BUDGET) {
         return evade(request, state, config);
     }
     let depth = (state.blocks as usize / 2).clamp(2, 5);
@@ -645,6 +657,15 @@ fn apply_layered_encoding(
 }
 
 /// Apply grammar-aware mutations to the request body.
+/// Bodies above this byte threshold are skipped by grammar mutation.
+/// Real injection payloads are short (KB-range at most); anything
+/// larger is overwhelmingly file uploads, big JSON blobs, multipart
+/// data, etc. Running regex-heavy `grammar::mutate` over a multi-MB
+/// body burns multi-second CPU per request and was the cause of an
+/// observed proxy hang on POST bodies ≥ 100 KB. Header / URL evasion
+/// still runs on these requests.
+pub const GRAMMAR_MUTATION_BODY_BUDGET: usize = 64 * 1024;
+
 fn apply_grammar_mutations(
     req: &mut Request,
     techniques: &mut Vec<Technique>,
@@ -654,6 +675,9 @@ fn apply_grammar_mutations(
         return;
     }
     let Some(ref body) = req.body else { return };
+    if body.len() > GRAMMAR_MUTATION_BODY_BUDGET {
+        return;
+    }
     let body_str = match std::str::from_utf8(body) {
         Ok(s) => s,
         Err(_) => return,

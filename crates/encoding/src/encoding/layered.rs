@@ -201,4 +201,30 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn encode_layered_empty_strategies() {
+        let result = encode_layered("hello", &[]).unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn encode_layered_single_strategy() {
+        let result = encode_layered("A<", &[Strategy::UrlEncode]).unwrap();
+        assert_eq!(result, "A%3C");
+    }
+
+    #[test]
+    fn layered_combinations_depth_1_returns_empty() {
+        let combos = layered_combinations(1);
+        assert!(combos.is_empty());
+    }
+
+    #[test]
+    fn aggressiveness_in_valid_range() {
+        for s in all_strategies() {
+            let a = aggressiveness(s);
+            assert!((0.0..=1.0).contains(&a), "aggressiveness for {s:?} out of range: {a}");
+        }
+    }
 }

@@ -98,6 +98,10 @@ async fn run_async(args: &OriginHintsArgs) -> Result<(), String> {
     let host = normalize_host(&args.host)?;
     let ips = resolve_ips(&host).await?;
 
+    if ips.is_empty() {
+        return Err(format!("no IP addresses resolved for {host}"));
+    }
+
     let first_ip = ips[0];
     let origin_bypass_example = json!({ &host: first_ip.to_string() });
 
@@ -157,5 +161,10 @@ mod tests {
             normalize_host("https://[2001:db8::1]:8443/path").unwrap(),
             "2001:db8::1"
         );
+    }
+
+    #[test]
+    fn normalize_rejects_empty() {
+        assert!(normalize_host("").is_err());
     }
 }

@@ -170,8 +170,11 @@ pub fn narrow_to_trigger(payload: &str, is_blocked: &dyn Fn(&str) -> bool) -> Na
         description: if still_blocked {
             format!(
                 "WAF trigger narrowed to '{}' ({} chars, positions {}-{} of {} char payload)",
-                if trigger.len() > 50 {
-                    &trigger[..50]
+                if trigger.chars().count() > 50 {
+                    &trigger[..trigger
+                        .char_indices()
+                        .nth(50)
+                        .map_or(trigger.len(), |(i, _)| i)]
                 } else {
                     &trigger
                 },

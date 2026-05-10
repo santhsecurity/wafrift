@@ -220,4 +220,28 @@ mod tests {
 
         let _ = std::fs::remove_file(&tmp);
     }
+
+    #[test]
+    fn planner_with_zero_budget_returns_empty() {
+        let plan = plan_pipelines(None, None, 0, None, &[]);
+        assert!(plan.pipelines.is_empty());
+    }
+
+    #[test]
+    fn planner_sets_fingerprint_and_payload_type() {
+        let plan = plan_pipelines(Some("aws"), Some("xss"), 100, None, &[]);
+        assert_eq!(plan.waf_fingerprint, Some("aws".to_string()));
+        assert_eq!(plan.payload_type, Some("xss".to_string()));
+    }
+
+    #[test]
+    fn planner_sorts_by_cost_when_success_rate_tied() {
+        let plan = plan_pipelines(None, None, 100, None, &[]);
+        // Find windows with equal success rates and verify cost ordering
+        for w in plan.pipelines.windows(2) {
+            if w[0].success_bps == w[1].success_bps {
+                assert!(w[0].cost <= w[1].cost, "cost should be ascending when success rates are tied");
+            }
+        }
+    }
 }

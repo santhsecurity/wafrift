@@ -1262,8 +1262,23 @@ async fn forward_wafrift_request(
     limits: Arc<ProxyLimits>,
     response_profiles: Arc<ResponseProfileDb>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    // Determine evasion strategy: winner rotation vs. discovery.
-    let (mut evasion_result, technique_keys) = {
+    // Snapshot the state needed for evasion, then DROP the lock before
+    // running evade() / evade_smart() — those calls do regex-heavy
+    // mutations that can take seconds on large request bodies, and
+    // before this restructure the global ProxyState lock was held
+    // across the whole computation. Result: a single 100 KB POST would
+    // freeze the proxy for every other concurrent client. Now the lock
+    // is held only for the brief snapshot + state mutation.
+    enum EvadePlan {
+        Replay {
+            replay_state: HostState,
+            winner_name: String,
+        },
+        Discovery {
+            host_state: HostState,
+        },
+    }
+    let plan = {
         let mut st = state.lock().await;
         st.total_scanned = st.total_scanned.saturating_add(1);
 
@@ -1295,7 +1310,6 @@ async fn forward_wafrift_request(
         }
 
         if hs.has_winners() {
-            // ── Rotation mode: only use proven winners ─────────────
             let winner_name = hs.next_winner().unwrap_or_default();
             info!(
                 host = %host,
@@ -1303,12 +1317,31 @@ async fn forward_wafrift_request(
                 pool_size = hs.proven_winners.len(),
                 "rotating proven winner"
             );
-
             let replay_state = HostState {
                 proven_winners: vec![winner_name.clone()],
                 discovery_complete: true,
                 ..HostState::default()
             };
+            EvadePlan::Replay {
+                replay_state,
+                winner_name,
+            }
+        } else {
+            if hs.discovery_complete {
+                info!(host = %host, "all winners pruned, re-entering discovery");
+            }
+            EvadePlan::Discovery {
+                host_state: hs.clone(),
+            }
+        }
+        // ── lock dropped here ──
+    };
+
+    let (mut evasion_result, technique_keys) = match plan {
+        EvadePlan::Replay {
+            replay_state,
+            winner_name,
+        } => {
             let result = evade(&wafrift_req, &replay_state, &config);
             let mut keys: Vec<String> = result
                 .techniques
@@ -1319,17 +1352,8 @@ async fn forward_wafrift_request(
                 keys.push(winner_name);
             }
             (result, keys)
-        } else {
-            // ── Discovery mode: MCTS-first via evade_smart, falls back
-            // to classic evade() pipeline. evade_smart switches to MCTS
-            // once the host has accumulated block telemetry — so the
-            // first request to a new host runs the cheap pipeline, and
-            // every subsequent block triggers tree-search reasoning. ──
-            if hs.discovery_complete {
-                // Winners were pruned — re-entering discovery.
-                info!(host = %host, "all winners pruned, re-entering discovery");
-            }
-            let host_state = hs.clone();
+        }
+        EvadePlan::Discovery { host_state } => {
             let result = evade_smart(&wafrift_req, &host_state, &config);
             let keys: Vec<String> = result
                 .techniques

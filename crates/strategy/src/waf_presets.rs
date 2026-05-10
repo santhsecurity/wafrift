@@ -120,4 +120,27 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn aws_waf_preset_exists() {
+        assert!(preset_for("AWS WAF").is_some());
+        assert!(preset_for("aws waf").is_some());
+    }
+
+    #[test]
+    fn preset_has_sql_or_xss_tricks() {
+        for preset in all_presets() {
+            assert!(
+                !preset.sql_tricks.is_empty() || !preset.xss_tricks.is_empty(),
+                "{} should have at least sql_tricks or xss_tricks",
+                preset.name
+            );
+        }
+    }
+
+    #[test]
+    fn known_wafs_non_empty() {
+        let wafs = known_wafs();
+        assert!(!wafs.is_empty());
+    }
 }

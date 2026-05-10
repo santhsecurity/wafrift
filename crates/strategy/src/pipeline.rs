@@ -128,4 +128,43 @@ mod tests {
         ]);
         assert_eq!(plan.cheapest().unwrap().name, "b");
     }
+
+    #[test]
+    fn plan_best_returns_first() {
+        let plan = EvasionPlanOutput::new(vec![
+            EvasionPipeline::new("first", vec![], 10),
+            EvasionPipeline::new("second", vec![], 1),
+        ]);
+        assert_eq!(plan.best().unwrap().name, "first");
+    }
+
+    #[test]
+    fn pipeline_with_success_rate() {
+        let p = EvasionPipeline::new("test", vec![], 1).with_success_rate(5000);
+        assert_eq!(p.success_bps, 5000);
+    }
+
+    #[test]
+    fn apply_to_clones_request_and_stages() {
+        let req = Request::get("http://example.com/");
+        let pipeline = EvasionPipeline::new(
+            "test",
+            vec![EvasionStage {
+                technique: Technique::UserAgentRotation,
+                context: None,
+            }],
+            1,
+        );
+        let (cloned_req, stages) = pipeline.apply_to(&req);
+        assert_eq!(cloned_req.method, req.method);
+        assert_eq!(stages.len(), 1);
+    }
+
+    #[test]
+    fn empty_plan_has_zero_cost() {
+        let plan = EvasionPlanOutput::new(vec![]);
+        assert_eq!(plan.total_cost, 0);
+        assert!(plan.cheapest().is_none());
+        assert!(plan.best().is_none());
+    }
 }

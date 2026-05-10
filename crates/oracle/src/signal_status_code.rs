@@ -94,4 +94,46 @@ mod tests {
         assert!(is_definitive_status(403));
         assert!(!is_definitive_status(503));
     }
+
+    #[test]
+    fn ambiguous_503_is_rate_limited_not_blocked() {
+        let (v, _) = classify_status_code(503);
+        assert!(matches!(v, Verdict::RateLimited { .. }), "503 should be rate-limited provisional");
+    }
+
+    #[test]
+    fn nginx_444_tcp_reset() {
+        let (v, _) = classify_status_code(444);
+        assert!(v.is_blocked());
+        let signals = v.signals();
+        assert!(signals.iter().any(|s| matches!(s, Signal::ConnectionBehavior(..))));
+    }
+
+    #[test]
+    fn nginx_499_timeout() {
+        let (v, _) = classify_status_code(499);
+        assert!(v.is_blocked());
+        let signals = v.signals();
+        assert!(signals.iter().any(|s| matches!(s, Signal::ConnectionBehavior(..))));
+    }
+
+    #[test]
+    fn method_not_allowed_405_is_blocked() {
+        let (v, _) = classify_status_code(405);
+        assert!(v.is_blocked());
+    }
+
+    #[test]
+    fn request_timeout_408_is_rate_limited() {
+        let (v, _) = classify_status_code(408);
+        assert!(matches!(v, Verdict::RateLimited { .. }));
+    }
+
+    #[test]
+    fn unknown_codes_are_allowed() {
+        for code in [100, 301, 302, 400, 404, 409, 411, 416, 451, 501, 505, 599] {
+            let (v, _) = classify_status_code(code);
+            assert!(v.is_allowed(), "{code} should be allowed by default");
+        }
+    }
 }

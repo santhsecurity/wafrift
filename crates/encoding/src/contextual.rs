@@ -438,4 +438,53 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("too large"));
     }
+
+    #[test]
+    fn xml_cdata_rejects_termination_sequence() {
+        let err = encode_in_context(
+            b"hello]]>world",
+            Strategy::CaseAlternation,
+            InjectionContext::XmlCdata,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("CDATA"));
+    }
+
+    #[test]
+    fn multipart_filename_rejects_quote() {
+        let err = encode_in_context(
+            b"file\"name.txt",
+            Strategy::CaseAlternation,
+            InjectionContext::MultipartFileName,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("quote"));
+    }
+
+    #[test]
+    fn json_number_rejects_non_numeric() {
+        let err = encode_in_context(
+            b"abc",
+            Strategy::CaseAlternation,
+            InjectionContext::JsonNumber,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a valid JSON number"));
+    }
+
+    #[test]
+    fn empty_payload_valid_in_all_contexts() {
+        for ctx in [
+            InjectionContext::PlainBody,
+            InjectionContext::JsonString,
+            InjectionContext::XmlAttribute,
+            InjectionContext::HeaderValue,
+            InjectionContext::CookieValue,
+        ] {
+            assert!(
+                encode_in_context(b"", Strategy::UrlEncode, ctx).is_ok(),
+                "empty payload should be valid in {ctx:?}"
+            );
+        }
+    }
 }
