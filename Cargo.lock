@@ -516,6 +516,8 @@ dependencies = [
 [[package]]
 name = "captchaforge"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48811f5f661d45f475677a6f1e043bde3c6273e3476e7535005c467b35252e36"
 dependencies = [
  "anyhow",
  "async-trait",
