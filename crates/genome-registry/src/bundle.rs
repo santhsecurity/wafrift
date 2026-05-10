@@ -7,8 +7,32 @@ use serde::{Deserialize, Serialize};
 use crate::signing::{RegistryError, SigningKey, sign_bytes, verify_bytes};
 use crate::trust::TrustList;
 
+// Hard limits enforced at the trust boundary (`SignedBundle::from_json`)
+// so a malicious feed can't OOM the registry.
+
+/// Soft cap on accepted JSON envelope size. Larger inputs are rejected
+/// before serde even sees them; the largest legitimate bundle we've
+/// seen in the wild is ~120KB, so 50MB is generous.
+pub const MAX_BUNDLE_JSON_BYTES: usize = 50 * 1024 * 1024;
+/// Maximum genomes in a single bundle.
+pub const MAX_GENOMES_PER_BUNDLE: usize = 10_000;
+/// Maximum length of any genome / bundle name.
+pub const MAX_NAME_LEN: usize = 256;
+/// Maximum payload length per genome (recipes are usually <16KB).
+pub const MAX_PAYLOAD_LEN: usize = 1024 * 1024;
+/// Maximum description length.
+pub const MAX_DESCRIPTION_LEN: usize = 4096;
+/// Maximum number of WAF target tags per genome.
+pub const MAX_TARGETS_PER_GENOME: usize = 100;
+/// Maximum length per WAF target tag.
+pub const MAX_TARGET_LEN: usize = 64;
+/// Maximum hex string length for signature / public key (ed25519 = 64
+/// bytes = 128 hex chars; allow a little slack for variant encodings).
+pub const MAX_HEX_LEN: usize = 256;
+
 /// One named evasion recipe.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Genome {
     /// Stable, human-readable identifier — e.g. `akamai-bm-bypass-jul24`.
     pub name: String,
@@ -38,6 +62,7 @@ impl Genome {
 
 /// A named, ordered bundle of genomes ready to be signed and shared.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenomeBundle {
     pub bundle_name: String,
     pub genomes: Vec<Genome>,
@@ -57,11 +82,23 @@ impl GenomeBundle {
         }
     }
 
-    /// Deterministic JSON for the inner bundle — sort genomes by name
-    /// so two byte-equal bundles produce byte-equal signatures.
+    /// Deterministic JSON for the inner bundle.
+    ///
+    /// Sort key is `(name, payload, description, targets)` rather than
+    /// `name` alone — two genomes with the same name but different
+    /// payloads would otherwise preserve their input order and produce
+    /// different canonical bytes (and therefore different signatures)
+    /// for the same logical bundle.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, RegistryError> {
         let mut sorted = self.clone();
-        sorted.genomes.sort_by(|a, b| a.name.cmp(&b.name));
+        sorted.genomes.sort_by(|a, b| {
+            (&a.name, &a.payload, &a.description, &a.targets).cmp(&(
+                &b.name,
+                &b.payload,
+                &b.description,
+                &b.targets,
+            ))
+        });
         serde_json::to_vec(&sorted).map_err(RegistryError::SerializationFailed)
     }
 
@@ -79,6 +116,7 @@ impl GenomeBundle {
 
 /// Signed bundle — the wire payload distributed to consumers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SignedBundle {
     pub bundle: GenomeBundle,
     pub signature_hex: String,
@@ -92,8 +130,103 @@ impl SignedBundle {
     }
 
     /// Parse a signed bundle from JSON without verifying.
+    ///
+    /// Bounded at the trust boundary against:
+    /// - oversize input (`MAX_BUNDLE_JSON_BYTES`)
+    /// - oversize fields (`MAX_NAME_LEN`, `MAX_PAYLOAD_LEN`,
+    ///   `MAX_DESCRIPTION_LEN`, `MAX_TARGET_LEN`)
+    /// - excessive cardinality (`MAX_GENOMES_PER_BUNDLE`,
+    ///   `MAX_TARGETS_PER_GENOME`)
+    /// - excessive hex (`MAX_HEX_LEN`) on signature / public_key
+    /// - unknown fields (`#[serde(deny_unknown_fields)]`)
+    ///
+    /// All limits are conservative — legitimate bundles fit comfortably.
+    /// A malicious feed that tries to OOM the registry hits the input
+    /// cap *before* serde allocates any backing buffers.
     pub fn from_json(s: &str) -> Result<Self, RegistryError> {
-        serde_json::from_str(s).map_err(RegistryError::DeserializationFailed)
+        if s.len() > MAX_BUNDLE_JSON_BYTES {
+            return Err(RegistryError::BundleTooLarge {
+                bytes: s.len(),
+                limit: MAX_BUNDLE_JSON_BYTES,
+            });
+        }
+        let parsed: SignedBundle =
+            serde_json::from_str(s).map_err(RegistryError::DeserializationFailed)?;
+        parsed.validate_limits()?;
+        Ok(parsed)
+    }
+
+    /// Enforce all post-deserialisation length / cardinality limits.
+    /// Called automatically by [`Self::from_json`]; exposed so tests
+    /// and library consumers that build a bundle by other means can
+    /// run the same checks.
+    pub fn validate_limits(&self) -> Result<(), RegistryError> {
+        if self.signature_hex.len() > MAX_HEX_LEN {
+            return Err(RegistryError::FieldTooLong {
+                field: "signature_hex",
+                len: self.signature_hex.len(),
+                limit: MAX_HEX_LEN,
+            });
+        }
+        if self.public_key_hex.len() > MAX_HEX_LEN {
+            return Err(RegistryError::FieldTooLong {
+                field: "public_key_hex",
+                len: self.public_key_hex.len(),
+                limit: MAX_HEX_LEN,
+            });
+        }
+        if self.bundle.bundle_name.len() > MAX_NAME_LEN {
+            return Err(RegistryError::FieldTooLong {
+                field: "bundle_name",
+                len: self.bundle.bundle_name.len(),
+                limit: MAX_NAME_LEN,
+            });
+        }
+        if self.bundle.genomes.len() > MAX_GENOMES_PER_BUNDLE {
+            return Err(RegistryError::TooManyGenomes {
+                count: self.bundle.genomes.len(),
+                limit: MAX_GENOMES_PER_BUNDLE,
+            });
+        }
+        for g in &self.bundle.genomes {
+            if g.name.len() > MAX_NAME_LEN {
+                return Err(RegistryError::FieldTooLong {
+                    field: "genome.name",
+                    len: g.name.len(),
+                    limit: MAX_NAME_LEN,
+                });
+            }
+            if g.payload.len() > MAX_PAYLOAD_LEN {
+                return Err(RegistryError::FieldTooLong {
+                    field: "genome.payload",
+                    len: g.payload.len(),
+                    limit: MAX_PAYLOAD_LEN,
+                });
+            }
+            if g.description.len() > MAX_DESCRIPTION_LEN {
+                return Err(RegistryError::FieldTooLong {
+                    field: "genome.description",
+                    len: g.description.len(),
+                    limit: MAX_DESCRIPTION_LEN,
+                });
+            }
+            if g.targets.len() > MAX_TARGETS_PER_GENOME {
+                return Err(RegistryError::TooManyTargets {
+                    count: g.targets.len(),
+                    limit: MAX_TARGETS_PER_GENOME,
+                });
+            }
+            for t in &g.targets {
+                if t.len() > MAX_TARGET_LEN {
+                    return Err(RegistryError::FieldTooLong {
+                        field: "genome.targets[]",
+                        len: t.len(),
+                        limit: MAX_TARGET_LEN,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Verify the signature AND that the publishing key is in the

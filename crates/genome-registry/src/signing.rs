@@ -36,6 +36,18 @@ pub enum RegistryError {
     TrustListParse(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("bundle JSON exceeds size cap ({bytes} > {limit} bytes)")]
+    BundleTooLarge { bytes: usize, limit: usize },
+    #[error("bundle has too many genomes ({count} > {limit})")]
+    TooManyGenomes { count: usize, limit: usize },
+    #[error("genome has too many target tags ({count} > {limit})")]
+    TooManyTargets { count: usize, limit: usize },
+    #[error("field `{field}` is too long ({len} > {limit} chars)")]
+    FieldTooLong {
+        field: &'static str,
+        len: usize,
+        limit: usize,
+    },
 }
 
 /// ed25519 secret key wrapper.
