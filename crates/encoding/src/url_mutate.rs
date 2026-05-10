@@ -208,8 +208,18 @@ pub fn mutate_url(path_and_query: &str, cfg: &UrlMutateConfig) -> (String, Vec<&
 }
 
 fn mutate_last_segment(path: &str, strategy: UrlStrategy) -> Option<String> {
-    let last_slash = path.rfind('/')?;
-    let (head, tail) = path.split_at(last_slash + 1);
+    // Treat both literal '/' and percent-encoded slash (%2F or %2f)
+    // as segment boundaries — otherwise an attacker who pre-encodes
+    // a slash inside what looks like the last segment (e.g.
+    // /a/b%2Fc) would have the WHOLE tail (b%2Fc) mutated, when the
+    // logical last segment is `c`.
+    let normalized_last_slash = {
+        let lit = path.rfind('/');
+        let pct_upper = path.rfind("%2F").map(|i| i + 2);
+        let pct_lower = path.rfind("%2f").map(|i| i + 2);
+        [lit, pct_upper, pct_lower].into_iter().flatten().max()?
+    };
+    let (head, tail) = path.split_at(normalized_last_slash + 1);
     if tail.is_empty() {
         return None;
     }
@@ -257,8 +267,15 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
             let form_decoded = value.replace('+', " ");
             let decoded = percent_decode_bytes(&form_decoded);
             let mutated = strategy.apply_bytes(&decoded);
+            // Only set applied=true if the mutator actually changed
+            // the value. An all-alphanumeric value passed through
+            // PercentEncodeAggressive comes out byte-equal; reporting
+            // a technique was applied would falsely inflate the
+            // technique log.
+            if mutated.as_bytes() != value.as_bytes() {
+                applied = true;
+            }
             out.push(format!("{name}={mutated}"));
-            applied = true;
         } else {
             out.push(pair.to_string());
         }
@@ -292,7 +309,9 @@ fn percent_encode_aggressive_bytes(bytes: &[u8]) -> String {
 }
 
 fn non_canonical_spaces(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 2);
+    // saturating_mul to avoid usize overflow on 32-bit targets when
+    // someone hands us a ~2 GB string.
+    let mut out = String::with_capacity(s.len().saturating_mul(2));
     for ch in s.chars() {
         match ch {
             ' ' => out.push('+'),

@@ -57,7 +57,7 @@ impl EvasionClient {
 
         let mut builder = reqwest::Client::builder()
             .danger_accept_invalid_certs(config.insecure_tls)
-            .redirect(reqwest::redirect::Policy::limited(10))
+            .redirect(reqwest::redirect::Policy::limited(wafrift_types::DEFAULT_MAX_REDIRECTS))
             .timeout(std::time::Duration::from_secs(
                 wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             ));

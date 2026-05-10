@@ -100,6 +100,23 @@ pub fn fingerprint(status: u16, headers: &[(String, String)], body: &[u8]) -> Re
     }
 }
 
+/// Drift weight for a status-code change.
+const STATUS_DRIFT_WEIGHT: f64 = 0.30;
+/// Drift weight for a content-type change.
+const CONTENT_TYPE_DRIFT_WEIGHT: f64 = 0.15;
+/// Drift weight for a body-length-bucket change.
+const LENGTH_DRIFT_WEIGHT: f64 = 0.20;
+/// Drift weight for a title-tag change.
+const TITLE_DRIFT_WEIGHT: f64 = 0.15;
+/// Drift weight for a body-hash (exact-content) change.
+const BODY_HASH_DRIFT_WEIGHT: f64 = 0.10;
+/// Drift weight when block markers appear in the sample but not the baseline.
+const BLOCK_MARKERS_DRIFT_WEIGHT: f64 = 0.30;
+/// Threshold: score at which drift + 4xx status is considered a likely block.
+const LIKELY_BLOCKED_SCORE_4XX_THRESHOLD: f64 = 0.40;
+/// Threshold: score at which drift alone is considered a likely block.
+const LIKELY_BLOCKED_SCORE_THRESHOLD: f64 = 0.60;
+
 /// Compare two fingerprints and compute drift.
 ///
 /// Weight rationale (empirical, based on observed baseline->block transitions):
@@ -119,37 +136,38 @@ pub fn compare(baseline: &ResponseFingerprint, sample: &ResponseFingerprint) -> 
     let mut changed = Vec::new();
 
     if baseline.status != sample.status {
-        score += 0.3;
+        score += STATUS_DRIFT_WEIGHT;
         changed.push("status_code");
     }
 
     if baseline.content_type != sample.content_type {
-        score += 0.15;
+        score += CONTENT_TYPE_DRIFT_WEIGHT;
         changed.push("content_type");
     }
 
     if baseline.length_bucket != sample.length_bucket {
-        score += 0.2;
+        score += LENGTH_DRIFT_WEIGHT;
         changed.push("body_length");
     }
 
     if baseline.title != sample.title {
-        score += 0.15;
+        score += TITLE_DRIFT_WEIGHT;
         changed.push("title_tag");
     }
 
     if baseline.body_hash != sample.body_hash {
-        score += 0.1;
+        score += BODY_HASH_DRIFT_WEIGHT;
         changed.push("body_content");
     }
 
     if !baseline.has_block_markers && sample.has_block_markers {
-        score += 0.3;
+        score += BLOCK_MARKERS_DRIFT_WEIGHT;
         changed.push("block_markers_appeared");
     }
 
-    let likely_blocked =
-        sample.has_block_markers || (score >= 0.4 && sample.status >= 400) || (score >= 0.6);
+    let likely_blocked = sample.has_block_markers
+        || (score >= LIKELY_BLOCKED_SCORE_4XX_THRESHOLD && sample.status >= 400)
+        || (score >= LIKELY_BLOCKED_SCORE_THRESHOLD);
 
     FingerprintDrift {
         score: score.min(1.0),

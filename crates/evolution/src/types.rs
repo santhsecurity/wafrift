@@ -21,6 +21,23 @@ pub struct OracleVerdict {
     pub triggered_rules: u32,
 }
 
+/// Penalty per triggered WAF rule in fitness calculation.
+const RULE_PENALTY_PER_RULE: f64 = 0.05;
+/// Maximum rule-based penalty (caps at 6 rules).
+const MAX_RULE_PENALTY: f64 = 0.3;
+/// Reference latency in ms for normalising the latency penalty.
+const LATENCY_REFERENCE_MS: f64 = 5000.0;
+/// Maximum latency-based penalty.
+const MAX_LATENCY_PENALTY: f64 = 0.1;
+/// Reference body-size delta in bytes for normalising the body penalty.
+const BODY_DELTA_REFERENCE: f64 = 10000.0;
+/// Maximum body-delta-based penalty.
+const MAX_BODY_PENALTY: f64 = 0.1;
+/// Maximum partial-credit pool for a non-passing verdict.
+const MAX_PARTIAL_CREDIT: f64 = 0.3;
+/// Confidence bonus multiplier.
+const CONFIDENCE_BONUS_MULTIPLIER: f64 = 0.05;
+
 impl OracleVerdict {
     /// Create a binary pass/fail verdict.
     #[must_use]
@@ -46,12 +63,15 @@ impl OracleVerdict {
             0.0
         } else {
             // Partial credit for fewer triggered rules, faster response
-            let rule_penalty = (self.triggered_rules as f64 * 0.05).min(0.3);
-            let latency_penalty = (self.latency_ms as f64 / 5000.0).min(0.1);
-            let body_penalty = (self.body_delta.abs() as f64 / 10000.0).min(0.1);
-            0.3 - rule_penalty - latency_penalty - body_penalty
+            let rule_penalty =
+                (self.triggered_rules as f64 * RULE_PENALTY_PER_RULE).min(MAX_RULE_PENALTY);
+            let latency_penalty =
+                (self.latency_ms as f64 / LATENCY_REFERENCE_MS).min(MAX_LATENCY_PENALTY);
+            let body_penalty = (self.body_delta.abs() as f64 / BODY_DELTA_REFERENCE)
+                .min(MAX_BODY_PENALTY);
+            MAX_PARTIAL_CREDIT - rule_penalty - latency_penalty - body_penalty
         };
-        let confidence_bonus = self.confidence * 0.05;
+        let confidence_bonus = self.confidence * CONFIDENCE_BONUS_MULTIPLIER;
         (base + partial + confidence_bonus).clamp(0.0, 1.0)
     }
 }

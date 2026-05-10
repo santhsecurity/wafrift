@@ -131,8 +131,8 @@ fn contains_word(text: &str, word: &str) -> bool {
 fn has_cmdi_structure(payload: &str) -> bool {
     let payload = payload.trim_end_matches(['\0', '\u{FFFD}']);
 
-    // Must have at least one separator
-    let has_separator = cmd_separators().iter().any(|sep| payload.contains(sep));
+    // Must have at least one separator (`.contains` is memchr-backed — faster than a naive byte loop).
+    let has_separator = cmd_separators().iter().any(|sep| payload.contains(sep.as_str()));
 
     // Must reference at least one command as a whole word
     let has_command = shell_commands()

@@ -132,7 +132,7 @@ impl InterceptStore {
         path: impl Into<String>,
     ) -> (u64, oneshot::Receiver<InterceptDecision>) {
         let (tx, rx) = oneshot::channel();
-        let mut inner = self.inner.lock().expect("InterceptStore poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.next_id = inner.next_id.wrapping_add(1);
         let id = inner.next_id;
         inner.senders.insert(id, tx);
@@ -152,7 +152,7 @@ impl InterceptStore {
     /// Resolve a pending intercept with a decision. Idempotent — a
     /// second resolve for the same id is a no-op.
     pub fn resolve(&self, id: u64, decision: InterceptDecision) -> bool {
-        let mut inner = self.inner.lock().expect("InterceptStore poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.pending.remove(&id);
         if let Some(tx) = inner.senders.remove(&id) {
             let _ = tx.send(decision);
@@ -170,7 +170,7 @@ impl InterceptStore {
     ///
     /// Returns true if an entry was removed, false if no such id.
     pub fn cancel(&self, id: u64) -> bool {
-        let mut inner = self.inner.lock().expect("InterceptStore poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let removed_pending = inner.pending.remove(&id).is_some();
         let removed_sender = inner.senders.remove(&id).is_some();
         removed_pending || removed_sender
@@ -180,7 +180,7 @@ impl InterceptStore {
     /// operator toggles intercept-mode OFF — don't strand existing
     /// requests.
     pub fn drain_release(&self) -> usize {
-        let mut inner = self.inner.lock().expect("InterceptStore poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let ids: Vec<u64> = inner.senders.keys().copied().collect();
         let mut released = 0;
         for id in ids {
@@ -195,13 +195,13 @@ impl InterceptStore {
 
     /// Snapshot of the pending list for the TUI.
     pub fn snapshot(&self) -> Vec<PendingIntercept> {
-        let inner = self.inner.lock().expect("InterceptStore poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.pending.values().cloned().collect()
     }
 
     /// How many requests are currently parked in the rendezvous.
     pub fn pending_count(&self) -> usize {
-        let inner = self.inner.lock().expect("InterceptStore poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.pending.len()
     }
 }

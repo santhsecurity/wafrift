@@ -125,10 +125,19 @@ fn internal_path_indicators() -> &'static [String] {
 
 /// Checks whether a payload contains SSRF URL structure.
 fn has_ssrf_structure(payload: &str) -> bool {
+    // Protocol-relative URLs are valid SSRF shapes; no need to scan megabyte bodies for indicators.
+    if payload.starts_with("//") {
+        return true;
+    }
+
     // Must have a URL scheme or be a bare IP/hostname
     let has_scheme = URL_SCHEMES
         .iter()
         .any(|scheme| starts_with_ascii_insensitive(payload, scheme));
+
+    if !has_scheme {
+        return false;
+    }
 
     // Check for SSRF indicator hosts
     let has_indicator_host = ssrf_indicator_hosts()
@@ -147,11 +156,7 @@ fn has_ssrf_structure(payload: &str) -> bool {
         .any(|path| contains_ascii_insensitive(payload, path));
 
     // Valid SSRF structure: scheme + (indicator host OR private IP OR internal path)
-    // OR protocol-relative URL (//localhost)
-    let is_protocol_relative = payload.starts_with("//");
-
-    has_scheme && (has_indicator_host || has_private_ip || has_internal_path)
-        || is_protocol_relative
+    has_indicator_host || has_private_ip || has_internal_path
 }
 
 /// Upper bound for passing the full string into the URL parser (hostile multi-megabyte bodies).

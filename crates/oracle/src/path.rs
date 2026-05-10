@@ -86,8 +86,20 @@ fn target_files() -> &'static [String] {
     })
 }
 
+/// Quick reject: traversal probes always involve `.`, `%`, `\`, or `/`.
+fn may_contain_traversal_bytes(payload: &str) -> bool {
+    payload
+        .as_bytes()
+        .iter()
+        .any(|&x| matches!(x, b'.' | b'%' | b'\\' | b'/'))
+}
+
 /// Checks whether a payload contains path traversal structure.
 fn has_traversal_structure(payload: &str) -> bool {
+    if !may_contain_traversal_bytes(payload) {
+        return false;
+    }
+
     // Must have at least one traversal sequence
     let has_traversal = traversal_sequences()
         .iter()
