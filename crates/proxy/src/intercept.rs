@@ -247,7 +247,10 @@ mod tests {
         let s = store();
         let (id, rx) = s.register("h", "GET", "/");
         assert!(s.resolve(id, InterceptDecision::Release));
-        assert!(!s.resolve(id, InterceptDecision::Kill), "second resolve must no-op");
+        assert!(
+            !s.resolve(id, InterceptDecision::Kill),
+            "second resolve must no-op"
+        );
         assert_eq!(rx.await.unwrap(), InterceptDecision::Release);
     }
 

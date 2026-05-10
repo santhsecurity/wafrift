@@ -99,7 +99,11 @@ mod tests {
     #[test]
     fn array_bypass_replaces_ne() {
         let mutations = mutate(r#"{"field": {"$ne": null}}"#);
-        assert!(mutations.iter().any(|m| m.contains("$in") && m.contains("[null]")));
+        assert!(
+            mutations
+                .iter()
+                .any(|m| m.contains("$in") && m.contains("[null]"))
+        );
     }
 
     #[test]

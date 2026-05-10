@@ -68,17 +68,15 @@ fn draw_leaderboard(f: &mut Frame, area: Rect, state: &State) {
                 Cell::from((i + 1).to_string()).style(Style::default().fg(Color::DarkGray)),
                 Cell::from((*name).clone()).style(Style::default().fg(Color::White)),
                 Cell::from(t.tried.to_string()),
-                Cell::from(t.bypassed.to_string())
-                    .style(Style::default().fg(Color::LightGreen)),
+                Cell::from(t.bypassed.to_string()).style(Style::default().fg(Color::LightGreen)),
                 Cell::from(format!("{rate:.1}%")).style(Style::default().fg(rate_color)),
                 Cell::from(last).style(Style::default().fg(Color::DarkGray)),
             ])
         })
         .collect();
 
-    let title = format!(
-        " Technique leaderboard (≥{MIN_TRIES_FOR_RANK} tries · top 50 by bypass rate) "
-    );
+    let title =
+        format!(" Technique leaderboard (≥{MIN_TRIES_FOR_RANK} tries · top 50 by bypass rate) ");
     let widths = [
         Constraint::Length(5),
         Constraint::Percentage(45),

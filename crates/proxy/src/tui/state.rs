@@ -523,7 +523,11 @@ impl State {
         let p = p.clamp(0.0, 1.0);
         // "Nearest rank" with floor — matches NIST C=1 convention for
         // common percentiles: p50 of [10..100 by 10] = 50, not 60.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
         let idx = ((v.len() as f64 - 1.0) * p).floor() as usize;
         v[idx]
     }
@@ -543,7 +547,13 @@ impl State {
             return 0.0;
         }
         #[allow(clippy::cast_precision_loss)]
-        let sum: f64 = self.spark.iter().rev().take(n).map(|b| b.requests as f64).sum();
+        let sum: f64 = self
+            .spark
+            .iter()
+            .rev()
+            .take(n)
+            .map(|b| b.requests as f64)
+            .sum();
         sum / (n as f64)
     }
 
@@ -595,7 +605,8 @@ impl State {
             .and_then(|i| visible.iter().position(|&v| v == i))
             .unwrap_or(visible.len().saturating_sub(1));
         #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
-        let new_visible = (cur_visible as i64 + delta).clamp(0, (visible.len() - 1) as i64) as usize;
+        let new_visible =
+            (cur_visible as i64 + delta).clamp(0, (visible.len() - 1) as i64) as usize;
         self.selected = Some(visible[new_visible]);
         // any explicit navigation drops auto-follow — operator wants to
         // pin a row.
@@ -822,8 +833,20 @@ mod tests {
     #[test]
     fn filter_query_matches_host_path_method_techniques_waf_case_insensitive() {
         let mut s = State::new();
-        s.record(&req_with("api.target.com", "/admin", 200, true, "encoding:UrlEncode"));
-        s.record(&req_with("static.example.com", "/style.css", 200, false, ""));
+        s.record(&req_with(
+            "api.target.com",
+            "/admin",
+            200,
+            true,
+            "encoding:UrlEncode",
+        ));
+        s.record(&req_with(
+            "static.example.com",
+            "/style.css",
+            200,
+            false,
+            "",
+        ));
         s.filter_query = "ADMIN".into();
         let v = s.visible_indices();
         assert_eq!(v.len(), 1, "filter must be case-insensitive on path");
@@ -856,7 +879,13 @@ mod tests {
     #[test]
     fn tech_stats_per_key_tally() {
         let mut s = State::new();
-        s.record(&req_with("h", "/", 200, true, "encoding:UrlEncode, grammar:cmd"));
+        s.record(&req_with(
+            "h",
+            "/",
+            200,
+            true,
+            "encoding:UrlEncode, grammar:cmd",
+        ));
         s.record(&req_with("h", "/", 200, true, "encoding:UrlEncode"));
         s.record(&req_with("h", "/", 403, false, "encoding:UrlEncode"));
         let url = s.tech_stats.get("encoding:UrlEncode").expect("present");

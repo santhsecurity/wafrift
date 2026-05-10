@@ -90,7 +90,11 @@ mod tests {
     #[test]
     fn generates_nested_obfuscation() {
         let mutations = mutate(r#"{"query": {"match": {"title": "test"}}}"#);
-        assert!(mutations.iter().any(|m| m.contains("\"q\"") || m.contains("query_string")));
+        assert!(
+            mutations
+                .iter()
+                .any(|m| m.contains("\"q\"") || m.contains("query_string"))
+        );
     }
 
     #[test]

@@ -413,7 +413,10 @@ mod tests {
 
     #[test]
     fn encode_double_url_encode() {
-        assert_eq!(encode("A<", Strategy::DoubleUrlEncode).unwrap(), "%2541%253C");
+        assert_eq!(
+            encode("A<", Strategy::DoubleUrlEncode).unwrap(),
+            "%2541%253C"
+        );
     }
 
     #[test]
@@ -445,7 +448,10 @@ mod tests {
 
     #[test]
     fn encode_html_entity() {
-        assert_eq!(encode("A<", Strategy::HtmlEntityEncode).unwrap(), "&#x41;&#x3C;");
+        assert_eq!(
+            encode("A<", Strategy::HtmlEntityEncode).unwrap(),
+            "&#x41;&#x3C;"
+        );
     }
 
     #[test]

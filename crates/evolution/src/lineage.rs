@@ -249,8 +249,7 @@ impl BypassCorpus {
         use crate::types::EvolutionError;
         let mut buf = Vec::new();
         for entry in &self.entries {
-            let json = serde_json::to_string(entry)
-                .map_err(EvolutionError::SerializationFailed)?;
+            let json = serde_json::to_string(entry).map_err(EvolutionError::SerializationFailed)?;
             if json.len() > Self::MAX_JSONL_LINE_BYTES {
                 tracing::warn!(
                     line_len = json.len(),
@@ -298,8 +297,8 @@ impl BypassCorpus {
                 );
                 continue;
             }
-            let entry: BypassEntry = serde_json::from_str(line)
-                .map_err(EvolutionError::DeserializationFailed)?;
+            let entry: BypassEntry =
+                serde_json::from_str(line).map_err(EvolutionError::DeserializationFailed)?;
             entries.push(entry);
         }
         Ok(Self {

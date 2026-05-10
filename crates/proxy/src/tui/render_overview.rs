@@ -8,20 +8,18 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
 use super::DashboardConfig;
-use super::format::{
-    STATUS_BUCKET_LABELS, status_bucket_color, truncate,
-};
+use super::format::{STATUS_BUCKET_LABELS, status_bucket_color, truncate};
 use super::state::State;
 
 pub fn draw(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &State) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),  // counters
-            Constraint::Length(4),  // latency percentiles
-            Constraint::Length(4),  // status ribbon
-            Constraint::Length(7),  // tls
-            Constraint::Min(4),     // wafs
+            Constraint::Length(7), // counters
+            Constraint::Length(4), // latency percentiles
+            Constraint::Length(4), // status ribbon
+            Constraint::Length(7), // tls
+            Constraint::Min(4),    // wafs
         ])
         .split(area);
 
@@ -36,7 +34,10 @@ fn draw_counters(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &State
     let body = vec![
         Line::from(vec![
             label("total"),
-            Span::styled(state.total.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                state.total.to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             spacer(),
             label("bypassed"),
             Span::styled(
@@ -45,7 +46,10 @@ fn draw_counters(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &State
             ),
             spacer(),
             label("blocked"),
-            Span::styled(state.blocked.to_string(), Style::default().fg(Color::LightRed)),
+            Span::styled(
+                state.blocked.to_string(),
+                Style::default().fg(Color::LightRed),
+            ),
             spacer(),
             label("errors"),
             Span::styled(state.errors.to_string(), Style::default().fg(Color::Yellow)),
@@ -58,10 +62,16 @@ fn draw_counters(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &State
             ),
             spacer(),
             label("padded bodies"),
-            Span::styled(state.padded.to_string(), Style::default().fg(Color::LightCyan)),
+            Span::styled(
+                state.padded.to_string(),
+                Style::default().fg(Color::LightCyan),
+            ),
             spacer(),
             label("evade retries"),
-            Span::styled(state.attempts_sum.to_string(), Style::default().fg(Color::White)),
+            Span::styled(
+                state.attempts_sum.to_string(),
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             label("body padding cfg"),
@@ -77,7 +87,11 @@ fn draw_counters(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &State
             label("conn reuse"),
             Span::styled(
                 if cfg.conn_reuse { "on" } else { "OFF" },
-                Style::default().fg(if cfg.conn_reuse { Color::White } else { Color::LightRed }),
+                Style::default().fg(if cfg.conn_reuse {
+                    Color::White
+                } else {
+                    Color::LightRed
+                }),
             ),
             spacer(),
             label("mode"),
@@ -88,7 +102,10 @@ fn draw_counters(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &State
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::DarkGray))
-            .title(Span::styled(" Counters ", Style::default().fg(Color::LightCyan))),
+            .title(Span::styled(
+                " Counters ",
+                Style::default().fg(Color::LightCyan),
+            )),
     );
     f.render_widget(p, area);
 }
@@ -172,7 +189,10 @@ fn draw_status_ribbon(f: &mut Frame, area: Rect, state: &State) {
         let pct = (*count as f64 / total as f64) * 100.0;
         spans.push(Span::styled(
             format!(" {} ", STATUS_BUCKET_LABELS[i]),
-            Style::default().fg(Color::Black).bg(status_bucket_color(i)).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(status_bucket_color(i))
+                .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
@@ -188,7 +208,10 @@ fn draw_tls(f: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
-        .title(Span::styled(" TLS Rotation ", Style::default().fg(Color::LightCyan)));
+        .title(Span::styled(
+            " TLS Rotation ",
+            Style::default().fg(Color::LightCyan),
+        ));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -222,7 +245,10 @@ fn draw_wafs(f: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
-        .title(Span::styled(" WAFs Identified ", Style::default().fg(Color::LightCyan)));
+        .title(Span::styled(
+            " WAFs Identified ",
+            Style::default().fg(Color::LightCyan),
+        ));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -246,7 +272,10 @@ fn draw_wafs(f: &mut Frame, area: Rect, state: &State) {
                     Style::default().fg(Color::White),
                 ),
                 Span::raw("  "),
-                Span::styled(format!("{hosts} host(s)"), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{hosts} host(s)"),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ])
         })
         .collect();

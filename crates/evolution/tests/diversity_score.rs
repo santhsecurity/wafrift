@@ -97,7 +97,10 @@ fn diversity_monotone_in_pairwise_disagreement() {
     // only honest way to check the metric reflects what it claims.
     let pool = GenePool::default_wafrift();
     let gene_count = pool.pools.len();
-    assert!(gene_count >= 3, "default pool must have ≥3 genes for this test");
+    assert!(
+        gene_count >= 3,
+        "default pool must have ≥3 genes for this test"
+    );
 
     fn populate(pool: &GenePool, disagreements: usize) -> Vec<Chromosome> {
         let a: Vec<(String, String)> = pool
@@ -134,12 +137,13 @@ fn novelty_search_exposes_population_and_archive_for_diversity() {
     let mut engine = engine_with("novelty_search", 3);
     let pool = engine.gene_pool.clone();
     let mut rng = StdRng::seed_from_u64(0);
-    let population: Vec<Chromosome> = (0..8)
-        .map(|_| random_chromosome(&pool, &mut rng))
-        .collect();
+    let population: Vec<Chromosome> = (0..8).map(|_| random_chromosome(&pool, &mut rng)).collect();
     inject_population(&mut engine, population);
     let d = engine.diversity_score();
-    assert!(d > 0.0, "novelty search with 8 random chromosomes must report >0 diversity");
+    assert!(
+        d > 0.0,
+        "novelty search with 8 random chromosomes must report >0 diversity"
+    );
 }
 
 #[test]
@@ -185,7 +189,9 @@ fn in_flight_chromosomes_lift_diversity_for_single_state_algos() {
     // Inject distinct in-flight chromosomes — these must be unioned
     // into the diversity snapshot.
     let distinct = mk_chromosome_uniform(&pool, "Z");
-    engine.in_flight.insert(1, (distinct, std::time::Instant::now()));
+    engine
+        .in_flight
+        .insert(1, (distinct, std::time::Instant::now()));
     let d = engine.diversity_score();
     assert!(
         d > 0.0,

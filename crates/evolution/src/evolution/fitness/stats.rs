@@ -112,7 +112,11 @@ pub fn gene_cooccurrence_stats(
         .into_iter()
         .filter(|(_, (_, total))| *total as usize >= min_cooccurrence)
         .map(|(pair, (success, total))| {
-            let rate = if total == 0 { 0.0 } else { f64::from(success) / f64::from(total) };
+            let rate = if total == 0 {
+                0.0
+            } else {
+                f64::from(success) / f64::from(total)
+            };
             (pair.0, pair.1, rate)
         })
         .collect();
@@ -195,14 +199,16 @@ mod tests {
     #[test]
     fn gene_cooccurrence_finds_pairs() {
         let pop = vec![
-            chrom(0.8, 1, vec![
-                ("a".into(), "1".into()),
-                ("b".into(), "2".into()),
-            ]),
-            chrom(0.9, 1, vec![
-                ("a".into(), "1".into()),
-                ("b".into(), "2".into()),
-            ]),
+            chrom(
+                0.8,
+                1,
+                vec![("a".into(), "1".into()), ("b".into(), "2".into())],
+            ),
+            chrom(
+                0.9,
+                1,
+                vec![("a".into(), "1".into()), ("b".into(), "2".into())],
+            ),
         ];
         let result = gene_cooccurrence_stats(&pop, 1);
         assert_eq!(result.len(), 1);
@@ -211,12 +217,11 @@ mod tests {
 
     #[test]
     fn gene_cooccurrence_respects_min_cooccurrence() {
-        let pop = vec![
-            chrom(0.8, 1, vec![
-                ("a".into(), "1".into()),
-                ("b".into(), "2".into()),
-            ]),
-        ];
+        let pop = vec![chrom(
+            0.8,
+            1,
+            vec![("a".into(), "1".into()), ("b".into(), "2".into())],
+        )];
         let result = gene_cooccurrence_stats(&pop, 2);
         assert!(result.is_empty());
     }

@@ -349,10 +349,7 @@ impl GeneBank {
     /// Atomic write of a genome to disk.
     ///
     /// Does NOT acquire locks — the caller must hold the advisory lock.
-    fn write_genome(
-        path: &std::path::Path,
-        genome: &WafGenome,
-    ) -> Result<(), GeneBankError> {
+    fn write_genome(path: &std::path::Path, genome: &WafGenome) -> Result<(), GeneBankError> {
         let tmp_path = path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(genome).map_err(|e| GeneBankError::Serialize {
             waf: genome.waf_name.clone(),

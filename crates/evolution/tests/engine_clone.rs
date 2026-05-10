@@ -83,8 +83,12 @@ fn clone_starts_with_empty_in_flight_set() {
 #[test]
 fn clone_starts_with_empty_cache_at_same_capacity() {
     let mut engine = engine_with("hill_climbing", 4);
-    engine.cache.put("hot".into(), OracleVerdict::from_bool(true));
-    engine.cache.put("warm".into(), OracleVerdict::from_bool(false));
+    engine
+        .cache
+        .put("hot".into(), OracleVerdict::from_bool(true));
+    engine
+        .cache
+        .put("warm".into(), OracleVerdict::from_bool(false));
     assert_eq!(engine.cache.len(), 2);
     let cloned = engine.clone();
     assert_eq!(

@@ -175,8 +175,7 @@ impl SearchAlgorithm for NoveltySearch {
     }
 
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError> {
-        *self = serde_json::from_slice(bytes)
-            .map_err(EvolutionError::DeserializationFailed)?;
+        *self = serde_json::from_slice(bytes).map_err(EvolutionError::DeserializationFailed)?;
         self.in_flight.clear();
         Ok(())
     }
@@ -228,7 +227,11 @@ mod tests {
         let mut alg = NoveltySearch::new(5, 0.3);
         let pool = GenePool::default_wafrift();
         let mut rng = StdRng::seed_from_u64(2);
-        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+        alg.initialize(
+            vec![dummy_chromosome("UrlEncode", "sqli", "json")],
+            &pool,
+            &mut rng,
+        );
 
         let c1 = alg.request_evaluations(2, &mut rng);
         let c2 = alg.request_evaluations(2, &mut rng);
@@ -314,7 +317,11 @@ mod tests {
         let mut alg = NoveltySearch::new(5, 0.3);
         let pool = GenePool::default_wafrift();
         let mut rng = StdRng::seed_from_u64(5);
-        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+        alg.initialize(
+            vec![dummy_chromosome("UrlEncode", "sqli", "json")],
+            &pool,
+            &mut rng,
+        );
         let _ = alg.request_evaluations(3, &mut rng);
         assert!(!alg.in_flight.is_empty());
 

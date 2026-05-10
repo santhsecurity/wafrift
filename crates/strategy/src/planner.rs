@@ -240,7 +240,10 @@ mod tests {
         // Find windows with equal success rates and verify cost ordering
         for w in plan.pipelines.windows(2) {
             if w[0].success_bps == w[1].success_bps {
-                assert!(w[0].cost <= w[1].cost, "cost should be ascending when success rates are tied");
+                assert!(
+                    w[0].cost <= w[1].cost,
+                    "cost should be ascending when success rates are tied"
+                );
             }
         }
     }

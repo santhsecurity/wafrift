@@ -276,7 +276,11 @@ fn parser_confusion_authority(
     target: &str,
     path_suffix: &str,
 ) -> Vec<String> {
-    let p = if path_suffix.is_empty() { "/" } else { path_suffix };
+    let p = if path_suffix.is_empty() {
+        "/"
+    } else {
+        path_suffix
+    };
     vec![
         // Classic userinfo: validator parses host=cover, fetcher hits target.
         format!("{scheme}{cover}@{target}{p}"),
@@ -737,9 +741,8 @@ mod tests {
             out.len()
         );
         assert!(
-            out.iter()
-                .any(|s| s.contains("api.example.com\\@127.0.0.1")
-                    || s.contains("api.example.com\\\\@127.0.0.1")),
+            out.iter().any(|s| s.contains("api.example.com\\@127.0.0.1")
+                || s.contains("api.example.com\\\\@127.0.0.1")),
             "no backslash-confusion variant; got {} entries",
             out.len()
         );

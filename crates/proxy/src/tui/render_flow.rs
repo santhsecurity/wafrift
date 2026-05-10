@@ -51,7 +51,9 @@ fn draw_request_list(f: &mut Frame, area: Rect, state: &State) {
         .border_style(Style::default().fg(Color::DarkGray))
         .title(Span::styled(
             format!(" Requests · {} of {} ", visible.len(), state.recent.len()),
-            Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -81,11 +83,15 @@ fn draw_request_list(f: &mut Frame, area: Rect, state: &State) {
 
     let mut lines = Vec::with_capacity(window.len());
     for ridx in window {
-        let Some(rec) = state.recent.get(ridx) else { continue };
+        let Some(rec) = state.recent.get(ridx) else {
+            continue;
+        };
         let is_sel = state.selected == Some(ridx);
         let marker = if is_sel { "▶ " } else { "  " };
         let row_style = if is_sel {
-            Style::default().bg(Color::Rgb(28, 32, 40)).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(Color::Rgb(28, 32, 40))
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -95,15 +101,23 @@ fn draw_request_list(f: &mut Frame, area: Rect, state: &State) {
             Span::styled(marker, Style::default().fg(outcome_color(rec))),
             Span::styled(rec.timestamp.clone(), Style::default().fg(Color::DarkGray)),
             Span::raw(" "),
-            Span::styled(format!("{:>5}", rec.method), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("{:>5}", rec.method),
+                Style::default().fg(Color::Cyan),
+            ),
             Span::raw(" "),
-            Span::styled(format!("{path_disp:<24}"), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{path_disp:<24}"),
+                Style::default().fg(Color::White),
+            ),
             Span::raw(" "),
             Span::styled(format!("{host_disp:<22}"), Style::default().fg(Color::Gray)),
             Span::raw(" "),
             Span::styled(
                 format!("{:>3}", rec.status),
-                Style::default().fg(status_color(rec.status)).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(status_color(rec.status))
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
             Span::styled(
@@ -168,7 +182,9 @@ fn draw_sparklines(f: &mut Frame, area: Rect, state: &State) {
 
 fn draw_detail(f: &mut Frame, area: Rect, state: &State) {
     let Some(idx) = state.selected else { return };
-    let Some(rec) = state.recent.get(idx) else { return };
+    let Some(rec) = state.recent.get(idx) else {
+        return;
+    };
 
     f.render_widget(Clear, area);
     let block = Block::default()
@@ -182,7 +198,9 @@ fn draw_detail(f: &mut Frame, area: Rect, state: &State) {
                 rec.status,
                 rec.outcome()
             ),
-            Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -261,7 +279,9 @@ pub fn render_detail_lines(rec: &RequestRecord) -> Vec<Line<'static>> {
         ),
         Line::from(vec![Span::styled(
             format!("{} {} HTTP/1.1", rec.method, rec.path),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )]),
     ];
     for (k, v) in &rec.req_headers {
@@ -299,7 +319,9 @@ pub fn render_detail_lines(rec: &RequestRecord) -> Vec<Line<'static>> {
     ));
     lines.push(Line::from(vec![Span::styled(
         format!("HTTP/1.1 {}", rec.status),
-        Style::default().fg(status_color(rec.status)).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(status_color(rec.status))
+            .add_modifier(Modifier::BOLD),
     )]));
     for (k, v) in &rec.resp_headers {
         lines.push(Line::from(vec![
@@ -413,7 +435,10 @@ fn render_mutation_diff(rec: &RequestRecord) -> Vec<Line<'static>> {
         ]));
     }
 
-    if added.is_empty() && removed.is_empty() && changed.is_empty() && rec.req_body_pre_excerpt == rec.req_body_excerpt
+    if added.is_empty()
+        && removed.is_empty()
+        && changed.is_empty()
+        && rec.req_body_pre_excerpt == rec.req_body_excerpt
     {
         out.push(Line::from(vec![Span::styled(
             "(no mutation — request passed through unchanged)",
@@ -477,10 +502,22 @@ mod tests {
     fn detail_lines_include_summary_and_both_directions() {
         let lines = render_detail_lines(&rec());
         assert!(lines.iter().any(|l| line_text(l).contains("host")));
-        assert!(lines.iter().any(|l| line_text(l).contains("outgoing request")));
-        assert!(lines.iter().any(|l| line_text(l).contains("GET / HTTP/1.1")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| line_text(l).contains("outgoing request"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| line_text(l).contains("GET / HTTP/1.1"))
+        );
         assert!(lines.iter().any(|l| line_text(l).contains("X-A:")));
-        assert!(lines.iter().any(|l| line_text(l).contains("incoming response")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| line_text(l).contains("incoming response"))
+        );
         assert!(lines.iter().any(|l| line_text(l).contains("HTTP/1.1 200")));
         assert!(lines.iter().any(|l| line_text(l).contains("server:")));
     }
@@ -492,7 +529,10 @@ mod tests {
     }
 
     fn line_text(l: &Line<'_>) -> String {
-        l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
+        l.spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>()
     }
 
     // ── mutation diff (#109) ─────────────────────────────────
@@ -530,7 +570,10 @@ mod tests {
             .map(line_text)
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(body.contains("+ x-forwarded-for:"), "added header must be tagged: {body}");
+        assert!(
+            body.contains("+ x-forwarded-for:"),
+            "added header must be tagged: {body}"
+        );
         assert!(body.contains("127.0.0.1"));
     }
 
@@ -577,7 +620,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(body.contains("body"), "body line present: {body}");
-        assert!(body.contains("12 → 20 bytes"), "byte counts present: {body}");
+        assert!(
+            body.contains("12 → 20 bytes"),
+            "byte counts present: {body}"
+        );
         assert!(body.contains("mutated"), "mutated label present: {body}");
     }
 
@@ -594,6 +640,9 @@ mod tests {
             .map(line_text)
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(body.contains("byte-identical"), "byte-identical body label: {body}");
+        assert!(
+            body.contains("byte-identical"),
+            "byte-identical body label: {body}"
+        );
     }
 }

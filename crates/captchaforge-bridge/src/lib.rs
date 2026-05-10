@@ -83,10 +83,7 @@ pub async fn solve_in_browser(
     });
 
     let solve_fut = async {
-        let page = browser
-            .new_page("about:blank")
-            .await
-            .context("new_page")?;
+        let page = browser.new_page("about:blank").await.context("new_page")?;
         // Inject the challenge HTML directly so we don't depend on
         // the original origin being reachable; chromium evaluates
         // its scripts as if served from `target_url`.
@@ -136,7 +133,12 @@ pub async fn solve_in_browser(
     let timeout = std::time::Duration::from_millis(cfg.solve_timeout_ms);
     let result = tokio::time::timeout(timeout, solve_fut)
         .await
-        .map_err(|_| anyhow!("solve_in_browser exceeded {}ms budget", cfg.solve_timeout_ms))??;
+        .map_err(|_| {
+            anyhow!(
+                "solve_in_browser exceeded {}ms budget",
+                cfg.solve_timeout_ms
+            )
+        })??;
 
     // Best-effort tidy.
     let _ = browser.close().await;

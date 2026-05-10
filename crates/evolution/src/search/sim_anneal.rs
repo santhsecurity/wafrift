@@ -124,8 +124,7 @@ impl SearchAlgorithm for SimulatedAnnealing {
     }
 
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError> {
-        *self = serde_json::from_slice(bytes)
-            .map_err(EvolutionError::DeserializationFailed)?;
+        *self = serde_json::from_slice(bytes).map_err(EvolutionError::DeserializationFailed)?;
         Ok(())
     }
 

@@ -177,10 +177,7 @@ pub fn replay_to_disk_and_optionally_exec(
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     let (upstream_status, upstream_body_excerpt) = if autoexec {
-        match std::process::Command::new("bash")
-            .arg(&curl_path)
-            .output()
-        {
+        match std::process::Command::new("bash").arg(&curl_path).output() {
             Ok(out) => {
                 let mut excerpt = out.stdout;
                 excerpt.truncate(256);
@@ -215,7 +212,10 @@ fn try_set_clipboard(s: &str) -> (bool, Option<String>) {
 
 #[cfg(not(feature = "clipboard"))]
 fn try_set_clipboard(_s: &str) -> (bool, Option<String>) {
-    (false, Some("clipboard feature disabled at build time".into()))
+    (
+        false,
+        Some("clipboard feature disabled at build time".into()),
+    )
 }
 
 #[cfg(test)]
@@ -240,7 +240,7 @@ mod tests {
                 ("Host".into(), "api.target.com".into()), // dropped (skip)
                 ("X-Original-URL".into(), "/admin".into()),
                 ("User-Agent".into(), "Mozilla'5.0".into()), // tests escape
-                ("Content-Length".into(), "10".into()),     // dropped
+                ("Content-Length".into(), "10".into()),      // dropped
             ],
             req_body_excerpt: b"q=' OR 1=1--".to_vec(),
             req_headers_pre: vec![],
@@ -318,7 +318,12 @@ mod tests {
         let r = rec_full();
         let report = replay_to_disk_and_optionally_exec(&r, 9999).expect("write");
         assert!(
-            report.path.file_name().unwrap().to_string_lossy().starts_with("wafrift-replay-"),
+            report
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("wafrift-replay-"),
             "replay file must use the replay prefix, got {}",
             report.path.display()
         );
@@ -328,7 +333,10 @@ mod tests {
         );
         assert!(report.path.exists(), "replay file must be on disk");
         let body = std::fs::read_to_string(&report.path).expect("read back");
-        assert!(body.starts_with("curl"), "rendered curl recoverable: {body}");
+        assert!(
+            body.starts_with("curl"),
+            "rendered curl recoverable: {body}"
+        );
         std::fs::remove_file(&report.path).ok();
     }
 

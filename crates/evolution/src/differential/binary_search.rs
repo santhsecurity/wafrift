@@ -67,7 +67,10 @@ pub fn generate_family_probes(family: ProbeFamily) -> Vec<Probe> {
         ProbeFamily::Command => {
             let seps = command_separator_probes();
             let paths = command_path_probes();
-            seps.into_iter().take(2).chain(paths.into_iter().take(1)).collect()
+            seps.into_iter()
+                .take(2)
+                .chain(paths.into_iter().take(1))
+                .collect()
         }
     }
 }

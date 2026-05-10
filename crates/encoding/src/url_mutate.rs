@@ -73,7 +73,9 @@ impl UrlStrategy {
     pub fn apply(self, value: &str) -> String {
         match self {
             Self::PercentEncodeAggressive => percent_encode_aggressive(value),
-            Self::DoublePercentEncode => percent_encode_aggressive(&percent_encode_aggressive(value)),
+            Self::DoublePercentEncode => {
+                percent_encode_aggressive(&percent_encode_aggressive(value))
+            }
             Self::NonCanonicalSpaces => non_canonical_spaces(value),
             Self::Hpp => value.to_string(),
         }
@@ -225,10 +227,7 @@ fn percent_decode_lossy(s: &str) -> Cow<'_, str> {
     while i < bytes.len() {
         if bytes[i] == b'%'
             && i + 2 < bytes.len()
-            && let (Some(h), Some(l)) = (
-                hex_digit(bytes[i + 1]),
-                hex_digit(bytes[i + 2]),
-            )
+            && let (Some(h), Some(l)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2]))
         {
             out.push(h * 16 + l);
             i += 3;
@@ -268,7 +267,10 @@ mod tests {
         let c = UrlMutateConfig::default();
         assert!(!c.mutate_last_path_segment);
         let (out, _) = mutate_url("/admin/login?id=1", &c);
-        assert!(out.starts_with("/admin/login?"), "path must stay verbatim, got {out}");
+        assert!(
+            out.starts_with("/admin/login?"),
+            "path must stay verbatim, got {out}"
+        );
     }
 
     #[test]
@@ -276,7 +278,10 @@ mod tests {
         let c = UrlMutateConfig::default();
         let (out, techniques) = mutate_url("/just/a/path", &c);
         assert_eq!(out, "/just/a/path");
-        assert!(techniques.is_empty(), "no mutation must report no technique");
+        assert!(
+            techniques.is_empty(),
+            "no mutation must report no technique"
+        );
     }
 
     #[test]
@@ -309,7 +314,10 @@ mod tests {
     fn percent_encode_aggressive_skips_alphanumerics() {
         let c = cfg(UrlStrategy::PercentEncodeAggressive, false);
         let (out, _) = mutate_url("/p?q=ABCxyz123", &c);
-        assert!(out.ends_with("q=ABCxyz123"), "alnum must not be encoded; got {out}");
+        assert!(
+            out.ends_with("q=ABCxyz123"),
+            "alnum must not be encoded; got {out}"
+        );
     }
 
     #[test]
@@ -336,7 +344,10 @@ mod tests {
         let (out, t) = mutate_url("/api/v1/admin.php", &c);
         assert!(out.starts_with("/api/v1/"), "head must stay; got {out}");
         assert_ne!(out, "/api/v1/admin.php", "tail must change; got {out}");
-        assert!(out.contains("admin%2Ephp"), "dot must be percent-encoded; got {out}");
+        assert!(
+            out.contains("admin%2Ephp"),
+            "dot must be percent-encoded; got {out}"
+        );
         assert!(t.contains(&"url:path_segment"));
     }
 

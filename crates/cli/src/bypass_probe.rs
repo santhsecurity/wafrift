@@ -178,7 +178,10 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
         for report in &all_results {
             print_report_text(report);
         }
-        let total = all_results.iter().map(|r| r.divergences.len()).sum::<usize>();
+        let total = all_results
+            .iter()
+            .map(|r| r.divergences.len())
+            .sum::<usize>();
         if all_results.len() > 1 {
             println!();
             println!(
@@ -278,7 +281,9 @@ async fn probe_one_url(
         }
     }
     if !args.skip_methods {
-        for m in ["POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "PROPFIND"] {
+        for m in [
+            "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "PROPFIND",
+        ] {
             work.push(ProbeJob::Method(m.to_string()));
         }
     }
@@ -295,11 +300,7 @@ async fn probe_one_url(
     let delay_ms = args.delay_ms;
     let body_thresh = args.body_diff_threshold_pct;
     let url_owned = url.to_string();
-    let base_origin = url
-        .split('/')
-        .take(3)
-        .collect::<Vec<_>>()
-        .join("/");
+    let base_origin = url.split('/').take(3).collect::<Vec<_>>().join("/");
 
     let mut handles = Vec::with_capacity(work.len());
     for job in work {
@@ -488,11 +489,7 @@ fn classify(
 ) -> Option<Divergence> {
     let status_changed = probe_status != baseline_status;
     let body_delta = if baseline_len == 0 {
-        if probe_len == 0 {
-            0.0
-        } else {
-            100.0
-        }
+        if probe_len == 0 { 0.0 } else { 100.0 }
     } else {
         ((probe_len as f64 - baseline_len as f64) / baseline_len as f64) * 100.0
     };
@@ -552,10 +549,7 @@ mod tests {
     #[test]
     fn extracts_path_from_full_url() {
         assert_eq!(parse_path_from_url("https://example.com/admin"), "/admin");
-        assert_eq!(
-            parse_path_from_url("http://x:8080/a/b?q=1"),
-            "/a/b?q=1"
-        );
+        assert_eq!(parse_path_from_url("http://x:8080/a/b?q=1"), "/a/b?q=1");
         assert_eq!(parse_path_from_url("https://example.com/"), "/");
         assert_eq!(parse_path_from_url("https://example.com"), "/");
     }
@@ -578,17 +572,9 @@ mod tests {
 
     #[test]
     fn classify_403_to_200_is_high_severity() {
-        let d = classify(
-            "headers",
-            "x",
-            "y",
-            403,
-            500,
-            200,
-            500,
-            10.0,
-            || "curl".to_string(),
-        )
+        let d = classify("headers", "x", "y", 403, 500, 200, 500, 10.0, || {
+            "curl".to_string()
+        })
         .expect("must fire");
         assert_eq!(d.severity, "HIGH");
     }
@@ -612,34 +598,18 @@ mod tests {
 
     #[test]
     fn classify_baseline_zero_body_then_content_returns_100pct() {
-        let d = classify(
-            "paths",
-            "x",
-            "y",
-            403,
-            0,
-            403,
-            500,
-            10.0,
-            || "curl".to_string(),
-        )
+        let d = classify("paths", "x", "y", 403, 0, 403, 500, 10.0, || {
+            "curl".to_string()
+        })
         .expect("must fire");
         assert!((d.body_delta_pct - 100.0).abs() < 0.01);
     }
 
     #[test]
     fn classify_unchanged_returns_none() {
-        let d = classify(
-            "methods",
-            "POST",
-            "test",
-            403,
-            500,
-            403,
-            500,
-            10.0,
-            || "curl".to_string(),
-        );
+        let d = classify("methods", "POST", "test", 403, 500, 403, 500, 10.0, || {
+            "curl".to_string()
+        });
         assert!(d.is_none());
     }
 }

@@ -165,16 +165,62 @@ mod tests {
         apply_profile(&mut headers, &PROFILES[0]);
 
         // All fingerprint headers replaced exactly once
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("user-agent")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept-language")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept-encoding")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-site")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-mode")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-dest")).count(), 1);
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("accept"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("accept-language"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("accept-encoding"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-site"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-mode"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-dest"))
+                .count(),
+            1
+        );
 
         // Non-fingerprint header preserved
-        assert!(headers.iter().any(|(k, v)| k == "other-header" && v == "keep-me"));
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k == "other-header" && v == "keep-me")
+        );
     }
 
     #[test]
@@ -185,9 +231,27 @@ mod tests {
             ("sec-FETCH-MODE".into(), "old".into()),
         ];
         apply_profile(&mut headers, &PROFILES[0]);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("user-agent")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept")).count(), 1);
-        assert_eq!(headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-mode")).count(), 1);
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("accept"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("sec-fetch-mode"))
+                .count(),
+            1
+        );
     }
 
     #[test]

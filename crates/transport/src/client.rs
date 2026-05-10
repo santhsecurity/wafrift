@@ -64,8 +64,8 @@ impl EvasionClient {
 
         #[cfg(feature = "proxy-pool")]
         if !config.proxies.is_empty()
-            && let Some(pool) =
-                wafrift_pool::ProxyPool::new(&config.proxies).map_err(|e| EvasionError::InvalidUrl(e.to_string()))?
+            && let Some(pool) = wafrift_pool::ProxyPool::new(&config.proxies)
+                .map_err(|e| EvasionError::InvalidUrl(e.to_string()))?
         {
             let custom_proxy = reqwest::Proxy::custom(move |_url| {
                 if pool.is_empty() {
@@ -185,20 +185,21 @@ impl EvasionClient {
             // Send and get response with body (CRITICAL FIX #1)
             // We need to read the body for WAF fingerprinting, but also preserve it
             // for the caller. We use a bounded read to avoid memory issues.
-            let (status, body_preview, is_blocked) = match Self::send_and_check(req_builder, &host).await {
-                Ok(result) => result,
-                Err(EvasionError::Transport(ref e)) if attempt + 1 < max_attempts => {
-                    tracing::warn!(
-                        host = %host,
-                        error = %e,
-                        attempt = attempt + 1,
-                        max = max_attempts,
-                        "transient transport error — will retry"
-                    );
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
+            let (status, body_preview, is_blocked) =
+                match Self::send_and_check(req_builder, &host).await {
+                    Ok(result) => result,
+                    Err(EvasionError::Transport(ref e)) if attempt + 1 < max_attempts => {
+                        tracing::warn!(
+                            host = %host,
+                            error = %e,
+                            attempt = attempt + 1,
+                            max = max_attempts,
+                            "transient transport error — will retry"
+                        );
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
 
             if is_blocked && attempt + 1 < max_attempts {
                 let technique_keys: Vec<String> =

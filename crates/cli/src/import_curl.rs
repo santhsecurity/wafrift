@@ -276,7 +276,10 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         }
     };
 
-    let target = parsed.url.expect("checked in parse_curl");
+    let Some(target) = parsed.url else {
+        eprintln!("error: parse curl: no URL found in curl command");
+        return ExitCode::from(1);
+    };
     eprintln!(
         "import-curl: parsed {} headers, body {} bytes, method {} → target {}",
         parsed.headers.len(),
