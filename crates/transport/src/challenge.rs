@@ -295,8 +295,49 @@ pub const CLASSIFY_BODY_SCAN_CAP: usize = 64 * 1024;
 /// scanned. A multi-MB upstream response (e.g. a streamed PDF or a
 /// CDN-cached HTML page that happens to mention "turnstile") would
 /// otherwise force a body-sized lowercase allocation on every call.
+///
+/// Prefer [`classify_with_status`] when the HTTP status code is
+/// available — passing the status lets the classifier reject the
+/// false-positive case where a benign 200 OK page mentions
+/// "turnstile" or "hcaptcha" in its body (e.g. a blog post about
+/// captcha bypass) and would otherwise be treated as a challenge.
 #[must_use]
 pub fn classify(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
+    // Back-compat shim: status = 0 means "caller didn't tell us" →
+    // scan anyway, preserving pre-status-aware behaviour for callers
+    // that haven't been updated.
+    classify_with_status(body, headers, 0)
+}
+
+/// Status-aware classifier: only flags challenges on responses with
+/// challenge-shaped status codes (403, 429, 503, or any 5xx). For
+/// 200/3xx responses returns [`ChallengeKind::Unknown`] without even
+/// scanning the body — a benign page mentioning a captcha keyword
+/// is not a challenge.
+///
+/// `status = 0` is the back-compat sentinel: scan regardless. Anything
+/// else gates the heuristic on the status check.
+#[must_use]
+pub fn classify_with_status(
+    body: &[u8],
+    headers: &[(String, String)],
+    status: u16,
+) -> ChallengeKind {
+    if status != 0 && !is_challenge_status(status) {
+        return ChallengeKind::Unknown;
+    }
+    classify_inner(body, headers)
+}
+
+/// Status codes where a body-keyword match plausibly means "this is
+/// a challenge response". Anything 2xx/3xx is by definition NOT a
+/// challenge — the upstream let the request through.
+#[must_use]
+fn is_challenge_status(status: u16) -> bool {
+    matches!(status, 403 | 429 | 503) || (500..=599).contains(&status)
+}
+
+fn classify_inner(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
     let scan_slice = &body[..body.len().min(CLASSIFY_BODY_SCAN_CAP)];
     let lower_body = std::str::from_utf8(scan_slice)
         .map(str::to_ascii_lowercase)

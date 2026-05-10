@@ -7,7 +7,7 @@
 use std::thread;
 use std::time::Duration;
 use wafrift_transport::challenge::{
-    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, classify,
+    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, classify, classify_with_status,
 };
 
 // ── HIGH: classify body OOM ─────────────────────────────────────
@@ -145,4 +145,68 @@ fn store_record_does_not_purge_live_entries() {
     s.record("b", "cf_clearance=b", ChallengeKind::CloudflareManaged, None);
     s.record("c", "cf_clearance=c", ChallengeKind::CloudflareManaged, None);
     assert_eq!(s.len(), 3, "live entries must survive opportunistic purge");
+}
+
+// ── HIGH: classify status-code gating (FP on benign 200 OK) ─────
+
+#[test]
+fn classify_with_status_skips_body_scan_on_200_ok() {
+    // A blog post about Cloudflare turnstile served with 200 OK
+    // must NOT be classified as a challenge — the upstream let
+    // the request through, by definition.
+    let body = b"<html><h1>Bypassing Turnstile in 2026</h1>";
+    let kind = classify_with_status(body, &[], 200);
+    assert_eq!(
+        kind,
+        ChallengeKind::Unknown,
+        "200 OK with keyword in body must be Unknown, not a challenge"
+    );
+}
+
+#[test]
+fn classify_with_status_classifies_on_403() {
+    let body = b"<html>turnstile</html>";
+    let kind = classify_with_status(body, &[], 403);
+    assert_eq!(
+        kind,
+        ChallengeKind::Turnstile,
+        "403 with turnstile body must classify as a challenge"
+    );
+}
+
+#[test]
+fn classify_with_status_classifies_on_503() {
+    let body = b"<html>turnstile</html>";
+    let kind = classify_with_status(body, &[], 503);
+    assert_eq!(kind, ChallengeKind::Turnstile);
+}
+
+#[test]
+fn classify_with_status_classifies_on_500_5xx_range() {
+    let body = b"<html>turnstile</html>";
+    assert_eq!(classify_with_status(body, &[], 500), ChallengeKind::Turnstile);
+    assert_eq!(classify_with_status(body, &[], 502), ChallengeKind::Turnstile);
+    assert_eq!(classify_with_status(body, &[], 599), ChallengeKind::Turnstile);
+}
+
+#[test]
+fn classify_with_status_skips_on_3xx_redirect() {
+    // 301 / 302 are not challenges by definition.
+    let body = b"<html>turnstile</html>";
+    assert_eq!(classify_with_status(body, &[], 301), ChallengeKind::Unknown);
+    assert_eq!(classify_with_status(body, &[], 302), ChallengeKind::Unknown);
+}
+
+#[test]
+fn classify_status_zero_is_back_compat_scan() {
+    // The original `classify` (no status param) must still work
+    // exactly as before for callers that haven't been updated.
+    let body = b"<html>turnstile</html>";
+    assert_eq!(classify(body, &[]), ChallengeKind::Turnstile);
+    // Internally classify(body, headers) === classify_with_status(body, headers, 0).
+    assert_eq!(
+        classify_with_status(body, &[], 0),
+        ChallengeKind::Turnstile,
+        "status=0 sentinel must scan regardless"
+    );
 }
