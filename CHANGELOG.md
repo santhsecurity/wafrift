@@ -4,6 +4,82 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-05-10
+
+### Added — community genome registry + ed25519 signing (#111)
+
+- New `wafrift-genome-registry` crate (zero network dependencies):
+  bundle wire format, ed25519 sign + verify, trust-list at
+  `~/.wafrift/trusted-keys.toml`. Deterministic canonical encoding
+  (genomes sorted by name) so two senders building the same pack
+  produce byte-equal signatures. 22 unit tests covering signing,
+  bundle round-trip, and trust-list lifecycle.
+
+### Added — TUI evade-mutation diff (#109) and replay (#110)
+
+- The detail pane now shows a third side: the diff between the
+  request as the client sent it and the request that wafrift's evade
+  pipeline put on the wire. Added headers tagged `+ name:` (green),
+  removed `- name:` (red), changed `~ name:` (yellow) with arrow
+  separator. Body delta line classifies as `mutated` or
+  `byte-identical` with a directional arrow.
+- New `R` keybinding writes a `/tmp/wafrift-replay-N.curl`
+  reproducer; when `WAFRIFT_REPLAY_AUTOEXEC=1` is set, also re-fires
+  via bash and reports the upstream exit code in the toast.
+
+### Added — managed-challenge solver (#115)
+
+- New `wafrift-transport::challenge` module: per-host clearance
+  cookie capture/replay (cf_clearance / _abck / aws-waf-token),
+  classifier for CloudflareManaged / Turnstile / Hcaptcha /
+  Recaptcha / AwsWaf / AkamaiBmp / Unknown, and a dispatcher
+  returning ReplayWithCookie / Wait / EscalateToOperator. Operator
+  prompts are throttled per-host (5min cooldown).
+- Wired into proxy: every response is scanned for clearance cookies
+  and recorded; subsequent requests to the same host get the cookie
+  folded into their `Cookie` header (appended, never replacing).
+
+### Added — URL/query-param body-evasion (#114)
+
+- `wafrift-proxy --mutate-url` (off by default). When set, every
+  query parameter VALUE is aggressively percent-encoded; names,
+  scheme, host, port, and path are left intact. Operators must opt
+  in because mutating URLs changes upstream routing semantics.
+- New `wafrift-encoding::url_mutate` module with four strategies
+  (PercentEncodeAggressive / DoublePercentEncode / NonCanonicalSpaces
+  / Hpp). 17 unit tests; 8 plumbing tests.
+
+### Added — wafw00f attribution + regression test (#117)
+
+- The 160-WAF detection catalog under `crates/detect/rules/detect/`
+  is now properly attributed to [wafw00f](https://github.com/EnableSecurity/wafw00f)
+  (BSD-3-Clause) plus selective contributions from
+  [identYwaf](https://github.com/stamparm/identYwaf) (MIT). Top-level
+  README + `wafrift-detect/README` + module-level rustdoc. Regression
+  test refuses to ship a rule file without a `source =` field.
+
+### Fixed — evolution engine internals (#112, #113)
+
+- `EvolutionEngine::diversity_score()` previously returned a
+  hardcoded 0.5; the engine could not adapt mutation pressure.
+  Replaced with a real metric: pairwise gene-mismatch over
+  `algorithm.population_snapshot()` ∪ in-flight chromosomes; falls
+  back to gene-pool exploration entropy when the live population
+  has fewer than two members. SearchAlgorithm trait gains
+  `population_snapshot()` (default impl returns `best().into_iter()`)
+  with overrides on NoveltySearch and MapElites. 17 integration
+  tests.
+- `EvolutionEngine::clone()` previously round-tripped the algorithm
+  state through serde_json (`checkpoint` → `restore`), spiking
+  allocations on populated MapElites grids and novelty archives.
+  SearchAlgorithm trait gains `clone_box()` overridden by every
+  in-tree algorithm with `Box::new(self.clone())`. New
+  `pub type SharedEngine = Arc<tokio::sync::RwLock<EvolutionEngine>>`
+  for the canonical shared-state pattern. Perf gates: populated
+  MapElites engine clones in <50ms, NoveltySearch <100ms. 12
+  integration tests covering correctness, perf, SharedEngine
+  semantics, and backward compat.
+
 ### Added — Tsai-class differential probing (May 9-10, 2026)
 
 - **`wafrift bypass-probe URL`** — new top-level subcommand. Ports the
