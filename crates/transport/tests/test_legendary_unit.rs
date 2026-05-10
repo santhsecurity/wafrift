@@ -69,7 +69,7 @@ async fn test_evasion_client_mocked_server_get() {
         .mount(&mock_server)
         .await;
 
-    let client = EvasionClient::new().unwrap();
+    let client = EvasionClient::with_config(EvasionConfig { allow_private_upstream: true, ..Default::default() }).unwrap();
     let target_url = format!("{}/target", mock_server.uri());
 
     let response = client
@@ -101,6 +101,7 @@ async fn test_evasion_client_mocked_server_waf_block() {
 
     let config = EvasionConfig {
         max_attempts: 3,
+        allow_private_upstream: true, // wiremock binds 127.0.0.1
         ..Default::default()
     }; // Retry up to 3 times
     let client = EvasionClient::with_config(config).unwrap();
@@ -126,7 +127,7 @@ async fn test_evasion_client_send_post() {
         .mount(&mock_server)
         .await;
 
-    let client = EvasionClient::new().unwrap();
+    let client = EvasionClient::with_config(EvasionConfig { allow_private_upstream: true, ..Default::default() }).unwrap();
     let target_url = format!("{}/submit", mock_server.uri());
 
     let req =

@@ -55,6 +55,18 @@ pub struct EvasionConfig {
     /// `wafrift-proxy --mutate-url` (or set this field via TOML).
     #[serde(default)]
     pub mutate_url: bool,
+
+    /// Allow upstream targets that fall in the bogon set
+    /// (loopback / RFC1918 / CGN / Teredo / IMDS / etc.).
+    ///
+    /// Off by default — wafrift-transport's EvasionClient rejects
+    /// literal-IP requests to these ranges as a defence-in-depth
+    /// against accidental SSRF. Set true when targeting a lab
+    /// upstream on 127.0.0.1 / 192.168.x or when running tests
+    /// against a wiremock instance bound to loopback. Audit
+    /// (2026-05-10).
+    #[serde(default)]
+    pub allow_private_upstream: bool,
 }
 
 impl Default for EvasionConfig {
@@ -73,6 +85,7 @@ impl Default for EvasionConfig {
             origin_bypass: std::collections::HashMap::new(),
             body_padding_bytes: 0,
             mutate_url: false,
+            allow_private_upstream: false,
         }
     }
 }
@@ -95,6 +108,7 @@ impl EvasionConfig {
             origin_bypass: std::collections::HashMap::new(),
             body_padding_bytes: 0,
             mutate_url: false,
+            allow_private_upstream: false,
         }
     }
 
@@ -120,6 +134,10 @@ impl EvasionConfig {
             // too. Operators reaching for `maximum()` already accept
             // the routing-semantics tradeoffs.
             mutate_url: true,
+            // maximum() is for offensive testing on lab infra, where
+            // loopback / RFC1918 targets are normal. Stays false in
+            // production via the default; flips true here.
+            allow_private_upstream: true,
         }
     }
 

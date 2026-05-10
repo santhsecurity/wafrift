@@ -180,18 +180,19 @@ impl EvasionClient {
         // defence-in-depth, reject literal-IP URLs in the bogon set
         // upfront so a misconfigured scan can't accidentally hit
         // 127.0.0.1, 169.254.169.254 (IMDS), CGN, Teredo, etc.
-        // Hostname-based DNS rebinding is still an open gap on this
-        // path — wafrift-proxy's BogonFilteringResolver should be
-        // wired into EvasionClient when the dep graph allows it.
-        if let Ok(parsed) = reqwest::Url::parse(&request.url)
+        //
+        // Operators targeting a lab upstream on loopback or RFC1918
+        // (or running mock-server tests against wiremock) opt in via
+        // EvasionConfig.allow_private_upstream.
+        if !self.config.allow_private_upstream
+            && let Ok(parsed) = reqwest::Url::parse(&request.url)
             && let Some(host) = parsed.host_str()
             && let Ok(ip) = host.parse::<std::net::IpAddr>()
             && is_bogon_ip(ip)
         {
             return Err(EvasionError::InvalidUrl(format!(
                 "EvasionClient refuses literal-IP upstream {ip} (private/loopback/CGN/Teredo). \
-                 If you intentionally target a lab address, configure the proxy with \
-                 --allow-private-upstream and route through it instead."
+                 Set EvasionConfig.allow_private_upstream = true if intentional."
             )));
         }
         let host = extract_host(&request.url)?;

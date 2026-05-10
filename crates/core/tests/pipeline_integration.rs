@@ -58,6 +58,7 @@ fn all_features_disabled_no_techniques() {
         proxies: vec![],
         origin_bypass: std::collections::HashMap::new(),
         body_padding_bytes: 0,
+        allow_private_upstream: false,
     };
     let result = evade(&req, &state, &config);
     // Smuggling/H2 metadata may still be applied (no config flag yet)
