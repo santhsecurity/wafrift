@@ -41,6 +41,20 @@ pub struct EvasionConfig {
     /// skipped at strategy time.
     #[serde(default)]
     pub body_padding_bytes: usize,
+    /// Mutate URL/query-param payload bytes (off by default).
+    ///
+    /// When true, the evade pipeline applies the same encoding +
+    /// grammar mutations to query-string parameter VALUES (not
+    /// names) and to the path's last segment. This is the canonical
+    /// attack surface for SQLi-in-`?id=` / XSS-in-`?q=` etc — most
+    /// production attacks live in URL parameters, not request bodies.
+    ///
+    /// **Off by default** because mutating the URL changes upstream
+    /// routing semantics (e.g. cache keys, log entries, downstream
+    /// handler dispatch). Operators must opt in via
+    /// `wafrift-proxy --mutate-url` (or set this field via TOML).
+    #[serde(default)]
+    pub mutate_url: bool,
 }
 
 impl Default for EvasionConfig {
@@ -58,6 +72,7 @@ impl Default for EvasionConfig {
             proxies: Vec::new(),
             origin_bypass: std::collections::HashMap::new(),
             body_padding_bytes: 0,
+            mutate_url: false,
         }
     }
 }
@@ -79,6 +94,7 @@ impl EvasionConfig {
             proxies: Vec::new(),
             origin_bypass: std::collections::HashMap::new(),
             body_padding_bytes: 0,
+            mutate_url: false,
         }
     }
 
@@ -100,6 +116,10 @@ impl EvasionConfig {
             // Default to AWS-WAF-default-tier (16 KB) — covers
             // Cloudflare Pro (8 KB), AWS WAF default, Akamai default.
             body_padding_bytes: 16 * 1024,
+            // maximum() is opt-in aggression — flip URL mutation on
+            // too. Operators reaching for `maximum()` already accept
+            // the routing-semantics tradeoffs.
+            mutate_url: true,
         }
     }
 

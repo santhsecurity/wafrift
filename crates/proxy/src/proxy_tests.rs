@@ -551,6 +551,7 @@ fn default_args() -> Args {
         body_padding_bytes: 0,
         no_conn_reuse: false,
         tui: false,
+        mutate_url: false,
     }
 }
 
@@ -1039,4 +1040,96 @@ fn render_live_findings_does_not_render_attacker_markdown() {
         md.contains("evil_alert_1__.com"),
         "sanitised host missing:\n{md}"
     );
+}
+
+// ── --mutate-url plumbing tests (blocker #114) ─────────────────────
+
+#[test]
+fn split_url_for_mutation_separates_authority_from_path() {
+    let r = split_url_for_mutation("https://api.target.com/admin?id=1");
+    assert_eq!(
+        r,
+        Some(("https://api.target.com".into(), "/admin?id=1".into()))
+    );
+}
+
+#[test]
+fn split_url_for_mutation_handles_port() {
+    let r = split_url_for_mutation("http://localhost:8080/api/v1?q=hello");
+    assert_eq!(
+        r,
+        Some(("http://localhost:8080".into(), "/api/v1?q=hello".into()))
+    );
+}
+
+#[test]
+fn split_url_for_mutation_handles_path_only_no_query() {
+    let r = split_url_for_mutation("https://x.com/just/a/path");
+    assert_eq!(
+        r,
+        Some(("https://x.com".into(), "/just/a/path".into()))
+    );
+}
+
+#[test]
+fn split_url_for_mutation_returns_none_for_relative() {
+    assert_eq!(split_url_for_mutation("/relative/path?q=1"), None);
+    assert_eq!(split_url_for_mutation("not a url"), None);
+    assert_eq!(split_url_for_mutation(""), None);
+}
+
+#[test]
+fn split_url_for_mutation_returns_none_for_authority_only() {
+    // No path component — there's nothing for the mutator to chew on.
+    assert_eq!(split_url_for_mutation("https://x.com"), None);
+}
+
+#[test]
+fn mutate_url_atomic_default_off() {
+    // Reset so the test is order-independent on the global atomic.
+    MUTATE_URL_ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        !MUTATE_URL_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+        "MUTATE_URL_ENABLED must default to false — opt-in only"
+    );
+}
+
+#[test]
+fn mutate_url_full_mutation_pipeline_round_trip() {
+    // Smoke: feed a realistic SQLi-bearing URL through the same
+    // (split → mutate → reassemble) sequence the proxy uses.
+    let url = "https://api.target.com/admin?id=1' OR '1'='1&debug=true";
+    let (authority, pq) = split_url_for_mutation(url).expect("absolute");
+    let cfg = wafrift_encoding::url_mutate::UrlMutateConfig::default();
+    let (mutated_pq, techniques) =
+        wafrift_encoding::url_mutate::mutate_url(&pq, &cfg);
+    let mutated_url = format!("{authority}{mutated_pq}");
+    assert_ne!(
+        mutated_url, url,
+        "mutated URL must differ from original — got identical {mutated_url}"
+    );
+    assert!(
+        mutated_url.starts_with("https://api.target.com/admin?"),
+        "scheme + authority + path must be byte-identical, got {mutated_url}"
+    );
+    assert!(
+        mutated_url.contains("id=1%27%20OR%20%271%27%3D%271"),
+        "id value must be aggressively percent-encoded, got {mutated_url}"
+    );
+    assert!(
+        techniques.contains(&"url:percent_encode"),
+        "techniques must report the strategy that fired, got {techniques:?}"
+    );
+}
+
+#[test]
+fn mutate_url_does_not_disturb_alphanumeric_only_query() {
+    // If every query value is alphanumeric there is nothing to encode
+    // and the URL must come out byte-identical.
+    let url = "https://x.com/path?a=ABC&b=xyz123";
+    let (authority, pq) = split_url_for_mutation(url).expect("absolute");
+    let cfg = wafrift_encoding::url_mutate::UrlMutateConfig::default();
+    let (mutated_pq, _) = wafrift_encoding::url_mutate::mutate_url(&pq, &cfg);
+    let mutated_url = format!("{authority}{mutated_pq}");
+    assert_eq!(mutated_url, url);
 }

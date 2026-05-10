@@ -11,6 +11,7 @@ pub mod encoding;
 pub mod error;
 pub mod header;
 pub mod tamper;
+pub mod url_mutate;
 
 // Re-export the encoding submodule's public API at crate root for ergonomics.
 pub use encoding::{

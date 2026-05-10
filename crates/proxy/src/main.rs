@@ -267,6 +267,23 @@ struct Args {
     /// terminal the proxy starts without the TUI and logs a warning.
     #[arg(long = "tui", default_value_t = false)]
     tui: bool,
+
+    /// Mutate URL/query-string payload bytes (off by default).
+    ///
+    /// When set, the evade pipeline aggressively percent-encodes
+    /// every query parameter VALUE (names are left intact since
+    /// they drive routing). This covers the canonical attack
+    /// surface for SQLi-in-`?id=`, XSS-in-`?q=`, file-include in
+    /// `?file=` etc — most production attacks live in URL
+    /// parameters, not request bodies.
+    ///
+    /// Off by default because mutating the URL changes upstream
+    /// routing semantics (cache keys, log entries, downstream
+    /// handler dispatch). Opt in only when the target's WAF
+    /// matches against URL bytes AND you've verified the upstream
+    /// is robust to percent-encoded query values.
+    #[arg(long = "mutate-url", default_value_t = false)]
+    mutate_url: bool,
 }
 
 type SharedState = Arc<Mutex<ProxyState>>;
@@ -290,6 +307,14 @@ static STEALTH_POOL: std::sync::OnceLock<StealthPool> = std::sync::OnceLock::new
 /// whether to invoke `wafrift_evolution::body_padding::pad`. Set once
 /// at startup from `--body-padding-bytes`.
 static BODY_PADDING_BYTES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Process-wide URL/query mutation flag. Read on every forward to
+/// decide whether to apply `wafrift_encoding::url_mutate::mutate_url`
+/// to the upstream URL's path-and-query. Set once at startup from
+/// `--mutate-url`. Off by default since mutating URLs changes
+/// upstream routing semantics; opt-in only.
+static MUTATE_URL_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Process-wide TUI event channel. `Some` when `--tui` is set; the
 /// dashboard task drains it. Bounded at 10 k events so a slow TTY can't
@@ -915,6 +940,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // URL/query mutation — applied per request, controlled by an
+    // atomic so there's no per-request lock contention on the hot
+    // path. Off by default; opt-in via --mutate-url.
+    if args.mutate_url {
+        MUTATE_URL_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+        warn!(
+            "--mutate-url: every upstream URL's query parameter values will be aggressively \
+             percent-encoded. This changes routing semantics (cache keys, log entries) — \
+             ensure the upstream is robust to encoded query bytes."
+        );
+    }
+
     // Body padding — applied per request, controlled by an atomic so
     // there's no per-request lock contention on the hot path.
     if args.body_padding_bytes > 0 {
@@ -1215,6 +1252,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Build an error response without panicking.
+/// Split an absolute URL into `(scheme://authority, path?query)` for
+/// the `--mutate-url` hook so the URL-mutator only sees the path-and-
+/// query portion (it never touches scheme or authority).
+///
+/// Returns `None` for URLs without `://` (relative, malformed) — the
+/// caller leaves the URL alone in that case rather than risking a
+/// mutation that breaks routing.
+fn split_url_for_mutation(url: &str) -> Option<(String, String)> {
+    let scheme_end = url.find("://")?;
+    let after_scheme = &url[scheme_end + 3..];
+    let path_start = after_scheme.find('/')?;
+    let absolute_path_start = scheme_end + 3 + path_start;
+    Some((
+        url[..absolute_path_start].to_string(),
+        url[absolute_path_start..].to_string(),
+    ))
+}
+
 fn error_response(status: StatusCode, message: &str) -> Response<Full<Bytes>> {
     Response::builder()
         .status(status)
@@ -1411,6 +1466,33 @@ async fn forward_wafrift_request(
     if let Err(msg) = assert_forward_url_allowed(&evasion_result.request.url, &policy).await {
         warn!(host = %host, url = %evasion_result.request.url, "{}", msg);
         return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+    }
+
+    // ── URL/query mutation (--mutate-url, off by default) ───────────
+    // Applied AFTER SSRF policy validation but BEFORE upstream fetch
+    // so the unmodified URL is what gets gated, while the WAF on the
+    // wire sees the mutated query bytes. Path is left intact —
+    // mutating the path's last segment is reserved for the more
+    // aggressive `evade_smart` URL-aware variants and is not
+    // something a passive proxy should do silently.
+    if MUTATE_URL_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Some((scheme_authority, path_and_query)) = split_url_for_mutation(
+            &evasion_result.request.url,
+        ) {
+            let cfg = wafrift_encoding::url_mutate::UrlMutateConfig::default();
+            let (mutated_pq, _techniques) =
+                wafrift_encoding::url_mutate::mutate_url(&path_and_query, &cfg);
+            if mutated_pq != path_and_query {
+                let new_url = format!("{scheme_authority}{mutated_pq}");
+                debug!(
+                    host = %host,
+                    from = %path_and_query,
+                    to = %mutated_pq,
+                    "url mutation applied"
+                );
+                evasion_result.request.url = new_url;
+            }
+        }
     }
 
     // ── Body padding (8KB/16KB cloud-WAF inspection bypass) ─────────
