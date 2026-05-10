@@ -53,10 +53,21 @@ crossterm = { workspace = true }
 # off so headless servers (no X11/wayland) still build. The yank action
 # falls back to writing /tmp/wafrift-yank-N.curl when arboard fails.
 arboard = { workspace = true, optional = true }
+# Optional captchaforge bridge — pulls chromiumoxide. Default builds
+# do NOT include this; opt in with `--features captchaforge` to make
+# `--captchaforge` actually solve managed challenges. Without it the
+# flag is rejected at clap-parse time with an actionable hint.
+wafrift-captchaforge-bridge = { workspace = true, optional = true }
 
 [features]
 default = ["clipboard"]
 clipboard = ["dep:arboard"]
+# When enabled at build time, the proxy gains a `--captchaforge` flag
+# that installs the headless-browser solver into ChallengeStore so
+# Cloudflare/Turnstile/hCaptcha responses are auto-solved instead of
+# falling back to operator-prompt. Pulls chromiumoxide, so it's
+# behind a feature flag — default proxy stays lean.
+captchaforge = ["dep:wafrift-captchaforge-bridge"]
 # Forwards the wafrift-transport `tls-impersonate` feature so that
 # `wafrift-proxy --tls-impersonate <profile>` actually engages the
 # StealthClient (rquest + BoringSSL) instead of erroring at startup.
