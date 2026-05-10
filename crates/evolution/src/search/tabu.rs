@@ -139,6 +139,13 @@ impl SearchAlgorithm for TabuSearch {
     }
 
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError> {
+        if bytes.len() > crate::types::MAX_CHECKPOINT_BYTES {
+            return Err(EvolutionError::OversizedData {
+                context: "tabu checkpoint restore".into(),
+                size: bytes.len(),
+                max: crate::types::MAX_CHECKPOINT_BYTES,
+            });
+        }
         *self = serde_json::from_slice(bytes).map_err(EvolutionError::DeserializationFailed)?;
         Ok(())
     }

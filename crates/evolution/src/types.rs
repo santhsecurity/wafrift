@@ -327,7 +327,7 @@ impl Default for Deduper {
 
 /// Maximum checkpoint file size (bytes). Prevents OOM from
 /// maliciously large checkpoint files.
-const MAX_CHECKPOINT_BYTES: usize = 512 * 1024 * 1024;
+pub(crate) const MAX_CHECKPOINT_BYTES: usize = 512 * 1024 * 1024;
 
 /// Checkpoint persistence helpers.
 pub fn save_checkpoint(

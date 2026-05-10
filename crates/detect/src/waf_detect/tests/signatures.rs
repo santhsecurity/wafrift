@@ -253,3 +253,64 @@ fn ambiguity_returns_multiple() {
     // the ambiguity logic should return both.
     assert!(!results.is_empty());
 }
+
+#[test]
+fn detect_all_whitespace_body_no_panic() {
+    let result = detect(200, &[], b"     \n\t   ");
+    assert!(result.is_empty());
+}
+
+#[test]
+fn detect_gzip_bytes_raw_no_panic() {
+    // Gzip magic bytes passed as raw body — should not panic or false-match
+    let gzip_prefix = &[0x1f, 0x8b, 0x08, 0x00];
+    let result = detect(200, &[], gzip_prefix);
+    assert!(result.is_empty());
+}
+
+#[test]
+fn detect_http2_pseudo_headers_no_panic() {
+    // HTTP/2 pseudo-headers mixed with regular headers
+    let headers = vec![
+        (":authority".into(), "example.com".into()),
+        (":status".into(), "200".into()),
+        ("server".into(), "nginx".into()),
+    ];
+    let result = detect(200, &headers, b"OK");
+    assert!(result.is_empty());
+}
+
+#[test]
+fn detect_non_ascii_header_name_no_panic() {
+    let headers = vec![
+        ("x-café".into(), "value".into()),
+        ("server".into(), "nginx".into()),
+    ];
+    let result = detect(200, &headers, b"OK");
+    // Should not panic; result may be empty or not depending on rules
+    let _ = result;
+}
+
+#[test]
+fn detect_body_length_boundary_100_no_panic() {
+    let body = "x".repeat(100);
+    let _ = detect(200, &[], body.as_bytes());
+}
+
+#[test]
+fn detect_body_length_boundary_1000_no_panic() {
+    let body = "x".repeat(1000);
+    let _ = detect(200, &[], body.as_bytes());
+}
+
+#[test]
+fn detect_body_length_boundary_5000_no_panic() {
+    let body = "x".repeat(5000);
+    let _ = detect(200, &[], body.as_bytes());
+}
+
+#[test]
+fn detect_empty_headers_no_panic() {
+    let _ = detect(200, &[], b"normal body");
+    let _ = detect(403, &[], b"blocked body");
+}

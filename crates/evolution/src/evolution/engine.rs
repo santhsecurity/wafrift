@@ -390,6 +390,12 @@ impl EvolutionEngine {
                 self.stagnation_counter = 0;
             }
         }
+        // Mirror into stats so should_terminate() (which reads
+        // self.stats.stagnation_counter, not self.stagnation_counter)
+        // and the search algorithms' own should_terminate() impls see
+        // the same value. Without this sync the stagnation_limit
+        // budget would be silently ignored.
+        self.stats.stagnation_counter = self.stagnation_counter;
 
         self.stats.generation += 1;
         self.generation_evals = 0;
