@@ -96,13 +96,27 @@ impl ChallengeKind {
     }
 }
 
-/// Per-host clearance cookie entry with absolute expiry.
+/// Per-host clearance cookie entry with absolute expiry + RFC 6265
+/// scoping attributes captured from the original `Set-Cookie`.
 #[derive(Debug, Clone)]
 struct CookieEntry {
     cookie_header: String,
     expires_at: Instant,
     captured_at: Instant,
     kind: ChallengeKind,
+    /// Domain attribute (lowercased, no leading dot). When set, the
+    /// cookie replays on this host AND its subdomains. When None,
+    /// host-only matching is used (cookie replays only on the exact
+    /// host that captured it).
+    scope_domain: Option<String>,
+    /// Path attribute. The cookie replays only on requests whose
+    /// path starts with this prefix. When None or "/", any path
+    /// matches.
+    scope_path: Option<String>,
+    /// Secure attribute. When true, the cookie must only replay over
+    /// HTTPS — the get path enforces this when the caller indicates
+    /// the request scheme.
+    secure: bool,
 }
 
 /// Process-wide store of captured clearance cookies keyed by host.
@@ -188,6 +202,9 @@ impl ChallengeStore {
             captured_at: now,
             expires_at: now + ttl.unwrap_or(DEFAULT_CLEARANCE_TTL),
             kind,
+            scope_domain: None,
+            scope_path: None,
+            secure: false,
         };
         let key = normalize_host(&host.into());
         let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
