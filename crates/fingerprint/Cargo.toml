@@ -14,5 +14,9 @@ categories = ["network-programming", "web-programming"]
 wafrift-types = { workspace = true }
 rand = { workspace = true }
 
+[dev-dependencies]
+wafrift-detect = { path = "../detect" }
+proptest = { workspace = true }
+
 [lints]
 workspace = true

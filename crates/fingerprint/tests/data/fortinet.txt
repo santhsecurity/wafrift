@@ -1,0 +1,3 @@
+403
+
+<html><head><script src="//globalurl.fortinet.net/block.js"></script></head><body>blocked</body></html>

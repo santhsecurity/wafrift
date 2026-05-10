@@ -1,0 +1,6 @@
+200
+server: nginx/1.24
+content-type: text/html
+
+<!DOCTYPE html>
+<html><head><title>Welcome to nginx!</title></head><body>Welcome</body></html>

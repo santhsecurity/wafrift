@@ -1,0 +1,5 @@
+200
+server: Apache/2.4.58 (Unix)
+content-type: text/html
+
+<html><body><h1>It works!</h1></body></html>

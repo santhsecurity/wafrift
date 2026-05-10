@@ -27,7 +27,8 @@ impl fmt::Display for DetectedWaf {
 /// The body is truncated to the first 4 KiB before matching to keep the
 /// classifier predictable and inexpensive.
 ///
-/// Returns a `Vec<DetectedWaf>` sorted by confidence descending.
+/// Returns a `Vec<DetectedWaf>` sorted by confidence descending, then by
+/// WAF name ascending when scores tie (deterministic ordering).
 /// If two or more WAFs have confidence within [`DetectConfig::ambiguity_delta`]
 /// of each other, all are returned so callers can union evasion techniques
 /// or escalate to the user.

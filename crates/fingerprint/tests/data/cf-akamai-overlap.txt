@@ -1,0 +1,5 @@
+403
+server: AkamaiGHost
+cf-ray: cf-fronted-999-AMS
+
+overlapping cdn footprint

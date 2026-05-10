@@ -358,7 +358,7 @@ impl RuleEngine {
     ///
     /// Must be called after all rules are loaded.  Populates
     /// `body_regex_set`, `body_pattern_map`, and `body_regexes`.
-    fn compile_body_regex_set(&mut self) -> Result<(), DetectRulesError> {
+    pub fn compile_body_regex_set(&mut self) -> Result<(), DetectRulesError> {
         let mut patterns: Vec<String> = Vec::new();
         let mut map: Vec<BodyPatternRef> = Vec::new();
         let mut regexes: Vec<Regex> = Vec::new();
@@ -389,8 +389,9 @@ impl RuleEngine {
         }
 
         if !patterns.is_empty() {
-            let set = RegexSet::new(&patterns)
-                .map_err(|e| DetectRulesError::Parse(format!("failed to compile body RegexSet: {e}")))?;
+            let set = RegexSet::new(&patterns).map_err(|e| {
+                DetectRulesError::Parse(format!("failed to compile body RegexSet: {e}"))
+            })?;
             self.body_regex_set = Some(set);
         }
 
@@ -522,6 +523,7 @@ impl RuleEngine {
             b.confidence
                 .partial_cmp(&a.confidence)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
         });
         results
     }
@@ -579,7 +581,9 @@ where
 /// Reload the global rule engine from disk.
 pub fn reload() -> Result<(), DetectRulesError> {
     let new_engine = RuleEngine::load_embedded()?;
-    let mut guard = RULE_DB.write().map_err(|e| DetectRulesError::Parse(format!("RULE_DB poisoned: {e}")))?;
+    let mut guard = RULE_DB
+        .write()
+        .map_err(|e| DetectRulesError::Parse(format!("RULE_DB poisoned: {e}")))?;
     *guard = new_engine;
     Ok(())
 }
@@ -783,7 +787,9 @@ weight = 0.6
     #[test]
     fn detect_body_only_needs_higher_threshold() {
         let mut engine = RuleEngine::default();
-        engine.load_from_str(r#"
+        engine
+            .load_from_str(
+                r#"
 [[waf]]
 name = "LowConfWAF"
 vendor = "test"
@@ -792,7 +798,9 @@ confidence_threshold = 0.1
 [[waf.signature]]
 body_regex = "blocked"
 weight = 0.4
-"#).expect("load");
+"#,
+            )
+            .expect("load");
         engine.compile_body_regex_set().expect("compile");
 
         // body-only match with weight 0.4 < BODY_ONLY_MIN_CONFIDENCE (0.5)
