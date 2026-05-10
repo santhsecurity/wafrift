@@ -136,6 +136,17 @@ pub const DEFAULT_CLEARANCE_TTL: Duration = Duration::from_secs(30 * 60);
 /// re-triggers the challenge.
 pub const OPERATOR_PROMPT_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 
+/// Normalize a host key so case + optional trailing port don't
+/// scatter entries across multiple slots. DNS is case-insensitive and
+/// `Example.com:443` / `example.com` resolve to the same upstream
+/// for our purposes — pre-fix they were stored under different keys
+/// and `get("example.com")` would silently miss the cookie captured
+/// under `Example.com`.
+fn normalize_host(host: &str) -> String {
+    let no_port = host.split(':').next().unwrap_or(host);
+    no_port.to_ascii_lowercase()
+}
+
 impl ChallengeStore {
     #[must_use]
     pub fn new() -> Self {
@@ -146,8 +157,9 @@ impl ChallengeStore {
     /// or expired.
     #[must_use]
     pub fn get(&self, host: &str) -> Option<String> {
+        let key = normalize_host(host);
         let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
-        let entry = inner.by_host.get(host)?;
+        let entry = inner.by_host.get(&key)?;
         if Instant::now() >= entry.expires_at {
             return None;
         }
@@ -157,6 +169,12 @@ impl ChallengeStore {
     /// Record a freshly captured clearance cookie for `host`.
     ///
     /// `ttl` defaults to [`DEFAULT_CLEARANCE_TTL`] when `None`.
+    ///
+    /// Opportunistically GCs expired entries on every insert so the
+    /// store self-bounds without requiring an external background
+    /// task. Worst case: an attacker who churns through N hosts
+    /// before any TTL expires holds N entries — which is the same
+    /// behaviour as a sane caller, so the bound is acceptable.
     pub fn record(
         &self,
         host: impl Into<String>,
@@ -171,21 +189,24 @@ impl ChallengeStore {
             expires_at: now + ttl.unwrap_or(DEFAULT_CLEARANCE_TTL),
             kind,
         };
-        self.inner
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .by_host
-            .insert(host.into(), entry);
+        let key = normalize_host(&host.into());
+        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        inner.by_host.retain(|_, e| now < e.expires_at);
+        inner
+            .operator_prompted
+            .retain(|_, t| now < *t + OPERATOR_PROMPT_COOLDOWN);
+        inner.by_host.insert(key, entry);
     }
 
     /// Drop the entry for `host` (e.g. after observing a 4xx that
     /// suggests the cookie has been invalidated upstream).
     pub fn forget(&self, host: &str) {
+        let key = normalize_host(host);
         self.inner
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .by_host
-            .remove(host);
+            .remove(&key);
     }
 
     /// Capacity-trimming sweep: drop every expired entry. Cheap;
@@ -205,12 +226,13 @@ impl ChallengeStore {
     /// challenge for `host` — i.e. either no recent prompt has been
     /// emitted, or the cooldown has passed.
     pub fn should_prompt_operator(&self, host: &str) -> bool {
+        let key = normalize_host(host);
         let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
-        match inner.operator_prompted.get(host).copied() {
+        match inner.operator_prompted.get(&key).copied() {
             Some(prev) if now < prev + OPERATOR_PROMPT_COOLDOWN => false,
             _ => {
-                inner.operator_prompted.insert(host.to_string(), now);
+                inner.operator_prompted.insert(key, now);
                 true
             }
         }
@@ -220,31 +242,63 @@ impl ChallengeStore {
     /// Returns `None` if no entry exists (regardless of expiry).
     #[must_use]
     pub fn age(&self, host: &str) -> Option<Duration> {
+        let key = normalize_host(host);
         let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
-        inner.by_host.get(host).map(|e| e.captured_at.elapsed())
+        inner.by_host.get(&key).map(|e| e.captured_at.elapsed())
     }
 
     /// Diagnostic: which challenge kind is associated with the active
     /// cookie for `host`?
     #[must_use]
     pub fn kind(&self, host: &str) -> Option<ChallengeKind> {
+        let key = normalize_host(host);
         let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
-        let e = inner.by_host.get(host)?;
+        let e = inner.by_host.get(&key)?;
         if Instant::now() >= e.expires_at {
             return None;
         }
         Some(e.kind)
     }
+
+    /// Number of currently-stored entries (test/diagnostic only —
+    /// not for production decisions).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.inner
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .by_host
+            .len()
+    }
+
+    /// True iff the store has no live entries.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
+
+/// Hard cap on the body prefix scanned by [`classify`]. Real
+/// challenge pages are well under this; large benign responses
+/// (CDN-cached HTML, asset bundles) shouldn't OOM the proxy.
+pub const CLASSIFY_BODY_SCAN_CAP: usize = 64 * 1024;
 
 /// Detect the challenge kind from a response body + headers heuristic.
 ///
 /// Returns `ChallengeKind::Unknown` when nothing matches — the caller
 /// then defaults to `EscalateToOperator` rather than acting on a
 /// guess.
+///
+/// Only the first [`CLASSIFY_BODY_SCAN_CAP`] bytes of `body` are
+/// scanned. A multi-MB upstream response (e.g. a streamed PDF or a
+/// CDN-cached HTML page that happens to mention "turnstile") would
+/// otherwise force a body-sized lowercase allocation on every call.
 #[must_use]
 pub fn classify(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
-    let lower_body = std::str::from_utf8(body)
+    let scan_slice = &body[..body.len().min(CLASSIFY_BODY_SCAN_CAP)];
+    let lower_body = std::str::from_utf8(scan_slice)
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
     let server = headers

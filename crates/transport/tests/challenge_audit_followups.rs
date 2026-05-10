@@ -1,0 +1,148 @@
+//! Follow-up coverage for the 2026-05-10 challenge.rs audit:
+//! HIGH classify body-OOM, HIGH unbounded growth, MEDIUM host
+//! case+port mismatch.
+//!
+//! Each test would have failed pre-fix.
+
+use std::thread;
+use std::time::Duration;
+use wafrift_transport::challenge::{
+    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, classify,
+};
+
+// ── HIGH: classify body OOM ─────────────────────────────────────
+
+#[test]
+fn classify_caps_body_scan_at_64k() {
+    // Pre-fix classify allocated `body.len()` bytes for the lowercase
+    // copy. A 16 MB body would burn ~16 MB on every call.
+    let prefix = b"<html>turnstile</html>";
+    let mut huge = Vec::with_capacity(prefix.len() + 16 * 1024 * 1024);
+    huge.extend_from_slice(prefix);
+    huge.extend(std::iter::repeat_n(b'X', 16 * 1024 * 1024));
+    // Should still classify on the prefix without OOMing on the suffix.
+    let kind = classify(&huge, &[]);
+    assert_eq!(kind, ChallengeKind::Turnstile);
+}
+
+#[test]
+fn classify_keyword_after_cap_is_not_seen() {
+    // Defence-in-depth: a keyword placed AFTER the cap must be
+    // ignored. A benign multi-MB body that happens to contain
+    // "hcaptcha" deep in its tail must not trigger classification.
+    let mut body = vec![b' '; CLASSIFY_BODY_SCAN_CAP + 64];
+    let kw = b"hcaptcha";
+    body.extend_from_slice(kw);
+    let kind = classify(&body, &[]);
+    assert_eq!(
+        kind,
+        ChallengeKind::Unknown,
+        "keyword past CLASSIFY_BODY_SCAN_CAP must not classify"
+    );
+}
+
+#[test]
+fn classify_keyword_inside_cap_still_works() {
+    // Negative twin: the keyword must still be detected when it's
+    // inside the cap.
+    let body = b"<html>turnstile</html>";
+    assert_eq!(classify(body, &[]), ChallengeKind::Turnstile);
+}
+
+// ── MEDIUM: host case + port normalization ─────────────────────
+
+#[test]
+fn store_get_is_case_insensitive() {
+    let s = ChallengeStore::new();
+    s.record(
+        "Example.COM",
+        "cf_clearance=abc",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    assert_eq!(
+        s.get("example.com").as_deref(),
+        Some("cf_clearance=abc"),
+        "DNS is case-insensitive — store_get must canonicalise"
+    );
+}
+
+#[test]
+fn store_get_strips_port_from_host() {
+    let s = ChallengeStore::new();
+    s.record(
+        "host.test:443",
+        "cf_clearance=tok",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    assert_eq!(
+        s.get("host.test").as_deref(),
+        Some("cf_clearance=tok"),
+        "host:port and host must collide on the same key"
+    );
+}
+
+#[test]
+fn store_record_canonicalises_then_dedupes_on_re_insert() {
+    let s = ChallengeStore::new();
+    s.record(
+        "Foo.COM",
+        "cf_clearance=v1",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    s.record(
+        "foo.com",
+        "cf_clearance=v2",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    // Both should land in the same slot — the last write wins.
+    assert_eq!(s.len(), 1, "case variants must collapse to one entry");
+    assert_eq!(s.get("FOO.com").as_deref(), Some("cf_clearance=v2"));
+}
+
+// ── HIGH: unbounded growth without external purge ──────────────
+
+#[test]
+fn store_record_purges_expired_entries_on_insert() {
+    let s = ChallengeStore::new();
+    let short = Duration::from_millis(10);
+    s.record(
+        "short.live",
+        "cf_clearance=expiring",
+        ChallengeKind::CloudflareManaged,
+        Some(short),
+    );
+    assert_eq!(s.len(), 1);
+
+    // Sleep past the TTL.
+    thread::sleep(Duration::from_millis(50));
+
+    // A new insert on a different host must trigger the opportunistic
+    // purge — the expired entry should NOT survive.
+    s.record(
+        "fresh.live",
+        "cf_clearance=fresh",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    assert_eq!(
+        s.len(),
+        1,
+        "expired entry must be GC'd by the next insert; pre-fix store \
+         would hold 2 entries forever"
+    );
+    assert_eq!(s.get("fresh.live").as_deref(), Some("cf_clearance=fresh"));
+    assert_eq!(s.get("short.live"), None);
+}
+
+#[test]
+fn store_record_does_not_purge_live_entries() {
+    let s = ChallengeStore::new();
+    s.record("a", "cf_clearance=a", ChallengeKind::CloudflareManaged, None);
+    s.record("b", "cf_clearance=b", ChallengeKind::CloudflareManaged, None);
+    s.record("c", "cf_clearance=c", ChallengeKind::CloudflareManaged, None);
+    assert_eq!(s.len(), 3, "live entries must survive opportunistic purge");
+}
