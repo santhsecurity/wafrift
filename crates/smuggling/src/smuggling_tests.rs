@@ -312,9 +312,21 @@ mod tests {
     }
 
     #[test]
-    fn cache_buster_non_empty() {
-        let b = crate::safety::cache_buster();
-        assert!(!b.is_empty());
+    fn cache_buster_unique_and_numeric() {
+        // Audit (2026-05-10): pre-fix this only checked non-empty.
+        // A bug returning a constant `"x"` would have passed.
+        // Now: uniqueness across N calls + valid base-10 integer.
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        for _ in 0..100 {
+            let b = crate::safety::cache_buster();
+            assert!(!b.is_empty(), "cache_buster must not return empty");
+            assert!(
+                b.parse::<u64>().is_ok(),
+                "cache_buster must produce a base-10 integer, got: {b:?}"
+            );
+            assert!(seen.insert(b), "cache_buster collided across 100 calls");
+        }
     }
 
     #[test]
@@ -374,15 +386,28 @@ mod tests {
     }
 
     #[test]
-    fn concurrency_stress_all_payloads() {
+    fn concurrency_stress_payloads_remain_well_formed() {
+        // Audit (2026-05-10): pre-fix this only checked that the
+        // threads didn't panic. A bug returning empty bytes would
+        // have passed. Now we verify each payload contains the Host
+        // header and ends with the expected request terminator.
         use std::thread;
         let handles: Vec<_> = (0..16)
             .map(|_| {
                 thread::spawn(|| {
                     for _ in 0..100 {
-                        let _ = cl_te("example.com", "GET / HTTP/1.1").unwrap();
-                        let _ = te_cl("example.com", "GET / HTTP/1.1").unwrap();
-                        let _ = te_obfuscations();
+                        let p = cl_te("example.com", "GET / HTTP/1.1").unwrap();
+                        let s = String::from_utf8_lossy(&p.raw_bytes);
+                        assert!(s.contains("Host: example.com"));
+                        assert!(s.contains("\r\n\r\n"), "payload missing header terminator");
+                        assert!(!p.canary.token.is_empty(), "canary must be non-empty");
+
+                        let p = te_cl("example.com", "GET / HTTP/1.1").unwrap();
+                        let s = String::from_utf8_lossy(&p.raw_bytes);
+                        assert!(s.contains("Transfer-Encoding: chunked"));
+
+                        let obfs = te_obfuscations();
+                        assert!(!obfs.is_empty(), "te_obfuscations must yield variants");
                     }
                 })
             })
@@ -393,10 +418,20 @@ mod tests {
     }
 
     #[test]
-    fn multibyte_utf8_split_path_no_panic() {
+    fn multibyte_utf8_path_round_trips_in_payload() {
+        // Audit (2026-05-10): pre-fix this only asserted non-empty.
+        // A bug ASCII-stripping the path would have passed silently.
+        // Now we assert the actual Japanese characters survive into
+        // the wire bytes.
         let path = "/admin/日本語";
         let p = te_cl("example.com", path).unwrap();
-        assert!(!p.raw_bytes.is_empty());
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains(path), "multibyte path must round-trip into the payload");
+        // Sanity: the request line carries the path.
+        assert!(
+            s.contains(&format!("GET {path}")) || s.contains(path),
+            "multibyte path must appear in payload bytes: {s:?}"
+        );
     }
 
     #[test]

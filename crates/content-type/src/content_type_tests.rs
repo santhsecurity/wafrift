@@ -301,575 +301,94 @@ mod tests {
         assert!(variants.is_empty());
     }
 
-    // Generated adversarial content-type tests
-
+    /// Adversarial coverage replacing 30 hand-generated smoke-alarm
+    /// tests (auto_0..auto_29) flagged by the 2026-05-10 audit. Each
+    /// of the originals only asserted `!variants.is_empty()` — they
+    /// passed regardless of whether the bodies were valid multipart
+    /// framing, parseable JSON, or well-formed XML. This replacement
+    /// drives the same payload set through generate_variants_from_body
+    /// AND validates the body shape per Content-Type variant.
     #[test]
-    fn adversarial_content_type_test_auto_0() {
-        let repeat_str = "A".to_string();
-        let payloads: Vec<&str> = vec![
+    fn adversarial_payloads_produce_structurally_valid_variants() {
+        let medium = "A".repeat(2901);
+        let payloads: &[&str] = &[
             "' OR 1=1--",
             "<script>alert(1)</script>",
             "../../../../etc/passwd",
             "DROP TABLE users;",
-            &repeat_str,
+            &medium,
             "{\"key\": \"value\"}",
         ];
-        let payload = payloads[0 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
 
-    #[test]
-    fn adversarial_content_type_test_auto_1() {
-        let repeat_str = "A".repeat(101);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[1 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
+        for payload in payloads {
+            let body = format!("user=admin&pass={payload}");
+            let variants = generate_variants_from_body(body.as_bytes());
+            assert!(
+                !variants.is_empty(),
+                "no variants for payload: {payload:?}"
+            );
 
-    #[test]
-    fn adversarial_content_type_test_auto_2() {
-        let repeat_str = "A".repeat(201);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[2 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
+            for v in &variants {
+                let ct = &v.content_type;
+                let body_str = std::str::from_utf8(&v.body)
+                    .expect("variant body must be valid UTF-8 for these payloads");
 
-    #[test]
-    fn adversarial_content_type_test_auto_3() {
-        let repeat_str = "A".repeat(301);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[3 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_4() {
-        let repeat_str = "A".repeat(401);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[4 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_5() {
-        let repeat_str = "A".repeat(501);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[5 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_6() {
-        let repeat_str = "A".repeat(601);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[6 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_7() {
-        let repeat_str = "A".repeat(701);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[7 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_8() {
-        let repeat_str = "A".repeat(801);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[8 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_9() {
-        let repeat_str = "A".repeat(901);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[9 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_10() {
-        let repeat_str = "A".repeat(1001);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[10 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_11() {
-        let repeat_str = "A".repeat(1101);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[11 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_12() {
-        let repeat_str = "A".repeat(1201);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[12 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_13() {
-        let repeat_str = "A".repeat(1301);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[13 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_14() {
-        let repeat_str = "A".repeat(1401);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[14 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_15() {
-        let repeat_str = "A".repeat(1501);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[15 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_16() {
-        let repeat_str = "A".repeat(1601);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[16 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_17() {
-        let repeat_str = "A".repeat(1701);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[17 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_18() {
-        let repeat_str = "A".repeat(1801);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[18 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_19() {
-        let repeat_str = "A".repeat(1901);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[19 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_20() {
-        let repeat_str = "A".repeat(2001);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[20 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_21() {
-        let repeat_str = "A".repeat(2101);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[21 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_22() {
-        let repeat_str = "A".repeat(2201);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[22 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_23() {
-        let repeat_str = "A".repeat(2301);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[23 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_24() {
-        let repeat_str = "A".repeat(2401);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[24 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_25() {
-        let repeat_str = "A".repeat(2501);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[25 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_26() {
-        let repeat_str = "A".repeat(2601);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[26 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_27() {
-        let repeat_str = "A".repeat(2701);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[27 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_28() {
-        let repeat_str = "A".repeat(2801);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[28 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
-        }
-    }
-
-    #[test]
-    fn adversarial_content_type_test_auto_29() {
-        let repeat_str = "A".repeat(2901);
-        let payloads: Vec<&str> = vec![
-            "' OR 1=1--",
-            "<script>alert(1)</script>",
-            "../../../../etc/passwd",
-            "DROP TABLE users;",
-            &repeat_str,
-            "{\"key\": \"value\"}",
-        ];
-        let payload = payloads[29 % payloads.len()];
-        let body = format!("user=admin&pass={payload}");
-        let variants = generate_variants_from_body(body.as_bytes());
-        if !payload.is_empty() {
-            assert!(!variants.is_empty());
+                if ct.starts_with("multipart/form-data") {
+                    // Boundary param must be present.
+                    assert!(
+                        ct.contains("boundary="),
+                        "multipart Content-Type missing boundary param: {ct:?}"
+                    );
+                    // Body must contain the user param's name field.
+                    assert!(
+                        body_str.contains(r#"name="user""#),
+                        "multipart body missing user= field"
+                    );
+                    // Body must contain the pass field.
+                    assert!(
+                        body_str.contains(r#"name="pass""#),
+                        "multipart body missing pass= field"
+                    );
+                    // Multipart must end with `--<boundary>--\r\n`.
+                    assert!(
+                        body_str.ends_with("--\r\n"),
+                        "multipart body must end with --boundary--\\r\\n"
+                    );
+                } else if ct == "application/json" {
+                    // Either strict JSON OR JSON-with-comments
+                    // (JsonWithComments variant). For the comments
+                    // variant, strip `//` lines before parsing.
+                    let stripped: String = body_str
+                        .lines()
+                        .filter(|line| !line.trim_start().starts_with("//"))
+                        .collect::<Vec<&str>>()
+                        .join("\n");
+                    let parsed: serde_json::Value = serde_json::from_str(&stripped)
+                        .unwrap_or_else(|e| panic!(
+                            "JSON variant failed to parse: {e} ; body={body_str:?}"
+                        ));
+                    assert!(
+                        parsed.get("user").is_some() || parsed.get("pass").is_some(),
+                        "JSON variant missing expected fields: {body_str:?}"
+                    );
+                } else if ct == "application/xml" {
+                    // Must contain BOTH a user element and a pass
+                    // element. Tag name may be plain or namespaced.
+                    assert!(
+                        body_str.contains("user>") || body_str.contains("user "),
+                        "XML variant missing user element: {body_str:?}"
+                    );
+                    assert!(
+                        body_str.contains("pass>") || body_str.contains("pass "),
+                        "XML variant missing pass element: {body_str:?}"
+                    );
+                    // Must declare the XML preamble.
+                    assert!(
+                        body_str.starts_with("<?xml "),
+                        "XML variant missing <?xml preamble: {body_str:?}"
+                    );
+                }
+            }
         }
     }
 
