@@ -588,15 +588,26 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdMutation> {
 // ──────────────────────────────────────────────
 
 /// Extract the command separator from the beginning of a payload.
+///
+/// Audit (2026-05-10): pre-fix this hardcoded only `; | || && \n` and
+/// ignored the larger separator set defined in `rules/cmd/oracle.toml`
+/// (which includes `` ` ``, `$(`, `%0a`, etc.). A payload starting
+/// with a non-listed separator would parse as having NO separator
+/// and downstream mutators would produce broken output. We now check
+/// the longer-form patterns first (greedy match on `&&`, `||`) and
+/// the full short-pattern set the grammar engine recognises.
 fn extract_separator(payload: &str) -> (&str, &str) {
-    let separators = ["; ", "| ", "|| ", "&& ", "\n"];
-    for sep in &separators {
+    // Multi-char first so `&&` doesn't get prematurely matched as `&`.
+    let multi = [
+        "&& ", "|| ", "; ", "| ", "$(", "${", "&&", "||", "%0a", "%0A", "%0d", "%0D",
+    ];
+    for sep in &multi {
         if let Some(rest) = payload.strip_prefix(sep) {
             return (*sep, rest);
         }
     }
-    // Single-char separators
-    for sep in &[";", "|", "\n"] {
+    // Single-char separators (note `\r` and ``\``/`` ` `` were missing).
+    for sep in &[";", "|", "&", "`", "\n", "\r"] {
         if let Some(rest) = payload.strip_prefix(sep) {
             return (*sep, rest.trim_start());
         }

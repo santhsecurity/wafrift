@@ -99,7 +99,27 @@ pub fn auth_bypass_probes(target_path: &str) -> Vec<AuthBypassProbe> {
     for h in ip_headers {
         for ip in trusted_ips {
             let value = if h.eq_ignore_ascii_case("Forwarded") {
-                format!("for={ip}")
+                // RFC 7239 §4 + §6.3: node-name production requires
+                // IPv6 to be bracketed AND quoted (`for="[::1]"`).
+                // Bare hostnames like `localhost` are NOT valid as
+                // node-names — they must be obfnodes (`_internal`)
+                // or the backend (nginx realip, Apache mod_remoteip)
+                // rejects the value silently and the probe never
+                // reaches the auth path it's meant to test.
+                // Audit (2026-05-10).
+                if ip.contains(':') && !ip.starts_with('[') {
+                    format!(r#"for="[{ip}]""#)
+                } else if ip.parse::<std::net::IpAddr>().is_err() {
+                    // Non-IP token (e.g. "localhost"): rewrite as
+                    // RFC-7239-valid obfnode.
+                    let obf: String = ip
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect();
+                    format!("for=_{obf}")
+                } else {
+                    format!("for={ip}")
+                }
             } else {
                 ip.to_string()
             };

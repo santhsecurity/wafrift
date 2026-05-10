@@ -163,6 +163,8 @@ pub fn plan_pipelines(
     // field; until then the planner relies on success_bps from the
     // learning cache (line 137) for the same signal. Removed the
     // dead allocation so the code matches the docs.
+    let _ = verdict_history; // explicitly silence "unused" until
+                              // pipeline-name attribution lands
 
     // Sort: cached winner first, then by success_bps descending, then by cost ascending
     pipelines.sort_by(|a, b| {
