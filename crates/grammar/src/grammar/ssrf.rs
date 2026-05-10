@@ -396,9 +396,15 @@ pub fn detect_type(payload: &str) -> bool {
 }
 
 /// True if `needle` appears in `haystack` bounded on both sides by
-/// non-host-character bytes. Prevents `127.0.0.1` from matching inside
-/// `Build 127.0.0.1234`, `localhost` inside `localhost-builds.example`,
-/// etc.
+/// host-label-separator bytes. Prevents `127.0.0.1` from matching
+/// inside `Build 127.0.0.1234` and `localhost` inside
+/// `localhost-builds.example`.
+///
+/// "Host-label-separator" means: not a digit/letter and not `-`. The
+/// `.` IS allowed as a boundary because it separates DNS labels — so
+/// `metadata.google` is allowed to match inside the longer host
+/// `metadata.google.internal` (the `.` after `google` is the label
+/// boundary).
 fn host_token_present(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return false;
@@ -408,14 +414,18 @@ fn host_token_present(haystack: &str, needle: &str) -> bool {
     if h.len() < n.len() {
         return false;
     }
-    let is_host_char = |b: u8| -> bool {
-        b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b':'
-    };
+    // A char that may NOT bound a host token: digits, letters, `-` —
+    // the LDH chars that live INSIDE a single DNS label. Anything
+    // else (`.`, `:`, `/`, whitespace, end-of-string) marks a label
+    // or token boundary.
+    let is_label_inner_char =
+        |b: u8| -> bool { b.is_ascii_alphanumeric() || b == b'-' };
     let mut i = 0;
     while i + n.len() <= h.len() {
         if &h[i..i + n.len()] == n {
-            let left_ok = i == 0 || !is_host_char(h[i - 1]);
-            let right_ok = i + n.len() == h.len() || !is_host_char(h[i + n.len()]);
+            let left_ok = i == 0 || !is_label_inner_char(h[i - 1]);
+            let right_ok =
+                i + n.len() == h.len() || !is_label_inner_char(h[i + n.len()]);
             if left_ok && right_ok {
                 return true;
             }

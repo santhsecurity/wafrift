@@ -155,12 +155,14 @@ pub fn plan_pipelines(
         }
     }
 
-    // 3. Deprioritize any pipeline whose last verdict in history was a block
-    let _blocked_names: Vec<String> = verdict_history
-        .iter()
-        .filter(|v| v.is_blocked())
-        .filter_map(|_| None) // We don't have pipeline names in verdicts yet
-        .collect();
+    // Audit (2026-05-10): the previous "deprioritize blocked
+    // pipelines" stub was filter_map(|_| None) — collecting nothing
+    // and binding to a `_blocked_names` it never used. That violates
+    // the no-stubs rule. Verdict-to-pipeline-name attribution will
+    // arrive when wafrift_types::Verdict gains a `pipeline_name`
+    // field; until then the planner relies on success_bps from the
+    // learning cache (line 137) for the same signal. Removed the
+    // dead allocation so the code matches the docs.
 
     // Sort: cached winner first, then by success_bps descending, then by cost ascending
     pipelines.sort_by(|a, b| {

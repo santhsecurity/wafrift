@@ -26,6 +26,17 @@ const BLOCK_THRESHOLD: f64 = 0.20;
 /// before it is evicted from the winner pool (drift detection).
 const DRIFT_BLOCK_LIMIT: u32 = 2;
 
+/// Hard cap on `prioritized_techniques` and `avoided_techniques` so a
+/// long-running scan that ingests many adversarial WAF profiles cannot
+/// grow HostState memory without bound. Audit (2026-05-10).
+const MAX_HINTS_PER_LIST: usize = 200;
+
+/// Hard cap on `technique_stats` and `winner_consecutive_blocks` —
+/// per-host structures that key on the technique name. With ~100
+/// distinct names in the standard catalogue, 500 is generous headroom
+/// while still bounding worst-case adversarial growth. Audit (2026-05-10).
+const MAX_TECHNIQUE_STATS: usize = 500;
+
 /// Per-host evasion state — tracks what works and what doesn't.
 #[derive(Debug, Default, Clone)]
 pub struct HostState {
@@ -93,8 +104,14 @@ impl HostState {
             .iter_mut()
             .find(|(n, _, _)| n == technique_name)
         {
-            stat.2 += 1;
-        } else {
+            // saturating_add avoids the u32 overflow audit finding —
+            // pre-fix `stat.2 += 1` would panic in debug or wrap in
+            // release after 2^32 attempts.
+            stat.2 = stat.2.saturating_add(1);
+        } else if self.technique_stats.len() < MAX_TECHNIQUE_STATS {
+            // Audit (2026-05-10): cap technique_stats so a host that
+            // sees an unbounded stream of unique technique names from
+            // adversarial profiles cannot grow the vector forever.
             self.technique_stats
                 .push((technique_name.to_string(), 0, 1));
         }
@@ -105,8 +122,8 @@ impl HostState {
                 .iter_mut()
                 .find(|(n, _)| n == technique_name)
             {
-                entry.1 += 1;
-            } else {
+                entry.1 = entry.1.saturating_add(1);
+            } else if self.winner_consecutive_blocks.len() < MAX_TECHNIQUE_STATS {
                 self.winner_consecutive_blocks
                     .push((technique_name.to_string(), 1));
             }
@@ -433,14 +450,24 @@ impl HostState {
         }
 
         // Merge prioritized techniques (union, preserving order).
+        // Audit (2026-05-10): pre-fix this grew unboundedly. A long-
+        // running scan picking up 100k unique technique names from
+        // adversarial profiles would balloon HostState past safe
+        // memory limits. Cap at MAX_HINTS_PER_LIST entries.
         for tech in prioritize {
+            if self.prioritized_techniques.len() >= MAX_HINTS_PER_LIST {
+                break;
+            }
             if !self.prioritized_techniques.contains(tech) {
                 self.prioritized_techniques.push(tech.clone());
             }
         }
 
-        // Merge avoided techniques.
+        // Merge avoided techniques (same cap).
         for tech in avoid {
+            if self.avoided_techniques.len() >= MAX_HINTS_PER_LIST {
+                break;
+            }
             if !self.avoided_techniques.contains(tech) {
                 self.avoided_techniques.push(tech.clone());
             }

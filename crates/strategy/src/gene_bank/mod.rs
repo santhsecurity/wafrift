@@ -116,6 +116,11 @@ impl WafGenome {
         eligible
     }
 
+    /// Hard cap on `techniques.len()` so a long-running scan ingesting
+    /// many adversarial profiles cannot grow the genome on disk
+    /// without bound. Audit (2026-05-10).
+    const MAX_TECHNIQUES: usize = 1024;
+
     /// Merge results from a scan session into the genome.
     ///
     /// Takes a set of technique stats `(name, successes, attempts)` from
@@ -133,7 +138,7 @@ impl WafGenome {
                     existing.target_count = existing.target_count.saturating_add(1);
                     existing.last_success_epoch = now;
                 }
-            } else {
+            } else if self.techniques.len() < Self::MAX_TECHNIQUES {
                 self.techniques.push(TechniqueRecord {
                     name: name.clone(),
                     total_successes: *successes,
@@ -142,6 +147,10 @@ impl WafGenome {
                     last_success_epoch: if *successes > 0 { now } else { 0 },
                 });
             }
+            // Beyond the cap, novel technique names are silently
+            // dropped. The fix-it for the operator: if MAX_TECHNIQUES
+            // is genuinely too small for their corpus, raise it and
+            // re-seed.
         }
     }
 

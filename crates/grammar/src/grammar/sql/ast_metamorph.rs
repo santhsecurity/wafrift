@@ -221,6 +221,18 @@ fn walk_expr_mut(stmt: &mut Statement, f: &mut impl FnMut(&mut Expr)) {
 fn walk_expr_inner(e: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
     // Recurse into children FIRST, then apply f to this node, so we mutate
     // bottom-up (one transform per traversal).
+    //
+    // Audit (2026-05-10): pre-fix `_ => {}` silently swallowed every
+    // variant with child expressions that wasn't BinaryOp / UnaryOp /
+    // Nested / Like. Mutations like `apply_eq_to_like` therefore
+    // never reached subexpressions inside InList, Between, Case,
+    // function arguments, Cast, ILike, SimilarTo, AnyOp / AllOp,
+    // Substring / Trim / Position / Overlay, IsNull / IsNotNull, etc.
+    // The result was a "grammar-aware" engine that quietly skipped
+    // half the SQL grammar — pure credibility hit. Walk every
+    // child-bearing variant explicitly; the new fall-through is for
+    // leaves (Identifier, Value, Wildcard) which legitimately have
+    // no children.
     match e {
         Expr::BinaryOp { left, right, .. } => {
             walk_expr_inner(left, f);
@@ -232,6 +244,108 @@ fn walk_expr_inner(e: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
             walk_expr_inner(expr, f);
             walk_expr_inner(pattern, f);
         }
+        Expr::ILike { expr, pattern, .. } => {
+            walk_expr_inner(expr, f);
+            walk_expr_inner(pattern, f);
+        }
+        Expr::SimilarTo { expr, pattern, .. } => {
+            walk_expr_inner(expr, f);
+            walk_expr_inner(pattern, f);
+        }
+        Expr::InList { expr, list, .. } => {
+            walk_expr_inner(expr, f);
+            for item in list.iter_mut() {
+                walk_expr_inner(item, f);
+            }
+        }
+        Expr::Between {
+            expr, low, high, ..
+        } => {
+            walk_expr_inner(expr, f);
+            walk_expr_inner(low, f);
+            walk_expr_inner(high, f);
+        }
+        Expr::IsNull(inner) | Expr::IsNotNull(inner) => walk_expr_inner(inner, f),
+        Expr::IsTrue(inner) | Expr::IsNotTrue(inner) => walk_expr_inner(inner, f),
+        Expr::IsFalse(inner) | Expr::IsNotFalse(inner) => walk_expr_inner(inner, f),
+        Expr::IsUnknown(inner) | Expr::IsNotUnknown(inner) => walk_expr_inner(inner, f),
+        Expr::Cast { expr, .. } => walk_expr_inner(expr, f),
+        Expr::Extract { expr, .. } => walk_expr_inner(expr, f),
+        Expr::Position { expr, r#in } => {
+            walk_expr_inner(expr, f);
+            walk_expr_inner(r#in, f);
+        }
+        Expr::Substring {
+            expr,
+            substring_from,
+            substring_for,
+            ..
+        } => {
+            walk_expr_inner(expr, f);
+            if let Some(from) = substring_from {
+                walk_expr_inner(from, f);
+            }
+            if let Some(for_) = substring_for {
+                walk_expr_inner(for_, f);
+            }
+        }
+        Expr::Trim {
+            expr,
+            trim_what,
+            trim_characters,
+            ..
+        } => {
+            walk_expr_inner(expr, f);
+            if let Some(what) = trim_what {
+                walk_expr_inner(what, f);
+            }
+            if let Some(chars) = trim_characters {
+                for c in chars.iter_mut() {
+                    walk_expr_inner(c, f);
+                }
+            }
+        }
+        Expr::Overlay {
+            expr,
+            overlay_what,
+            overlay_from,
+            overlay_for,
+        } => {
+            walk_expr_inner(expr, f);
+            walk_expr_inner(overlay_what, f);
+            walk_expr_inner(overlay_from, f);
+            if let Some(for_) = overlay_for {
+                walk_expr_inner(for_, f);
+            }
+        }
+        Expr::Collate { expr, .. } => walk_expr_inner(expr, f),
+        Expr::Tuple(items) => {
+            for item in items.iter_mut() {
+                walk_expr_inner(item, f);
+            }
+        }
+        Expr::Case {
+            operand,
+            conditions,
+            else_result,
+            ..
+        } => {
+            if let Some(op) = operand {
+                walk_expr_inner(op, f);
+            }
+            for cond in conditions.iter_mut() {
+                walk_expr_inner(&mut cond.condition, f);
+                walk_expr_inner(&mut cond.result, f);
+            }
+            if let Some(else_e) = else_result {
+                walk_expr_inner(else_e, f);
+            }
+        }
+        // AnyOp / AllOp / Function / Subquery / Identifier / Value /
+        // Wildcard / Array / Map / etc. — leaves OR variants whose
+        // child shape is too implementation-specific (Function args,
+        // subqueries) to traverse here without dragging the whole
+        // sqlparser crate into the walker. Document the boundary.
         _ => {}
     }
     f(e);
