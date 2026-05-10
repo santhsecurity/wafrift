@@ -53,7 +53,7 @@ fn no_fragment_no_change_to_query_behaviour() {
         mutate_last_path_segment: false,
         strategy: UrlStrategy::PercentEncodeAggressive,
     };
-    let (out, techniques) = mutate_url("/p?q=admin", &cfg);
+    let (out, techniques) = mutate_url("/p?q='admin'", &cfg);
     assert!(
         out.contains("?q=") && !out.contains('#'),
         "no fragment in input → no fragment in output; got: {out}"
@@ -278,4 +278,77 @@ fn non_utf8_byte_sequence_survives_path_segment_round_trip() {
         !out.contains("%EF%BF%BD"),
         "must NOT have been mangled into U+FFFD; got: {out}"
     );
+}
+
+// ── LOW: applied=true must not fire on no-op mutation ────────────
+
+#[test]
+fn no_op_mutation_does_not_report_technique_applied() {
+    let cfg = UrlMutateConfig {
+        mutate_query_values: true,
+        mutate_last_path_segment: false,
+        strategy: UrlStrategy::PercentEncodeAggressive,
+    };
+    // All-alphanumeric query value comes out byte-equal under
+    // PercentEncodeAggressive. The technique log must NOT report
+    // url:query_values fired in that case.
+    let (_, techniques) = mutate_url("/?q=plainvalue123", &cfg);
+    assert!(
+        !techniques
+            .iter()
+            .any(|t| *t == "url:query_values" || *t == "url:percent_encode"),
+        "no-op mutation must not fire technique labels; got: {techniques:?}"
+    );
+}
+
+#[test]
+fn real_mutation_still_reports_technique() {
+    // Negative twin — mutator that DOES change the value still
+    // reports technique applied.
+    let cfg = UrlMutateConfig {
+        mutate_query_values: true,
+        mutate_last_path_segment: false,
+        strategy: UrlStrategy::PercentEncodeAggressive,
+    };
+    let (_, techniques) = mutate_url("/?q='abc'", &cfg);
+    assert!(
+        techniques.iter().any(|t| *t == "url:query_values"),
+        "apostrophe mutation MUST report applied; got: {techniques:?}"
+    );
+}
+
+// ── LOW: encoded slash %2F is treated as a path-segment boundary ─
+
+#[test]
+fn percent_encoded_slash_is_a_path_segment_boundary() {
+    let cfg = UrlMutateConfig {
+        mutate_query_values: false,
+        mutate_last_path_segment: true,
+        strategy: UrlStrategy::PercentEncodeAggressive,
+    };
+    // /a/b%2Fc — pre-fix the WHOLE tail `b%2Fc` was treated as the
+    // last segment. Post-fix `%2F` counts as a boundary so only
+    // `c` mutates.
+    let (out, _) = mutate_url("/a/b%2Fc", &cfg);
+    assert!(
+        out.starts_with("/a/b%2F"),
+        "everything up to the encoded slash must pass through; got: {out}"
+    );
+    assert!(
+        !out.contains("%2532") && !out.contains("%2546"),
+        "the b portion must NOT be re-encoded; got: {out}"
+    );
+}
+
+// ── LOW: capacity calculation never overflows on 32-bit ──────────
+
+#[test]
+fn non_canonical_spaces_capacity_does_not_overflow() {
+    // Direct call via UrlStrategy::apply with a 64KB string to
+    // exercise the saturating_mul path. We can't actually allocate
+    // usize::MAX/2 bytes, but the saturating arithmetic must be
+    // present — this test pins the API path.
+    let big = " ".repeat(64 * 1024);
+    let s = UrlStrategy::NonCanonicalSpaces.apply(&big);
+    assert!(s.len() >= big.len(), "output at least as long as input");
 }
