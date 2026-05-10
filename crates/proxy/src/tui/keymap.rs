@@ -9,7 +9,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use tokio::sync::oneshot;
 
 use super::state::{InputMode, State, Tab, ToastKind};
-use super::yank::yank_to_disk_and_clipboard;
+use super::yank::{replay_to_disk_and_optionally_exec, yank_to_disk_and_clipboard};
 
 /// Result of one keystroke dispatch — `true` means the loop should
 /// exit.
@@ -168,6 +168,14 @@ fn handle_normal(
             do_yank(state);
         }
 
+        // Replay — write a /tmp/wafrift-replay-N.curl reproducer and
+        // (when WAFRIFT_REPLAY_AUTOEXEC=1) re-fire it via bash. This
+        // does NOT route through the proxy's evade pipeline — the
+        // captured request is already evaded.
+        KeyCode::Char('R') if state.tab == Tab::Flow => {
+            do_replay(state);
+        }
+
         _ => {}
     }
     false
@@ -184,6 +192,40 @@ fn is_flow_outcome_cycle(state: &State, code: KeyCode) -> bool {
 fn send_quit(quit: &mut Option<oneshot::Sender<()>>) {
     if let Some(tx) = quit.take() {
         let _ = tx.send(());
+    }
+}
+
+fn do_replay(state: &mut State) {
+    let Some(idx) = state.selected else {
+        state.set_toast("replay: no request selected", ToastKind::Warn);
+        return;
+    };
+    let Some(rec) = state.recent.get(idx).cloned() else {
+        state.set_toast("replay: stale selection", ToastKind::Warn);
+        return;
+    };
+    state.yank_seq = state.yank_seq.wrapping_add(1);
+    let seq = state.yank_seq;
+    match replay_to_disk_and_optionally_exec(&rec, seq) {
+        Ok(report) => {
+            let exec_label = match report.upstream_status {
+                Some(code) => format!("autoexec exit={code}"),
+                None => {
+                    "no autoexec (set WAFRIFT_REPLAY_AUTOEXEC=1 to fire on every R)".into()
+                }
+            };
+            state.set_toast(
+                format!("replay → {} ({} bytes, {})", report.path.display(), report.bytes, exec_label),
+                if report.upstream_status.unwrap_or(0) == 0 {
+                    ToastKind::Ok
+                } else {
+                    ToastKind::Info
+                },
+            );
+        }
+        Err(e) => {
+            state.set_toast(format!("replay failed: {e}"), ToastKind::Err);
+        }
     }
 }
 

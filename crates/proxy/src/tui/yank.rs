@@ -19,6 +19,23 @@ pub struct YankReport {
     pub bytes: usize,
 }
 
+/// Outcome of a replay attempt — drives the toast banner. Reports
+/// both the on-disk reproducer and (when auto-exec is enabled) the
+/// upstream HTTP status / body byte-count.
+#[derive(Debug, Clone)]
+pub struct ReplayReport {
+    pub path: PathBuf,
+    pub bytes: usize,
+    /// `Some(status)` when WAFRIFT_REPLAY_AUTOEXEC=1 was set and the
+    /// shell-out completed (regardless of the upstream HTTP code).
+    /// `None` when auto-exec was disabled — the operator is expected
+    /// to run the curl command themselves.
+    pub upstream_status: Option<i32>,
+    /// First few bytes of the upstream response body, when auto-exec
+    /// fired. Capped at 256 bytes.
+    pub upstream_body_excerpt: Vec<u8>,
+}
+
 /// Headers that tend to be hop-by-hop or auto-managed by curl. We omit
 /// them from the rendered command so the operator gets a clean
 /// reproducer rather than something curl will refuse to send verbatim.
@@ -124,6 +141,62 @@ pub fn yank_to_disk_and_clipboard(rec: &RequestRecord, seq: u64) -> std::io::Res
         clipboard_ok,
         clipboard_error,
         bytes: curl.len(),
+    })
+}
+
+/// Materialise the rendered curl as a replay reproducer at
+/// `/tmp/wafrift-replay-{seq}.curl` and (when `WAFRIFT_REPLAY_AUTOEXEC=1`
+/// is set in the operator's environment) execute it via `bash` so
+/// the upstream gets re-hit with the captured request bytes.
+///
+/// Auto-exec is gated by an env var, not a CLI flag, because it
+/// performs an outbound network request — operators must opt in
+/// explicitly per shell session. Without it, this function is
+/// equivalent to a yank with a different filename prefix and no
+/// clipboard set.
+pub fn replay_to_disk_and_optionally_exec(
+    rec: &RequestRecord,
+    seq: u64,
+) -> std::io::Result<ReplayReport> {
+    let dir = std::env::temp_dir();
+    let curl_path = dir.join(format!("wafrift-replay-{seq}.curl"));
+    let body_needs_sidecar =
+        !rec.req_body_excerpt.is_empty() && std::str::from_utf8(&rec.req_body_excerpt).is_err();
+    let body_path = if body_needs_sidecar {
+        Some(dir.join(format!("wafrift-replay-{seq}.body")))
+    } else {
+        None
+    };
+    let curl = render_curl(rec, body_path.as_ref());
+    std::fs::write(&curl_path, curl.as_bytes())?;
+    if let Some(p) = &body_path {
+        std::fs::write(p, &rec.req_body_excerpt)?;
+    }
+
+    let autoexec = std::env::var("WAFRIFT_REPLAY_AUTOEXEC")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let (upstream_status, upstream_body_excerpt) = if autoexec {
+        match std::process::Command::new("bash")
+            .arg(&curl_path)
+            .output()
+        {
+            Ok(out) => {
+                let mut excerpt = out.stdout;
+                excerpt.truncate(256);
+                (out.status.code(), excerpt)
+            }
+            Err(_) => (None, Vec::new()),
+        }
+    } else {
+        (None, Vec::new())
+    };
+
+    Ok(ReplayReport {
+        path: curl_path,
+        bytes: curl.len(),
+        upstream_status,
+        upstream_body_excerpt,
     })
 }
 
@@ -234,6 +307,29 @@ mod tests {
         let p = PathBuf::from("/tmp/wafrift-yank-7.body");
         let s = render_curl(&r, Some(&p));
         assert!(s.contains("--data-binary @/tmp/wafrift-yank-7.body"));
+    }
+
+    #[test]
+    fn replay_writes_curl_file_with_replay_prefix() {
+        // Ensure autoexec is OFF for this test regardless of env.
+        // SAFETY: tests run sequentially within a process so this is
+        // safe in practice. Use a unique env var name to avoid bleed.
+        unsafe { std::env::set_var("WAFRIFT_REPLAY_AUTOEXEC", "0") };
+        let r = rec_full();
+        let report = replay_to_disk_and_optionally_exec(&r, 9999).expect("write");
+        assert!(
+            report.path.file_name().unwrap().to_string_lossy().starts_with("wafrift-replay-"),
+            "replay file must use the replay prefix, got {}",
+            report.path.display()
+        );
+        assert!(
+            report.upstream_status.is_none(),
+            "no upstream call when autoexec is off"
+        );
+        assert!(report.path.exists(), "replay file must be on disk");
+        let body = std::fs::read_to_string(&report.path).expect("read back");
+        assert!(body.starts_with("curl"), "rendered curl recoverable: {body}");
+        std::fs::remove_file(&report.path).ok();
     }
 
     #[test]

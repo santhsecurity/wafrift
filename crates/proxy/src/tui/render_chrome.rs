@@ -122,6 +122,8 @@ pub fn draw_footer(f: &mut Frame, area: Rect, state: &State) {
             sep(),
             key_hint("y", "yank curl"),
             sep(),
+            key_hint("R", "replay"),
+            sep(),
         ]);
     }
     spans.extend([
