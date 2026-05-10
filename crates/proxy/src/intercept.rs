@@ -125,6 +125,12 @@ impl InterceptStore {
 
     /// Register a fresh intercept and return the receiver the request
     /// handler should await on, plus the assigned ID.
+    ///
+    /// Each call also opportunistically GCs any senders whose receiver
+    /// has been dropped — this catches the client-disconnect path where
+    /// neither `resolve` nor the timeout's `cancel` fires (the request
+    /// future is cancelled before either arm of `tokio::select!` runs).
+    /// Without the GC the entries leak forever in `senders` + `pending`.
     pub fn register(
         &self,
         host: impl Into<String>,
@@ -133,6 +139,17 @@ impl InterceptStore {
     ) -> (u64, oneshot::Receiver<InterceptDecision>) {
         let (tx, rx) = oneshot::channel();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        // GC closed senders (client-disconnect leak).
+        let dead: Vec<u64> = inner
+            .senders
+            .iter()
+            .filter(|(_, tx)| tx.is_closed())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in dead {
+            inner.senders.remove(&id);
+            inner.pending.remove(&id);
+        }
         inner.next_id = inner.next_id.wrapping_add(1);
         let id = inner.next_id;
         inner.senders.insert(id, tx);
@@ -147,6 +164,25 @@ impl InterceptStore {
             },
         );
         (id, rx)
+    }
+
+    /// Drop entries whose oneshot rx has been dropped. Exposed for
+    /// tests + the TUI render loop, which can call this periodically
+    /// even when no new intercepts are arriving.
+    pub fn gc_dead_senders(&self) -> usize {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let dead: Vec<u64> = inner
+            .senders
+            .iter()
+            .filter(|(_, tx)| tx.is_closed())
+            .map(|(id, _)| *id)
+            .collect();
+        let n = dead.len();
+        for id in dead {
+            inner.senders.remove(&id);
+            inner.pending.remove(&id);
+        }
+        n
     }
 
     /// Resolve a pending intercept with a decision. Idempotent — a
