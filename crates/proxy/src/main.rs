@@ -2306,10 +2306,25 @@ async fn proxy(
     // CONNECT: optional TLS MITM (terminate client TLS, evade, forward via HTTPS).
     if req.method() == Method::CONNECT {
         if let Some(addr) = host_addr(req.uri()) {
-            if let Err(msg) = assert_connect_target_allowed(&addr, &policy).await {
-                warn!("CONNECT rejected: {}", msg);
-                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
-            }
+            // Audit (2026-05-10): pre-fix this validated the authority
+            // then `tunnel(addr: String)` re-resolved DNS at connect
+            // time. An attacker who flipped a record between the two
+            // lookups (DNS rebinding) could land on 127.0.0.1 or RFC1918
+            // even though the validation saw a public IP. Now we
+            // resolve once, validate every returned address, and pass
+            // the validated SocketAddrs straight to tunnel — no second
+            // DNS lookup possible.
+            let resolved = match wafrift_proxy::upstream_policy::resolve_connect_target_allowed(
+                &addr, &policy,
+            )
+            .await
+            {
+                Ok(v) => v,
+                Err(msg) => {
+                    warn!("CONNECT rejected: {}", msg);
+                    return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+                }
+            };
             if let (true, Some(ca)) = (mitm_enabled, mitm_ca.as_ref()) {
                 let ca = ca.clone();
                 let state = state.clone();
@@ -2360,10 +2375,13 @@ async fn proxy(
                          Pass `--mitm` to terminate TLS and apply evasion to HTTPS request bodies."
                     );
                 }
+                let resolved_for_tunnel = resolved.clone();
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(req).await {
                         Ok(upgraded) => {
-                            if let Err(e) = tunnel(upgraded, addr).await {
+                            if let Err(e) =
+                                tunnel(upgraded, resolved_for_tunnel).await
+                            {
                                 warn!("server io error: {}", e);
                             };
                         }
@@ -2826,9 +2844,19 @@ const MAX_TUNNEL_BYTES_PER_DIRECTION: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Bidirectional tunnel for CONNECT (HTTPS pass-through). Per-direction
 /// byte counter aborts the copy when either side exceeds the cap.
-async fn tunnel(upgraded: Upgraded, addr: String) -> std::io::Result<()> {
+///
+/// Audit (2026-05-10): takes a pre-resolved `Vec<SocketAddr>` instead
+/// of `addr: String`. The string form forced a SECOND DNS lookup at
+/// `TcpStream::connect`, opening a rebinding TOCTOU window after the
+/// caller had already validated the upstream as public. We now pass
+/// the validated SocketAddrs straight in and connect to whichever
+/// answers first.
+async fn tunnel(
+    upgraded: Upgraded,
+    addrs: Vec<std::net::SocketAddr>,
+) -> std::io::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut server = TcpStream::connect(addr).await?;
+    let mut server = TcpStream::connect(addrs.as_slice()).await?;
     let mut upgraded = TokioIo::new(upgraded);
     let (mut up_r, mut up_w) = tokio::io::split(&mut upgraded);
     let (mut sv_r, mut sv_w) = server.split();

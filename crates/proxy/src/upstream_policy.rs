@@ -173,17 +173,40 @@ pub async fn assert_connect_target_allowed(
     addr: &str,
     policy: &UpstreamPolicy,
 ) -> Result<(), String> {
-    if policy.insecure_open_upstream {
-        return Ok(());
-    }
-    if policy.allow_private_upstream {
-        return Ok(());
-    }
+    let _ = resolve_connect_target_allowed(addr, policy).await?;
+    Ok(())
+}
+
+/// Validate `CONNECT` authority `host:port` AND return the resolved
+/// public socket addresses. Callers should pass these straight to
+/// `TcpStream::connect_to_addr` instead of reusing `host:port` so a
+/// DNS rebinding flip between the validation and the connect cannot
+/// land — pre-fix `tunnel(addr: String)` re-resolved DNS, opening a
+/// TOCTOU window the audit caught as CRITICAL.
+pub async fn resolve_connect_target_allowed(
+    addr: &str,
+    policy: &UpstreamPolicy,
+) -> Result<Vec<SocketAddr>, String> {
     let authority = addr
         .parse::<hyper::http::uri::Authority>()
         .map_err(|_| format!("invalid CONNECT authority: {addr}"))?;
     let host = authority.host();
     let port = authority.port_u16().unwrap_or(443);
+
+    if policy.insecure_open_upstream || policy.allow_private_upstream {
+        // Permissive mode: still resolve so the caller has addresses
+        // to connect to without doing its own lookup, but skip bogon
+        // filtering.
+        let lookups = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
+        let v: Vec<SocketAddr> = lookups.collect();
+        if v.is_empty() {
+            return Err(format!("no addresses for {host}"));
+        }
+        return Ok(v);
+    }
+
     if let Ok(ip) = host.parse::<IpAddr>() {
         if ip_addr_is_bogon(ip) {
             return Err(format!(
@@ -192,9 +215,26 @@ pub async fn assert_connect_target_allowed(
                  restart wafrift-proxy with `--allow-private-upstream`."
             ));
         }
-        return Ok(());
+        return Ok(vec![SocketAddr::new(ip, port)]);
     }
-    resolve_host_all_public(host, port).await
+
+    let mut filtered = Vec::new();
+    let lookups = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
+    for sa in lookups {
+        if ip_addr_is_bogon(sa.ip()) {
+            return Err(format!(
+                "refusing upstream: DNS for {host} includes non-public address {}",
+                sa.ip()
+            ));
+        }
+        filtered.push(sa);
+    }
+    if filtered.is_empty() {
+        return Err(format!("refusing upstream: no addresses for {host}"));
+    }
+    Ok(filtered)
 }
 
 /// `reqwest::dns::Resolve` impl that wraps the system resolver and
