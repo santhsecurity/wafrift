@@ -75,15 +75,14 @@ impl RateLimiter {
                 // (or a long-running browser session crawling thousands
                 // of CDN edges) would unboundedly leak memory. Cap +
                 // LRU-ish eviction keeps the working set bounded.
-                if !buckets.contains_key(host) && buckets.len() >= MAX_TRACKED_HOSTS {
-                    if let Some(oldest_host) = buckets
+                if !buckets.contains_key(host) && buckets.len() >= MAX_TRACKED_HOSTS
+                    && let Some(oldest_host) = buckets
                         .iter()
                         .min_by_key(|(_, b)| b.last)
                         .map(|(h, _)| h.clone())
                     {
                         buckets.remove(&oldest_host);
                     }
-                }
                 let bucket = buckets.entry(host.to_string()).or_insert(HostBucket {
                     tokens: self.burst,
                     last: now,

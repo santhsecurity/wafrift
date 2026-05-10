@@ -111,9 +111,8 @@ pub(crate) async fn run_scan(
         }
         Err(e) => {
             eprintln!(
-                "{} {}",
+                "{} failed to open: {e}",
                 "Gene bank warning:".yellow().bold(),
-                format!("failed to open: {e}")
             );
             vec![]
         }
@@ -287,9 +286,8 @@ pub(crate) async fn run_scan(
         Ok(cache) => Some(cache),
         Err(e) => {
             eprintln!(
-                "{} {}",
+                "{} failed to open: {e}",
                 "Learning cache warning:".yellow().bold(),
-                format!("failed to open: {e}")
             );
             None
         }
@@ -470,9 +468,8 @@ pub(crate) async fn run_scan(
                                 Ok(enc) => Some(enc),
                                 Err(e) => {
                                     eprintln!(
-                                        "{} {}",
+                                        "{} {enc_name} failed: {e}",
                                         "Encoding warning:".yellow().bold(),
-                                        format!("{enc_name} failed: {e}")
                                     );
                                     None
                                 }

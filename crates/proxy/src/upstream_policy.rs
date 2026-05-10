@@ -17,12 +17,33 @@ pub struct UpstreamPolicy {
 pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v) => {
-            v.is_private()
+            if v.is_private()
                 || v.is_loopback()
                 || v.is_link_local()
                 || v.is_broadcast()
                 || v.is_documentation()
                 || v.is_unspecified()
+            {
+                return true;
+            }
+            // Audit additions (2026-05-10):
+            //   100.64.0.0/10  — Carrier-Grade NAT (RFC 6598)
+            //   192.0.0.0/24   — IETF protocol assignments (RFC 6890)
+            //   198.18.0.0/15  — benchmark testing (RFC 2544)
+            // These are not "private" per std::net::Ipv4Addr but
+            // routing them upstream from a security tool would still
+            // exfiltrate to attacker-side infra in many topologies.
+            let octets = v.octets();
+            if octets[0] == 100 && (octets[1] & 0xc0) == 0x40 {
+                return true; // 100.64.0.0/10
+            }
+            if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
+                return true; // 192.0.0.0/24
+            }
+            if octets[0] == 198 && (octets[1] & 0xfe) == 18 {
+                return true; // 198.18.0.0/15
+            }
+            false
         }
         IpAddr::V6(v) => {
             // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1, ::ffff:169.254.169.254)
@@ -55,6 +76,27 @@ pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
             // RFC 3849 documentation prefix.
             if segs[0] == 0x2001 && segs[1] == 0x0db8 {
                 return true;
+            }
+            // Audit additions (2026-05-10):
+            //   2001:0::/32 — Teredo tunneling (RFC 4380). Embeds an
+            //     attacker-controlled IPv4 server *and* exposes the
+            //     client's IPv4 — never a legitimate origin endpoint.
+            //   2001:20::/28 — ORCHIDv2 (RFC 7343). Pure cryptographic
+            //     identifiers; not routable as upstream targets.
+            //   2002::/16 with private V4 — handled above.
+            //   100::/64 — discard-only address block (RFC 6666).
+            if segs[0] == 0x2001 && segs[1] == 0x0000 {
+                return true; // Teredo
+            }
+            if segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020 {
+                return true; // ORCHIDv2 2001:20::/28
+            }
+            if segs[0] == 0x0100
+                && segs[1] == 0
+                && segs[2] == 0
+                && segs[3] == 0
+            {
+                return true; // 100::/64 discard
             }
             v.is_loopback()
                 || v.is_multicast()

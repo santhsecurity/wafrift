@@ -354,10 +354,19 @@ impl ChallengeStore {
             }
         }
         // Path scope: cookie scoped to /admin/ does NOT replay on /api/.
-        if let Some(path) = entry.scope_path.as_deref()
-            && !request_path.starts_with(path)
-        {
-            return None;
+        // Pre-fix this used `starts_with` directly, which mis-matches
+        // `/adminxss` against scope `/admin` (RFC 6265 §5.1.4: the
+        // request-path must equal the cookie-path OR continue with a
+        // `/` after the cookie-path prefix). The audit caught this as
+        // a HIGH — replaying admin cookies onto an unrelated subtree.
+        if let Some(path) = entry.scope_path.as_deref() {
+            let prefix_match = request_path.starts_with(path)
+                && (request_path.len() == path.len()
+                    || path.ends_with('/')
+                    || request_path.as_bytes().get(path.len()) == Some(&b'/'));
+            if !prefix_match {
+                return None;
+            }
         }
         // Secure scope: HTTPS-only cookies must not replay over HTTP.
         if entry.secure && !is_https {
@@ -677,11 +686,10 @@ pub fn extract_clearance_cookie_scoped(
                     if !v.is_empty() {
                         scope.domain = Some(v.to_string());
                     }
-                } else if k.trim().eq_ignore_ascii_case("Path") {
-                    if !v.is_empty() {
+                } else if k.trim().eq_ignore_ascii_case("Path")
+                    && !v.is_empty() {
                         scope.path = Some(v.to_string());
                     }
-                }
             }
         }
         return Some((format!("{name_trim}={value_trim}"), kind, scope));

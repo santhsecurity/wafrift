@@ -83,6 +83,16 @@ pub fn escape_for_context(
                     '\r' => s.push_str("\\r"),
                     '\t' => s.push_str("\\t"),
                     '\x00'..='\x1f' => s.push_str(&format!("\\u{:04x}", c as u32)),
+                    // U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR
+                    // are valid in JSON strings per RFC 8259 but are line
+                    // terminators in legacy ECMAScript / JSONP / eval
+                    // contexts. Pre-fix a payload-controlled value with
+                    // U+2028 inlined into <script>JSON</script> would
+                    // close the string literal and inject script. Escape
+                    // both for defence-in-depth even when shipping pure
+                    // JSON over the wire.
+                    '\u{2028}' => s.push_str("\\u2028"),
+                    '\u{2029}' => s.push_str("\\u2029"),
                     _ => s.push(c),
                 }
             }
@@ -108,9 +118,13 @@ pub fn escape_for_context(
                     reason: "null byte in xml attribute".into(),
                 });
             }
+            // XML allows single-quoted attributes; pre-fix only escaped
+            // `&"<>` and a payload with `'` would break out of an
+            // `<elem attr='...'>` form. Add &apos; escape.
             input
                 .replace('&', "&amp;")
                 .replace('"', "&quot;")
+                .replace('\'', "&apos;")
                 .replace('<', "&lt;")
                 .replace('>', "&gt;")
         }
@@ -155,8 +169,17 @@ pub fn escape_for_context(
             input.to_string()
         }
         InjectionContext::CookieValue => input
+            // RFC 6265 §4.1.1 cookie-octet excludes space, ",", '"', `\\`
+            // in addition to ; = CTLs. Pre-fix the missing chars caused
+            // Chrome / Firefox / curl to truncate the cookie at the
+            // offending byte — making bypass probes silently lie about
+            // the value that actually reached the server.
             .replace(';', "%3B")
             .replace('=', "%3D")
+            .replace(' ', "%20")
+            .replace(',', "%2C")
+            .replace('"', "%22")
+            .replace('\\', "%5C")
             .replace('\x00', "%00")
             .replace('\r', "%0D")
             .replace('\n', "%0A"),
@@ -279,20 +302,59 @@ pub fn validate_in_context(
             // Plain body accepts any byte sequence; nothing to validate.
         }
         InjectionContext::XmlCdata => {
-            // TODO: validate that payload doesn't contain `]]>` which
-            // would terminate the CDATA section prematurely.
+            if payload.contains("]]>") {
+                return Err(ContextualEncodeError::ContextIncompatible {
+                    strategy: "validate".into(),
+                    context,
+                    reason: "CDATA payload contains `]]>` (unterminated section)".into(),
+                });
+            }
         }
         InjectionContext::XmlText => {
-            // TODO: validate that payload doesn't contain `<` or `&`
-            // unless they are proper entities.
+            if payload.contains('<') {
+                return Err(ContextualEncodeError::ContextIncompatible {
+                    strategy: "validate".into(),
+                    context,
+                    reason: "XML text payload contains unescaped `<`".into(),
+                });
+            }
+            reject_unescaped_ampersand(payload, context)?;
         }
         InjectionContext::HtmlAttribute => {
-            // TODO: validate that payload doesn't contain unescaped quotes
-            // matching the attribute delimiter.
+            if payload.contains('<') {
+                return Err(ContextualEncodeError::ContextIncompatible {
+                    strategy: "validate".into(),
+                    context,
+                    reason: "HTML attribute contains unescaped `<` — would close the attribute"
+                        .into(),
+                });
+            }
+            if payload.contains('"') {
+                return Err(ContextualEncodeError::ContextIncompatible {
+                    strategy: "validate".into(),
+                    context,
+                    reason: "HTML attribute contains unescaped `\"` — attribute breakout".into(),
+                });
+            }
+            if payload.contains('\'') {
+                return Err(ContextualEncodeError::ContextIncompatible {
+                    strategy: "validate".into(),
+                    context,
+                    reason: "HTML attribute contains unescaped `'` — single-quoted attr breakout"
+                        .into(),
+                });
+            }
+            reject_unescaped_ampersand(payload, context)?;
         }
         InjectionContext::HtmlText => {
-            // TODO: validate that payload doesn't contain `<` or `&`
-            // unless they are proper HTML entities.
+            if payload.contains('<') {
+                return Err(ContextualEncodeError::ContextIncompatible {
+                    strategy: "validate".into(),
+                    context,
+                    reason: "HTML text contains unescaped `<` — would start a tag".into(),
+                });
+            }
+            reject_unescaped_ampersand(payload, context)?;
         }
         InjectionContext::UrlQuery | InjectionContext::UrlPath | InjectionContext::UrlFragment => {
             // URL components are validated by percent-encoding step later;
@@ -313,6 +375,90 @@ pub fn validate_in_context(
         // InjectionContext is #[non_exhaustive]; future variants default to
         // no validation until explicit rules are added.
         _ => {}
+    }
+    Ok(())
+}
+
+/// Returns Err if `payload` contains an `&` that is NOT the start of a
+/// well-formed entity reference (`&name;`, `&#nnn;`, or `&#xHHH;`).
+///
+/// This is the cheap cousin of an HTML5 entity validator — it doesn't
+/// know which named entities are real (`&copy;` vs `&xyz;`), but it
+/// does enforce the lexical shape so a stray `&` cannot ride through
+/// `validate_in_context` for HTML/XML contexts.
+fn reject_unescaped_ampersand(
+    payload: &str,
+    context: InjectionContext,
+) -> Result<(), ContextualEncodeError> {
+    let bytes = payload.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'&' {
+            i += 1;
+            continue;
+        }
+        // Walk forward to find the terminating `;` within a bounded
+        // window — real entities are short (max ~12 chars including
+        // the `;`). If we don't find one, the `&` is unescaped.
+        let mut j = i + 1;
+        let max = (i + 12).min(bytes.len());
+        let mut saw_semicolon = false;
+        let mut valid_shape = true;
+        let first = bytes.get(j).copied();
+        if first == Some(b'#') {
+            j += 1;
+            let hex = bytes.get(j).copied() == Some(b'x') || bytes.get(j).copied() == Some(b'X');
+            if hex {
+                j += 1;
+            }
+            let mut digit_count = 0;
+            while j < max {
+                let b = bytes[j];
+                if b == b';' {
+                    saw_semicolon = true;
+                    j += 1;
+                    break;
+                }
+                let ok = if hex { b.is_ascii_hexdigit() } else { b.is_ascii_digit() };
+                if !ok {
+                    valid_shape = false;
+                    break;
+                }
+                digit_count += 1;
+                j += 1;
+            }
+            if digit_count == 0 {
+                valid_shape = false;
+            }
+        } else if let Some(b) = first {
+            if !b.is_ascii_alphabetic() {
+                valid_shape = false;
+            } else {
+                while j < max {
+                    let b = bytes[j];
+                    if b == b';' {
+                        saw_semicolon = true;
+                        j += 1;
+                        break;
+                    }
+                    if !b.is_ascii_alphanumeric() {
+                        valid_shape = false;
+                        break;
+                    }
+                    j += 1;
+                }
+            }
+        } else {
+            valid_shape = false;
+        }
+        if !valid_shape || !saw_semicolon {
+            return Err(ContextualEncodeError::ContextIncompatible {
+                strategy: "validate".into(),
+                context,
+                reason: format!("unescaped `&` at byte {i} (no entity reference follows)"),
+            });
+        }
+        i = j;
     }
     Ok(())
 }

@@ -5,7 +5,9 @@
 use ed25519_dalek::{Signature, SigningKey as Ed25519SigningKey, Verifier, VerifyingKey};
 use rand_core::OsRng;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::fmt;
 use thiserror::Error;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Hex-encoded verifying (public) key. 64 hex chars.
 pub type VerifyingKeyHex = String;
@@ -55,16 +57,37 @@ pub enum RegistryError {
 /// Wraps the keypair so `sign()` can produce a signature and the
 /// matching public key is recoverable via [`Self::verifying_key_hex`].
 ///
+/// **Memory hygiene.** The hex-encoded secret is wiped on drop via
+/// [`ZeroizeOnDrop`]. `Debug` is implemented manually to redact the
+/// secret — the prior derive would have spilled the 32-byte key into
+/// any tracing line, panic message, or `format!("{key:?}")` call.
+///
 /// `Deserialize` is implemented manually and routes through
 /// [`Self::from_secret_hex`] so loading a key from JSON cannot produce
 /// a `SigningKey` with malformed hex (which would panic later inside
 /// `verifying_key_hex` / `sign_bytes` on the constructor-checked
 /// unwraps). The derive would otherwise accept any string and arm a
 /// panic-on-first-use bomb.
-#[derive(Debug, Serialize)]
+#[derive(Serialize, ZeroizeOnDrop)]
 pub struct SigningKey {
     /// Hex-encoded 32-byte secret. NEVER log this.
     secret_hex: String,
+}
+
+impl fmt::Debug for SigningKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Pre-fix this used the derive, which printed the full secret_hex
+        // into any log line that included a SigningKey. The fingerprint
+        // (first 8 hex chars of the verifying key, NOT the secret) is
+        // enough to disambiguate keys for an operator without ever
+        // exposing the private material.
+        let fingerprint = self.verifying_key_hex();
+        let short = fingerprint.get(..8).unwrap_or("????????");
+        f.debug_struct("SigningKey")
+            .field("vk_fingerprint", &short)
+            .field("secret_hex", &"<redacted>")
+            .finish()
+    }
 }
 
 impl<'de> Deserialize<'de> for SigningKey {
@@ -100,12 +123,16 @@ impl SigningKey {
                 context: "secret_hex".into(),
             });
         }
-        let bytes = hex::decode(secret_hex).map_err(|e| RegistryError::HexDecode {
+        let mut bytes = hex::decode(secret_hex).map_err(|e| RegistryError::HexDecode {
             context: "secret_hex".into(),
             source: e,
         })?;
-        let arr: [u8; 32] = bytes.try_into().expect("length checked above");
+        let mut arr: [u8; 32] = bytes.as_slice().try_into().expect("length checked above");
+        // Validates the bytes are a usable scalar; the resulting key is
+        // zeroized on Drop by dalek's own impl.
         let _ = Ed25519SigningKey::from_bytes(&arr);
+        bytes.zeroize();
+        arr.zeroize();
         Ok(Self {
             secret_hex: secret_hex.to_string(),
         })
@@ -114,10 +141,16 @@ impl SigningKey {
     /// Hex-encoded 32-byte verifying (public) key.
     #[must_use]
     pub fn verifying_key_hex(&self) -> VerifyingKeyHex {
-        let bytes = hex::decode(&self.secret_hex).expect("constructor checked");
-        let arr: [u8; 32] = bytes.try_into().expect("constructor checked");
+        let mut bytes = hex::decode(&self.secret_hex).expect("constructor checked");
+        let mut arr: [u8; 32] = bytes.as_slice().try_into().expect("constructor checked");
         let kp = Ed25519SigningKey::from_bytes(&arr);
-        hex::encode(kp.verifying_key().to_bytes())
+        let out = hex::encode(kp.verifying_key().to_bytes());
+        // Zero intermediate copies of the secret material so they don't
+        // sit in the heap / stack until the OS reclaims them.
+        // Ed25519SigningKey itself is ZeroizeOnDrop in dalek 2.x.
+        bytes.zeroize();
+        arr.zeroize();
+        out
     }
 
     /// Hex-encoded 32-byte secret. Exposed for export to a key file
@@ -131,11 +164,16 @@ impl SigningKey {
 /// Sign `bytes` with `key`, returning the hex-encoded 64-byte
 /// signature.
 pub fn sign_bytes(key: &SigningKey, bytes: &[u8]) -> String {
-    let secret = hex::decode(key.secret_hex()).expect("constructor checked");
-    let arr: [u8; 32] = secret.try_into().expect("constructor checked");
+    let mut secret = hex::decode(key.secret_hex()).expect("constructor checked");
+    let mut arr: [u8; 32] = secret.as_slice().try_into().expect("constructor checked");
     let kp = Ed25519SigningKey::from_bytes(&arr);
     let sig = ed25519_dalek::Signer::sign(&kp, bytes);
-    hex::encode(sig.to_bytes())
+    let out = hex::encode(sig.to_bytes());
+    // Wipe the intermediate secret-bearing buffers. dalek's SigningKey
+    // is ZeroizeOnDrop so kp is handled when it falls out of scope.
+    secret.zeroize();
+    arr.zeroize();
+    out
 }
 
 /// Verify `signature_hex` over `bytes` against `public_key_hex`.

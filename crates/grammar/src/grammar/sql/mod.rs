@@ -337,8 +337,10 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         );
     }
 
-    // Final truncate: allow dialect mutations to extend beyond base budget
-    // Each user-facing output (CLI, scan) applies its own display limit
+    // Final truncate: dialect mutations are allowed to extend beyond base
+    // budget during collection so each dialect gets a fair share, but the
+    // public contract promises at most `max_mutations` results.
+    results.truncate(max_mutations);
     results
 }
 
@@ -467,6 +469,9 @@ fn push_postgres_quote_mutations(
     max_mutations: usize,
     string_value: &str,
 ) {
+    if results.len() >= max_mutations {
+        return;
+    }
     let dollar_quoted = format!("$${string_value}$$");
     let mutated = payload.replace(&format!("'{string_value}'"), &dollar_quoted);
     if mutated != payload {
@@ -477,9 +482,12 @@ fn push_postgres_quote_mutations(
         });
     }
 
+    if results.len() >= max_mutations {
+        return;
+    }
     let tagged = format!("$tag${string_value}$tag$");
     let mutated_tagged = payload.replace(&format!("'{string_value}'"), &tagged);
-    if mutated_tagged != payload && results.len() < max_mutations {
+    if mutated_tagged != payload {
         results.push(SqlMutation {
             payload: mutated_tagged,
             description: format!(
