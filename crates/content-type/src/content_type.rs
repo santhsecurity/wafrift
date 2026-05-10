@@ -147,20 +147,23 @@ fn xml_escape(value: &str) -> String {
 
 /// Sanitise a string for use as an XML element name.
 ///
-/// XML element names must start with a letter or underscore and contain
-/// only letters, digits, hyphens, underscores, and periods. Characters
-/// outside this set are replaced with underscores.
+/// XML 1.0 §2.3 NameStartChar permits any Unicode letter (or `_`) and
+/// NameChar additionally permits digits, `-`, `.`, and the combining/
+/// extender ranges. Pre-fix this used `is_ascii_alphabetic` and
+/// `is_ascii_alphanumeric`, which mangled valid Unicode names like
+/// `<日本語>` into all-underscores — a bug that any non-Latin operator
+/// would notice immediately.
 #[must_use]
 pub fn xml_safe_name(name: &str) -> String {
     let mut result = String::with_capacity(name.len());
     for (i, ch) in name.chars().enumerate() {
         if i == 0 {
-            if ch.is_ascii_alphabetic() || ch == '_' {
+            if ch.is_alphabetic() || ch == '_' {
                 result.push(ch);
             } else {
                 result.push('_');
             }
-        } else if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+        } else if ch.is_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
             result.push(ch);
         } else {
             result.push('_');

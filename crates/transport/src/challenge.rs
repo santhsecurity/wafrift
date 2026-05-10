@@ -751,8 +751,9 @@ fn jittered_wait(base: Duration) -> Duration {
         .map(|d| d.subsec_nanos() as u64)
         .unwrap_or(0);
     // jitter ∈ [-25%, +25%]
-    let half_range = base.as_millis() as u64 / 2; // 25% of base in ms
-    let offset = (nanos % (half_range.saturating_mul(2).max(1))) as i64 - half_range as i64;
+    let quarter_range = base.as_millis() as u64 / 4; // 25% of base in ms
+    let offset =
+        (nanos % (quarter_range.saturating_mul(2).max(1))) as i64 - quarter_range as i64;
     let new_ms = (base.as_millis() as i64 + offset).max(1) as u64;
     Duration::from_millis(new_ms)
 }
