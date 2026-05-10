@@ -301,15 +301,14 @@ pub fn validate_in_context(
         InjectionContext::PlainBody => {
             // Plain body accepts any byte sequence; nothing to validate.
         }
-        InjectionContext::XmlCdata => {
-            if payload.contains("]]>") {
+        InjectionContext::XmlCdata
+            if payload.contains("]]>") => {
                 return Err(ContextualEncodeError::ContextIncompatible {
                     strategy: "validate".into(),
                     context,
                     reason: "CDATA payload contains `]]>` (unterminated section)".into(),
                 });
             }
-        }
         InjectionContext::XmlText => {
             if payload.contains('<') {
                 return Err(ContextualEncodeError::ContextIncompatible {

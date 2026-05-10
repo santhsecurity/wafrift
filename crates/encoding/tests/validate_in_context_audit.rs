@@ -41,7 +41,7 @@ fn xml_text_rejects_raw_lt() {
 
 #[test]
 fn xml_text_rejects_unescaped_ampersand() {
-    let err = validate_in_context("rock & roll", InjectionContext::XmlText)
+    let _err = validate_in_context("rock & roll", InjectionContext::XmlText)
         .expect_err("must reject unescaped &");
 }
 
@@ -78,7 +78,7 @@ fn html_attribute_rejects_single_quote() {
 
 #[test]
 fn html_attribute_rejects_unescaped_ampersand() {
-    let err = validate_in_context("a & b", InjectionContext::HtmlAttribute)
+    let _err = validate_in_context("a & b", InjectionContext::HtmlAttribute)
         .expect_err("must reject unescaped &");
 }
 
@@ -101,7 +101,7 @@ fn html_text_rejects_raw_lt() {
 
 #[test]
 fn html_text_rejects_unescaped_ampersand() {
-    let err = validate_in_context("AT&T", InjectionContext::HtmlText)
+    let _err = validate_in_context("AT&T", InjectionContext::HtmlText)
         .expect_err("must reject unescaped &");
 }
 

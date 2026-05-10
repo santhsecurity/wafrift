@@ -9,12 +9,12 @@ use wafrift_oracle::traits::PayloadOracle;
 
 const THREADS: usize = 50;
 
-fn spawn_uniform<V: Send + 'static>(
+fn spawn_uniform<V>(
     threads: usize,
     f: impl Fn() -> V + Send + Sync + 'static,
 ) -> Vec<V>
 where
-    V: Eq + std::fmt::Debug,
+    V: Send + 'static + Eq + std::fmt::Debug,
 {
     let f = std::sync::Arc::new(f);
     let handles: Vec<_> = (0..threads)

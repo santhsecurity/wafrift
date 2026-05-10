@@ -64,7 +64,9 @@ impl ScanPolicy {
         } else {
             0
         };
-        Duration::from_millis(ms + jitter_ms)
+        // Pre-fix this used `ms + jitter_ms` which panics in debug /
+        // wraps in release when max_delay_ms is near u64::MAX.
+        Duration::from_millis(ms.saturating_add(jitter_ms))
     }
 }
 
@@ -111,7 +113,10 @@ impl CircuitBreaker {
 
     /// Record a probe failure (timeout, 5xx, or connection reset).
     pub fn record_failure(&mut self) {
-        self.consecutive_failures += 1;
+        // Pre-fix `+= 1` would panic in debug / wrap in release after
+        // u32::MAX failures. Saturating add keeps the breaker stuck in
+        // Open instead of secretly resetting itself.
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
         self.last_failure = Some(Instant::now());
         if self.consecutive_failures >= self.failure_threshold {
             self.state = CircuitState::Open;
@@ -152,18 +157,23 @@ pub fn cache_buster() -> String {
 
 /// Sanitize a user-supplied host/path/prefix to prevent accidental header injection.
 ///
+/// Rejects CR (`\r`), LF (`\n`), and NULL (`\0`). The NULL check is
+/// load-bearing: many HTTP/1 stacks truncate header values at the
+/// first NUL, turning a benign-looking `Host: example.com\0evil.com`
+/// into a smuggled second host. The audit caught this as CRITICAL.
+///
 /// # Errors
-/// Returns an error if the input contains `\r` or `\n`.
+/// Returns an error if the input contains `\r`, `\n`, or `\0`.
 pub fn sanitize_input(input: &str) -> Result<String, SafetyError> {
-    if input.contains('\r') || input.contains('\n') {
+    if input.contains('\r') || input.contains('\n') || input.contains('\0') {
         return Err(SafetyError::HeaderInjection);
     }
     Ok(input.into())
 }
 
-/// Guard that a string contains no CRLF without copying it.
+/// Guard that a string contains no CRLF or NUL without copying it.
 pub fn guard_no_crlf(input: &str) -> Result<(), SafetyError> {
-    if input.contains('\r') || input.contains('\n') {
+    if input.contains('\r') || input.contains('\n') || input.contains('\0') {
         return Err(SafetyError::HeaderInjection);
     }
     Ok(())
