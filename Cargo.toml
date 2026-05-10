@@ -21,6 +21,7 @@ members = [
     "crates/transport", "crates/oracle", "crates/pool",
     "crates/recon",
     "crates/genome-registry",
+    "crates/captchaforge-bridge",
 ]
 
 [workspace.package]
