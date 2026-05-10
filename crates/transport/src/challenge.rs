@@ -189,12 +189,16 @@ struct ChallengeInner {
     /// don't all spawn a redundant external solver.
     solver_in_flight: HashMap<String, Instant>,
     /// Global token bucket for operator prompts. Tracks the
-    /// timestamps of the last `OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN`
-    /// prompts emitted across ALL hosts; if all of them fall in
-    /// the past minute, we suppress further prompts even if the
-    /// per-host cooldown would allow them. Caps a 1000-host
-    /// simultaneous-flip storm to a manageable rate.
-    global_prompt_window: std::collections::VecDeque<Instant>,
+    /// (host, timestamp) of the last `OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN`
+    /// prompts across ALL hosts.
+    ///
+    /// Audit (2026-05-10): tracking only the timestamp meant the cap
+    /// was first-come-first-served — one chatty host could fill the
+    /// 30-prompt window inside its cooldown and starve every other
+    /// host. We now record the host too and additionally cap any
+    /// single host at `OPERATOR_PROMPT_PER_HOST_CAP_PER_MIN` of those
+    /// 30 slots, so the chatty host is forced to share.
+    global_prompt_window: std::collections::VecDeque<(String, Instant)>,
 }
 
 /// Maximum operator prompts emitted per rolling 60-second window
@@ -202,6 +206,12 @@ struct ChallengeInner {
 /// challenge state simultaneously — the per-host cooldown would
 /// otherwise let all N fire at once and overwhelm the operator.
 pub const OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN: usize = 30;
+/// Per-host cap on the share of GLOBAL_PROMPT_WINDOW prompts a single
+/// host may consume. With CAP_PER_MIN = 30 and PER_HOST = 8, a chatty
+/// host taking its full quota still leaves room for ~3 other hosts to
+/// each take their full quota — fair enough that the operator can
+/// triage incoming requests across distinct sites. Audit (2026-05-10).
+pub const OPERATOR_PROMPT_PER_HOST_CAP_PER_MIN: usize = 8;
 const GLOBAL_PROMPT_WINDOW: Duration = Duration::from_secs(60);
 
 /// How long a `mark_solver_pending` claim stays valid before another
@@ -456,8 +466,8 @@ impl ChallengeStore {
         // older than 60 s before checking the cap.
         let cutoff = now.checked_sub(GLOBAL_PROMPT_WINDOW);
         if let Some(cut) = cutoff {
-            while let Some(front) = inner.global_prompt_window.front() {
-                if *front < cut {
+            while let Some((_, ts)) = inner.global_prompt_window.front() {
+                if *ts < cut {
                     inner.global_prompt_window.pop_front();
                 } else {
                     break;
@@ -467,11 +477,23 @@ impl ChallengeStore {
         if inner.global_prompt_window.len() >= OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN {
             return false;
         }
+        // Audit (2026-05-10): per-host fairness. A chatty host that's
+        // already taken its share of the window must wait, even if
+        // the global cap has slack. Without this a single noisy host
+        // can starve every other host's prompt.
+        let host_count = inner
+            .global_prompt_window
+            .iter()
+            .filter(|(h, _)| h == &key)
+            .count();
+        if host_count >= OPERATOR_PROMPT_PER_HOST_CAP_PER_MIN {
+            return false;
+        }
         match inner.operator_prompted.get(&key).copied() {
             Some(prev) if now < prev + OPERATOR_PROMPT_COOLDOWN => false,
             _ => {
-                inner.operator_prompted.insert(key, now);
-                inner.global_prompt_window.push_back(now);
+                inner.operator_prompted.insert(key.clone(), now);
+                inner.global_prompt_window.push_back((key, now));
                 true
             }
         }
