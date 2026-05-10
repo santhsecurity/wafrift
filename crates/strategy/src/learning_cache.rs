@@ -80,17 +80,45 @@ impl LearningCache {
 
     /// Open or create a cache at a specific path.
     ///
+    /// A corrupted cache file (kill-9 mid-save, disk corruption, partial
+    /// flush) is moved aside to `<path>.corrupt-<epoch>` and a fresh
+    /// empty cache is returned. Crashing the whole strategy engine on
+    /// one bad JSON file would lose all subsequent learning — better to
+    /// surface the corruption via `tracing::warn` and keep going.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read.
+    /// Returns an error only if the file exists, looks fine, and the
+    /// underlying I/O still fails (permission denied, etc.).
     pub fn open(path: impl AsRef<Path>) -> Result<Self, LearningCacheError> {
         let path = path.as_ref();
         if path.exists() {
             let contents = fs::read_to_string(path).map_err(LearningCacheError::Io)?;
-            let mut cache: LearningCache =
-                serde_json::from_str(&contents).map_err(LearningCacheError::Serde)?;
-            cache.path = Some(path.to_path_buf());
-            Ok(cache)
+            match serde_json::from_str::<LearningCache>(&contents) {
+                Ok(mut cache) => {
+                    cache.path = Some(path.to_path_buf());
+                    Ok(cache)
+                }
+                Err(e) => {
+                    let backup = path.with_extension(format!("corrupt-{}", current_epoch()));
+                    let backup_msg = match fs::rename(path, &backup) {
+                        Ok(()) => format!("moved aside to {}", backup.display()),
+                        Err(rename_err) => {
+                            format!("could not rename ({rename_err}); leaving file in place")
+                        }
+                    };
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        backup = %backup_msg,
+                        "learning cache file corrupted; starting fresh"
+                    );
+                    Ok(Self {
+                        path: Some(path.to_path_buf()),
+                        entries: HashMap::new(),
+                    })
+                }
+            }
         } else {
             Ok(Self {
                 path: Some(path.to_path_buf()),
@@ -136,18 +164,45 @@ impl LearningCache {
         entry.attempts = entry.attempts.saturating_add(1);
     }
 
-    /// Persist the cache to disk.
+    /// Persist the cache to disk atomically.
+    ///
+    /// Writes to a sibling `<path>.tmp.<pid>.<epoch>` file, fsyncs it,
+    /// then renames over the target path. A kill-9 between `write` and
+    /// `rename` leaves the previous good cache file untouched instead
+    /// of producing the half-written JSON that was poisoning subsequent
+    /// `open` calls.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be written.
+    /// Returns an error if the file cannot be written or renamed.
     pub fn save(&self) -> Result<(), LearningCacheError> {
         let path = self.path.as_ref().ok_or(LearningCacheError::NoPath)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(LearningCacheError::Io)?;
         }
         let json = serde_json::to_string_pretty(self).map_err(LearningCacheError::Serde)?;
-        fs::write(path, json).map_err(LearningCacheError::Io)
+
+        // Sibling tmp file in the same directory so `rename` is atomic
+        // (cross-FS rename on /tmp would silently fall back to copy).
+        let tmp = path.with_extension(format!(
+            "tmp.{}.{}",
+            std::process::id(),
+            current_epoch()
+        ));
+        // Scope the file handle so the OS releases its descriptor before
+        // we rename — Windows would otherwise refuse the rename.
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&tmp).map_err(LearningCacheError::Io)?;
+            f.write_all(json.as_bytes()).map_err(LearningCacheError::Io)?;
+            f.sync_all().map_err(LearningCacheError::Io)?;
+        }
+        if let Err(e) = fs::rename(&tmp, path) {
+            // Clean up the orphaned tmp file before propagating.
+            let _ = fs::remove_file(&tmp);
+            return Err(LearningCacheError::Io(e));
+        }
+        Ok(())
     }
 
     /// All cached keys.
