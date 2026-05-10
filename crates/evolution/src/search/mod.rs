@@ -58,6 +58,22 @@ pub trait SearchAlgorithm: Send + Sync + std::fmt::Debug {
 
     /// Restore internal state from bytes.
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError>;
+
+    /// Snapshot the algorithm's current "live" chromosomes — the set
+    /// the engine is actively searching from.
+    ///
+    /// Population-based algorithms (`NoveltySearch`, `MapElites`)
+    /// return their full pool. Single-state algorithms (`HillClimbing`,
+    /// `SimulatedAnnealing`, `TabuSearch`) return the singleton
+    /// current/best so the engine sees `len() == 1` and reports
+    /// "no pairwise diversity yet" rather than zero.
+    ///
+    /// Used by [`EvolutionEngine::diversity_score`](crate::evolution::EvolutionEngine::diversity_score)
+    /// to drive adaptive mutation pressure. Cloning is acceptable here
+    /// because callers run it at engine-tick rate, not per-evaluation.
+    fn population_snapshot(&self) -> Vec<Chromosome> {
+        self.best().cloned().into_iter().collect()
+    }
 }
 
 /// Convert non-finite fitness values into a strict worst-case sentinel.

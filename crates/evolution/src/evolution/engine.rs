@@ -11,7 +11,7 @@ use crate::types::{
 };
 use lru::LruCache;
 use rand::{SeedableRng, rngs::StdRng};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -42,7 +42,7 @@ pub struct EvolutionEngine {
     /// Per-gene success tracking: `(gene_name, gene_value, successes, attempts)`.
     pub gene_stats: Vec<(String, String, u32, u32)>,
     /// Fitness history: average fitness per generation (sliding window).
-    pub fitness_history: Vec<f64>,
+    pub fitness_history: VecDeque<f64>,
     /// Number of consecutive generations with no improvement.
     pub stagnation_counter: u32,
     /// Saved bypass corpus.
@@ -157,7 +157,7 @@ impl EvolutionEngine {
             algorithm,
             gene_pool,
             rng,
-            cache: LruCache::new(NonZeroUsize::new(10_000).unwrap()),
+            cache: LruCache::new(NonZeroUsize::new(10_000).expect("10_000 is non-zero")),
             budget,
             in_flight: HashMap::new(),
             stats: SearchStats::new(),
@@ -165,7 +165,7 @@ impl EvolutionEngine {
             checkpoint_path: None,
             request_count: 0,
             gene_stats: Vec::new(),
-            fitness_history: Vec::new(),
+            fitness_history: VecDeque::new(),
             stagnation_counter: 0,
             corpus: BypassCorpus::new(),
             generation_evals: 0,
@@ -198,15 +198,9 @@ impl EvolutionEngine {
             return None;
         }
         if self.pending_single.is_none() {
-            let batch = self.batch_candidates(1);
-            if batch.is_empty() {
-                return None;
-            }
-            self.pending_single = Some(batch.into_iter().next().unwrap());
+            self.pending_single = self.batch_candidates(1).into_iter().next();
         }
-        self.pending_single
-            .as_ref()
-            .map(|(idx, chrom)| (*idx, chrom))
+        self.pending_single.as_ref().map(|(idx, chrom)| (*idx, chrom))
     }
 
     /// Request a batch of up to `n` candidates for parallel evaluation.
@@ -277,12 +271,13 @@ impl EvolutionEngine {
             chromosome.fitness = adjusted;
 
             // Save high-fitness bypasses to corpus
+            let hash_str = format!("{:016x}", chromosome.hash());
             if chromosome.fitness >= 0.85
                 && !self
                     .corpus
                     .entries
                     .iter()
-                    .any(|e| e.payload_hash == format!("{:016x}", chromosome.hash()))
+                    .any(|e| e.payload_hash == hash_str)
             {
                 self.corpus
                     .add(BypassEntry::from_chromosome(&chromosome, None));
@@ -344,16 +339,17 @@ impl EvolutionEngine {
 
         // Update fitness history with sliding window
         if let Some(best) = self.algorithm.best() {
-            self.fitness_history.push(best.fitness);
+            self.fitness_history.push_back(best.fitness);
         }
         if self.fitness_history.len() > 1000 {
-            self.fitness_history.remove(0);
+            self.fitness_history.pop_front();
         }
 
         // Detect stagnation
         let window = 10_usize;
         if self.fitness_history.len() >= window {
-            let recent = &self.fitness_history[self.fitness_history.len() - window..];
+            let skip = self.fitness_history.len().saturating_sub(window);
+            let recent: Vec<f64> = self.fitness_history.iter().skip(skip).copied().collect();
             let improved = recent.windows(2).any(|w| w[1] > w[0] + 0.001);
             if !improved {
                 self.stagnation_counter += 1;
@@ -437,11 +433,115 @@ impl EvolutionEngine {
         )
     }
 
-    /// Compute diversity score using algorithm population if available.
+    /// Seed the underlying algorithm with an explicit population —
+    /// the public path callers use to warm-start search from a known
+    /// good corpus (or to inject a synthetic population from tests).
+    pub fn seed_population(&mut self, population: Vec<Chromosome>) {
+        let mut rng = self.rng.clone();
+        self.algorithm
+            .initialize(population, &self.gene_pool, &mut rng);
+    }
+
+    /// Snapshot the algorithm's live population (test/diagnostic
+    /// surface). Population-based algorithms return their full pool;
+    /// single-state algorithms return the singleton current/best.
+    #[must_use]
+    pub fn population_snapshot(&self) -> Vec<Chromosome> {
+        self.algorithm.population_snapshot()
+    }
+
+    /// Population diversity in `[0.0, 1.0]` — drives adaptive mutation
+    /// pressure (see `crossover::diversity::adaptive_mutation_rate`).
+    ///
+    /// Strategy:
+    /// 1. Snapshot the algorithm's live population and union it with
+    ///    the engine's `in_flight` candidates.
+    /// 2. If `len() >= 2`, return mean pairwise gene-mismatch ratio
+    ///    via `crossover::diversity::diversity_score`.
+    /// 3. Otherwise (single-state algorithm with nothing in-flight),
+    ///    fall back to gene-pool exploration entropy from
+    ///    [`Self::gene_stats_diversity`] — measures how broadly the
+    ///    engine has *explored* the gene space rather than how varied
+    ///    the *current* population is. With no exploration history
+    ///    either, return 1.0 (max-safe default — keeps mutation
+    ///    pressure conservative on a fresh engine).
     #[must_use]
     pub fn diversity_score(&self) -> f64 {
-        // Fallback: use gene stats diversity heuristic
-        0.5
+        let mut population = self.algorithm.population_snapshot();
+        for (chromosome, _) in self.in_flight.values() {
+            population.push(chromosome.clone());
+        }
+        if population.len() >= 2 {
+            return crate::evolution::crossover::diversity::diversity_score(&population);
+        }
+        let gene_div = self.gene_stats_diversity();
+        if gene_div > 0.0 { gene_div } else { 1.0 }
+    }
+
+    /// Shannon-entropy style diversity over the engine's per-gene
+    /// exploration history.
+    ///
+    /// For each unique gene name in `gene_stats`, computes the
+    /// normalised entropy of its value distribution weighted by
+    /// `attempts`. The per-gene entropies are averaged. Range
+    /// `[0.0, 1.0]`: 0.0 means we tried only one value for every
+    /// gene (no exploration), 1.0 means a uniform distribution
+    /// across the maximum-cardinality gene's value space.
+    ///
+    /// Useful as a fallback signal when the active search algorithm
+    /// is single-state (e.g. simulated annealing) and the population
+    /// snapshot is too small to give meaningful pairwise distance.
+    #[must_use]
+    pub fn gene_stats_diversity(&self) -> f64 {
+        if self.gene_stats.is_empty() {
+            return 0.0;
+        }
+        // Bucket per-gene attempt counts.
+        let mut by_gene: HashMap<&str, Vec<u32>> = HashMap::new();
+        for (name, _value, _successes, attempts) in &self.gene_stats {
+            if *attempts == 0 {
+                continue;
+            }
+            by_gene.entry(name.as_str()).or_default().push(*attempts);
+        }
+        if by_gene.is_empty() {
+            return 0.0;
+        }
+        let mut entropy_sum = 0.0_f64;
+        let mut counted = 0_usize;
+        for attempts in by_gene.values() {
+            let total: u64 = attempts.iter().map(|a| u64::from(*a)).sum();
+            if total == 0 || attempts.len() < 2 {
+                // Single value tried — zero entropy contribution. Still
+                // counted so the per-gene mean isn't biased by skipping.
+                counted += 1;
+                continue;
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let total_f = total as f64;
+            let mut h = 0.0_f64;
+            for a in attempts {
+                #[allow(clippy::cast_precision_loss)]
+                let p = f64::from(*a) / total_f;
+                if p > 0.0 {
+                    h -= p * p.log2();
+                }
+            }
+            // Normalise by max entropy log2(k) where k is the number of
+            // distinct values tried for this gene. Falls in `[0, 1]`.
+            #[allow(clippy::cast_precision_loss)]
+            let h_max = (attempts.len() as f64).log2();
+            let normalised = if h_max > 0.0 { h / h_max } else { 0.0 };
+            entropy_sum += normalised;
+            counted += 1;
+        }
+        if counted == 0 {
+            0.0
+        } else {
+            #[allow(clippy::cast_precision_loss)]
+            let avg = entropy_sum / counted as f64;
+            avg.clamp(0.0, 1.0)
+        }
     }
 }
 
@@ -454,7 +554,7 @@ pub struct EngineState {
     pub rng_seed: u64,
     pub budget: Budget,
     pub gene_stats: Vec<(String, String, u32, u32)>,
-    pub fitness_history: Vec<f64>,
+    pub fitness_history: VecDeque<f64>,
     pub stagnation_counter: u32,
     pub request_count: usize,
     pub stats: SearchStats,

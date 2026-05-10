@@ -36,7 +36,7 @@ impl FeatureDescriptor {
 /// MAP-Elites quality-diversity search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapElites {
-    grid: HashMap<FeatureDescriptor, Chromosome>,
+    grid: Vec<(FeatureDescriptor, Chromosome)>,
     gene_pool: GenePool,
     generation: u32,
     eval_counter: u64,
@@ -48,7 +48,7 @@ impl MapElites {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            grid: HashMap::new(),
+            grid: Vec::new(),
             gene_pool: GenePool::default_wafrift(),
             generation: 0,
             eval_counter: 0,
@@ -63,8 +63,8 @@ impl MapElites {
         // 50% of the time sample from under-filled regions (random bin)
         // 50% of the time sample uniformly from existing elites
         if rng.gen_bool(0.5) {
-            let values: Vec<&Chromosome> = self.grid.values().collect();
-            Some(values[rng.gen_range(0..values.len())].clone())
+            let idx = rng.gen_range(0..self.grid.len());
+            Some(self.grid[idx].1.clone())
         } else {
             // Try to fill a random feature combination
             let encoding = self
@@ -84,10 +84,14 @@ impl MapElites {
                 grammar,
                 content_type,
             };
-            self.grid.get(&descriptor).cloned().or_else(|| {
-                let values: Vec<&Chromosome> = self.grid.values().collect();
-                Some(values[rng.gen_range(0..values.len())].clone())
-            })
+            self.grid
+                .iter()
+                .find(|(d, _)| *d == descriptor)
+                .map(|(_, c)| c.clone())
+                .or_else(|| {
+                    let idx = rng.gen_range(0..self.grid.len());
+                    Some(self.grid[idx].1.clone())
+                })
         }
     }
 
@@ -121,7 +125,9 @@ impl SearchAlgorithm for MapElites {
         self.in_flight.clear();
         for chromosome in population {
             let descriptor = FeatureDescriptor::from_chromosome(&chromosome);
-            self.grid.entry(descriptor).or_insert(chromosome);
+            if !self.grid.iter().any(|(d, _)| *d == descriptor) {
+                self.grid.push((descriptor, chromosome));
+            }
         }
     }
 
@@ -144,12 +150,16 @@ impl SearchAlgorithm for MapElites {
             if let Some(mut candidate) = self.in_flight.remove(&id) {
                 candidate.record_verdict(&verdict);
                 let descriptor = FeatureDescriptor::from_chromosome(&candidate);
-                let should_insert = match self.grid.get(&descriptor) {
-                    Some(existing) => candidate.fitness > existing.fitness,
+                let should_insert = match self.grid.iter().find(|(d, _)| *d == descriptor) {
+                    Some((_, existing)) => candidate.fitness > existing.fitness,
                     None => true,
                 };
                 if should_insert {
-                    self.grid.insert(descriptor, candidate);
+                    if let Some((idx, _)) = self.grid.iter().enumerate().find(|(_, (d, _))| *d == descriptor) {
+                        self.grid[idx] = (descriptor, candidate);
+                    } else {
+                        self.grid.push((descriptor, candidate));
+                    }
                 }
             }
         }
@@ -163,7 +173,7 @@ impl SearchAlgorithm for MapElites {
     }
 
     fn best(&self) -> Option<&Chromosome> {
-        self.grid.values().max_by(|a, b| {
+        self.grid.iter().map(|(_, c)| c).max_by(|a, b| {
             a.fitness
                 .partial_cmp(&b.fitness)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -171,13 +181,148 @@ impl SearchAlgorithm for MapElites {
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, EvolutionError> {
-        serde_json::to_vec(self).map_err(|e| EvolutionError::SerializationFailed(e.to_string()))
+        serde_json::to_vec(self).map_err(EvolutionError::SerializationFailed)
     }
 
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError> {
         *self = serde_json::from_slice(bytes)
-            .map_err(|e| EvolutionError::DeserializationFailed(e.to_string()))?;
+            .map_err(EvolutionError::DeserializationFailed)?;
         self.in_flight.clear();
         Ok(())
+    }
+
+    /// Every grid cell holds a (descriptor, elite chromosome) pair —
+    /// the elite set IS the live population for diversity purposes.
+    fn population_snapshot(&self) -> Vec<Chromosome> {
+        self.grid.iter().map(|(_, c)| c.clone()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    fn dummy_chromosome(encoding: &str, grammar: &str, content_type: &str) -> Chromosome {
+        Chromosome::new(vec![
+            ("encoding".into(), encoding.into()),
+            ("grammar_rule".into(), grammar.into()),
+            ("content_type".into(), content_type.into()),
+        ])
+    }
+
+    #[test]
+    fn initialize_populates_grid() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(1);
+        let pop = vec![
+            dummy_chromosome("UrlEncode", "sqli", "json"),
+            dummy_chromosome("CaseAlternation", "cmdi", "form"),
+        ];
+        alg.initialize(pop, &pool, &mut rng);
+        assert_eq!(alg.grid.len(), 2);
+    }
+
+    #[test]
+    fn request_evaluations_returns_unique_ids() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(2);
+        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+
+        let c1 = alg.request_evaluations(2, &mut rng);
+        let c2 = alg.request_evaluations(2, &mut rng);
+        let ids: Vec<_> = c1.iter().chain(c2.iter()).map(|c| c.id).collect();
+        let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), unique.len());
+    }
+
+    #[test]
+    fn submit_evaluation_inserts_into_grid() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(3);
+        alg.initialize(vec![], &pool, &mut rng);
+
+        let candidates = alg.request_evaluations(1, &mut rng);
+        let id = candidates[0].id;
+
+        alg.submit_evaluations(vec![(
+            id,
+            OracleVerdict {
+                passed: true,
+                status_delta: 1,
+                body_delta: 1,
+                latency_ms: 10,
+                confidence: 0.9,
+                triggered_rules: 0,
+            },
+        )]);
+
+        assert!(!alg.grid.is_empty());
+        assert!(alg.best().is_some());
+        assert!(alg.best().unwrap().fitness > 0.0);
+    }
+
+    #[test]
+    fn higher_fitness_replaces_existing_grid_cell() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(4);
+        let mut low = dummy_chromosome("UrlEncode", "sqli", "json");
+        low.fitness = 0.1;
+        alg.initialize(vec![low], &pool, &mut rng);
+
+        // Force a candidate with the same descriptor but higher fitness
+        let mut high = dummy_chromosome("UrlEncode", "sqli", "json");
+        high.fitness = 0.9;
+        alg.in_flight.insert(42, high);
+        alg.submit_evaluations(vec![(
+            42,
+            OracleVerdict {
+                passed: true,
+                status_delta: 1,
+                body_delta: 1,
+                latency_ms: 10,
+                confidence: 0.9,
+                triggered_rules: 0,
+            },
+        )]);
+
+        assert!(alg.best().unwrap().fitness > 0.5);
+    }
+
+    #[test]
+    fn checkpoint_roundtrip_clears_in_flight() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(5);
+        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+        let _ = alg.request_evaluations(3, &mut rng);
+        assert!(!alg.in_flight.is_empty());
+
+        let bytes = alg.checkpoint().expect("checkpoint must serialize");
+        let mut restored = MapElites::new();
+        restored.restore(&bytes).expect("restore must succeed");
+        assert!(restored.in_flight.is_empty());
+        assert_eq!(restored.grid.len(), alg.grid.len());
+    }
+
+    #[test]
+    fn should_terminate_respects_budget() {
+        let alg = MapElites::new();
+        let budget = Budget::default_wafrift();
+        let mut stats = SearchStats::default();
+        stats.evaluations = budget.max_requests - 1;
+        assert!(!alg.should_terminate(&stats, &budget));
+        stats.evaluations = budget.max_requests;
+        assert!(alg.should_terminate(&stats, &budget));
+    }
+
+    #[test]
+    fn best_returns_none_for_empty_grid() {
+        let alg = MapElites::new();
+        assert!(alg.best().is_none());
     }
 }

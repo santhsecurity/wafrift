@@ -171,14 +171,194 @@ impl SearchAlgorithm for NoveltySearch {
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, EvolutionError> {
-        serde_json::to_vec(self).map_err(|e| EvolutionError::SerializationFailed(e.to_string()))
+        serde_json::to_vec(self).map_err(EvolutionError::SerializationFailed)
     }
 
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError> {
         *self = serde_json::from_slice(bytes)
-            .map_err(|e| EvolutionError::DeserializationFailed(e.to_string()))?;
+            .map_err(EvolutionError::DeserializationFailed)?;
         self.in_flight.clear();
         Ok(())
+    }
+
+    /// Population + archive — both are live state the algorithm draws
+    /// candidates from. Diversity over the union is the meaningful
+    /// signal for adaptive mutation pressure.
+    fn population_snapshot(&self) -> Vec<Chromosome> {
+        let mut out = Vec::with_capacity(self.population.len() + self.archive.len());
+        out.extend(self.population.iter().cloned());
+        out.extend(self.archive.iter().cloned());
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    fn dummy_chromosome(encoding: &str, grammar: &str, content_type: &str) -> Chromosome {
+        Chromosome::new(vec![
+            ("encoding".into(), encoding.into()),
+            ("grammar_rule".into(), grammar.into()),
+            ("content_type".into(), content_type.into()),
+        ])
+    }
+
+    #[test]
+    fn initialize_sets_population() {
+        let mut alg = NoveltySearch::new(5, 0.3);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(1);
+        let pop = vec![
+            dummy_chromosome("UrlEncode", "sqli", "json"),
+            dummy_chromosome("CaseAlternation", "cmdi", "form"),
+        ];
+        alg.initialize(pop.clone(), &pool, &mut rng);
+        assert_eq!(alg.population.len(), 2);
+        assert!(alg.archive.is_empty());
+    }
+
+    #[test]
+    fn request_evaluations_returns_unique_ids() {
+        let mut alg = NoveltySearch::new(5, 0.3);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(2);
+        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+
+        let c1 = alg.request_evaluations(2, &mut rng);
+        let c2 = alg.request_evaluations(2, &mut rng);
+        let ids: Vec<_> = c1.iter().chain(c2.iter()).map(|c| c.id).collect();
+        let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), unique.len());
+    }
+
+    #[test]
+    fn submit_evaluation_populates_archive_and_population() {
+        let mut alg = NoveltySearch::new(5, 0.0); // threshold = 0 → everything is novel
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(3);
+        alg.initialize(vec![], &pool, &mut rng);
+
+        let candidates = alg.request_evaluations(2, &mut rng);
+        let id1 = candidates[0].id;
+        let id2 = candidates[1].id;
+
+        alg.submit_evaluations(vec![
+            (
+                id1,
+                OracleVerdict {
+                    passed: true,
+                    status_delta: 1,
+                    body_delta: 1,
+                    latency_ms: 10,
+                    confidence: 0.9,
+                    triggered_rules: 0,
+                },
+            ),
+            (
+                id2,
+                OracleVerdict {
+                    passed: false,
+                    status_delta: 0,
+                    body_delta: 0,
+                    latency_ms: 10,
+                    confidence: 0.1,
+                    triggered_rules: 1,
+                },
+            ),
+        ]);
+
+        assert!(!alg.population.is_empty());
+        assert!(!alg.archive.is_empty());
+        assert!(alg.best().is_some());
+    }
+
+    #[test]
+    fn archive_respects_threshold() {
+        let mut alg = NoveltySearch::new(5, f64::INFINITY); // threshold = ∞ → nothing is novel
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(4);
+        alg.initialize(vec![], &pool, &mut rng);
+
+        let candidates = alg.request_evaluations(3, &mut rng);
+        let results: Vec<_> = candidates
+            .iter()
+            .map(|c| {
+                (
+                    c.id,
+                    OracleVerdict {
+                        passed: true,
+                        status_delta: 1,
+                        body_delta: 1,
+                        latency_ms: 10,
+                        confidence: 0.9,
+                        triggered_rules: 0,
+                    },
+                )
+            })
+            .collect();
+        alg.submit_evaluations(results);
+        // With infinite threshold, nothing should enter the archive
+        assert!(alg.archive.is_empty());
+        // But population still grows
+        assert!(!alg.population.is_empty());
+    }
+
+    #[test]
+    fn checkpoint_roundtrip_clears_in_flight() {
+        let mut alg = NoveltySearch::new(5, 0.3);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(5);
+        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+        let _ = alg.request_evaluations(3, &mut rng);
+        assert!(!alg.in_flight.is_empty());
+
+        let bytes = alg.checkpoint().expect("checkpoint must serialize");
+        let mut restored = NoveltySearch::new(5, 0.3);
+        restored.restore(&bytes).expect("restore must succeed");
+        assert!(restored.in_flight.is_empty());
+    }
+
+    #[test]
+    fn should_terminate_respects_budget() {
+        let alg = NoveltySearch::new(5, 0.3);
+        let budget = Budget::default_wafrift();
+        let mut stats = SearchStats::default();
+        stats.generation = budget.max_generations - 1;
+        assert!(!alg.should_terminate(&stats, &budget));
+        stats.generation = budget.max_generations;
+        assert!(alg.should_terminate(&stats, &budget));
+    }
+
+    #[test]
+    fn best_returns_none_for_empty_population_and_archive() {
+        let alg = NoveltySearch::new(5, 0.3);
+        assert!(alg.best().is_none());
+    }
+
+    #[test]
+    fn phenotypic_distance_is_symmetric() {
+        let a = dummy_chromosome("UrlEncode", "sqli", "json");
+        let b = dummy_chromosome("CaseAlternation", "cmdi", "form");
+        let d1 = NoveltySearch::phenotypic_distance(&a, &b);
+        let d2 = NoveltySearch::phenotypic_distance(&b, &a);
+        assert!((d1 - d2).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn phenotypic_distance_self_is_zero() {
+        let a = dummy_chromosome("UrlEncode", "sqli", "json");
+        let d = NoveltySearch::phenotypic_distance(&a, &a);
+        assert!(d.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn levenshtein_distance_smoke() {
+        assert_eq!(super::levenshtein_distance("kitten", "sitting"), 3);
+        assert_eq!(super::levenshtein_distance("", ""), 0);
+        assert_eq!(super::levenshtein_distance("a", ""), 1);
+        assert_eq!(super::levenshtein_distance("", "b"), 1);
     }
 }
 
