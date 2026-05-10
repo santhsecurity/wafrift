@@ -108,13 +108,17 @@ impl SearchAlgorithm for HillClimbing {
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, EvolutionError> {
-        serde_json::to_vec(self).map_err(|e| EvolutionError::SerializationFailed(e.to_string()))
+        serde_json::to_vec(self).map_err(EvolutionError::SerializationFailed)
     }
 
     fn restore(&mut self, bytes: &[u8]) -> Result<(), EvolutionError> {
         *self = serde_json::from_slice(bytes)
-            .map_err(|e| EvolutionError::DeserializationFailed(e.to_string()))?;
+            .map_err(EvolutionError::DeserializationFailed)?;
         Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn SearchAlgorithm> {
+        Box::new(self.clone())
     }
 }
 

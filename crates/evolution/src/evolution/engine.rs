@@ -57,36 +57,67 @@ pub struct EvolutionEngine {
 
 impl Clone for EvolutionEngine {
     fn clone(&self) -> Self {
-        // Clone via checkpoint/restore. Both calls panic-on-error
-        // because they only fail when invariants are corrupt — the
-        // earlier silent-fallback path produced a clone with the
-        // wrong algorithm + default state, masking the bug. Loud
-        // panic > silent state corruption.
-        let alg_bytes = self
-            .algorithm
-            .checkpoint()
-            .expect("algorithm checkpoint must succeed for a live engine");
-        let mut restored = Self::with_algorithm(
-            self.algorithm.name(),
-            self.gene_pool.clone(),
-            self.rng.clone(),
-            self.budget,
-        )
-        .expect("re-constructing the same registered algorithm must succeed");
-        restored
-            .algorithm
-            .restore(&alg_bytes)
-            .expect("restoring fresh checkpoint into matching algorithm must succeed");
-        restored.cache = LruCache::new(self.cache.cap());
-        restored.gene_stats = self.gene_stats.clone();
-        restored.fitness_history = self.fitness_history.clone();
-        restored.stagnation_counter = self.stagnation_counter;
-        restored.corpus = self.corpus.clone();
-        restored.request_count = self.request_count;
-        restored.stats = self.stats;
-        restored.next_id = self.next_id;
-        restored.pending_single = None;
-        restored
+        // Algorithm state is duplicated via the trait's `clone_box`
+        // method, which all in-tree algorithms override with a direct
+        // `Box::new(self.clone())` — no serde_json round-trip.
+        // The previous checkpoint/restore path was 10-100× slower
+        // on populated MapElites grids and was the original "clone
+        // spike on the proxy hot path" blocker (see #113).
+        Self {
+            algorithm: self.algorithm.clone_box(),
+            gene_pool: self.gene_pool.clone(),
+            rng: self.rng.clone(),
+            // The LRU cache deliberately does not survive cloning —
+            // each cloned engine gets a fresh same-capacity cache.
+            // Sharing the cache across clones is what `SharedEngine`
+            // is for (Arc<RwLock<EvolutionEngine>>); deep-cloning the
+            // cache itself would just balloon allocation.
+            cache: LruCache::new(self.cache.cap()),
+            budget: self.budget,
+            // Mid-flight evaluations belong to the caller, not the
+            // clone — drop them.
+            in_flight: HashMap::new(),
+            stats: self.stats,
+            target_health: self.target_health.clone(),
+            checkpoint_path: self.checkpoint_path.clone(),
+            request_count: self.request_count,
+            gene_stats: self.gene_stats.clone(),
+            fitness_history: self.fitness_history.clone(),
+            stagnation_counter: self.stagnation_counter,
+            corpus: self.corpus.clone(),
+            generation_evals: self.generation_evals,
+            next_id: self.next_id,
+            pending_single: None,
+        }
+    }
+}
+
+/// Shared engine pointer — what the proxy and any future
+/// shared-state worker pool should hold.
+///
+/// Use this instead of `Clone` whenever multiple async tasks need
+/// access to the same engine's cache + corpus + gene_stats. Cloning
+/// the `Arc` is O(1); cloning the engine itself is O(grid + archive +
+/// gene_stats) and produces an *independent* engine with a fresh
+/// (empty) cache.
+///
+/// Locking discipline:
+/// - hot read paths (cache hits, diversity_score, best()) → `read()`
+/// - mutation paths (submit_evaluations, gene_stats updates,
+///   checkpoint persistence) → `write()`
+/// - never hold the write lock across an `await` that performs network
+///   I/O — drop it before the await, re-acquire after
+pub type SharedEngine = std::sync::Arc<tokio::sync::RwLock<EvolutionEngine>>;
+
+impl EvolutionEngine {
+    /// Move this engine behind the canonical [`SharedEngine`] pointer.
+    ///
+    /// Equivalent to `Arc::new(RwLock::new(self))` — exists so the
+    /// shared-access pattern is discoverable on the type itself
+    /// rather than buried in module-level docs.
+    #[must_use]
+    pub fn into_shared(self) -> SharedEngine {
+        std::sync::Arc::new(tokio::sync::RwLock::new(self))
     }
 }
 

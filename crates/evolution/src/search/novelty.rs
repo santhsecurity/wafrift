@@ -190,6 +190,10 @@ impl SearchAlgorithm for NoveltySearch {
         out.extend(self.archive.iter().cloned());
         out
     }
+
+    fn clone_box(&self) -> Box<dyn SearchAlgorithm> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

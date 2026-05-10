@@ -196,6 +196,10 @@ impl SearchAlgorithm for MapElites {
     fn population_snapshot(&self) -> Vec<Chromosome> {
         self.grid.iter().map(|(_, c)| c.clone()).collect()
     }
+
+    fn clone_box(&self) -> Box<dyn SearchAlgorithm> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]
