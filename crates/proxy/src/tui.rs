@@ -260,7 +260,7 @@ fn humanize_uptime(d: Duration) -> String {
 /// main loop can begin graceful shutdown.
 pub async fn run(
     cfg: DashboardConfig,
-    mut events: mpsc::UnboundedReceiver<Event>,
+    mut events: mpsc::Receiver<Event>,
     quit_tx: oneshot::Sender<()>,
 ) -> io::Result<()> {
     enable_raw_mode()?;

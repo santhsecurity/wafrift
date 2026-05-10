@@ -80,4 +80,27 @@ mod tests {
         assert!(!detect_type("hello world"));
         assert!(mutate("' OR 1=1--").is_empty());
     }
+
+    #[test]
+    fn generates_script_injection_variants() {
+        let mutations = mutate(r#"{"query": {"match": {"title": "test"}}}"#);
+        assert!(mutations.iter().any(|m| m.contains("script")));
+    }
+
+    #[test]
+    fn generates_nested_obfuscation() {
+        let mutations = mutate(r#"{"query": {"match": {"title": "test"}}}"#);
+        assert!(mutations.iter().any(|m| m.contains("\"q\"") || m.contains("query_string")));
+    }
+
+    #[test]
+    fn empty_payload_returns_empty() {
+        assert!(mutate("").is_empty());
+    }
+
+    #[test]
+    fn rejects_plain_text() {
+        assert!(!detect_type("just some text"));
+        assert!(mutate("just some text").is_empty());
+    }
 }

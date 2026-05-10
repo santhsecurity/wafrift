@@ -66,4 +66,27 @@ mod tests {
         assert!(!detect_type("hello world"));
         assert!(mutate("' OR 1=1--").is_empty());
     }
+
+    #[test]
+    fn consistency_variants_generated() {
+        let mutations = mutate("SELECT * FROM users USING TTL");
+        assert!(mutations.iter().any(|m| m.contains("CONSISTENCY")));
+    }
+
+    #[test]
+    fn ttl_variant_for_insert() {
+        let mutations = mutate("INSERT INTO users (id) VALUES (1) USING TTL");
+        assert!(mutations.iter().any(|m| m.contains("USING TTL")));
+    }
+
+    #[test]
+    fn token_variant_for_where() {
+        let mutations = mutate("SELECT JSON * FROM users WHERE id = 1");
+        assert!(mutations.iter().any(|m| m.contains("token(")));
+    }
+
+    #[test]
+    fn empty_payload_returns_empty() {
+        assert!(mutate("").is_empty());
+    }
 }

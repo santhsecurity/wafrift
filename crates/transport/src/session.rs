@@ -79,16 +79,16 @@ pub fn load_jar(path: &Path) -> Result<Jar, SessionError> {
 /// `add_cookie_str` calls themselves and write the file via this
 /// function's same line format: `Set-Cookie | https://origin/`.
 pub fn save_jar(_jar: &Jar, path: &Path) -> Result<(), SessionError> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                SessionError::CookieJarCorrupt {
-                    path: path.display().to_string(),
-                    line: 0,
-                }
-                .map_io(e)
-            })?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            SessionError::CookieJarCorrupt {
+                path: path.display().to_string(),
+                line: 0,
+            }
+            .map_io(e)
+        })?;
     }
     let header = "# wafrift cookie jar v1\n# format: Set-Cookie | https://origin/\n";
     std::fs::write(path, header).map_err(|e| {
@@ -111,10 +111,10 @@ impl SessionError {
 }
 
 pub fn extract_csrf(response_body: &str, regex: &regex::Regex) -> Result<String, SessionError> {
-    if let Some(m) = regex.captures(response_body).and_then(|c| c.get(1)) {
-        if !m.as_str().is_empty() {
-            return Ok(m.as_str().to_string());
-        }
+    if let Some(m) = regex.captures(response_body).and_then(|c| c.get(1))
+        && !m.as_str().is_empty()
+    {
+        return Ok(m.as_str().to_string());
     }
     Err(SessionError::CsrfTokenNotFound {
         url: "unknown".into(),

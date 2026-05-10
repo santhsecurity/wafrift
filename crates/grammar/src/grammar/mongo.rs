@@ -83,4 +83,27 @@ mod tests {
         assert!(!detect_type("' OR 1=1--"));
         assert!(mutate("hello world").is_empty());
     }
+
+    #[test]
+    fn generates_regex_bypass() {
+        let mutations = mutate(r#"{"username": {"$ne": null}}"#);
+        assert!(mutations.iter().any(|m| m.contains("$regex")));
+    }
+
+    #[test]
+    fn generates_where_injection() {
+        let mutations = mutate(r#"{"$where": "1==1"}"#);
+        assert!(mutations.iter().any(|m| m.contains("sleep")));
+    }
+
+    #[test]
+    fn array_bypass_replaces_ne() {
+        let mutations = mutate(r#"{"field": {"$ne": null}}"#);
+        assert!(mutations.iter().any(|m| m.contains("$in") && m.contains("[null]")));
+    }
+
+    #[test]
+    fn empty_payload_returns_empty() {
+        assert!(mutate("").is_empty());
+    }
 }

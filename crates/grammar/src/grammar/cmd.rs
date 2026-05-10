@@ -430,22 +430,28 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdMutation> {
     // combined obfuscation) still fit inside max_mutations. With small
     // budgets (--variants 5) priority-0 still gets the first 2-3 slots
     // — enough to drive naxsi cmdi to 100% per the live bench.
-    let priority_budget = ((max_mutations / 8).max(2)).min(5);
+    let priority_budget = (max_mutations / 8).clamp(2, 5);
     let cmd_no_args = command.trim();
     let arg_no_passwd = if args.contains("passwd") {
         "/etc/hostname".to_string()
     } else {
         args.to_string()
     };
+    // Find a UTF-8-safe split point near position 2 so a non-ASCII
+    // command name (e.g. "★cat") doesn't panic the mutator on mid-
+    // codepoint slicing. Falls back to splitting at the byte position
+    // of the second character if the first two chars span > 2 bytes,
+    // or to the whole-string split if the command is shorter.
+    let split_at = cmd_no_args
+        .char_indices()
+        .nth(2)
+        .map_or(cmd_no_args.len(), |(idx, _)| idx);
+    let cmd_left = &cmd_no_args[..split_at];
+    let cmd_right = &cmd_no_args[split_at..];
     for variant in [
         format!("{cmd_no_args}${{IFS}}{arg_no_passwd}"),
         format!("${{IFS}}{cmd_no_args}${{IFS}}{arg_no_passwd}"),
-        format!(
-            "{}${{IFS}}{}${{IFS}}{}",
-            &cmd_no_args[..cmd_no_args.len().min(2)],
-            &cmd_no_args[cmd_no_args.len().min(2)..],
-            arg_no_passwd
-        ),
+        format!("{cmd_left}${{IFS}}{cmd_right}${{IFS}}{arg_no_passwd}"),
         // Bare RCE-confirmation commands (no args):
         "whoami".to_string(),
         "id".to_string(),

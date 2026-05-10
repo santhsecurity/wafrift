@@ -166,4 +166,33 @@ mod tests {
         assert!(!detect_type("; cat /etc/passwd"));
         assert!(mutate("hello world", 10).is_empty());
     }
+
+    #[test]
+    fn generates_comspec_variant() {
+        let mutations = mutate("dir C:\\", 10);
+        assert!(mutations.iter().any(|m| m.payload.contains("%comspec%")));
+    }
+
+    #[test]
+    fn generates_powershell_wrapper() {
+        let mutations = mutate("powershell Get-Process", 15);
+        assert!(mutations.iter().any(|m| m.payload.contains("powershell -nop")));
+    }
+
+    #[test]
+    fn max_mutations_respected() {
+        let mutations = mutate("dir C:\\", 3);
+        assert!(mutations.len() <= 3);
+    }
+
+    #[test]
+    fn set_p_trick_generated() {
+        let mutations = mutate("dir C:\\", 10);
+        assert!(mutations.iter().any(|m| m.payload.contains("set /p")));
+    }
+
+    #[test]
+    fn empty_payload_returns_empty() {
+        assert!(mutate("", 10).is_empty());
+    }
 }

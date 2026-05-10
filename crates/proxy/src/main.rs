@@ -292,15 +292,25 @@ static STEALTH_POOL: std::sync::OnceLock<StealthPool> = std::sync::OnceLock::new
 static BODY_PADDING_BYTES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Process-wide TUI event channel. `Some` when `--tui` is set; the
-/// dashboard task drains it. Senders just `try_send` and ignore errors
-/// (a slow drain shouldn't slow the proxy hot path).
-static TUI_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<wafrift_proxy::tui::Event>> =
+/// dashboard task drains it. Bounded at 10 k events so a slow TTY can't
+/// produce unbounded memory growth on a heavy-traffic proxy (was
+/// unbounded — at 10 k req/s with a stalled TUI that's 200 MB/s of
+/// dropped allocations). `try_send` drops on full so the request hot
+/// path never blocks on TUI backpressure.
+static TUI_TX: std::sync::OnceLock<tokio::sync::mpsc::Sender<wafrift_proxy::tui::Event>> =
     std::sync::OnceLock::new();
+
+/// Counter of TUI events dropped because the channel was full. Visible
+/// at /_wafrift/status so an operator can tell their TUI is too slow
+/// for the request rate (vs. silent data loss).
+static TUI_DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[inline]
 fn emit_tui(ev: wafrift_proxy::tui::Event) {
-    if let Some(tx) = TUI_TX.get() {
-        let _ = tx.send(ev);
+    if let Some(tx) = TUI_TX.get()
+        && tx.try_send(ev).is_err()
+    {
+        TUI_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -1056,7 +1066,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Optional TUI dashboard ──────────────────────────────────────
     if args.tui {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // Bounded at 10 k events. At ~200 B per event that caps memory
+        // pressure at ~2 MB even with a fully-stalled TUI; emit_tui
+        // drops on full and bumps TUI_DROPPED.
+        let (tx, rx) = tokio::sync::mpsc::channel(10_000);
         if TUI_TX.set(tx).is_err() {
             warn!("TUI_TX was already initialised; skipping TUI startup");
         } else {
