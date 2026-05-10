@@ -67,8 +67,17 @@ pub enum UrlStrategy {
     /// don't.
     NonCanonicalSpaces,
     /// Insert empty PHP-style array brackets `[]` after the param name
-    /// to force HTTP Parameter Pollution path. Only meaningful when
-    /// the *name* needs to change; otherwise no-op.
+    /// to force HTTP Parameter Pollution path.
+    ///
+    /// **Audit (2026-05-10): NOT YET IMPLEMENTED.** apply_bytes only
+    /// receives the value — the (name, value) pair lives one layer up
+    /// in `mutate_query_string`. The current behaviour is a value
+    /// pass-through, which is a stub. Selecting this strategy will
+    /// log a tracing::warn but otherwise return the value unchanged
+    /// so existing callers don't break. Real HPP needs a query-level
+    /// mutator that operates on the pair list — track via a dedicated
+    /// `query_pollute_pairs()` function rather than as a UrlStrategy
+    /// variant.
     Hpp,
 }
 
@@ -90,8 +99,27 @@ impl UrlStrategy {
     /// (NonCanonicalSpaces) lossy-convert internally.
     #[must_use]
     pub fn apply_bytes(self, value: &[u8]) -> String {
+        self.apply_bytes_with_label(value).0
+    }
+
+    /// Apply the strategy and return BOTH the encoded output AND the
+    /// label that honestly describes what was done. For most strategies
+    /// this is just `Self::label()`, but DoublePercentEncode silently
+    /// downgrades to single-percent encoding above MAX_DOUBLE_ENCODE_INPUT
+    /// (to avoid 9× output blowup) — pre-fix the technique log still
+    /// reported `url:double_percent` even though only one pass ran,
+    /// poisoning every WAF-decay statistic. Now the downgrade is
+    /// surfaced via `url:double_percent_downgraded` so callers (and
+    /// the gene-bank) see what actually shipped.
+    ///
+    /// Audit (2026-05-10).
+    #[must_use]
+    pub fn apply_bytes_with_label(self, value: &[u8]) -> (String, &'static str) {
         match self {
-            Self::PercentEncodeAggressive => percent_encode_aggressive_bytes(value),
+            Self::PercentEncodeAggressive => (
+                percent_encode_aggressive_bytes(value),
+                "url:percent_encode",
+            ),
             Self::DoublePercentEncode => {
                 // Two passes of aggressive percent-encoding can blow
                 // up to roughly 9× the input size on worst-case
@@ -99,19 +127,38 @@ impl UrlStrategy {
                 // so a malicious caller can't OOM via a 100 MB
                 // string asking for 900 MB of output.
                 if value.len() > MAX_DOUBLE_ENCODE_INPUT {
-                    return percent_encode_aggressive_bytes(value);
+                    return (
+                        percent_encode_aggressive_bytes(value),
+                        "url:double_percent_downgraded",
+                    );
                 }
                 let first = percent_encode_aggressive_bytes(value);
-                percent_encode_aggressive_bytes(first.as_bytes())
+                (
+                    percent_encode_aggressive_bytes(first.as_bytes()),
+                    "url:double_percent",
+                )
             }
             Self::NonCanonicalSpaces => {
-                // NonCanonicalSpaces is char-based by design (its
-                // rules target Unicode whitespace + ASCII glyphs);
-                // lossy-convert here so the str path stays sane.
                 let s = String::from_utf8_lossy(value);
-                non_canonical_spaces(&s)
+                (non_canonical_spaces(&s), "url:noncanon_spaces")
             }
-            Self::Hpp => String::from_utf8_lossy(value).into_owned(),
+            Self::Hpp => {
+                // Honest no-op label so the technique log doesn't claim
+                // HPP was applied. See the Hpp variant docstring for
+                // the architectural fix path.
+                if std::str::from_utf8(value).is_err() {
+                    // Lossy convert with a warn — a non-UTF-8 value
+                    // would have been silently U+FFFD'd before.
+                    tracing::warn!(
+                        bytes = value.len(),
+                        "UrlStrategy::Hpp dropped non-UTF-8 bytes; HPP transform NOT YET IMPLEMENTED"
+                    );
+                }
+                (
+                    String::from_utf8_lossy(value).into_owned(),
+                    "url:hpp_unimplemented",
+                )
+            }
         }
     }
 
@@ -183,10 +230,13 @@ pub fn mutate_url(path_and_query: &str, cfg: &UrlMutateConfig) -> (String, Vec<&
 
     let new_query = if cfg.mutate_query_values {
         if let Some(q) = query.as_ref() {
-            let (mq, applied) = mutate_query_string(q, cfg.strategy);
-            if applied {
+            let (mq, label) = mutate_query_string(q, cfg.strategy);
+            if let Some(honest_label) = label {
                 techniques.push("url:query_values");
-                techniques.push(cfg.strategy.label());
+                // Use the honest label returned by apply_bytes_with_label
+                // (may be a "_downgraded" variant) instead of the
+                // nominal cfg.strategy.label(). Audit (2026-05-10).
+                techniques.push(honest_label);
             }
             Some(mq)
         } else {
@@ -244,13 +294,16 @@ fn mutate_last_segment(path: &str, strategy: UrlStrategy) -> Option<String> {
 /// `+` in a query value is interpreted as space per RFC 1866 form
 /// encoding before the strategy is applied — otherwise `q=1+1`
 /// would be mutated as if `+` were a literal plus sign.
-fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
+/// Returns `(mutated_query, Some(honest_label))` if any pair was
+/// mutated, or `(unchanged_query, None)` if not. The label tracks
+/// per-input downgrades — e.g. DoublePercentEncode on an oversize
+/// input returns `"url:double_percent_downgraded"` instead of the
+/// nominal `"url:double_percent"`. Audit (2026-05-10).
+fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, Option<&'static str>) {
     let mut out = Vec::with_capacity(8);
-    let mut applied = false;
+    let mut last_label: Option<&'static str> = None;
     for pair in query.split('&') {
         if pair.is_empty() {
-            // Preserve `&&` so the upstream sees the original
-            // parameter count.
             out.push(String::new());
             continue;
         }
@@ -259,28 +312,27 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, bool) {
                 out.push(format!("{name}="));
                 continue;
             }
-            // Form-decode `+` to space BEFORE percent-decoding so
-            // application/x-www-form-urlencoded semantics survive
-            // the mutation pipeline. Decode into raw bytes (NOT
-            // from_utf8_lossy) so non-UTF-8 escapes survive — see
-            // percent_decode_bytes for the U+FFFD-avoidance rationale.
             let form_decoded = value.replace('+', " ");
             let decoded = percent_decode_bytes(&form_decoded);
-            let mutated = strategy.apply_bytes(&decoded);
-            // Only set applied=true if the mutator actually changed
-            // the value. An all-alphanumeric value passed through
-            // PercentEncodeAggressive comes out byte-equal; reporting
-            // a technique was applied would falsely inflate the
-            // technique log.
+            let (mutated, label) = strategy.apply_bytes_with_label(&decoded);
             if mutated.as_bytes() != value.as_bytes() {
-                applied = true;
+                // If different inputs in the same query produce
+                // different labels (one downgraded, others not),
+                // PREFER the downgraded one — operators care most
+                // about the worst case.
+                if last_label
+                    .map(|l| !l.contains("downgraded"))
+                    .unwrap_or(true)
+                {
+                    last_label = Some(label);
+                }
             }
             out.push(format!("{name}={mutated}"));
         } else {
             out.push(pair.to_string());
         }
     }
-    (out.join("&"), applied)
+    (out.join("&"), last_label)
 }
 
 /// Aggressive percent-encoding: every byte that is not `[A-Za-z0-9]`

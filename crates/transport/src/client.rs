@@ -9,6 +9,49 @@ use wafrift_types::{EvasionConfig, Request};
 
 use crate::response::{EvasionResponse, is_waf_block, is_waf_block_status};
 
+/// Reject upstream targets that fall in the bogon set.
+///
+/// Duplicated from wafrift-proxy because wafrift-transport sits below
+/// wafrift-proxy in the dependency graph. Keep in sync — the
+/// canonical version (with regression tests) is in
+/// `wafrift_proxy::upstream_policy::ip_addr_is_bogon`.
+fn is_bogon_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v) => {
+            if v.is_private()
+                || v.is_loopback()
+                || v.is_link_local()
+                || v.is_broadcast()
+                || v.is_documentation()
+                || v.is_unspecified()
+            {
+                return true;
+            }
+            let o = v.octets();
+            (o[0] == 100 && (o[1] & 0xc0) == 0x40)
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+                || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                || (o[0] == 169 && o[1] == 254 && o[2] == 169 && o[3] == 254)
+        }
+        IpAddr::V6(v) => {
+            if let Some(m) = v.to_ipv4_mapped() {
+                return is_bogon_ip(IpAddr::V4(m));
+            }
+            let segs = v.segments();
+            v.is_loopback()
+                || v.is_multicast()
+                || v.is_unspecified()
+                || v.is_unique_local()
+                || v.is_unicast_link_local()
+                || (segs[0] == 0x2001 && segs[1] == 0x0db8)
+                || (segs[0] == 0x2001 && segs[1] == 0x0000)
+                || (segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020)
+                || (segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0)
+        }
+    }
+}
+
 /// Maximum body size to read for WAF detection (100KB).
 /// WAF block pages are typically small; large responses are likely legitimate downloads.
 const MAX_BODY_READ_SIZE: usize = 100_000;
@@ -131,6 +174,26 @@ impl EvasionClient {
 
     /// Send a request with automatic evasion and retry on WAF block.
     pub async fn send(&self, request: Request) -> Result<EvasionResponse, EvasionError> {
+        // Audit (2026-05-10): EvasionClient's reqwest::Client is built
+        // without BogonFilteringResolver (the resolver lives in
+        // wafrift-proxy which sits ABOVE wafrift-transport). As a
+        // defence-in-depth, reject literal-IP URLs in the bogon set
+        // upfront so a misconfigured scan can't accidentally hit
+        // 127.0.0.1, 169.254.169.254 (IMDS), CGN, Teredo, etc.
+        // Hostname-based DNS rebinding is still an open gap on this
+        // path — wafrift-proxy's BogonFilteringResolver should be
+        // wired into EvasionClient when the dep graph allows it.
+        if let Ok(parsed) = reqwest::Url::parse(&request.url)
+            && let Some(host) = parsed.host_str()
+            && let Ok(ip) = host.parse::<std::net::IpAddr>()
+            && is_bogon_ip(ip)
+        {
+            return Err(EvasionError::InvalidUrl(format!(
+                "EvasionClient refuses literal-IP upstream {ip} (private/loopback/CGN/Teredo). \
+                 If you intentionally target a lab address, configure the proxy with \
+                 --allow-private-upstream and route through it instead."
+            )));
+        }
         let host = extract_host(&request.url)?;
         let max_attempts = self.config.max_attempts as usize;
 

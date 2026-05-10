@@ -120,6 +120,14 @@ pub struct CookieScope {
     /// Secure attribute. When true, the cookie must only replay over
     /// HTTPS.
     pub secure: bool,
+    /// HttpOnly attribute. RFC 6265 §4.1.2.6: when true, the cookie
+    /// must be sent ONLY in actual HTTP requests (it's invisible to
+    /// document.cookie / XHR / fetch). For wafrift's request-replay
+    /// path that means the cookie ALWAYS goes on the wire and is
+    /// never exposed by the proxy to client-side JS-injection probes.
+    /// Audit (2026-05-10): the field was parsed in tests but absent
+    /// from CookieScope, so the constraint was never enforced.
+    pub http_only: bool,
 }
 
 impl CookieScope {
@@ -710,6 +718,10 @@ pub fn extract_clearance_cookie_scoped(
             let attr = attr.trim();
             if attr.eq_ignore_ascii_case("Secure") {
                 scope.secure = true;
+                continue;
+            }
+            if attr.eq_ignore_ascii_case("HttpOnly") {
+                scope.http_only = true;
                 continue;
             }
             if let Some((k, v)) = attr.split_once('=') {

@@ -62,6 +62,7 @@ fn get_for_request_enforces_path_scope() {
             domain: None,
             path: Some("/admin".into()),
             secure: false,
+            ..Default::default()
         },
     );
     assert_eq!(
@@ -87,6 +88,7 @@ fn get_for_request_enforces_secure_scope() {
             domain: None,
             path: None,
             secure: true,
+            ..Default::default()
         },
     );
     assert_eq!(
@@ -112,6 +114,7 @@ fn get_for_request_enforces_domain_scope_to_subdomain() {
             domain: Some("example.com".into()),
             path: None,
             secure: false,
+            ..Default::default()
         },
     );
     assert!(

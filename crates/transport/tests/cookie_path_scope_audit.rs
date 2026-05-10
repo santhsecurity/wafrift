@@ -22,6 +22,7 @@ fn store_with_admin_cookie() -> ChallengeStore {
             domain: None,
             path: Some("/admin".to_string()),
             secure: false,
+            ..Default::default()
         },
     );
     store
@@ -89,6 +90,7 @@ fn cookie_with_trailing_slash_scope_replays_correctly() {
             domain: None,
             path: Some("/api/".to_string()),
             secure: false,
+            ..Default::default()
         },
     );
     assert!(store.get_for_request("example.com", "/api/", true).is_some());
