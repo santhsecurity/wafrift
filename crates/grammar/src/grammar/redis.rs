@@ -82,4 +82,27 @@ mod tests {
         assert!(!detect_type("hello world"));
         assert!(mutate("' OR 1=1--").is_empty());
     }
+
+    #[test]
+    fn eval_variants_generated() {
+        let mutations = mutate("EVAL 'return 1' 0");
+        assert!(mutations.iter().any(|m| m.contains("redis.call")));
+    }
+
+    #[test]
+    fn config_injection_appended() {
+        let mutations = mutate("GET key");
+        assert!(mutations.iter().any(|m| m.contains("CONFIG GET dir")));
+    }
+
+    #[test]
+    fn tab_separator_variant() {
+        let mutations = mutate("GET key");
+        assert!(mutations.iter().any(|m| m.contains('\t')));
+    }
+
+    #[test]
+    fn empty_payload_returns_empty() {
+        assert!(mutate("").is_empty());
+    }
 }
