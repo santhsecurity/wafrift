@@ -311,7 +311,18 @@ fn percent_encode_aggressive_bytes(bytes: &[u8]) -> String {
 fn non_canonical_spaces(s: &str) -> String {
     // saturating_mul to avoid usize overflow on 32-bit targets when
     // someone hands us a ~2 GB string.
-    let mut out = String::with_capacity(s.len().saturating_mul(2));
+    let mut out = String::with_capacity(s.len().saturating_mul(3));
+    // Pre-fix the `_ => out.push(other)` arm passed through `&`, `=`,
+    // `%`, `#`, `+`, `?`, `\0`, control chars, etc. After percent-decode
+    // had already turned `%26c%3Devil` into the literal bytes `&c=evil`,
+    // this re-emitted them verbatim and the server then split the value
+    // on `&` and `=` into THREE pairs — HTTP parameter injection. The
+    // audit caught this as CRITICAL.
+    //
+    // Fix: percent-encode every byte that would be parsed as URL/form
+    // structure or as an ASCII control. The cosmetic substitutions above
+    // (` `→`+`, `/`→`%2F`, etc.) are kept for the WAF-bypass shape; the
+    // dangerous bytes get the standard `%XX` form.
     for ch in s.chars() {
         match ch {
             ' ' => out.push('+'),
@@ -323,6 +334,20 @@ fn non_canonical_spaces(s: &str) -> String {
             '"' => out.push_str("%22"),
             '(' => out.push_str("%28"),
             ')' => out.push_str("%29"),
+            // Structural URL / form delimiters — must always be encoded
+            // so they cannot escape the value into a sibling pair.
+            '&' => out.push_str("%26"),
+            '=' => out.push_str("%3D"),
+            '%' => out.push_str("%25"),
+            '#' => out.push_str("%23"),
+            '?' => out.push_str("%3F"),
+            '+' => out.push_str("%2B"),
+            ';' => out.push_str("%3B"),
+            // Control chars (incl. NUL): %XX-encode exactly.
+            other if (other as u32) < 0x20 || other as u32 == 0x7F => {
+                use std::fmt::Write;
+                let _ = write!(&mut out, "%{:02X}", other as u32);
+            }
             other => out.push(other),
         }
     }

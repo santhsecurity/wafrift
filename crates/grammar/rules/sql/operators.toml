@@ -5,14 +5,16 @@
 # ═══════════════════════════════════════════
 #  Logical OR alternatives
 # ═══════════════════════════════════════════
+#
+# Audit (2026-05-10): `||` is logical OR ONLY in SQLite and Oracle. In
+# MySQL / PostgreSQL / MSSQL with default settings it is the string
+# concatenation operator, so swapping `OR` → `||` flips the meaning of
+# the payload. Removed from the global pool; gate behind a per-dialect
+# rule (sqlite/oracle only) when the engine learns dialect awareness.
 
 [[or_alternative]]
 pattern = "OR"
 description = "Standard SQL OR operator"
-
-[[or_alternative]]
-pattern = "||"
-description = "SQLite/Oracle concatenation and logical OR"
 
 [[or_alternative]]
 pattern = "oR"
@@ -86,17 +88,24 @@ description = "REGEXP operator (MySQL/PostgreSQL)"
 pattern = " RLIKE "
 description = "RLIKE operator (MySQL)"
 
-[[equality_alternative]]
-pattern = " IS "
-description = "IS operator (NULL comparison, boolean)"
-
-[[equality_alternative]]
-pattern = " NOT IN ("
-description = "Double-negative NOT IN for equality (requires closing paren)"
-
-[[equality_alternative]]
-pattern = " BETWEEN "
-description = "BETWEEN range (use with matching value pair)"
+# Audit (2026-05-10): removed semantically-incorrect "equality" entries:
+#
+#   IS         only valid for NULL / boolean. `1 IS 1` is a syntax
+#              error outside MySQL strict-mode; using it as a `=` swap
+#              produces broken SQL the server rejects.
+#   NOT IN (   inverts truth AND requires a closing paren. The engine
+#              doesn't track parens, so the output has unbalanced
+#              syntax. The TOML comment even said "requires closing
+#              paren" but the code ignored it.
+#   BETWEEN    needs a pair (`x BETWEEN low AND high`); naked use is a
+#              syntax error.
+#   DIV        integer division, NOT comparison. `id DIV 1` is `id`,
+#              not `id = 1`.
+#   XOR        bitwise/logical exclusive-or. `1 XOR 1` is FALSE — the
+#              OPPOSITE of what an equality swap intends.
+#
+# Kept: REGEXP, RLIKE, GLOB, SOUNDS LIKE — all real string-equality
+# equivalents on at least one mainstream dialect.
 
 [[equality_alternative]]
 pattern = " GLOB "
@@ -105,11 +114,3 @@ description = "SQLite GLOB operator"
 [[equality_alternative]]
 pattern = " SOUNDS LIKE "
 description = "MySQL phonetic comparison (bypasses string match filters)"
-
-[[equality_alternative]]
-pattern = " DIV "
-description = "MySQL integer division (1 DIV 1 = 1, truthy)"
-
-[[equality_alternative]]
-pattern = " XOR "
-description = "MySQL XOR operator (0 XOR 1 = 1, truthy)"
