@@ -31,5 +31,8 @@ path = "examples/encoding_basic.rs"
 name = "layered"
 path = "examples/layered.rs"
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lints]
 workspace = true

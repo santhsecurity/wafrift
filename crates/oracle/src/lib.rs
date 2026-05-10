@@ -43,6 +43,8 @@ pub mod path;
 pub mod response_oracle;
 /// Body-marker signal extractor.
 pub mod signal_body_marker;
+mod ascii_scan;
+
 /// Connection-behavior signal extractor.
 pub mod signal_connection;
 /// H2 GOAWAY signal extractor.

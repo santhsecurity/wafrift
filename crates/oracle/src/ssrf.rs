@@ -9,6 +9,7 @@
 //! If encoding destroys the URL structure, the request cannot be parsed
 //! and the SSRF attack fails.
 
+use crate::ascii_scan::{contains_ascii_insensitive, starts_with_ascii_insensitive};
 use crate::traits::PayloadOracle;
 use serde::Deserialize;
 use std::sync::OnceLock;
@@ -124,25 +125,26 @@ fn internal_path_indicators() -> &'static [String] {
 
 /// Checks whether a payload contains SSRF URL structure.
 fn has_ssrf_structure(payload: &str) -> bool {
-    let lower = payload.to_ascii_lowercase();
-
     // Must have a URL scheme or be a bare IP/hostname
-    let has_scheme = URL_SCHEMES.iter().any(|scheme| lower.starts_with(scheme));
+    let has_scheme = URL_SCHEMES
+        .iter()
+        .any(|scheme| starts_with_ascii_insensitive(payload, scheme));
 
     // Check for SSRF indicator hosts
     let has_indicator_host = ssrf_indicator_hosts()
         .iter()
-        .any(|host| lower.contains(host));
+        .any(|host| contains_ascii_insensitive(payload, host));
 
     // Check for private IP prefixes
-    let has_private_ip = private_ip_prefixes()
-        .iter()
-        .any(|prefix| lower.contains(prefix) || lower.contains(&prefix.replace('.', "_")));
+    let has_private_ip = private_ip_prefixes().iter().any(|prefix| {
+        contains_ascii_insensitive(payload, prefix)
+            || contains_ascii_insensitive(payload, &prefix.replace('.', "_"))
+    });
 
     // Check for internal path indicators
     let has_internal_path = internal_path_indicators()
         .iter()
-        .any(|path| lower.contains(path));
+        .any(|path| contains_ascii_insensitive(payload, path));
 
     // Valid SSRF structure: scheme + (indicator host OR private IP OR internal path)
     // OR protocol-relative URL (//localhost)
@@ -152,6 +154,9 @@ fn has_ssrf_structure(payload: &str) -> bool {
         || is_protocol_relative
 }
 
+/// Upper bound for passing the full string into the URL parser (hostile multi-megabyte bodies).
+const MAX_URL_PARSE_BYTES: usize = 16 * 1024 * 1024;
+
 /// Validates that the payload looks like a parseable URL.
 fn has_valid_url_syntax(payload: &str) -> bool {
     // Trailing nulls / UTF-8 replacement bytes from lossy decoding do not change URL semantics.
@@ -160,6 +165,10 @@ fn has_valid_url_syntax(payload: &str) -> bool {
     // Protocol-relative URLs are valid SSRF structures
     if payload.starts_with("//") {
         return true;
+    }
+
+    if payload.len() > MAX_URL_PARSE_BYTES {
+        return false;
     }
 
     // Use the `url` crate for rigorous validation

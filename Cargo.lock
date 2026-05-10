@@ -4686,6 +4686,7 @@ dependencies = [
  "base64",
  "flate2",
  "hex",
+ "proptest",
  "rand 0.8.6",
  "serde",
  "serde_json",
