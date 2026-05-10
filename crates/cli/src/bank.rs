@@ -32,6 +32,18 @@ pub enum BankAction {
     Export(BankExportArgs),
     /// Restore a previously-exported envelope onto this machine.
     Import(BankImportArgs),
+    /// Generate a fresh ed25519 signing keypair.
+    GenKey(crate::bank_registry::GenKeyArgs),
+    /// Sign a bank-export envelope.
+    Sign(crate::bank_registry::SignArgs),
+    /// Verify a `*.signed.json` against the trust list.
+    Verify(crate::bank_registry::VerifyArgs),
+    /// HTTP GET a signed bundle, verify, write to disk.
+    Pull(crate::bank_registry::PullArgs),
+    /// Sign a local envelope and HTTP POST to a registry URL.
+    Submit(crate::bank_registry::SubmitArgs),
+    /// Manage `~/.wafrift/trusted-keys.toml`.
+    Trust(crate::bank_registry::TrustArgs),
 }
 
 #[derive(Args, Debug)]
@@ -115,10 +127,29 @@ struct PersistedGeneBank {
 }
 
 pub fn run_bank(args: BankArgs) -> ExitCode {
+    use crate::bank_registry;
     match args.action {
         BankAction::List(a) => run_list(a),
         BankAction::Export(a) => run_export(a),
         BankAction::Import(a) => run_import(a),
+        BankAction::GenKey(a) => bank_registry::run(bank_registry::BankRegistryArgs {
+            action: bank_registry::RegistryAction::GenKey(a),
+        }),
+        BankAction::Sign(a) => bank_registry::run(bank_registry::BankRegistryArgs {
+            action: bank_registry::RegistryAction::Sign(a),
+        }),
+        BankAction::Verify(a) => bank_registry::run(bank_registry::BankRegistryArgs {
+            action: bank_registry::RegistryAction::Verify(a),
+        }),
+        BankAction::Pull(a) => bank_registry::run(bank_registry::BankRegistryArgs {
+            action: bank_registry::RegistryAction::Pull(a),
+        }),
+        BankAction::Submit(a) => bank_registry::run(bank_registry::BankRegistryArgs {
+            action: bank_registry::RegistryAction::Submit(a),
+        }),
+        BankAction::Trust(a) => bank_registry::run(bank_registry::BankRegistryArgs {
+            action: bank_registry::RegistryAction::Trust(a),
+        }),
     }
 }
 

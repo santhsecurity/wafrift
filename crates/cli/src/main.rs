@@ -12,6 +12,7 @@ use wafrift_grammar::grammar;
 use wafrift_strategy::gene_bank::GeneBank;
 
 mod bank;
+mod bank_registry;
 mod bench_diff;
 mod bench_waf;
 mod bypass_probe;
