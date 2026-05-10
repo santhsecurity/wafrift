@@ -20,6 +20,7 @@ members = [
     "crates/proxy",  # May require external dependencies
     "crates/transport", "crates/oracle", "crates/pool",
     "crates/recon",
+    "crates/genome-registry",
 ]
 
 [workspace.package]
