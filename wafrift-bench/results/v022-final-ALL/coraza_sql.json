@@ -1,0 +1,5293 @@
+{
+  "base_url": "http://127.0.0.1:18085",
+  "by_class": {
+    "sql": {
+      "bypass_rate": 0.0815028901734104,
+      "cases": 173,
+      "evaded_bypassed": 141,
+      "evaded_total": 1730,
+      "raw_block_rate": 0.9479768786127167,
+      "raw_blocked": 164
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 865
+    },
+    "mcts": {
+      "bypass_rate": 0.1630057803468208,
+      "bypassed": 141,
+      "oracle_valid": 141,
+      "variants": 865
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 84,
+    "cases_with_at_least_one_oracle_valid_bypass": 84,
+    "oracle_valid_rate": 0.0815028901734104,
+    "oracle_valid_share_of_bypasses": 1.0,
+    "overall_bypass_rate": 0.0815028901734104,
+    "total_variants_bypassed": 141,
+    "total_variants_oracle_valid": 141,
+    "total_variants_sent": 1730
+  },
+  "lineage_output": null,
+  "raw_block_rate": 0.9479768786127167,
+  "raw_blocked": 164,
+  "results": [
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_1_eq_1_dash",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.903957,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_1_eq_1_hash",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.128857,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_1_eq_1_semi",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.189722,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_str_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.789381,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_str_tautology_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.673283,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "and_1_eq_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.297415,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_true",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.057302,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_2_gt_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.073482,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_1_lt_2",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.239826,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_neq_self",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9817789999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_like_self",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.880479,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_in_self",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.314146,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_between",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9135220000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_is_not_null",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.129378,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "or_not_false",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8279099999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "username_admin_dash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.6392639999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "username_admin_hash",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.8696030000000001,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "username_admin_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.6564369999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "username_admin_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8017500000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "double_quote_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.214178,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): grammar:polyglot_ssti_xss, content-type:XmlCdata, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "no_quote_tautology",
+      "raw_blocked": false,
+      "raw_latency_ms": 3.365041,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "having_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.99807,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "group_by_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.018309,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "exists_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.844341,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:keywordless, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "any_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.963435,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "ascii_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.026725,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "hex_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.839371,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "char_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.801881,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "concat_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.880189,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "case_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.064856,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "if_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.272077,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "iif_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.110082,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "decode_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.821999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:cmdi_ifs_paren_free, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "coalesce_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7810119999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "nullif_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.99234,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "isnull_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.854711,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "regexp_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.572633,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "rlike_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.906017,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "soundex_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.095824,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "least_tautology",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.041172,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stacked_drop",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.001557,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_create",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.424233,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stacked_insert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.959839,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stacked_update",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.556031,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:mysql, header:CaseMixing, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_delete",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.3742990000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_alter_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.799471,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stacked_grant",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.555161,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_revoke",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.7594850000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stacked_truncate",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.610384,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:cmdi_ifs_paren_free, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:cmdi_ifs_paren_free, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "stacked_set",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.6695550000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_select",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.352248,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): grammar:cmdi_ifs_paren_free, content-type:XmlCdata, header:CaseMixing, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_call_proc",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.816212,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stacked_exec_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.642509,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stacked_pg_copy",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.102041,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_pg_lo",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.975398,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_use_mysql_priv",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7936949999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): grammar:cmdi_ifs_paren_free, content-type:JsonUnicodeEscape, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "stacked_load_data",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.113037,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "stacked_with_recursive_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.106695,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_two_statements",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.022556,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "stacked_chain_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.043647,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "extractvalue_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1789509999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "extractvalue_database",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.882083,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "updatexml_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.410728,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "updatexml_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.3416979999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "exp_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.614732,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "geometrycollection_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.258772,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:quote_free_tautology, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:keywordless, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "polygon_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.947796,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "multipoint_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.117365,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "linestring_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.087749,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "name_const_collision",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.9707230000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "duplicate_group_count",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.04852,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "rand_floor_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2925250000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "convert_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1769770000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cast_overflow",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.819633,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "ctxsys_drithsx_oracle",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.853893,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "utl_inaddr_oracle",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.373638,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:mysql",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:mysql, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "ora_dml_lock",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.5061620000000002,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "xmltype_oracle",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.6549820000000004,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "convert_to_int_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.021165,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "to_char_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.048155,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "json_each_pg",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.31624,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "implicit_conversion_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.201604,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "openrowset_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.941003,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "row_number_mssql",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.113533,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "bool_substring_eq",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.4275,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "bool_substring_lt",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.914738,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "bool_ascii",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.935783,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "bool_left",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.088862,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "bool_right",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.1090430000000002,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "bool_mid",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.981349,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "bool_length",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.847858,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "bool_count_users",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.223946,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:mysql, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:mysql, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "bool_exists_table",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.319947,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:mysql, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "bool_subquery_eq",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.3069629999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "bool_case_when",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.230348,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "bool_if_mysql",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2016939999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "bool_is_null_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0442369999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): header:CaseMixing, content-type:JsonUnicodeEscape, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "bool_regex",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.280122,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "bool_like",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.090665,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "time_sleep_5",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0097319999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "time_sleep_5_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.834472,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "time_pg_sleep",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7235330000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "time_waitfor_delay",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.164735,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "time_benchmark",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.893283,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "time_dbms_pipe",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1584430000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "time_heavy_query",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.503603,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "time_sleep_in_if",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0843829999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "time_pg_sleep_case",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1475719999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "time_mssql_waitfor",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.270073,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "time_sleep_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.921135,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "time_sleep_double_quote",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.764731,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): grammar:polyglot_ssti_xss, content-type:XmlCdata, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "time_oracle_dbms_lock",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.7761330000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "time_mysql_get_lock",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.989624,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:mysql, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "time_pg_sleep_with_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.499265,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "inline_comment_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.072571,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "inline_comment_select",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.124378,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "padded_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.4240730000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "padded_union",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.29996,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "case_or",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.941194,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "case_select",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.983964,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:mysql",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:mysql, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, grammar:keywordless, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, encoding:NullByte, grammar:keywordless, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "double_select",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.446519,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "tab_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0565200000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "newline_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.846214,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "vertical_tab_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.77497,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "form_feed_separated",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.839041,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "url_encoded_keyword",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.728282,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "double_url_encoded",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.198162,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "mixed_case_url_enc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.816608,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:comment_swap, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "char_function",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8105169999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "concat_keyword",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.861804,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "hex_keyword",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.032265,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "scientific_notation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.647139,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "unicode_zero_width",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.854884,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "no_space_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.32649,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "extra_keyword_padding",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.211532,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "outer_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.680887,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "concat_op",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.437629,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "ternary_op",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.6684780000000003,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:mysql_conditional, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "all_caps",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.743802,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "all_lower",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.032124,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "comment_only_dash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.904925,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:cmdi_ifs_paren_free, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "comment_only_hash",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.952108,
+      "raw_status": 200
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "block_comment_close",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2987170000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_null_3",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0473430000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth4:Applied 4 technique(s): encoding:OverlongUtf8, grammar:keywordless, header:CaseMixing, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_null_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.07765,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_null_5",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.091917,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "union_all_select_null",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.113197,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_int",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1255309999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_str",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.778026,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_version",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.181676,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_db_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.473126,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_information_schema",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.350925,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_columns",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2615969999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1878279999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_group_concat",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.311882,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_pg_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.213941,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): encoding:Base64Encode, grammar:mysql, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_mssql_user",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.777976,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_oracle_dual",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.130711,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_distinct",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.098409,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_padded",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.084915,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_newline",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.242,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): encoding:FullwidthEncode, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_tab",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.165997,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:mysql, header:CaseMixing, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "union_versioned_comment",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.622867,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_subquery",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.129298,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_with_order_by",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.044928,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_load_file",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.214017,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_outfile",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.367566,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:quote_free_strip_comment, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_extractvalue",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.9723820000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_select_hex",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0906449999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_unhex",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.123497,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_select_null_alias",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.097738,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "union_with_limit",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0793739999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "sql",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.1,
+        "bypass_techniques": [
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:mysql"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 1,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "union_paren",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0891220000000001,
+      "raw_status": 403
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 173,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}

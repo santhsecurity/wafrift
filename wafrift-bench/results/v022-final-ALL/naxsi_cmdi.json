@@ -1,0 +1,2021 @@
+{
+  "base_url": "http://127.0.0.1:18087",
+  "by_class": {
+    "cmdi": {
+      "bypass_rate": 0.3389830508474576,
+      "cases": 59,
+      "evaded_bypassed": 200,
+      "evaded_total": 590,
+      "raw_block_rate": 0.864406779661017,
+      "raw_blocked": 51
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 0.6542372881355932,
+      "bypassed": 193,
+      "oracle_valid": 75,
+      "variants": 295
+    },
+    "mcts": {
+      "bypass_rate": 0.023728813559322035,
+      "bypassed": 7,
+      "oracle_valid": 7,
+      "variants": 295
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 59,
+    "cases_with_at_least_one_oracle_valid_bypass": 25,
+    "oracle_valid_rate": 0.13898305084745763,
+    "oracle_valid_share_of_bypasses": 0.41,
+    "overall_bypass_rate": 0.3389830508474576,
+    "total_variants_bypassed": 200,
+    "total_variants_oracle_valid": 82,
+    "total_variants_sent": 590
+  },
+  "lineage_output": null,
+  "raw_block_rate": 0.864406779661017,
+  "raw_blocked": 51,
+  "results": [
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "amp_whoami",
+      "raw_blocked": false,
+      "raw_latency_ms": 3.2321400000000002,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "double_amp_whoami",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.203704,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "pipe_whoami",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.31842,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "double_pipe_whoami",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.194487,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 6,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "newline_whoami",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.702067,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "powershell_iex",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.221677,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "powershell_b64",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.19616999999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "cmd_carat_obfuscation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20987499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cmd_quote_obfuscation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15957100000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cmd_paren_subshell",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.232037,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cmd_for_loop",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.166213,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cmd_set_indirect",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.225635,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 6,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "cmd_call_label",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.3086650000000002,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "cmd_start_b",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.402012,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "powershell_invoke_expr",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.195659,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "cmd_cscript_jscript",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.734288,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cmd_certutil_download",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17996900000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cmd_bitsadmin_download",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.228721,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "semi_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.250131,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "newline_id",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.144066,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "pipe_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15209699999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "and_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.18542,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "or_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16453,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "backtick_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.253157,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "subshell_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.171833,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "subshell_nested",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.194777,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "redir_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23876999999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "stderr_redir",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23358,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "background_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.230505,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "exec_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.264618,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "eval_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.414882,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "exec_curl",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.231716,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "exec_wget",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24049299999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "exec_nc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.217971,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "exec_bash_revshell",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.351041,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "exec_python_revshell",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23622500000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "ifs_replacement",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.151856,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "ifs_index",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.12235999999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "brace_expansion",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.201941,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "brace_glob",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.184077,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "char_class_glob",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17213499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "tilde_home",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.173648,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "perl_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.298122,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "ruby_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22508399999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "php_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.295727,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "node_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.380648,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "awk_system",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.192663,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "sed_command",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.342495,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "find_exec",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.278856,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "xargs_id",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.437314,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "tee_root",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.279567,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "encoded_semi",
+      "raw_blocked": true,
+      "raw_latency_ms": 6.715923,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "encoded_pipe",
+      "raw_blocked": false,
+      "raw_latency_ms": 3.9241129999999997,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "double_encoded_semi",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.358605,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.4,
+        "variants_bypassed": 6,
+        "variants_oracle_valid": 4,
+        "variants_total": 10
+      },
+      "id": "carriage_return",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.921981,
+      "raw_status": 200
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "tab_separated_cmdi",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.273154,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "cve_2018_15473_openssh_userenum",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.208132,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2019_15107_webmin_rce",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.236285,
+      "raw_status": 403
+    },
+    {
+      "class": "cmdi",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.2,
+        "bypass_techniques": [
+          "heavy:cmdi_ifs_paren_free",
+          "heavy:cmdi_ifs_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 2,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2024_3094_xz_backdoor_marker",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.203133,
+      "raw_status": 403
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 59,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}

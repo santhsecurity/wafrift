@@ -1,0 +1,1844 @@
+{
+  "base_url": "http://127.0.0.1:18087",
+  "by_class": {
+    "path": {
+      "bypass_rate": 0.35,
+      "cases": 54,
+      "evaded_bypassed": 189,
+      "evaded_total": 540,
+      "raw_block_rate": 0.9444444444444444,
+      "raw_blocked": 51
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 0.6888888888888889,
+      "bypassed": 186,
+      "oracle_valid": 0,
+      "variants": 270
+    },
+    "mcts": {
+      "bypass_rate": 0.011111111111111112,
+      "bypassed": 3,
+      "oracle_valid": 3,
+      "variants": 270
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 38,
+    "cases_with_at_least_one_oracle_valid_bypass": 2,
+    "oracle_valid_rate": 0.005555555555555556,
+    "oracle_valid_share_of_bypasses": 0.015873015873015872,
+    "overall_bypass_rate": 0.35,
+    "total_variants_bypassed": 189,
+    "total_variants_oracle_valid": 3,
+    "total_variants_sent": 540
+  },
+  "lineage_output": null,
+  "raw_block_rate": 0.9444444444444444,
+  "raw_blocked": 51,
+  "results": [
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "etc_passwd",
+      "raw_blocked": true,
+      "raw_latency_ms": 6.276765999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "etc_shadow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.240573,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "etc_hosts",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20122900000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "etc_resolv_conf",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.310835,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "var_log_auth",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.185299,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "proc_self_environ",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.303382,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "proc_self_cmdline",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.213121,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "proc_self_status",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.222139,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "proc_self_maps",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.19895500000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "root_ssh_authorized",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.202672,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "root_ssh_id_rsa",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.240573,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "home_user_bash_history",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.27599999999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "varied_depth_2",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.208874,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "varied_depth_8",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.251685,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "with_leading_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22050499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "absolute_with_dotslash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.219023,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "absolute_double_dotslash",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.153884,
+      "raw_status": 200
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "double_dot_no_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16476,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "dot_slash_only",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.253939,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "trailing_null",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24058400000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "trailing_null_extension",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21307199999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "trailing_question",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23787799999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "trailing_hash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.152658,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "boot_ini",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.259529,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "windows_system_drivers_etc_hosts",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.181041,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "win_ini",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.227007,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "system32_config_sam",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.207861,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "iis_log",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.273365,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "absolute_c_drive",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22126700000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "absolute_unc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.233701,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "url_enc_backslash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.268385,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "double_url_enc_backslash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23385999999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "mixed_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.352094,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "url_enc_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.208052,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "url_enc_caps",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.288524,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "url_enc_dot",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.277142,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "double_url_enc_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.162687,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "double_url_enc_dot",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.202572,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "triple_url_enc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.197522,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "utf8_overlong_2byte_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.15140499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "utf8_overlong_3byte_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.374967,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "utf8_overlong_4byte_slash",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16999,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "unicode_normalization",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.221718,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "mixed_encoding",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.220085,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "backslash_only",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.13644699999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "backslash_url_enc",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.300386,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "encoded_dot_slash_combo",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.270569,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "double_slash_padded",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.34767499999999996,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "plus_for_space_before_dot",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.334801,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation",
+          "heavy:path_traversal_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2018_12613_phpmyadmin_rfi",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.496145,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2020_14882_weblogic_console",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.27092099999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "cve_2021_42013_apache_traversal",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.266683,
+      "raw_status": 403
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:encoding::CaseAlternation",
+          "heavy:encoding::RandomCase",
+          "heavy:encoding::WhitespaceInsertion",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.2,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 2,
+        "variants_total": 10
+      },
+      "id": "cve_2023_22515_atlassian_confluence_setup",
+      "raw_blocked": false,
+      "raw_latency_ms": 1.8025470000000001,
+      "raw_status": 200
+    },
+    {
+      "class": "path",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.2,
+            "bypassed": 1,
+            "oracle_valid": 1,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.4,
+        "bypass_techniques": [
+          "heavy:encoding::CaseAlternation",
+          "heavy:encoding::RandomCase",
+          "heavy:encoding::WhitespaceInsertion",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss"
+        ],
+        "oracle_valid_rate": 0.1,
+        "variants_bypassed": 4,
+        "variants_oracle_valid": 1,
+        "variants_total": 10
+      },
+      "id": "cve_2023_22518_atlassian_confluence_data_loss",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.659771,
+      "raw_status": 200
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 54,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}

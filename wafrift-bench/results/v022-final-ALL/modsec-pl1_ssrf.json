@@ -1,0 +1,1840 @@
+{
+  "base_url": "http://127.0.0.1:18081",
+  "by_class": {
+    "ssrf": {
+      "bypass_rate": 0.8063829787234043,
+      "cases": 47,
+      "evaded_bypassed": 379,
+      "evaded_total": 470,
+      "raw_block_rate": 0.8297872340425532,
+      "raw_blocked": 39
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 0.7106382978723405,
+      "bypassed": 167,
+      "oracle_valid": 127,
+      "variants": 235
+    },
+    "mcts": {
+      "bypass_rate": 0.902127659574468,
+      "bypassed": 212,
+      "oracle_valid": 212,
+      "variants": 235
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 47,
+    "cases_with_at_least_one_oracle_valid_bypass": 47,
+    "oracle_valid_rate": 0.7212765957446808,
+    "oracle_valid_share_of_bypasses": 0.8944591029023746,
+    "overall_bypass_rate": 0.8063829787234043,
+    "total_variants_bypassed": 379,
+    "total_variants_oracle_valid": 339,
+    "total_variants_sent": 470
+  },
+  "lineage_output": null,
+  "raw_block_rate": 0.8297872340425532,
+  "raw_blocked": 39,
+  "results": [
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): header:CaseMixing, content-type:JsonUnicodeEscape, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.103032,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:XmlCdata, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "localhost_127",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.200923,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): header:CaseMixing, content-type:XmlCdata, encoding:Utf7Encode, grammar:ssrf_mutation"
+        ],
+        "oracle_valid_rate": 0.6,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 6,
+        "variants_total": 10
+      },
+      "id": "localhost_zero",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.003962,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, grammar:cmdi_ifs_paren_free, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:time_blind, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "localhost_decimal",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.909719,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, grammar:cmdi_ifs_paren_free, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:cmdi_ifs_paren_free, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "localhost_hex",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.720687,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): grammar:cmdi_ifs_paren_free, header:CaseMixing, content-type:MultipartQuotedBoundary, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "localhost_octal",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.019441,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "localhost_short",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.246549,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): grammar:cmdi_ifs_paren_free, header:CaseMixing, content-type:MultipartQuotedBoundary, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "ipv6_localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.902601,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): grammar:cmdi_ifs_paren_free, header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth4:Applied 4 technique(s): grammar:cmdi_ifs_paren_free, header:CaseMixing, content-type:MultipartQuotedBoundary, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "ipv6_zero",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.8844770000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 4 technique(s): content-type:XmlCdata, header:CaseMixing, encoding:IisUnicodeEncode, encoding:FullwidthEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "ipv6_mapped",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0200719999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "url_at_bypass",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.456348,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "url_hash_bypass",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.431888,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): encoding:BetweenObfuscation, header:CaseMixing, grammar:ssrf_mutation, encoding:GzipEncode, content-type:XmlCdata",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "url_question_bypass",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.7207329999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "subdomain_eval_dns",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.1351989999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): grammar:polyglot_ssti_xss, content-type:XmlCdata, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "rfc_zero_address",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.083942,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): header:CaseMixing, content-type:Multipart, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "trailing_dot",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.19441,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:XmlCdata, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "url_path_traversal",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.005244,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 1.0,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): grammar:cmdi_ifs_paren_free, header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:time_blind, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 10,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "encoded_ipv4",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.014151,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.4,
+            "bypassed": 2,
+            "oracle_valid": 2,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 6,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "aws_metadata_root",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.206012,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "aws_metadata_latest",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.185363,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "aws_iam_creds",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.255826,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.6,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 6,
+        "variants_total": 10
+      },
+      "id": "aws_user_data",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.195783,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "gcp_metadata_root",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.46273,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:XmlCdata, header:CaseMixing, encoding:MysqlVersionedComment, encoding:SpaceToDash",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "gcp_token",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.213787,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "gcp_attributes",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.293106,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:XmlCdata, header:CaseMixing, grammar:ssrf_mutation, encoding:PercentagePrefix",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "azure_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.724329,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.6,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 6,
+        "variants_total": 10
+      },
+      "id": "azure_identity",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.82575,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "do_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.494005,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "alibaba_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.425697,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "oracle_metadata",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.747312,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:XmlCdata, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "kubelet_pods",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.550791,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 4,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 1.0,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.9,
+        "variants_bypassed": 10,
+        "variants_oracle_valid": 9,
+        "variants_total": 10
+      },
+      "id": "kubernetes_api_self",
+      "raw_blocked": false,
+      "raw_latency_ms": 3.958559,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): grammar:cmdi_ifs_paren_free, header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): grammar:polyglot_ssti_xss, header:CaseMixing, content-type:MultipartQuotedBoundary, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.6,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 6,
+        "variants_total": 10
+      },
+      "id": "file_passwd",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.2247270000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.6,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): grammar:polyglot_ssti_xss, header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 6,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "file_shadow",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.621335,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): grammar:polyglot_ssti_xss, content-type:MultipartQuotedBoundary, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.6,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 6,
+        "variants_total": 10
+      },
+      "id": "file_proc_self_environ",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.6606290000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 2,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.6,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 6,
+        "variants_total": 10
+      },
+      "id": "file_proc_cmdline",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.413644,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 4,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 1.0,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:XmlCdata, header:CaseMixing, encoding:UrlEncode, grammar:ssrf_mutation, encoding:NullByte",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.9,
+        "variants_bypassed": 10,
+        "variants_oracle_valid": 9,
+        "variants_total": 10
+      },
+      "id": "gopher_smtp",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.240457,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 4,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 1.0,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.9,
+        "variants_bypassed": 10,
+        "variants_oracle_valid": 9,
+        "variants_total": 10
+      },
+      "id": "gopher_redis",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.492362,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 4,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 1.0,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:XmlCdata, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.9,
+        "variants_bypassed": 10,
+        "variants_oracle_valid": 9,
+        "variants_total": 10
+      },
+      "id": "gopher_mysql",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.0733920000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 4,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 1.0,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:XmlCdata, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.9,
+        "variants_bypassed": 10,
+        "variants_oracle_valid": 9,
+        "variants_total": 10
+      },
+      "id": "dict_localhost",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.646616,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): encoding:SpaceToRandomBlank, content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "ldap_localhost",
+      "raw_blocked": false,
+      "raw_latency_ms": 2.4893,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 4,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.8,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.7,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 7,
+        "variants_total": 10
+      },
+      "id": "ftp_localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.926706,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary",
+          "mcts:depth3:Applied 3 technique(s): header:CaseMixing, content-type:MultipartQuotedBoundary, grammar:ssrf_mutation",
+          "mcts:depth4:Applied 4 technique(s): content-type:Multipart, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:ssrf_mutation, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "tftp_localhost",
+      "raw_blocked": false,
+      "raw_latency_ms": 4.43186,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.3,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth4:Applied 4 technique(s): content-type:JsonUnicodeEscape, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, grammar:ssrf_mutation, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.3,
+        "variants_bypassed": 3,
+        "variants_oracle_valid": 3,
+        "variants_total": 10
+      },
+      "id": "sftp_localhost",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.437879,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.9,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, grammar:polyglot_ssti_xss, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.8,
+        "variants_bypassed": 9,
+        "variants_oracle_valid": 8,
+        "variants_total": 10
+      },
+      "id": "jar_url",
+      "raw_blocked": false,
+      "raw_latency_ms": 3.399155,
+      "raw_status": 200
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 5,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth3:Applied 3 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:polyglot_ssti_xss",
+          "mcts:depth4:Applied 4 technique(s): grammar:cmdi_ifs_paren_free, header:CaseMixing, content-type:MultipartQuotedBoundary, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:JsonUnicodeEscape, header:CaseMixing, grammar:polyglot_ssti_xss, encoding:DeflateEncode, encoding:GzipEncode",
+          "mcts:depth6:Applied 6 technique(s): content-type:JsonUnicodeEscape, grammar:time_blind, header:CaseMixing, encoding:DeflateEncode, encoding:GzipEncode, encoding:DeflateEncode"
+        ],
+        "oracle_valid_rate": 0.5,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 5,
+        "variants_total": 10
+      },
+      "id": "netdoc_url",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.13922,
+      "raw_status": 403
+    },
+    {
+      "class": "ssrf",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.8,
+            "bypassed": 4,
+            "oracle_valid": 3,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.6,
+            "bypassed": 3,
+            "oracle_valid": 3,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.7,
+        "bypass_techniques": [
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "heavy:ssrf_mutation",
+          "mcts:depth2:Applied 2 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing",
+          "mcts:depth4:Applied 4 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:mysql, encoding:DeflateEncode",
+          "mcts:depth5:Applied 5 technique(s): content-type:MultipartQuotedBoundary, header:CaseMixing, grammar:mysql, encoding:DeflateEncode, encoding:GzipEncode"
+        ],
+        "oracle_valid_rate": 0.6,
+        "variants_bypassed": 7,
+        "variants_oracle_valid": 6,
+        "variants_total": 10
+      },
+      "id": "cve_2017_5715_ssrf_postgres",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.569167,
+      "raw_status": 403
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 47,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}

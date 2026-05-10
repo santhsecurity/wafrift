@@ -1,0 +1,4583 @@
+{
+  "base_url": "http://127.0.0.1:18087",
+  "by_class": {
+    "xss": {
+      "bypass_rate": 0.48846153846153845,
+      "cases": 130,
+      "evaded_bypassed": 635,
+      "evaded_total": 1300,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 130
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 0.9769230769230769,
+      "bypassed": 635,
+      "oracle_valid": 0,
+      "variants": 650
+    },
+    "mcts": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 650
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 127,
+    "cases_with_at_least_one_oracle_valid_bypass": 0,
+    "oracle_valid_rate": 0.0,
+    "oracle_valid_share_of_bypasses": 0.0,
+    "overall_bypass_rate": 0.48846153846153845,
+    "total_variants_bypassed": 635,
+    "total_variants_oracle_valid": 0,
+    "total_variants_sent": 1300
+  },
+  "lineage_output": null,
+  "raw_block_rate": 1.0,
+  "raw_blocked": 130,
+  "results": [
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "img_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.347494,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "img_onerror_template",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.211098,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "body_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28679,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "body_onpageshow",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24876899999999996,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "input_onfocus_autofocus",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.202,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "input_onfocusin",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.433015,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "select_onfocus",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.239201,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "textarea_onfocus",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.237818,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "details_ontoggle",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.19908499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "audio_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.229854,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "audio_onloadstart",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24819700000000003,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "video_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.250452,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "video_onloadeddata",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.290478,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "marquee_onstart",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.232749,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "marquee_onfinish",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.274197,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "iframe_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.226658,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "iframe_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26971900000000004,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "object_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.235204,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "embed_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.183916,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "form_onsubmit",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.286961,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "form_oninput",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16043200000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "input_onsearch",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24285800000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "input_oninvalid",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.214003,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "input_onbeforeinput",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17145300000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "div_onpointermove",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16308699999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "div_onpointerover",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.193224,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "div_oncopy",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.362884,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "div_oncut",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.275308,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "div_onpaste",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.241996,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "input_onkeyup",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20502599999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "html_onmousemove",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.269428,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "img_onbeforeunload",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.240323,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "video_onsuspend",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.25457,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "a_href_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.203213,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "iframe_src_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.212149,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "frame_src_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28702099999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "embed_src_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.181452,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "object_data_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.19649,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "form_action_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.243018,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "button_formaction_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.220906,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "input_formaction_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.216107,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "math_xlink_js",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.25196399999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_template",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.17471899999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_void",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.321415,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26543999999999995,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_with_label",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28286300000000003,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_url_enc_colon",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.485265,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_html_ent_colon",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.248378,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_hex_colon",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28708100000000003,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_tab_after_proto",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.41347900000000004,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_newline_after_proto",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28089000000000003,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "js_uri_padded_proto",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.344489,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "data_uri_html_script",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.450399,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "data_uri_html_b64",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.304398,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "vbscript_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.486116,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "ova_polyglot",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.238369,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_short_1",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.208073,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_short_2",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23580399999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_attribute_break",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.197793,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_double_attr",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.19210200000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_close_tag",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.27981700000000004,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_close_textarea",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.29959399999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_close_style",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22887100000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_close_xmp",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.242407,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_close_iframe",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.220355,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_close_noscript",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.226247,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_js_string_break",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.23337,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_js_string_double",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.206269,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_js_template_break",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20676,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_full_kettle",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.172044,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_xml_cdata",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22406199999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_html_inside_attr",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24393900000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "polyglot_unicode_brackets",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21102800000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.216388,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_alert_double",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.231106,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_confirm",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.30852100000000005,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_prompt",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.251925,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_eval",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.268606,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_settimeout",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.162636,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_function",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.2546,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_constructor",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20632899999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_template_literal",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.224904,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_unicode_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.211809,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_hex_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26098099999999996,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_octal_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.347755,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_alternating_case",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.258517,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_window_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28303300000000003,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_top_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.30256,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_global_this",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.265901,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_self_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.14854,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_with_attr",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.28402499999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_module",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.252045,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_inside_comment",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.273465,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_split_with_comment",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.263156,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_nested_close",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.29671899999999996,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_async",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.235815,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "script_defer",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.200027,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22458299999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_slash_onload",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.255541,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_script",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.206059,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_script_xlink_href",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.235524,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_animate_attribute_name",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.267875,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_set",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.162306,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_use_xlink",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.198935,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_a_xlink_href",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.190459,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_image_onerror",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.199716,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_foreignObject_iframe",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24134499999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_filter_javascript",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.229462,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_pattern_javascript",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.235644,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_handler",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.16238599999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_circle_onbegin",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.13411299999999998,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_animate_event",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.159982,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_repeat_event",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.29999600000000004,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "svg_data_uri",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.21251,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_break_quote_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.24993100000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_break_apos_alert",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26742299999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_break_no_quote",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.26687299999999997,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_javascript_uri_attr",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.176813,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_html_entity_lt",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.341453,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_double_encode",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.223792,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_url_encode",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.194947,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_double_url_encode",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.212861,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_overlong_utf8_lt",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.258006,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_unicode_escape",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.182895,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_html_entity_decimal",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.176903,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.0,
+        "bypass_techniques": [],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 0,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_html_entity_named",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.211318,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_partial_quote_break",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.161795,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_padded_event",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.178696,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_capital_event",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.171202,
+      "raw_status": 403
+    },
+    {
+      "class": "xss",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free",
+          "heavy:xss_paren_free"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "attr_mixed_case_event",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.194887,
+      "raw_status": 403
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 130,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}

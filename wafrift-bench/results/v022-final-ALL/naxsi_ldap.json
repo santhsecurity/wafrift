@@ -1,0 +1,436 @@
+{
+  "base_url": "http://127.0.0.1:18087",
+  "by_class": {
+    "ldap": {
+      "bypass_rate": 0.5,
+      "cases": 11,
+      "evaded_bypassed": 55,
+      "evaded_total": 110,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 11
+    }
+  },
+  "by_strategy": {
+    "heavy": {
+      "bypass_rate": 1.0,
+      "bypassed": 55,
+      "oracle_valid": 0,
+      "variants": 55
+    },
+    "mcts": {
+      "bypass_rate": 0.0,
+      "bypassed": 0,
+      "oracle_valid": 0,
+      "variants": 55
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 11,
+    "cases_with_at_least_one_oracle_valid_bypass": 0,
+    "oracle_valid_rate": 0.0,
+    "oracle_valid_share_of_bypasses": 0.0,
+    "overall_bypass_rate": 0.5,
+    "total_variants_bypassed": 55,
+    "total_variants_oracle_valid": 0,
+    "total_variants_sent": 110
+  },
+  "lineage_output": null,
+  "raw_block_rate": 1.0,
+  "raw_blocked": 11,
+  "results": [
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "tautology_or_uid",
+      "raw_blocked": true,
+      "raw_latency_ms": 1.7084489999999999,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "tautology_and_obj",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.20174,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "wildcard_cn",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.22398200000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "boolean_true",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.31312,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "always_true_filter",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.299414,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "blind_substring",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.215836,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "blind_present",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.326565,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "username_admin_anon",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.215506,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "double_filter_close",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.127751,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "with_extensible_match",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.146436,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "heavy": {
+            "bypass_rate": 1.0,
+            "bypassed": 5,
+            "oracle_valid": 0,
+            "variants": 5
+          },
+          "mcts": {
+            "bypass_rate": 0.0,
+            "bypassed": 0,
+            "oracle_valid": 0,
+            "variants": 5
+          }
+        },
+        "bypass_rate": 0.5,
+        "bypass_techniques": [
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation",
+          "heavy:ldap_mutation"
+        ],
+        "oracle_valid_rate": 0.0,
+        "variants_bypassed": 5,
+        "variants_oracle_valid": 0,
+        "variants_total": 10
+      },
+      "id": "negation",
+      "raw_blocked": true,
+      "raw_latency_ms": 0.192913,
+      "raw_status": 403
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "heavy",
+    "mcts"
+  ],
+  "total_cases": 11,
+  "variants_per_case_per_strategy": 5,
+  "wafrift_version": "0.2.2"
+}
