@@ -49,9 +49,14 @@ thiserror = { workspace = true }
 # tree — just turn them on for the proxy binary.
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+# Best-effort clipboard for the TUI's curl-yank action; default-features
+# off so headless servers (no X11/wayland) still build. The yank action
+# falls back to writing /tmp/wafrift-yank-N.curl when arboard fails.
+arboard = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["clipboard"]
+clipboard = ["dep:arboard"]
 # Forwards the wafrift-transport `tls-impersonate` feature so that
 # `wafrift-proxy --tls-impersonate <profile>` actually engages the
 # StealthClient (rquest + BoringSSL) instead of erroring at startup.
