@@ -103,7 +103,17 @@ pub fn draw_footer(f: &mut Frame, area: Rect, state: &State) {
         sep(),
         key_hint("tab", "switch"),
         sep(),
+        key_hint("i", "intercept"),
+        sep(),
     ];
+    if state.tab == Tab::Intercept {
+        spans.extend([
+            key_hint("r", "release"),
+            sep(),
+            key_hint("k", "kill"),
+            sep(),
+        ]);
+    }
     if state.tab == Tab::Flow {
         spans.extend([
             key_hint("/", "filter"),

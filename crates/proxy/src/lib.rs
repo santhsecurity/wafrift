@@ -6,6 +6,7 @@
 //! evasion proxy as a library) need.
 
 pub mod hop_by_hop;
+pub mod intercept;
 pub mod mitm;
 pub mod rate_limit;
 pub mod scope;

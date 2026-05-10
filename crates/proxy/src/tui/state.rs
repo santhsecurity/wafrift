@@ -168,17 +168,25 @@ pub enum Tab {
     Overview,
     Hosts,
     Techniques,
+    Intercept,
 }
 
 impl Tab {
-    pub const ORDER: [Tab; 4] = [Self::Flow, Self::Overview, Self::Hosts, Self::Techniques];
+    pub const ORDER: [Tab; 5] = [
+        Self::Flow,
+        Self::Overview,
+        Self::Hosts,
+        Self::Techniques,
+        Self::Intercept,
+    ];
 
     pub fn next(self) -> Self {
         match self {
             Self::Flow => Self::Overview,
             Self::Overview => Self::Hosts,
             Self::Hosts => Self::Techniques,
-            Self::Techniques => Self::Flow,
+            Self::Techniques => Self::Intercept,
+            Self::Intercept => Self::Flow,
         }
     }
     pub fn label(self) -> &'static str {
@@ -187,6 +195,7 @@ impl Tab {
             Self::Overview => "Overview",
             Self::Hosts => "Hosts",
             Self::Techniques => "Techniques",
+            Self::Intercept => "Intercept",
         }
     }
 }
@@ -313,6 +322,10 @@ pub struct State {
     pub toast: Option<Toast>,
     /// Monotonic counter for `/tmp/wafrift-yank-N.curl` filenames.
     pub yank_seq: u64,
+    /// Index INTO the latest `intercept::global_store().snapshot()`
+    /// for the Intercept tab. Recomputed each render — selection
+    /// survives across snapshots when possible.
+    pub intercept_selected: Option<u64>,
 }
 
 impl State {
@@ -907,11 +920,12 @@ mod tests {
     }
 
     #[test]
-    fn tab_cycles_in_four() {
+    fn tab_cycles_in_five() {
         assert_eq!(Tab::Flow.next(), Tab::Overview);
         assert_eq!(Tab::Overview.next(), Tab::Hosts);
         assert_eq!(Tab::Hosts.next(), Tab::Techniques);
-        assert_eq!(Tab::Techniques.next(), Tab::Flow);
+        assert_eq!(Tab::Techniques.next(), Tab::Intercept);
+        assert_eq!(Tab::Intercept.next(), Tab::Flow);
     }
 
     #[test]

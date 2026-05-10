@@ -77,6 +77,7 @@ fn handle_normal(
         KeyCode::Char('4') | KeyCode::Char('t') | KeyCode::Char('T') => {
             state.tab = Tab::Techniques;
         }
+        KeyCode::Char('5') => state.tab = Tab::Intercept,
 
         // Outcome filter cycle (Flow only) — 'o' lowercase
         KeyCode::Char('o') if state.tab == Tab::Flow => {
@@ -98,11 +99,11 @@ fn handle_normal(
             state.set_toast(msg, ToastKind::Info);
         }
 
-        KeyCode::Char('r') => {
+        KeyCode::Char('r') if state.tab != Tab::Intercept => {
             state.record(&super::state::Event::ResetCounters);
             state.set_toast("counters reset", ToastKind::Ok);
         }
-        KeyCode::Char('c') => {
+        KeyCode::Char('c') if state.tab != Tab::Intercept => {
             state.recent.clear();
             state.selected = None;
             state.set_toast("request list cleared", ToastKind::Ok);
@@ -174,6 +175,48 @@ fn handle_normal(
         // captured request is already evaded.
         KeyCode::Char('R') if state.tab == Tab::Flow => {
             do_replay(state);
+        }
+
+        // Intercept-mode toggle — works from any tab so the operator
+        // doesn't have to navigate to enable.
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            let now_on = crate::intercept::toggle_intercept_mode();
+            state.set_toast(
+                format!("intercept mode → {}", if now_on { "ON" } else { "OFF" }),
+                if now_on { ToastKind::Warn } else { ToastKind::Info },
+            );
+            if now_on {
+                state.tab = Tab::Intercept;
+            }
+        }
+
+        // Intercept tab actions: r releases the oldest pending,
+        // k kills the oldest pending. Operator-friendly default
+        // (act on the head of the queue) so no per-row selection
+        // is needed for the v1 surface.
+        KeyCode::Char('r') if state.tab == Tab::Intercept => {
+            let store = crate::intercept::global_store();
+            if let Some(pending) = store.snapshot().into_iter().next() {
+                store.resolve(pending.id, crate::intercept::InterceptDecision::Release);
+                state.set_toast(
+                    format!("released #{} → upstream", pending.id),
+                    ToastKind::Ok,
+                );
+            } else {
+                state.set_toast("intercept: no pending request", ToastKind::Warn);
+            }
+        }
+        KeyCode::Char('k') if state.tab == Tab::Intercept => {
+            let store = crate::intercept::global_store();
+            if let Some(pending) = store.snapshot().into_iter().next() {
+                store.resolve(pending.id, crate::intercept::InterceptDecision::Kill);
+                state.set_toast(
+                    format!("killed #{} → 403", pending.id),
+                    ToastKind::Err,
+                );
+            } else {
+                state.set_toast("intercept: no pending request", ToastKind::Warn);
+            }
         }
 
         _ => {}
@@ -408,6 +451,39 @@ mod tests {
         s.follow = false;
         press(&mut s, KeyCode::End, KeyModifiers::NONE);
         assert!(s.follow);
+    }
+
+    #[test]
+    fn five_switches_to_intercept_tab() {
+        let mut s = State::new();
+        press(&mut s, KeyCode::Char('5'), KeyModifiers::NONE);
+        assert_eq!(s.tab, Tab::Intercept);
+    }
+
+    #[test]
+    fn i_toggles_intercept_mode_and_jumps_to_tab_when_enabling() {
+        // Reset known state so the toggle direction is deterministic.
+        crate::intercept::set_intercept_mode(false);
+        let mut s = State::new();
+        assert_eq!(s.tab, Tab::Flow);
+        press(&mut s, KeyCode::Char('i'), KeyModifiers::NONE);
+        assert!(crate::intercept::intercept_mode_enabled());
+        assert_eq!(s.tab, Tab::Intercept, "enabling intercept jumps to the tab");
+        press(&mut s, KeyCode::Char('i'), KeyModifiers::NONE);
+        assert!(!crate::intercept::intercept_mode_enabled());
+        // Reset for any later test.
+        crate::intercept::set_intercept_mode(false);
+    }
+
+    #[test]
+    fn r_on_intercept_tab_does_not_reset_counters() {
+        let mut s = State::new();
+        // Force the unguarded reset arm NOT to fire from the
+        // Intercept tab — total must stay 0 after r.
+        s.tab = Tab::Intercept;
+        s.total = 7;
+        press(&mut s, KeyCode::Char('r'), KeyModifiers::NONE);
+        assert_eq!(s.total, 7, "r on Intercept must not run reset_counters");
     }
 
     #[test]

@@ -47,6 +47,7 @@ pub mod keymap;
 pub mod render_chrome;
 pub mod render_flow;
 pub mod render_hosts;
+pub mod render_intercept;
 pub mod render_overview;
 pub mod render_techniques;
 pub mod state;
@@ -142,6 +143,7 @@ fn draw(f: &mut ratatui::Frame, cfg: &DashboardConfig, state: &State) {
         Tab::Overview => render_overview::draw(f, chunks[2], cfg, state),
         Tab::Hosts => render_hosts::draw(f, chunks[2], state),
         Tab::Techniques => render_techniques::draw(f, chunks[2], state),
+        Tab::Intercept => render_intercept::draw(f, chunks[2], state),
     }
     render_chrome::draw_footer(f, chunks[3], state);
 }

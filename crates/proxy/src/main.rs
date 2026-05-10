@@ -324,6 +324,10 @@ static MUTATE_URL_ENABLED: std::sync::atomic::AtomicBool =
 static CHALLENGE_STORE: std::sync::OnceLock<wafrift_transport::challenge::ChallengeStore> =
     std::sync::OnceLock::new();
 
+// Intercept mode + store now live in wafrift_proxy::intercept so
+// the TUI keymap (in the lib) can toggle and the binary (in main)
+// can rendezvous against the same singletons. See #119.
+
 fn challenge_store() -> &'static wafrift_transport::challenge::ChallengeStore {
     CHALLENGE_STORE.get_or_init(wafrift_transport::challenge::ChallengeStore::new)
 }
@@ -1551,6 +1555,45 @@ async fn forward_wafrift_request(
             wafrift_evolution::body_padding::PadOutcome::SkippedTooSmall => {
                 // Already warned at startup; nothing to do per-request.
             }
+        }
+    }
+
+    // ── Operator intercept rendezvous (#119) ────────────────────────
+    // When intercept-mode is on, park here until the operator
+    // releases (forward unmodified) or kills (synthetic 403). 30s
+    // default-allow timeout so the proxy never wedges if the
+    // operator walks away. Skipped when intercept-mode is off — the
+    // atomic load is a single non-blocking read.
+    if wafrift_proxy::intercept::intercept_mode_enabled() {
+        let store = wafrift_proxy::intercept::global_store();
+        let path_for_intercept = evasion_result
+            .request
+            .url
+            .splitn(4, '/')
+            .nth(3)
+            .map(|s| format!("/{s}"))
+            .unwrap_or_else(|| "/".into());
+        let (_id, rx) = store.register(
+            host.clone(),
+            evasion_result.request.method.as_str(),
+            path_for_intercept,
+        );
+        let decision = tokio::select! {
+            d = rx => d.unwrap_or(wafrift_proxy::intercept::InterceptDecision::Release),
+            _ = tokio::time::sleep(wafrift_proxy::intercept::INTERCEPT_TIMEOUT) => {
+                warn!(
+                    host = %host,
+                    "intercept default-allow after {} secs (operator did not act)",
+                    wafrift_proxy::intercept::INTERCEPT_TIMEOUT.as_secs()
+                );
+                wafrift_proxy::intercept::InterceptDecision::Release
+            }
+        };
+        if matches!(decision, wafrift_proxy::intercept::InterceptDecision::Kill) {
+            return Ok(error_response(
+                StatusCode::FORBIDDEN,
+                "killed by operator from intercept tab",
+            ));
         }
     }
 
