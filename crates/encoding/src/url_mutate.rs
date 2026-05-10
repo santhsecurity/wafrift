@@ -46,6 +46,12 @@ impl Default for UrlMutateConfig {
     }
 }
 
+/// Hard cap on the input size accepted by [`UrlStrategy::DoublePercentEncode`].
+/// Two passes of aggressive percent-encoding can produce up to ~9×
+/// the input length, so an unbounded input is a DoS vector. Real WAF
+/// values are kilobytes at most; 1 MB is generous.
+pub const MAX_DOUBLE_ENCODE_INPUT: usize = 1024 * 1024;
+
 /// Per-value mutation choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UrlStrategy {
@@ -74,6 +80,14 @@ impl UrlStrategy {
         match self {
             Self::PercentEncodeAggressive => percent_encode_aggressive(value),
             Self::DoublePercentEncode => {
+                // Two passes of aggressive percent-encoding can blow
+                // up to roughly 9× the input size on worst-case
+                // inputs (every byte → %XX → %25%XX). Cap the input
+                // so a malicious caller can't OOM via a 100 MB
+                // string asking for 900 MB of output.
+                if value.len() > MAX_DOUBLE_ENCODE_INPUT {
+                    return percent_encode_aggressive(value);
+                }
                 percent_encode_aggressive(&percent_encode_aggressive(value))
             }
             Self::NonCanonicalSpaces => non_canonical_spaces(value),
@@ -100,13 +114,23 @@ impl UrlStrategy {
 ///   `/path/segment?a=1&b=2`
 ///   `/path/segment`            (no query — query mutation is a no-op)
 ///   `?a=1`                     (no path — path mutation is a no-op)
+///   `/path?a=1#frag`           (fragment preserved verbatim)
 ///
 /// Never panics, never returns empty for non-empty input.
 #[must_use]
 pub fn mutate_url(path_and_query: &str, cfg: &UrlMutateConfig) -> (String, Vec<&'static str>) {
-    let (path, query) = match path_and_query.split_once('?') {
+    // Split off any #fragment FIRST so query mutation can't encode the
+    // '#' delimiter and destroy fragment routing. Pre-fix the
+    // mutator turned `/p?q=1#frag` into `/p?q=1%23frag`, which the
+    // upstream then treated as a single (broken) query value.
+    let (without_frag, fragment) = match path_and_query.split_once('#') {
+        Some((rest, frag)) => (rest, Some(frag)),
+        None => (path_and_query, None),
+    };
+
+    let (path, query) = match without_frag.split_once('?') {
         Some((p, q)) => (p.to_string(), Some(q.to_string())),
-        None => (path_and_query.to_string(), None),
+        None => (without_frag.to_string(), None),
     };
     let mut techniques: Vec<&'static str> = Vec::new();
 
@@ -138,10 +162,14 @@ pub fn mutate_url(path_and_query: &str, cfg: &UrlMutateConfig) -> (String, Vec<&
         query
     };
 
-    let result = match new_query {
+    let mut result = match new_query {
         Some(q) => format!("{new_path}?{q}"),
         None => new_path,
     };
+    if let Some(frag) = fragment {
+        result.push('#');
+        result.push_str(frag);
+    }
     (result, techniques)
 }
 
@@ -151,7 +179,13 @@ fn mutate_last_segment(path: &str, strategy: UrlStrategy) -> Option<String> {
     if tail.is_empty() {
         return None;
     }
-    let mutated = strategy.apply(tail);
+    // Decode pre-existing percent escapes BEFORE re-applying the
+    // mutation strategy. Otherwise a tail like `admin%2Ephp` gets
+    // double-encoded to `admin%252Ephp` (the %2E is read as the
+    // literal three bytes `%`, `2`, `E` and each is re-encoded).
+    // Same shape as the query-value path which already decodes.
+    let decoded = percent_decode_lossy(tail);
+    let mutated = strategy.apply(&decoded);
     Some(format!("{head}{mutated}"))
 }
 
