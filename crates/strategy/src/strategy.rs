@@ -365,7 +365,6 @@ fn build_mcts_result(env: WafRiftEnv, config: &EvasionConfig) -> Option<EvasionR
 ///   Use when caller wants to dictate technique order from outside.
 /// - `evade_intelligent` — heuristic pipeline + the full
 ///   `IntelligenceLoop` (differential probing + advisor). Heaviest.
-#[must_use]
 /// Bodies above this threshold skip MCTS and use the classic heuristic
 /// pipeline. MCTS runs 500 iterations and each iteration clones the
 /// full request, so on a 100 KB POST the search alone allocates tens

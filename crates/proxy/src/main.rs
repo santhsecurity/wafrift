@@ -502,7 +502,19 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
     // Atomic, durable write via tempfile + fsync + rename + parent fsync.
     // Without the fsyncs a system crash between write and rename can leave
     // the renamed file zero-length or partially flushed.
-    let tmp = path.with_extension("json.tmp");
+    //
+    // The temp filename includes the PID + a nanosecond timestamp so two
+    // proxies pointed at the same gene-bank path don't both try to
+    // create the same `<path>.tmp` and clobber each other's file
+    // mid-flight (one rename succeeds; the other gets ENOENT). With a
+    // per-writer tmp name each rename is independent — the last one to
+    // rename wins, which matches the existing single-writer semantics.
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_extension(format!("json.tmp.{pid}.{nanos}"));
     {
         use std::io::Write;
         let mut f = std::fs::File::create(&tmp)?;
