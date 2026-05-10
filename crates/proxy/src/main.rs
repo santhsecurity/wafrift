@@ -700,7 +700,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let dir = args
             .mitm_ca_dir
             .as_ref()
-            .expect("mitm_ca_dir was set above when args.mitm is true");
+            .ok_or("internal error: mitm_ca_dir was not set")?;
         let ca = wafrift_proxy::mitm::ensure_ca(dir)?;
 
         // Attempt OS trust store installation.
@@ -1458,6 +1458,9 @@ async fn forward_wafrift_request(
     let conn_fwd = collect_connection_header_names(&evasion_result.request.headers);
     let max = limits.max_upstream_response_bytes;
 
+    // Wall-clock the upstream round-trip so the TUI / log line shows
+    // an honest latency, not zero.
+    let upstream_start = Instant::now();
     let status_code: u16;
     let (mut response_builder, buf) = if let Some(sc) = stealth() {
         let mut filtered_headers = Vec::with_capacity(evasion_result.request.headers.len());
@@ -1730,6 +1733,31 @@ async fn forward_wafrift_request(
         );
         let tls_profile = stealth().map(|sc| sc.profile().name().to_string());
         let bypassed = !is_block && !evasion_result.techniques.is_empty();
+        let upstream_latency_ms =
+            u64::try_from(upstream_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+        // Capture the post-evasion request headers (Host etc. omitted
+        // from `evasion_result.request.headers` because the upstream
+        // client supplies its own) and a 1 KB body excerpt for the
+        // detail pane.
+        let cap = wafrift_proxy::tui::MAX_BODY_EXCERPT;
+        let req_body_excerpt = evasion_result
+            .request
+            .body
+            .as_deref()
+            .map(|b| b[..b.len().min(cap)].to_vec())
+            .unwrap_or_default();
+        let resp_body_excerpt = buf[..buf.len().min(cap)].to_vec();
+        let resp_body_total = buf.len() as u64;
+
+        // WAF identification — re-read under the lock so we get the
+        // most recent value (this function ran the identification a
+        // few lines above).
+        let waf_name = {
+            let st = state.lock().await;
+            st.hosts.get(&host).and_then(|h| h.waf_name.clone())
+        };
+
         emit_tui(wafrift_proxy::tui::Event::Request {
             host: host.clone(),
             method: evasion_result.request.method.as_str().to_string(),
@@ -1740,7 +1768,18 @@ async fn forward_wafrift_request(
             techniques: technique_keys.join(", "),
             tls_profile,
             body_padded,
-            upstream_latency_ms: 0,
+            upstream_latency_ms,
+            waf_name,
+            req_headers: evasion_result.request.headers.clone(),
+            req_body_excerpt,
+            resp_headers: header_pairs.clone(),
+            resp_body_excerpt,
+            resp_body_total,
+            // attempts is not currently threaded through from
+            // forward_with_evade_retry — would need a return-tuple
+            // change. Leaving 0 until that refactor lands; the TUI
+            // tolerates 0 (just shows "0" in the detail pane).
+            attempts: 0,
         });
     }
 

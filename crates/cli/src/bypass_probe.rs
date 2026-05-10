@@ -38,7 +38,16 @@ use std::time::Duration;
 pub struct BypassProbeArgs {
     /// Target URL to probe. Must already return 401/403 (or any status
     /// the user wants to bypass) for the probe set to be meaningful.
+    /// When `--paths-file` is set this is the base URL (scheme://host)
+    /// and the file supplies the path list.
     pub url: String,
+
+    /// Path one URL path per line. Each path is appended to `<url>` and
+    /// probed with the full bypass set. Useful for sweeping a known
+    /// admin surface (`/admin /actuator /.env /wp-admin ...`). When
+    /// unset, only the single `url` arg is probed.
+    #[arg(long)]
+    pub paths_file: Option<String>,
 
     /// Request timeout in seconds.
     #[arg(long, default_value_t = 8)]
@@ -48,6 +57,13 @@ pub struct BypassProbeArgs {
     /// possible (may trip rate limits).
     #[arg(long, default_value_t = 25)]
     pub delay_ms: u64,
+
+    /// Maximum concurrent in-flight probes. Higher = faster but more
+    /// likely to trip rate limits. With `--delay-ms > 0` the delay
+    /// applies between batches (so effective rate is concurrency /
+    /// delay).
+    #[arg(long, default_value_t = 8)]
+    pub concurrency: usize,
 
     /// Disable TLS certificate verification (self-signed test stacks).
     #[arg(long)]
@@ -74,6 +90,10 @@ pub struct BypassProbeArgs {
     /// higher = miss small content changes.
     #[arg(long, default_value_t = 10.0)]
     pub body_diff_threshold_pct: f64,
+
+    /// Skip results below this severity (LOW < MEDIUM < HIGH).
+    #[arg(long, default_value = "low", value_parser = ["low", "medium", "high"])]
+    pub min_severity: String,
 
     /// Quiet — emit only machine-parseable JSON.
     #[arg(short, long)]
@@ -128,11 +148,104 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
-    let url = args.url.clone();
-    let parsed_path = parse_path_from_url(&url);
+    let urls = build_url_list(&args)?;
+    let concurrency = args.concurrency.max(1);
+    let min_severity_rank = severity_rank(&args.min_severity);
 
-    // ── Baseline request ─────────────────────────────────────────────
-    let baseline = match client.get(&url).send().await {
+    let mut all_results: Vec<UrlReport> = Vec::with_capacity(urls.len());
+    for url in &urls {
+        match probe_one_url(&client, url, &args, concurrency).await {
+            Ok(mut report) => {
+                report
+                    .divergences
+                    .retain(|d| severity_rank(d.severity) >= min_severity_rank);
+                all_results.push(report);
+            }
+            Err(e) => {
+                eprintln!("error probing {url}: {e}");
+                if urls.len() == 1 {
+                    return Err(e);
+                }
+                // multi-URL mode: keep going with the rest
+            }
+        }
+    }
+
+    if args.format == "json" {
+        let out = serde_json::json!({ "results": all_results });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+    } else {
+        for report in &all_results {
+            print_report_text(report);
+        }
+        let total = all_results.iter().map(|r| r.divergences.len()).sum::<usize>();
+        if all_results.len() > 1 {
+            println!();
+            println!(
+                "=== summary: {} URL(s) probed, {total} divergence(s) at or above {} severity ===",
+                all_results.len(),
+                args.min_severity.to_uppercase()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Per-URL result for JSON output and text rendering.
+#[derive(Debug, Clone, serde::Serialize)]
+struct UrlReport {
+    target: String,
+    baseline_status: u16,
+    baseline_body_len: usize,
+    divergences: Vec<Divergence>,
+}
+
+/// Build the final probe-target list from `args.url` + optional
+/// `--paths-file`. The single-URL case yields one entry; the paths-
+/// file case yields one URL per non-blank, non-`#` line.
+fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
+    let Some(ref pf) = args.paths_file else {
+        return Ok(vec![args.url.clone()]);
+    };
+    let body = std::fs::read_to_string(pf).map_err(|e| format!("read {pf}: {e}"))?;
+    let base = args.url.trim_end_matches('/');
+    let mut out = Vec::new();
+    for raw in body.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let url = if line.starts_with("http://") || line.starts_with("https://") {
+            line.to_string()
+        } else if line.starts_with('/') {
+            format!("{base}{line}")
+        } else {
+            format!("{base}/{line}")
+        };
+        out.push(url);
+    }
+    if out.is_empty() {
+        return Err(format!(
+            "{pf} contained no non-empty / non-comment lines — nothing to probe"
+        ));
+    }
+    Ok(out)
+}
+
+/// Probe a single URL through the full bypass set. Concurrency is
+/// bounded by `concurrency` (a `Semaphore` is acquired before each
+/// probe and released as soon as the response lands).
+async fn probe_one_url(
+    client: &Client,
+    url: &str,
+    args: &BypassProbeArgs,
+    concurrency: usize,
+) -> Result<UrlReport, String> {
+    let parsed_path = parse_path_from_url(url);
+
+    // Baseline. Even with concurrency we always do this first
+    // sequentially — the rest of the run depends on it.
+    let baseline = match client.get(url).send().await {
         Ok(r) => r,
         Err(e) => return Err(format!("baseline GET {url} failed: {e}")),
     };
@@ -141,36 +254,128 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
     let baseline_len = baseline_body.len();
 
     if !args.quiet {
+        eprintln!("baseline: GET {url} → HTTP {baseline_status}, {baseline_len} bytes");
+    }
+
+    // Build the full probe list as `(family, ProbeKind)` so we can
+    // run them all through a single bounded-concurrency loop. Order
+    // doesn't matter for correctness; results are sorted at the end.
+    let mut work: Vec<ProbeJob> = Vec::new();
+
+    if !args.skip_headers {
+        for p in wafrift_encoding::auth_bypass::auth_bypass_probes(&parsed_path) {
+            work.push(ProbeJob::Header(p));
+        }
+    }
+    if !args.skip_paths {
+        let synthetic = if wafrift_grammar::grammar::path_traversal::detect_type(&parsed_path) {
+            parsed_path.clone()
+        } else {
+            format!("../../{}", parsed_path.trim_start_matches('/'))
+        };
+        for v in wafrift_grammar::grammar::path_traversal::mutate(&synthetic) {
+            work.push(ProbeJob::Path(v));
+        }
+    }
+    if !args.skip_methods {
+        for m in ["POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "PROPFIND"] {
+            work.push(ProbeJob::Method(m.to_string()));
+        }
+    }
+
+    if !args.quiet {
         eprintln!(
-            "baseline: GET {url} → HTTP {baseline_status}, {baseline_len} bytes"
+            "firing {} probes (concurrency={concurrency}, delay={}ms)",
+            work.len(),
+            args.delay_ms
         );
     }
 
-    let mut divergences: Vec<Divergence> = Vec::new();
-    let delay = Duration::from_millis(args.delay_ms);
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let delay_ms = args.delay_ms;
+    let body_thresh = args.body_diff_threshold_pct;
+    let url_owned = url.to_string();
+    let base_origin = url
+        .split('/')
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("/");
 
-    // ── Family 1: auth-bypass headers ───────────────────────────────
-    if !args.skip_headers {
-        let probes = wafrift_encoding::auth_bypass::auth_bypass_probes(&parsed_path);
-        if !args.quiet {
-            eprintln!("firing {} auth-bypass header probes", probes.len());
-        }
-        for probe in probes {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
+    let mut handles = Vec::with_capacity(work.len());
+    for job in work {
+        let sem_c = sem.clone();
+        let client_c = client.clone();
+        let url_c = url_owned.clone();
+        let base_origin_c = base_origin.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = sem_c.acquire_owned().await.ok()?;
+            if delay_ms > 0 {
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             }
-            let Ok(resp) = client
-                .get(&url)
+            run_probe_job(
+                &client_c,
+                &url_c,
+                &base_origin_c,
+                job,
+                baseline_status,
+                baseline_len,
+                body_thresh,
+            )
+            .await
+        }));
+    }
+
+    let mut divergences = Vec::new();
+    for h in handles {
+        if let Ok(Some(div)) = h.await {
+            divergences.push(div);
+        }
+    }
+
+    divergences.sort_by(|a, b| {
+        let a_status_change = a.probe_status != a.baseline_status;
+        let b_status_change = b.probe_status != b.baseline_status;
+        b_status_change
+            .cmp(&a_status_change)
+            .then_with(|| severity_rank(b.severity).cmp(&severity_rank(a.severity)))
+            .then_with(|| b.body_delta_pct.abs().total_cmp(&a.body_delta_pct.abs()))
+    });
+
+    Ok(UrlReport {
+        target: url.to_string(),
+        baseline_status,
+        baseline_body_len: baseline_len,
+        divergences,
+    })
+}
+
+#[derive(Debug)]
+enum ProbeJob {
+    Header(wafrift_encoding::auth_bypass::AuthBypassProbe),
+    Path(String),
+    Method(String),
+}
+
+async fn run_probe_job(
+    client: &Client,
+    url: &str,
+    base_origin: &str,
+    job: ProbeJob,
+    baseline_status: u16,
+    baseline_len: usize,
+    body_thresh: f64,
+) -> Option<Divergence> {
+    match job {
+        ProbeJob::Header(probe) => {
+            let resp = client
+                .get(url)
                 .header(probe.header.clone(), probe.value.clone())
                 .send()
                 .await
-            else {
-                continue;
-            };
+                .ok()?;
             let status = resp.status().as_u16();
             let body = resp.bytes().await.unwrap_or_default();
-            let body_len = body.len();
-            if let Some(div) = classify(
+            classify(
                 "headers",
                 probe.label,
                 &format!(
@@ -180,44 +385,12 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
                 baseline_status,
                 baseline_len,
                 status,
-                body_len,
-                args.body_diff_threshold_pct,
+                body.len(),
+                body_thresh,
                 || format!("curl -s -H '{}: {}' '{url}'", probe.header, probe.value),
-            ) {
-                divergences.push(div);
-            }
+            )
         }
-    }
-
-    // ── Family 2: path-routing variants ─────────────────────────────
-    if !args.skip_paths {
-        // path_traversal::mutate generates routing variants for any
-        // path payload. We feed it the user's path so the variants
-        // preserve the original target. If the path doesn't trip
-        // detect_type (e.g. `/admin` with no `..`) we synthesise a
-        // dummy traversal-shaped payload that mutate() recognises and
-        // rewrite the resulting candidates back onto the user's path.
-        let synthetic = if wafrift_grammar::grammar::path_traversal::detect_type(&parsed_path) {
-            parsed_path.clone()
-        } else {
-            // Inject `..` so detect_type fires; we'll splice the real
-            // target back below.
-            format!("../../{}", parsed_path.trim_start_matches('/'))
-        };
-        let variants = wafrift_grammar::grammar::path_traversal::mutate(&synthetic);
-        if !args.quiet {
-            eprintln!("firing {} path-routing variants", variants.len());
-        }
-        let base_origin = url
-            .split('/')
-            .take(3)
-            .collect::<Vec<_>>()
-            .join("/"); // scheme://host:port
-        for v in variants {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-            // Probe the variant as a path under the same origin.
+        ProbeJob::Path(v) => {
             let probe_url = if v.starts_with("http://") || v.starts_with("https://") {
                 v.clone()
             } else if v.starts_with('/') {
@@ -225,101 +398,78 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
             } else {
                 format!("{base_origin}/{v}")
             };
-            let Ok(resp) = client.get(&probe_url).send().await else {
-                continue;
-            };
+            let resp = client.get(&probe_url).send().await.ok()?;
             let status = resp.status().as_u16();
             let body = resp.bytes().await.unwrap_or_default();
-            let body_len = body.len();
-            if let Some(div) = classify(
+            classify(
                 "paths",
                 "path-routing",
                 &format!("path-routing variant `{v}`"),
                 baseline_status,
                 baseline_len,
                 status,
-                body_len,
-                args.body_diff_threshold_pct,
+                body.len(),
+                body_thresh,
                 || format!("curl -s '{probe_url}'"),
-            ) {
-                divergences.push(div);
-            }
+            )
         }
-    }
-
-    // ── Family 3: HTTP method overrides ─────────────────────────────
-    if !args.skip_methods {
-        for method_name in ["POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "PROPFIND"] {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-            let Ok(method) = Method::from_str(method_name) else {
-                continue;
-            };
-            let Ok(resp) = client.request(method, &url).send().await else {
-                continue;
-            };
+        ProbeJob::Method(m) => {
+            let method = Method::from_str(&m).ok()?;
+            let resp = client.request(method, url).send().await.ok()?;
             let status = resp.status().as_u16();
             let body = resp.bytes().await.unwrap_or_default();
-            let body_len = body.len();
-            if let Some(div) = classify(
+            classify(
                 "methods",
-                method_name,
-                &format!("HTTP {method_name} method override"),
+                &m,
+                &format!("HTTP {m} method override"),
                 baseline_status,
                 baseline_len,
                 status,
-                body_len,
-                args.body_diff_threshold_pct,
-                || format!("curl -s -X {method_name} '{url}'"),
-            ) {
-                divergences.push(div);
-            }
+                body.len(),
+                body_thresh,
+                || format!("curl -s -X {m} '{url}'"),
+            )
         }
     }
+}
 
-    // ── Output ──────────────────────────────────────────────────────
-    // Sort by interestingness: status-change-from-block first, then
-    // body-delta magnitude.
-    divergences.sort_by(|a, b| {
-        let a_status_change = a.probe_status != a.baseline_status;
-        let b_status_change = b.probe_status != b.baseline_status;
-        b_status_change
-            .cmp(&a_status_change)
-            .then_with(|| b.body_delta_pct.abs().total_cmp(&a.body_delta_pct.abs()))
-    });
-
-    if args.format == "json" {
-        let out = serde_json::json!({
-            "target": url,
-            "baseline_status": baseline_status,
-            "baseline_body_len": baseline_len,
-            "divergences": divergences,
-        });
-        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+fn print_report_text(r: &UrlReport) {
+    println!();
+    println!("=== bypass-probe results: {} ===", r.target);
+    println!(
+        "baseline:  HTTP {} ({} bytes)",
+        r.baseline_status, r.baseline_body_len
+    );
+    if r.divergences.is_empty() {
+        println!("no divergences — every probe matched the baseline.");
     } else {
-        println!();
-        println!("=== bypass-probe results: {url} ===");
         println!(
-            "baseline:  HTTP {baseline_status} ({baseline_len} bytes)"
+            "{} divergences (sorted by interestingness):",
+            r.divergences.len()
         );
-        if divergences.is_empty() {
-            println!("no divergences — every probe matched the baseline.");
-        } else {
-            println!("{} divergences (sorted by interestingness):", divergences.len());
+        println!();
+        for d in &r.divergences {
+            println!(
+                "[{}] {}  HTTP {}→{}  body Δ {:+.1}%",
+                d.severity, d.family, d.baseline_status, d.probe_status, d.body_delta_pct
+            );
+            println!("    {}", d.description);
+            println!("    repro: {}", d.curl_cmd);
             println!();
-            for d in &divergences {
-                println!(
-                    "[{}] {}  HTTP {}→{}  body Δ {:+.1}%",
-                    d.severity, d.family, d.baseline_status, d.probe_status, d.body_delta_pct
-                );
-                println!("    {}", d.description);
-                println!("    repro: {}", d.curl_cmd);
-                println!();
-            }
         }
     }
-    Ok(())
+}
+
+/// Numeric rank for severity strings — used for sorting and for
+/// `--min-severity` filtering. Unknown strings rank as 0 (always
+/// included).
+fn severity_rank(s: &str) -> u8 {
+    match s.to_ascii_uppercase().as_str() {
+        "HIGH" => 3,
+        "MEDIUM" => 2,
+        "LOW" => 1,
+        _ => 0,
+    }
 }
 
 /// Decide whether a probe's response is meaningfully different from
