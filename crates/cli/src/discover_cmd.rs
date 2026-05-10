@@ -147,7 +147,10 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                     return ExitCode::from(1);
                 }
             };
-            let target = args.target.as_deref().unwrap();
+            let Some(target) = args.target.as_deref() else {
+                eprintln!("error: --target is required for discovery");
+                return ExitCode::from(1);
+            };
 
             if args.introspect {
                 sources.push("graphql");
@@ -163,7 +166,10 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
 
             if args.mine_params {
                 sources.push("mine");
-                let words_path = args.wordlist.as_ref().unwrap();
+                let Some(words_path) = args.wordlist.as_ref() else {
+                    eprintln!("error: --wordlist is required for --mine-params");
+                    return ExitCode::from(1);
+                };
                 let words = match std::fs::read_to_string(words_path) {
                     Ok(s) => s
                         .lines()

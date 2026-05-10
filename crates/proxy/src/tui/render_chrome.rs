@@ -20,13 +20,22 @@ pub fn draw_header(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &Sta
         Span::styled(cfg.bind_addr.clone(), Style::default().fg(Color::Yellow)),
         sep(),
         meta_label("stealth"),
-        Span::styled(cfg.tls_stack_label.clone(), Style::default().fg(Color::LightMagenta)),
+        Span::styled(
+            cfg.tls_stack_label.clone(),
+            Style::default().fg(Color::LightMagenta),
+        ),
         sep(),
         meta_label("uptime"),
-        Span::styled(humanize_uptime(state.uptime()), Style::default().fg(Color::White)),
+        Span::styled(
+            humanize_uptime(state.uptime()),
+            Style::default().fg(Color::White),
+        ),
         sep(),
         meta_label("rps"),
-        Span::styled(format!("{:.1}", state.rps_recent()), Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("{:.1}", state.rps_recent()),
+            Style::default().fg(Color::Cyan),
+        ),
         sep(),
         meta_label("bypass"),
         Span::styled(
@@ -82,11 +91,22 @@ pub fn draw_footer(f: &mut Frame, area: Rect, state: &State) {
         let p = Paragraph::new(Line::from(vec![
             Span::styled(
                 " filter ",
-                Style::default().fg(Color::Black).bg(Color::LightCyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled(state.filter_query.clone(), Style::default().fg(Color::Yellow)),
-            Span::styled("█", Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+            Span::styled(
+                state.filter_query.clone(),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::styled(
+                "█",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ),
             Span::raw("    "),
             key_hint("Enter", "commit"),
             sep(),
@@ -153,7 +173,9 @@ pub fn draw_footer(f: &mut Frame, area: Rect, state: &State) {
 // ── Local style helpers ─────────────────────────────────────────────
 
 fn title_style() -> Style {
-    Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(Color::LightCyan)
+        .add_modifier(Modifier::BOLD)
 }
 
 fn meta_label(s: &str) -> Span<'static> {
@@ -168,12 +190,18 @@ fn follow_chip(state: &State) -> Span<'static> {
     if state.follow {
         Span::styled(
             " FOLLOW ",
-            Style::default().fg(Color::Black).bg(Color::LightGreen).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
         )
     } else {
         Span::styled(
             " PAUSED ",
-            Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )
     }
 }
@@ -187,7 +215,10 @@ fn outcome_chip(f: OutcomeFilter) -> Span<'static> {
     };
     Span::styled(
         format!(" {label} "),
-        Style::default().fg(Color::Black).bg(color).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Black)
+            .bg(color)
+            .add_modifier(Modifier::BOLD),
     )
 }
 
@@ -199,7 +230,10 @@ fn filter_chip(state: &State) -> Span<'static> {
     };
     Span::styled(
         label,
-        Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )
 }
 
@@ -212,7 +246,10 @@ fn toast_chip(msg: &str, kind: ToastKind) -> Span<'static> {
     };
     Span::styled(
         format!(" {msg} "),
-        Style::default().fg(Color::Black).bg(color).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Black)
+            .bg(color)
+            .add_modifier(Modifier::BOLD),
     )
 }
 

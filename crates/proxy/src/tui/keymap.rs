@@ -89,13 +89,20 @@ fn handle_normal(
         // Filter-edit entry
         KeyCode::Char('/') => {
             state.enter_filter_edit();
-            state.set_toast("filter: type to narrow, Enter to commit, Esc to cancel", ToastKind::Info);
+            state.set_toast(
+                "filter: type to narrow, Enter to commit, Esc to cancel",
+                ToastKind::Info,
+            );
         }
 
         // Pause/follow toggle
         KeyCode::Char('p') | KeyCode::Char('P') => {
             state.toggle_follow();
-            let msg = if state.follow { "follow → ON" } else { "follow → PAUSED" };
+            let msg = if state.follow {
+                "follow → ON"
+            } else {
+                "follow → PAUSED"
+            };
             state.set_toast(msg, ToastKind::Info);
         }
 
@@ -183,7 +190,11 @@ fn handle_normal(
             let now_on = crate::intercept::toggle_intercept_mode();
             state.set_toast(
                 format!("intercept mode → {}", if now_on { "ON" } else { "OFF" }),
-                if now_on { ToastKind::Warn } else { ToastKind::Info },
+                if now_on {
+                    ToastKind::Warn
+                } else {
+                    ToastKind::Info
+                },
             );
             if now_on {
                 state.tab = Tab::Intercept;
@@ -210,10 +221,7 @@ fn handle_normal(
             let store = crate::intercept::global_store();
             if let Some(pending) = store.snapshot().into_iter().next() {
                 store.resolve(pending.id, crate::intercept::InterceptDecision::Kill);
-                state.set_toast(
-                    format!("killed #{} → 403", pending.id),
-                    ToastKind::Err,
-                );
+                state.set_toast(format!("killed #{} → 403", pending.id), ToastKind::Err);
             } else {
                 state.set_toast("intercept: no pending request", ToastKind::Warn);
             }
@@ -253,12 +261,15 @@ fn do_replay(state: &mut State) {
         Ok(report) => {
             let exec_label = match report.upstream_status {
                 Some(code) => format!("autoexec exit={code}"),
-                None => {
-                    "no autoexec (set WAFRIFT_REPLAY_AUTOEXEC=1 to fire on every R)".into()
-                }
+                None => "no autoexec (set WAFRIFT_REPLAY_AUTOEXEC=1 to fire on every R)".into(),
             };
             state.set_toast(
-                format!("replay → {} ({} bytes, {})", report.path.display(), report.bytes, exec_label),
+                format!(
+                    "replay → {} ({} bytes, {})",
+                    report.path.display(),
+                    report.bytes,
+                    exec_label
+                ),
                 if report.upstream_status.unwrap_or(0) == 0 {
                     ToastKind::Ok
                 } else {
@@ -285,7 +296,11 @@ fn do_yank(state: &mut State) {
     let seq = state.yank_seq;
     match yank_to_disk_and_clipboard(&rec, seq) {
         Ok(report) => {
-            let clip_label = if report.clipboard_ok { "clipboard ✓" } else { "clipboard ✗" };
+            let clip_label = if report.clipboard_ok {
+                "clipboard ✓"
+            } else {
+                "clipboard ✗"
+            };
             state.set_toast(
                 format!(
                     "yanked → {} ({} bytes, {})",
@@ -431,7 +446,10 @@ mod tests {
         let before_sel = s.selected;
         press(&mut s, KeyCode::Char('j'), KeyModifiers::NONE);
         assert_eq!(s.detail_scroll, 1);
-        assert_eq!(s.selected, before_sel, "selection must NOT move while inspecting");
+        assert_eq!(
+            s.selected, before_sel,
+            "selection must NOT move while inspecting"
+        );
     }
 
     #[test]

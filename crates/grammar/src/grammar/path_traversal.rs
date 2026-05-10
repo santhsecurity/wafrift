@@ -133,8 +133,8 @@ pub fn mutate(payload: &str) -> Vec<String> {
         // Double-encoded slash (frontend single-decodes, backend double-decodes).
         format!("/public/..%2f{stripped}"),
         format!("/public/..%252f{stripped}"),
-        format!("/public/..%5c{stripped}"),     // backslash variant
-        format!("/public/..%c0%af{stripped}"),  // overlong UTF-8 slash
+        format!("/public/..%5c{stripped}"),    // backslash variant
+        format!("/public/..%c0%af{stripped}"), // overlong UTF-8 slash
         // Fragment / query injection in path position (some routers strip,
         // some don't). The Orange Tsai ProxyShell pattern.
         format!("/public/?@{stripped}"),

@@ -120,7 +120,11 @@ pub fn classify_drift(results: &[ProbeResult]) -> Vec<DetectedWaf> {
     // Status-code consistency (all same status) suggests automated block
     let statuses: std::collections::HashSet<u16> =
         results.iter().map(|r| r.probed.status).collect();
-    if let Some(status) = (statuses.len() == 1).then(|| statuses.iter().next().copied()).flatten() && status >= 400 {
+    if let Some(status) = (statuses.len() == 1)
+        .then(|| statuses.iter().next().copied())
+        .flatten()
+        && status >= 400
+    {
         score += 0.1;
         indicators.push(format!("uniform block status {status}"));
     }

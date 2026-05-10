@@ -96,8 +96,8 @@ impl TrustList {
             }
             Err(e) => return Err(RegistryError::Io(e)),
         };
-        let mut tl: Self = toml::from_str(&body)
-            .map_err(|e| RegistryError::TrustListParse(e.to_string()))?;
+        let mut tl: Self =
+            toml::from_str(&body).map_err(|e| RegistryError::TrustListParse(e.to_string()))?;
         tl.rebuild_index();
         Ok(tl)
     }
@@ -160,8 +160,8 @@ mod tests {
         let mut t = TrustList::new();
         t.allow_hex("abc", "alice");
         t.allow_hex("def", "bob");
-        let path = std::env::temp_dir()
-            .join(format!("wafrift-trust-test-{}.toml", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("wafrift-trust-test-{}.toml", std::process::id()));
         t.save(&path).expect("save");
         let loaded = TrustList::load(&path).expect("load");
         assert_eq!(loaded.publishers().len(), 2);
@@ -185,9 +185,7 @@ mod tests {
         // .wafrift segment when default_path returns Some.
         if let Some(p) = TrustList::default_path() {
             assert!(p.ends_with("trusted-keys.toml"));
-            assert!(p
-                .components()
-                .any(|c| c.as_os_str() == ".wafrift"));
+            assert!(p.components().any(|c| c.as_os_str() == ".wafrift"));
         }
     }
 }

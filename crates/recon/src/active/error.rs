@@ -7,7 +7,9 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ReconProbeError {
     /// Underlying HTTP client error (DNS, TLS, etc.).
-    #[error("HTTP transport error: {0}. Fix: verify URL scheme/host, TLS trust, and outbound connectivity.")]
+    #[error(
+        "HTTP transport error: {0}. Fix: verify URL scheme/host, TLS trust, and outbound connectivity."
+    )]
     Http(#[from] reqwest::Error),
 
     /// Total request time exceeded [`crate::active::ActiveProbeConfig::http_timeout`].
@@ -33,6 +35,8 @@ pub enum ReconProbeError {
     Io(#[from] std::io::Error),
 
     /// Invalid TOML rules document.
-    #[error("Invalid header rules TOML: {0}. Fix: validate `[[rule]]` entries — family must be waf|cdn|framework.")]
+    #[error(
+        "Invalid header rules TOML: {0}. Fix: validate `[[rule]]` entries — family must be waf|cdn|framework."
+    )]
     RulesToml(String),
 }

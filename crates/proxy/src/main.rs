@@ -37,8 +37,8 @@ use wafrift_proxy::upstream_policy::{
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
-use wafrift_types::EvasionResult;
 use wafrift_transport::signal::{BlockClass, ResponseProfileDb};
+use wafrift_types::EvasionResult;
 
 /// Maximum request body buffered per message (plain HTTP + MITM plaintext).
 const MAX_PROXY_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -1576,9 +1576,8 @@ async fn forward_wafrift_request(
     // aggressive `evade_smart` URL-aware variants and is not
     // something a passive proxy should do silently.
     if MUTATE_URL_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
-        && let Some((scheme_authority, path_and_query)) = split_url_for_mutation(
-            &evasion_result.request.url,
-        )
+        && let Some((scheme_authority, path_and_query)) =
+            split_url_for_mutation(&evasion_result.request.url)
     {
         let cfg = wafrift_encoding::url_mutate::UrlMutateConfig::default();
         let (mutated_pq, _techniques) =

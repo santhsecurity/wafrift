@@ -2,9 +2,7 @@
 //! API. The wrapper exists so consumers don't need to depend on
 //! `ed25519-dalek` directly.
 
-use ed25519_dalek::{
-    Signature, SigningKey as Ed25519SigningKey, Verifier, VerifyingKey,
-};
+use ed25519_dalek::{Signature, SigningKey as Ed25519SigningKey, Verifier, VerifyingKey};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -73,9 +71,7 @@ impl SigningKey {
             context: "secret_hex".into(),
             source: e,
         })?;
-        let arr: [u8; 32] = bytes
-            .try_into()
-            .expect("length checked above");
+        let arr: [u8; 32] = bytes.try_into().expect("length checked above");
         let _ = Ed25519SigningKey::from_bytes(&arr);
         Ok(Self {
             secret_hex: secret_hex.to_string(),
@@ -186,7 +182,10 @@ mod tests {
     #[test]
     fn from_secret_hex_rejects_wrong_length() {
         let err = SigningKey::from_secret_hex("abc").unwrap_err();
-        assert!(matches!(err, RegistryError::InvalidHex { expected: 64, .. }));
+        assert!(matches!(
+            err,
+            RegistryError::InvalidHex { expected: 64, .. }
+        ));
     }
 
     #[test]

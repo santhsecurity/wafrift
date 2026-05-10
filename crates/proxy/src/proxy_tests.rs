@@ -1065,10 +1065,7 @@ fn split_url_for_mutation_handles_port() {
 #[test]
 fn split_url_for_mutation_handles_path_only_no_query() {
     let r = split_url_for_mutation("https://x.com/just/a/path");
-    assert_eq!(
-        r,
-        Some(("https://x.com".into(), "/just/a/path".into()))
-    );
+    assert_eq!(r, Some(("https://x.com".into(), "/just/a/path".into())));
 }
 
 #[test]
@@ -1101,8 +1098,7 @@ fn mutate_url_full_mutation_pipeline_round_trip() {
     let url = "https://api.target.com/admin?id=1' OR '1'='1&debug=true";
     let (authority, pq) = split_url_for_mutation(url).expect("absolute");
     let cfg = wafrift_encoding::url_mutate::UrlMutateConfig::default();
-    let (mutated_pq, techniques) =
-        wafrift_encoding::url_mutate::mutate_url(&pq, &cfg);
+    let (mutated_pq, techniques) = wafrift_encoding::url_mutate::mutate_url(&pq, &cfg);
     let mutated_url = format!("{authority}{mutated_pq}");
     assert_ne!(
         mutated_url, url,
@@ -1163,9 +1159,11 @@ fn challenge_capture_round_trip_via_extract_and_store() {
         "session=abc; path=/",
         "cf_clearance=zzz; domain=.example.com; secure; httponly",
     ];
-    let extracted =
-        wafrift_transport::challenge::extract_clearance_cookie(&set_cookie_values);
-    assert!(extracted.is_some(), "must extract cf_clearance from a Set-Cookie set");
+    let extracted = wafrift_transport::challenge::extract_clearance_cookie(&set_cookie_values);
+    assert!(
+        extracted.is_some(),
+        "must extract cf_clearance from a Set-Cookie set"
+    );
     let (cookie, kind) = extracted.unwrap();
     assert_eq!(
         kind,

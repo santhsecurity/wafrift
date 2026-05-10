@@ -752,8 +752,16 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
         h2_te(host),
         alpn_h2c(),
     ];
-    evasions.push(crlf_in_pseudo_headers(path, "X-Forwarded-For", "127.0.0.1")?);
-    evasions.push(crlf_in_pseudo_headers(path, "Transfer-Encoding", "chunked")?);
+    evasions.push(crlf_in_pseudo_headers(
+        path,
+        "X-Forwarded-For",
+        "127.0.0.1",
+    )?);
+    evasions.push(crlf_in_pseudo_headers(
+        path,
+        "Transfer-Encoding",
+        "chunked",
+    )?);
     evasions.push(crlf_request_smuggle(path, "/admin")?);
     evasions.push(crlf_request_smuggle(path, "/internal/debug")?);
     evasions.extend(mixed_case_headers());

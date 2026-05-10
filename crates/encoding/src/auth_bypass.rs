@@ -177,7 +177,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(rewrite.len() >= 6, "missing rewrite-header variants");
         for p in rewrite {
-            assert_eq!(p.value, "/admin/users", "{} did not carry user path", p.header);
+            assert_eq!(
+                p.value, "/admin/users",
+                "{} did not carry user path",
+                p.header
+            );
         }
     }
 
@@ -202,9 +206,10 @@ mod tests {
         assert!(ip.iter().any(|p| p.value == "127.0.0.1"));
         assert!(ip.iter().any(|p| p.value == "169.254.169.254"));
         // RFC 7239 Forwarded uses for=<ip> form, not bare IP.
-        assert!(ip
-            .iter()
-            .any(|p| p.header.eq_ignore_ascii_case("Forwarded") && p.value.starts_with("for=")));
+        assert!(
+            ip.iter()
+                .any(|p| p.header.eq_ignore_ascii_case("Forwarded") && p.value.starts_with("for="))
+        );
     }
 
     #[test]
@@ -223,8 +228,10 @@ mod tests {
     #[test]
     fn forwarded_host_includes_internal() {
         let probes = auth_bypass_probes("/x");
-        assert!(probes.iter().any(|p| p.header == "X-Forwarded-Host"
-            && (p.value == "localhost" || p.value == "internal")));
+        assert!(
+            probes.iter().any(|p| p.header == "X-Forwarded-Host"
+                && (p.value == "localhost" || p.value == "internal"))
+        );
     }
 
     #[test]

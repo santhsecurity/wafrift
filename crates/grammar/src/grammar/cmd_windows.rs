@@ -176,7 +176,11 @@ mod tests {
     #[test]
     fn generates_powershell_wrapper() {
         let mutations = mutate("powershell Get-Process", 15);
-        assert!(mutations.iter().any(|m| m.payload.contains("powershell -nop")));
+        assert!(
+            mutations
+                .iter()
+                .any(|m| m.payload.contains("powershell -nop"))
+        );
     }
 
     #[test]

@@ -142,7 +142,11 @@ pub enum EvolutionError {
     #[error("search algorithm error: {0}")]
     AlgorithmError(String),
     #[error("data exceeds size limit: {context} ({size} bytes, max {max})")]
-    OversizedData { context: String, size: usize, max: usize },
+    OversizedData {
+        context: String,
+        size: usize,
+        max: usize,
+    },
 }
 
 /// Reason for terminating evolution.
@@ -330,8 +334,7 @@ pub fn save_checkpoint(
     path: &std::path::Path,
     data: &impl Serialize,
 ) -> Result<(), EvolutionError> {
-    let json = serde_json::to_string_pretty(data)
-        .map_err(EvolutionError::SerializationFailed)?;
+    let json = serde_json::to_string_pretty(data).map_err(EvolutionError::SerializationFailed)?;
     if json.len() > MAX_CHECKPOINT_BYTES {
         return Err(EvolutionError::OversizedData {
             context: format!("checkpoint {}", path.display()),

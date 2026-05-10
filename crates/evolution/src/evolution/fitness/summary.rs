@@ -32,7 +32,11 @@ pub fn fitness_statistics(population: &[Chromosome]) -> FitnessStats {
 
     // Filter non-finite values before computing statistics — NaN/Inf
     // would corrupt min/max/median and make comparisons nonsensical.
-    let finite: Vec<f64> = evaluated.iter().copied().filter(|f| f.is_finite()).collect();
+    let finite: Vec<f64> = evaluated
+        .iter()
+        .copied()
+        .filter(|f| f.is_finite())
+        .collect();
     if finite.is_empty() {
         return FitnessStats {
             min: 0.0,
@@ -196,11 +200,7 @@ mod tests {
 
     #[test]
     fn fitness_statistics_basic() {
-        let pop = vec![
-            chrom(0.1, 1),
-            chrom(0.5, 1),
-            chrom(0.9, 1),
-        ];
+        let pop = vec![chrom(0.1, 1), chrom(0.5, 1), chrom(0.9, 1)];
         let s = fitness_statistics(&pop);
         assert_eq!(s.min, 0.1);
         assert_eq!(s.max, 0.9);

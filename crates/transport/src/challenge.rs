@@ -256,7 +256,8 @@ pub fn classify(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
         .iter()
         .any(|(k, _)| k.eq_ignore_ascii_case("cf-ray"));
 
-    if lower_body.contains("turnstile") || lower_body.contains("challenges.cloudflare.com/turnstile")
+    if lower_body.contains("turnstile")
+        || lower_body.contains("challenges.cloudflare.com/turnstile")
     {
         return ChallengeKind::Turnstile;
     }
@@ -400,7 +401,12 @@ mod tests {
     #[test]
     fn forget_drops_entry_immediately() {
         let s = store();
-        s.record("h", "cf_clearance=x", ChallengeKind::CloudflareManaged, None);
+        s.record(
+            "h",
+            "cf_clearance=x",
+            ChallengeKind::CloudflareManaged,
+            None,
+        );
         s.forget("h");
         assert_eq!(s.get("h"), None);
     }
@@ -429,8 +435,18 @@ mod tests {
     #[test]
     fn record_overwrites_existing_entry() {
         let s = store();
-        s.record("h", "cf_clearance=v1", ChallengeKind::CloudflareManaged, None);
-        s.record("h", "cf_clearance=v2", ChallengeKind::CloudflareManaged, None);
+        s.record(
+            "h",
+            "cf_clearance=v1",
+            ChallengeKind::CloudflareManaged,
+            None,
+        );
+        s.record(
+            "h",
+            "cf_clearance=v2",
+            ChallengeKind::CloudflareManaged,
+            None,
+        );
         assert_eq!(s.get("h"), Some("cf_clearance=v2".into()));
     }
 
@@ -440,14 +456,20 @@ mod tests {
     fn operator_prompt_fires_first_time_then_throttles() {
         let s = store();
         assert!(s.should_prompt_operator("h"));
-        assert!(!s.should_prompt_operator("h"), "second prompt within cooldown must throttle");
+        assert!(
+            !s.should_prompt_operator("h"),
+            "second prompt within cooldown must throttle"
+        );
     }
 
     #[test]
     fn operator_prompt_throttle_is_per_host() {
         let s = store();
         assert!(s.should_prompt_operator("a"));
-        assert!(s.should_prompt_operator("b"), "different host must not be throttled by 'a's prompt");
+        assert!(
+            s.should_prompt_operator("b"),
+            "different host must not be throttled by 'a's prompt"
+        );
     }
 
     // ── classify() ────────────────────────────────────────────
@@ -502,21 +524,33 @@ mod tests {
     fn extract_cf_clearance_cookie_with_attributes() {
         let h = vec!["cf_clearance=abc123; path=/; domain=.example.com; secure; httponly"];
         let r = extract_clearance_cookie(&h);
-        assert_eq!(r, Some(("cf_clearance=abc123".into(), ChallengeKind::CloudflareManaged)));
+        assert_eq!(
+            r,
+            Some((
+                "cf_clearance=abc123".into(),
+                ChallengeKind::CloudflareManaged
+            ))
+        );
     }
 
     #[test]
     fn extract_handles_multiple_set_cookie_headers_taking_first_match() {
         let h = vec!["session=xyz", "cf_clearance=abc", "tracker=foo"];
         let r = extract_clearance_cookie(&h);
-        assert_eq!(r, Some(("cf_clearance=abc".into(), ChallengeKind::CloudflareManaged)));
+        assert_eq!(
+            r,
+            Some(("cf_clearance=abc".into(), ChallengeKind::CloudflareManaged))
+        );
     }
 
     #[test]
     fn extract_recognises_akamai_abck() {
         let h = vec!["_abck=ABC123~-1~YAAQ; path=/"];
         let r = extract_clearance_cookie(&h);
-        assert_eq!(r, Some(("_abck=ABC123~-1~YAAQ".into(), ChallengeKind::AkamaiBmp)));
+        assert_eq!(
+            r,
+            Some(("_abck=ABC123~-1~YAAQ".into(), ChallengeKind::AkamaiBmp))
+        );
     }
 
     #[test]
@@ -561,14 +595,26 @@ mod tests {
     fn dispatch_escalates_for_interactive_kind() {
         let s = store();
         let action = dispatch("h", ChallengeKind::Hcaptcha, &s);
-        assert!(matches!(action, SolveAction::EscalateToOperator { kind: ChallengeKind::Hcaptcha, .. }));
+        assert!(matches!(
+            action,
+            SolveAction::EscalateToOperator {
+                kind: ChallengeKind::Hcaptcha,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn dispatch_escalates_for_unknown_kind() {
         let s = store();
         let action = dispatch("h", ChallengeKind::Unknown, &s);
-        assert!(matches!(action, SolveAction::EscalateToOperator { kind: ChallengeKind::Unknown, .. }));
+        assert!(matches!(
+            action,
+            SolveAction::EscalateToOperator {
+                kind: ChallengeKind::Unknown,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -577,12 +623,7 @@ mod tests {
         // captured the resulting cookie — replay it on subsequent
         // requests instead of re-prompting.
         let s = store();
-        s.record(
-            "h",
-            "cf_clearance=manual",
-            ChallengeKind::Turnstile,
-            None,
-        );
+        s.record("h", "cf_clearance=manual", ChallengeKind::Turnstile, None);
         let action = dispatch("h", ChallengeKind::Turnstile, &s);
         assert!(matches!(action, SolveAction::ReplayWithCookie { .. }));
     }

@@ -42,8 +42,7 @@ fn every_rule_file_has_a_source_field() {
 
 #[test]
 fn wafw00f_attribution_present_in_detect_readme() {
-    let readme =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("README.md");
+    let readme = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("README.md");
     let body = std::fs::read_to_string(&readme).expect("read detect README");
     assert!(
         body.to_ascii_lowercase().contains("wafw00f"),

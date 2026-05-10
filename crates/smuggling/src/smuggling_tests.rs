@@ -402,8 +402,13 @@ mod tests {
     fn websocket_custom_key_rejects_crlf() {
         assert!(websocket_smuggle_custom("example.com", "/ws", Some("bad\r\nkey"), None).is_err());
         assert!(websocket_smuggle_custom("example.com", "/ws", Some("bad\nkey"), None).is_err());
-        assert!(websocket_smuggle_custom("example.com", "/ws", None, Some("bad\r\nproto")).is_err());
+        assert!(
+            websocket_smuggle_custom("example.com", "/ws", None, Some("bad\r\nproto")).is_err()
+        );
         // Safe values should succeed
-        assert!(websocket_smuggle_custom("example.com", "/ws", Some("safe-key"), Some("safe-proto")).is_ok());
+        assert!(
+            websocket_smuggle_custom("example.com", "/ws", Some("safe-key"), Some("safe-proto"))
+                .is_ok()
+        );
     }
 }

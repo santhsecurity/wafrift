@@ -751,4 +751,3 @@ mod tests {
         assert!(has_nested, "should produce nested command substitution");
     }
 }
-

@@ -308,11 +308,20 @@ fn run_verify(args: VerifyArgs) -> ExitCode {
     };
     match signed.verify(&trust) {
         Ok(bundle) => {
-            println!("OK: bundle '{}' from a trusted publisher", bundle.bundle_name);
-            println!("    {} genome(s), created {}", bundle.genomes.len(), bundle.created_unix);
+            println!(
+                "OK: bundle '{}' from a trusted publisher",
+                bundle.bundle_name
+            );
+            println!(
+                "    {} genome(s), created {}",
+                bundle.genomes.len(),
+                bundle.created_unix
+            );
             ExitCode::SUCCESS
         }
-        Err(RegistryError::SignatureInvalid) => die("signature invalid (bundle tampered or wrong key)"),
+        Err(RegistryError::SignatureInvalid) => {
+            die("signature invalid (bundle tampered or wrong key)")
+        }
         Err(RegistryError::UntrustedPublisher { public_key_hex }) => die(format!(
             "publisher key not trusted: {public_key_hex} \
              (add via `wafrift bank trust add {public_key_hex} --name <NAME>`)"
@@ -414,7 +423,12 @@ fn run_submit(args: SubmitArgs) -> ExitCode {
 
     match http_post_blocking(&args.url, &json, args.timeout_secs) {
         Ok(resp) => {
-            eprintln!("submitted '{}' ({} bytes) — server: {}", bundle_name, json.len(), resp);
+            eprintln!(
+                "submitted '{}' ({} bytes) — server: {}",
+                bundle_name,
+                json.len(),
+                resp
+            );
             ExitCode::SUCCESS
         }
         Err(e) => die(format!("POST {}: {e}", args.url)),
@@ -435,13 +449,20 @@ fn run_trust(args: TrustArgs) -> ExitCode {
                 Err(e) => return die(format!("load: {e}")),
             };
             if tl.publishers().is_empty() {
-                println!("(no trusted publishers — add with `wafrift bank trust add HEX --name NAME`)");
+                println!(
+                    "(no trusted publishers — add with `wafrift bank trust add HEX --name NAME`)"
+                );
             } else {
                 for p in tl.publishers() {
-                    println!("{}  {}{}",
+                    println!(
+                        "{}  {}{}",
                         p.public_key_hex,
                         p.name,
-                        if p.note.is_empty() { String::new() } else { format!("  // {}", p.note) }
+                        if p.note.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  // {}", p.note)
+                        }
                     );
                 }
             }
@@ -498,7 +519,11 @@ fn http_get_blocking(url: &str, timeout_secs: u64) -> Result<String, String> {
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| format!("client build: {e}"))?;
-        let resp = client.get(url).send().await.map_err(|e| format!("send: {e}"))?;
+        let resp = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("send: {e}"))?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
         }
@@ -537,8 +562,11 @@ mod tests {
     use super::*;
 
     fn fresh_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("wafrift-bank-registry-{}-{}", label, std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-bank-registry-{}-{}",
+            label,
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -569,11 +597,9 @@ mod tests {
         assert!(signed_path.exists());
 
         // Trust the signing public key, verify.
-        let pk = SigningKey::from_secret_hex(
-            std::fs::read_to_string(&key_path).unwrap().trim(),
-        )
-        .unwrap()
-        .verifying_key_hex();
+        let pk = SigningKey::from_secret_hex(std::fs::read_to_string(&key_path).unwrap().trim())
+            .unwrap()
+            .verifying_key_hex();
         let trust_path = dir.join("trust.toml");
         let mut tl = TrustList::new();
         tl.allow_hex(&pk, "tester");
@@ -593,7 +619,9 @@ mod tests {
         let env_path = dir.join("envelope.json");
         std::fs::write(&env_path, b"{}").unwrap();
         let key_path = dir.join("signing.hex");
-        run_gen_key(GenKeyArgs { output: Some(key_path.clone()) });
+        run_gen_key(GenKeyArgs {
+            output: Some(key_path.clone()),
+        });
         let signed_path = dir.join("envelope.signed.json");
         run_sign(SignArgs {
             envelope: env_path,
@@ -622,7 +650,9 @@ mod tests {
         let env_path = dir.join("envelope.json");
         std::fs::write(&env_path, br#"{"a":1}"#).unwrap();
         let key_path = dir.join("signing.hex");
-        run_gen_key(GenKeyArgs { output: Some(key_path.clone()) });
+        run_gen_key(GenKeyArgs {
+            output: Some(key_path.clone()),
+        });
         let signed_path = dir.join("envelope.signed.json");
         run_sign(SignArgs {
             envelope: env_path,
@@ -637,22 +667,14 @@ mod tests {
         // exact serde-json key order), so deserialize / mutate /
         // re-serialize.
         let raw = std::fs::read_to_string(&signed_path).unwrap();
-        let mut signed: SignedBundle =
-            serde_json::from_str(&raw).expect("parse signed bundle");
-        signed.bundle.genomes[0].payload =
-            format!("EVIL_{}", signed.bundle.genomes[0].payload);
-        std::fs::write(
-            &signed_path,
-            serde_json::to_string_pretty(&signed).unwrap(),
-        )
-        .unwrap();
+        let mut signed: SignedBundle = serde_json::from_str(&raw).expect("parse signed bundle");
+        signed.bundle.genomes[0].payload = format!("EVIL_{}", signed.bundle.genomes[0].payload);
+        std::fs::write(&signed_path, serde_json::to_string_pretty(&signed).unwrap()).unwrap();
 
         // Trust the publisher anyway.
-        let pk = SigningKey::from_secret_hex(
-            std::fs::read_to_string(&key_path).unwrap().trim(),
-        )
-        .unwrap()
-        .verifying_key_hex();
+        let pk = SigningKey::from_secret_hex(std::fs::read_to_string(&key_path).unwrap().trim())
+            .unwrap()
+            .verifying_key_hex();
         let trust_path = dir.join("trust.toml");
         let mut tl = TrustList::new();
         tl.allow_hex(&pk, "tester");
@@ -714,7 +736,9 @@ mod tests {
         let dir = fresh_dir("nokoverwrite");
         let key_path = dir.join("signing.hex");
         std::fs::write(&key_path, "preexisting").unwrap();
-        let code = run_gen_key(GenKeyArgs { output: Some(key_path.clone()) });
+        let code = run_gen_key(GenKeyArgs {
+            output: Some(key_path.clone()),
+        });
         assert_ne!(
             format!("{code:?}"),
             format!("{:?}", ExitCode::SUCCESS),

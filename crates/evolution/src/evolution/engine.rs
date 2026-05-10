@@ -231,7 +231,9 @@ impl EvolutionEngine {
         if self.pending_single.is_none() {
             self.pending_single = self.batch_candidates(1).into_iter().next();
         }
-        self.pending_single.as_ref().map(|(idx, chrom)| (*idx, chrom))
+        self.pending_single
+            .as_ref()
+            .map(|(idx, chrom)| (*idx, chrom))
     }
 
     /// Request a batch of up to `n` candidates for parallel evaluation.

@@ -373,7 +373,11 @@ pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig)
         return evade(request, state, config);
     }
     // Skip MCTS for large bodies (see MCTS_BODY_BUDGET).
-    if request.body.as_ref().is_some_and(|b| b.len() > MCTS_BODY_BUDGET) {
+    if request
+        .body
+        .as_ref()
+        .is_some_and(|b| b.len() > MCTS_BODY_BUDGET)
+    {
         return evade(request, state, config);
     }
     let depth = (state.blocks as usize / 2).clamp(2, 5);
@@ -876,7 +880,9 @@ fn apply_smuggling_metadata(
         2 => smuggling::te_te(host, "GET /admin HTTP/1.1\r\n", state.blocks as usize),
         _ => smuggling::cl_zero(host, "GET /admin HTTP/1.1\r\n"),
     };
-    let Ok(smuggle) = smuggle else { return; };
+    let Ok(smuggle) = smuggle else {
+        return;
+    };
 
     req.headers.push((
         "X-Wafrift-Smuggle-Variant".into(),

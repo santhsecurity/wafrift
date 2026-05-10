@@ -30,10 +30,16 @@ pub fn draw(f: &mut Frame, area: Rect, _state: &State) {
     );
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if mode_on { Color::LightGreen } else { Color::DarkGray }))
+        .border_style(Style::default().fg(if mode_on {
+            Color::LightGreen
+        } else {
+            Color::DarkGray
+        }))
         .title(Span::styled(
             title,
-            Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
         ));
 
     if pending.is_empty() {
@@ -75,8 +81,10 @@ pub fn draw(f: &mut Frame, area: Rect, _state: &State) {
             Row::new(vec![
                 Cell::from(p.id.to_string()).style(Style::default().fg(Color::DarkGray)),
                 Cell::from(p.method.clone()).style(Style::default().fg(Color::Cyan)),
-                Cell::from(truncate(&p.path, 36).to_string()).style(Style::default().fg(Color::White)),
-                Cell::from(truncate(&p.host, 28).to_string()).style(Style::default().fg(Color::Yellow)),
+                Cell::from(truncate(&p.path, 36).to_string())
+                    .style(Style::default().fg(Color::White)),
+                Cell::from(truncate(&p.host, 28).to_string())
+                    .style(Style::default().fg(Color::Yellow)),
                 Cell::from(format!("{waiting_secs}s")).style(Style::default().fg(waiting_color)),
             ])
         })

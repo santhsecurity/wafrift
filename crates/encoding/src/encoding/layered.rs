@@ -224,7 +224,10 @@ mod tests {
     fn aggressiveness_in_valid_range() {
         for &s in all_strategies() {
             let a = aggressiveness(s);
-            assert!((0.0..=1.0).contains(&a), "aggressiveness for {s:?} out of range: {a}");
+            assert!(
+                (0.0..=1.0).contains(&a),
+                "aggressiveness for {s:?} out of range: {a}"
+            );
         }
     }
 }

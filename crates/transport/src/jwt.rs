@@ -32,6 +32,15 @@ pub fn manipulate(
             reason: "invalid base64".into(),
         })?;
 
+    // Reject absurdly large headers before feeding them to serde_json to
+    // prevent OOM from maliciously crafted tokens.
+    const MAX_JWT_HEADER_BYTES: usize = 16 * 1024;
+    if header_bytes.len() > MAX_JWT_HEADER_BYTES {
+        return Err(JwtError::InvalidToken {
+            reason: format!("header exceeds {} bytes", MAX_JWT_HEADER_BYTES),
+        });
+    }
+
     let mut header: serde_json::Value =
         serde_json::from_slice(&header_bytes).map_err(|_| JwtError::InvalidToken {
             reason: "invalid json".into(),
@@ -43,8 +52,8 @@ pub fn manipulate(
             let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
                 reason: format!("header serialization failed: {e}"),
             })?;
-            let new_header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(header_bytes);
+            let new_header_b64 =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_bytes);
             Ok(format!("{}.{}.", new_header_b64, payload_b64))
         }
         JwtManipulation::Hs256WithKey => {
@@ -56,8 +65,8 @@ pub fn manipulate(
             let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
                 reason: format!("header serialization failed: {e}"),
             })?;
-            let new_header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(header_bytes);
+            let new_header_b64 =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_bytes);
             // Fake signature for now since we don't have HMAC library in this file
             let sig_b64 = "fakesignature";
             Ok(format!("{}.{}.{}", new_header_b64, payload_b64, sig_b64))
@@ -67,8 +76,8 @@ pub fn manipulate(
             let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
                 reason: format!("header serialization failed: {e}"),
             })?;
-            let new_header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(header_bytes);
+            let new_header_b64 =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_bytes);
             Ok(format!("{}.{}.{}", new_header_b64, payload_b64, parts[2]))
         }
     }

@@ -98,7 +98,10 @@ mod tests {
     #[test]
     fn ambiguous_503_is_rate_limited_not_blocked() {
         let (v, _) = classify_status_code(503);
-        assert!(matches!(v, Verdict::RateLimited { .. }), "503 should be rate-limited provisional");
+        assert!(
+            matches!(v, Verdict::RateLimited { .. }),
+            "503 should be rate-limited provisional"
+        );
     }
 
     #[test]
@@ -106,7 +109,11 @@ mod tests {
         let (v, _) = classify_status_code(444);
         assert!(v.is_blocked());
         let signals = v.signals();
-        assert!(signals.iter().any(|s| matches!(s, Signal::ConnectionBehavior(..))));
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s, Signal::ConnectionBehavior(..)))
+        );
     }
 
     #[test]
@@ -114,7 +121,11 @@ mod tests {
         let (v, _) = classify_status_code(499);
         assert!(v.is_blocked());
         let signals = v.signals();
-        assert!(signals.iter().any(|s| matches!(s, Signal::ConnectionBehavior(..))));
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s, Signal::ConnectionBehavior(..)))
+        );
     }
 
     #[test]

@@ -96,8 +96,6 @@ pub fn save_jar(_jar: &Jar, path: &Path) -> Result<(), SessionError> {
     Ok(())
 }
 
-
-
 pub fn extract_csrf(response_body: &str, regex: &regex::Regex) -> Result<String, SessionError> {
     if let Some(m) = regex.captures(response_body).and_then(|c| c.get(1))
         && !m.as_str().is_empty()
