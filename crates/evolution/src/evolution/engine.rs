@@ -302,6 +302,28 @@ impl EvolutionEngine {
         result
     }
 
+    /// Drop entries from the in-flight map that have been outstanding
+    /// longer than `max_age`. The proxy / scan loop should call this
+    /// periodically (or when a Worker pool is reaped) so a dropped
+    /// evaluation doesn't permanently consume a budget slot.
+    ///
+    /// Audit (2026-05-10): pre-fix in_flight grew without any TTL —
+    /// every dropped eval permanently consumed a `max_requests` slot,
+    /// so a long scan with even moderate eval-loss would terminate
+    /// prematurely with budget exhausted while the in-flight map
+    /// silently accumulated. Returns the number of pruned entries.
+    pub fn prune_stale_in_flight(&mut self, max_age: std::time::Duration) -> usize {
+        let now = Instant::now();
+        let before = self.in_flight.len();
+        self.in_flight
+            .retain(|_, (_, _, sent_at)| now.duration_since(*sent_at) <= max_age);
+        let pruned = before - self.in_flight.len();
+        // Repay the budget for stale entries: they never returned a
+        // verdict so they shouldn't count against max_requests.
+        self.request_count = self.request_count.saturating_sub(pruned);
+        pruned
+    }
+
     /// Submit a batch of evaluation results.
     ///
     /// # Errors
