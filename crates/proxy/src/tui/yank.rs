@@ -170,6 +170,8 @@ mod tests {
                 ("Content-Length".into(), "10".into()),     // dropped
             ],
             req_body_excerpt: b"q=' OR 1=1--".to_vec(),
+            req_headers_pre: vec![],
+            req_body_pre_excerpt: vec![],
             resp_headers: vec![],
             resp_body_excerpt: vec![],
             resp_body_total: 0,

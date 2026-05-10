@@ -50,8 +50,16 @@ pub enum Event {
         body_padded: bool,
         upstream_latency_ms: u64,
         waf_name: Option<String>,
+        /// Outgoing request headers (post-evade — what hit the wire).
         req_headers: Vec<(String, String)>,
+        /// Outgoing request body excerpt (post-evade).
         req_body_excerpt: Vec<u8>,
+        /// PRE-evade request headers (what the client sent before
+        /// wafrift mutated them). Empty when the proxy is in
+        /// passthrough mode and no evade ran.
+        req_headers_pre: Vec<(String, String)>,
+        /// PRE-evade request body excerpt (capped at `MAX_BODY_EXCERPT`).
+        req_body_pre_excerpt: Vec<u8>,
         resp_headers: Vec<(String, String)>,
         resp_body_excerpt: Vec<u8>,
         resp_body_total: u64,
@@ -79,6 +87,8 @@ pub struct RequestRecord {
     pub waf_name: Option<String>,
     pub req_headers: Vec<(String, String)>,
     pub req_body_excerpt: Vec<u8>,
+    pub req_headers_pre: Vec<(String, String)>,
+    pub req_body_pre_excerpt: Vec<u8>,
     pub resp_headers: Vec<(String, String)>,
     pub resp_body_excerpt: Vec<u8>,
     pub resp_body_total: u64,
@@ -331,6 +341,8 @@ impl State {
                 waf_name,
                 req_headers,
                 req_body_excerpt,
+                req_headers_pre,
+                req_body_pre_excerpt,
                 resp_headers,
                 resp_body_excerpt,
                 resp_body_total,
@@ -394,6 +406,8 @@ impl State {
                     waf_name: waf_name.clone(),
                     req_headers: req_headers.clone(),
                     req_body_excerpt: req_body_excerpt.clone(),
+                    req_headers_pre: req_headers_pre.clone(),
+                    req_body_pre_excerpt: req_body_pre_excerpt.clone(),
                     resp_headers: resp_headers.clone(),
                     resp_body_excerpt: resp_body_excerpt.clone(),
                     resp_body_total: *resp_body_total,
@@ -688,6 +702,8 @@ mod tests {
             waf_name: None,
             req_headers: vec![],
             req_body_excerpt: vec![],
+            req_headers_pre: vec![],
+            req_body_pre_excerpt: vec![],
             resp_headers: vec![],
             resp_body_excerpt: vec![],
             resp_body_total: 0,

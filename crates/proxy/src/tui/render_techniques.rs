@@ -187,6 +187,8 @@ mod tests {
             waf_name: None,
             req_headers: vec![],
             req_body_excerpt: vec![],
+            req_headers_pre: vec![],
+            req_body_pre_excerpt: vec![],
             resp_headers: vec![],
             resp_body_excerpt: vec![],
             resp_body_total: 0,

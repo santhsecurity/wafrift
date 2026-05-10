@@ -211,6 +211,8 @@ pub fn render_detail_lines(rec: &RequestRecord) -> Vec<Line<'static>> {
     let pad_label = if rec.body_padded { "yes" } else { "no" }.to_string();
     let tls_label = rec.tls_profile.clone().unwrap_or_else(|| "(none)".into());
 
+    let mutation_diff = render_mutation_diff(rec);
+
     let mut lines = vec![
         Line::from(vec![
             label("host"),
@@ -275,6 +277,21 @@ pub fn render_detail_lines(rec: &RequestRecord) -> Vec<Line<'static>> {
         }
     }
 
+    // ── Mutation diff (#109) ──────────────────────────────────
+    // Show what wafrift's evade pipeline changed between
+    // client-side request and the bytes that hit the wire. Empty
+    // when the proxy was in passthrough (req_headers_pre is empty).
+    if !mutation_diff.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::styled(
+            "──── ⇄ evade mutation diff ────",
+            Style::default().fg(Color::LightMagenta),
+        ));
+        for diff_line in mutation_diff {
+            lines.push(diff_line);
+        }
+    }
+
     lines.push(Line::from(""));
     lines.push(Line::styled(
         "──── ↓ incoming response ────",
@@ -298,6 +315,112 @@ pub fn render_detail_lines(rec: &RequestRecord) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+/// Build the evade-mutation diff section: header-set difference
+/// (added / removed / value-changed) plus a one-line body byte-count
+/// delta. Returns empty when no pre-evade snapshot is recorded
+/// (passthrough mode).
+fn render_mutation_diff(rec: &RequestRecord) -> Vec<Line<'static>> {
+    if rec.req_headers_pre.is_empty() && rec.req_body_pre_excerpt.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<Line<'static>> = Vec::new();
+
+    let pre: std::collections::HashMap<String, &str> = rec
+        .req_headers_pre
+        .iter()
+        .map(|(k, v)| (k.to_ascii_lowercase(), v.as_str()))
+        .collect();
+    let post: std::collections::HashMap<String, &str> = rec
+        .req_headers
+        .iter()
+        .map(|(k, v)| (k.to_ascii_lowercase(), v.as_str()))
+        .collect();
+
+    let mut added: Vec<(String, &str)> = Vec::new();
+    let mut removed: Vec<(String, &str)> = Vec::new();
+    let mut changed: Vec<(String, &str, &str)> = Vec::new();
+    for (k, v) in &post {
+        match pre.get(k) {
+            None => added.push((k.clone(), v)),
+            Some(prev) if prev != v => changed.push((k.clone(), prev, v)),
+            _ => {}
+        }
+    }
+    for (k, v) in &pre {
+        if !post.contains_key(k) {
+            removed.push((k.clone(), v));
+        }
+    }
+    added.sort_by(|a, b| a.0.cmp(&b.0));
+    removed.sort_by(|a, b| a.0.cmp(&b.0));
+    changed.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (k, v) in &added {
+        out.push(Line::from(vec![
+            Span::styled("+ ", Style::default().fg(Color::LightGreen)),
+            Span::styled(format!("{k}: "), Style::default().fg(Color::Green)),
+            Span::styled(v.to_string(), Style::default().fg(Color::White)),
+        ]));
+    }
+    for (k, v) in &removed {
+        out.push(Line::from(vec![
+            Span::styled("- ", Style::default().fg(Color::LightRed)),
+            Span::styled(format!("{k}: "), Style::default().fg(Color::Red)),
+            Span::styled(v.to_string(), Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+    for (k, prev, cur) in &changed {
+        out.push(Line::from(vec![
+            Span::styled("~ ", Style::default().fg(Color::Yellow)),
+            Span::styled(format!("{k}: "), Style::default().fg(Color::Yellow)),
+            Span::styled(prev.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::raw(" → "),
+            Span::styled(cur.to_string(), Style::default().fg(Color::White)),
+        ]));
+    }
+
+    if !rec.req_body_pre_excerpt.is_empty() || !rec.req_body_excerpt.is_empty() {
+        let pre_len = rec.req_body_pre_excerpt.len();
+        let post_len = rec.req_body_excerpt.len();
+        let symbol = if pre_len == post_len {
+            "="
+        } else if post_len > pre_len {
+            "↑"
+        } else {
+            "↓"
+        };
+        let body_byte_equal = rec.req_body_pre_excerpt == rec.req_body_excerpt;
+        let body_status = if body_byte_equal {
+            "byte-identical"
+        } else {
+            "mutated"
+        };
+        let body_color = if body_byte_equal {
+            Color::DarkGray
+        } else {
+            Color::Yellow
+        };
+        out.push(Line::from(vec![
+            Span::styled("body ", Style::default().fg(Color::DarkGray)),
+            Span::styled(symbol.to_string(), Style::default().fg(body_color)),
+            Span::raw(" "),
+            Span::styled(
+                format!("{pre_len} → {post_len} bytes ({body_status})"),
+                Style::default().fg(body_color),
+            ),
+        ]));
+    }
+
+    if added.is_empty() && removed.is_empty() && changed.is_empty() && rec.req_body_pre_excerpt == rec.req_body_excerpt
+    {
+        out.push(Line::from(vec![Span::styled(
+            "(no mutation — request passed through unchanged)",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    }
+    out
 }
 
 fn label(s: &str) -> Span<'static> {
@@ -341,6 +464,8 @@ mod tests {
             waf_name: Some("Cloudflare".into()),
             req_headers: vec![("X-A".into(), "1".into())],
             req_body_excerpt: b"hello\nworld".to_vec(),
+            req_headers_pre: vec![("X-A".into(), "1".into())],
+            req_body_pre_excerpt: b"hello\nworld".to_vec(),
             resp_headers: vec![("server".into(), "cloudflare".into())],
             resp_body_excerpt: b"OK".to_vec(),
             resp_body_total: 2,
@@ -368,5 +493,107 @@ mod tests {
 
     fn line_text(l: &Line<'_>) -> String {
         l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
+    }
+
+    // ── mutation diff (#109) ─────────────────────────────────
+
+    #[test]
+    fn mutation_diff_empty_when_no_pre_snapshot_recorded() {
+        let mut r = rec();
+        r.req_headers_pre.clear();
+        r.req_body_pre_excerpt.clear();
+        let lines = render_mutation_diff(&r);
+        assert!(lines.is_empty(), "must return zero lines on passthrough");
+    }
+
+    #[test]
+    fn mutation_diff_byte_identical_emits_no_change_marker() {
+        // pre == post so diff renderer reports a 'no mutation' line.
+        let lines = render_mutation_diff(&rec());
+        let body = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(
+            body.contains("no mutation"),
+            "expected 'no mutation' note when pre == post; got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn mutation_diff_added_header_marked_with_plus() {
+        let mut r = rec();
+        r.req_headers_pre = vec![("Host".into(), "x".into())];
+        r.req_headers = vec![
+            ("Host".into(), "x".into()),
+            ("X-Forwarded-For".into(), "127.0.0.1".into()),
+        ];
+        let body = render_mutation_diff(&r)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(body.contains("+ x-forwarded-for:"), "added header must be tagged: {body}");
+        assert!(body.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn mutation_diff_removed_header_marked_with_minus() {
+        let mut r = rec();
+        r.req_headers_pre = vec![
+            ("Host".into(), "x".into()),
+            ("Cookie".into(), "session=abc".into()),
+        ];
+        r.req_headers = vec![("Host".into(), "x".into())];
+        let body = render_mutation_diff(&r)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(body.contains("- cookie:"), "removed header tagged: {body}");
+    }
+
+    #[test]
+    fn mutation_diff_changed_header_shows_arrow() {
+        let mut r = rec();
+        r.req_headers_pre = vec![("User-Agent".into(), "curl/8".into())];
+        r.req_headers = vec![("User-Agent".into(), "Mozilla/5.0".into())];
+        let body = render_mutation_diff(&r)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(body.contains("~ user-agent:"), "changed header tag: {body}");
+        assert!(body.contains("curl/8"), "old value present: {body}");
+        assert!(body.contains("→"), "arrow separator present: {body}");
+        assert!(body.contains("Mozilla/5.0"), "new value present: {body}");
+    }
+
+    #[test]
+    fn mutation_diff_body_size_delta_reported() {
+        let mut r = rec();
+        r.req_body_pre_excerpt = b"id=1' OR 1=1".to_vec();
+        r.req_body_excerpt = b"id=1%27%20OR%201%3D1".to_vec();
+        let body = render_mutation_diff(&r)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(body.contains("body"), "body line present: {body}");
+        assert!(body.contains("12 → 20 bytes"), "byte counts present: {body}");
+        assert!(body.contains("mutated"), "mutated label present: {body}");
+    }
+
+    #[test]
+    fn mutation_diff_byte_identical_body_marked() {
+        let mut r = rec();
+        r.req_body_pre_excerpt = b"same".to_vec();
+        r.req_body_excerpt = b"same".to_vec();
+        // Force a header change so the "no mutation" line doesn't fire.
+        r.req_headers_pre = vec![("a".into(), "1".into())];
+        r.req_headers = vec![("a".into(), "2".into())];
+        let body = render_mutation_diff(&r)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(body.contains("byte-identical"), "byte-identical body label: {body}");
     }
 }

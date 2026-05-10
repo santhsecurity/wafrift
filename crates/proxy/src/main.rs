@@ -1441,6 +1441,18 @@ async fn forward_wafrift_request(
         // ── lock dropped here ──
     };
 
+    // ── Snapshot the pre-evade request for the TUI's mutation diff ──
+    // (#109) Captured BEFORE evade() / evade_smart() so the TUI can
+    // show the operator exactly what bytes wafrift mutated. Body is
+    // capped at MAX_BODY_EXCERPT to match the post-evade excerpt
+    // budget.
+    let req_headers_pre = wafrift_req.headers.clone();
+    let req_body_pre_excerpt: Vec<u8> = wafrift_req
+        .body
+        .as_deref()
+        .map(|b| b[..b.len().min(wafrift_proxy::tui::MAX_BODY_EXCERPT)].to_vec())
+        .unwrap_or_default();
+
     let (mut evasion_result, technique_keys) = match plan {
         EvadePlan::Replay {
             replay_state,
@@ -1941,6 +1953,8 @@ async fn forward_wafrift_request(
             waf_name,
             req_headers: evasion_result.request.headers.clone(),
             req_body_excerpt,
+            req_headers_pre,
+            req_body_pre_excerpt,
             resp_headers: header_pairs.clone(),
             resp_body_excerpt,
             resp_body_total,
