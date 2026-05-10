@@ -506,19 +506,54 @@ impl ChallengeStore {
     ///
     /// Claims auto-expire after `SOLVER_INFLIGHT_TTL` so a crashed
     /// solver doesn't permanently lock out retries.
+    ///
+    /// Long-running solvers (chromium-based captcha solvers, Turnstile
+    /// flows that wait for a human) MUST call [`refresh_solver_pending`]
+    /// before the TTL elapses or a concurrent caller will claim the
+    /// slot and spawn a duplicate solver. Audit (2026-05-10) caught
+    /// the silent-eviction case as CRITICAL.
     pub fn mark_solver_pending(&self, host: &str) -> bool {
         let key = normalize_host(host);
         let mut inner = poison_recover_write(&self.inner, "mark_solver_pending");
         let now = Instant::now();
-        // GC stale claims first.
-        inner
-            .solver_in_flight
-            .retain(|_, t| now < *t + SOLVER_INFLIGHT_TTL);
+        // GC stale claims first — but log so a chronic eviction
+        // pattern is visible in operator logs.
+        inner.solver_in_flight.retain(|h, t| {
+            if now >= *t + SOLVER_INFLIGHT_TTL {
+                tracing::warn!(
+                    host = %h,
+                    held_for_secs = (now - *t).as_secs(),
+                    "solver_in_flight slot evicted by TTL — a concurrent caller may now spawn a duplicate solver. Long-running solvers should call refresh_solver_pending() to keep the slot alive."
+                );
+                false
+            } else {
+                true
+            }
+        });
         if inner.solver_in_flight.contains_key(&key) {
             return false;
         }
         inner.solver_in_flight.insert(key, now);
         true
+    }
+
+    /// Refresh the in-flight solver TTL. The owning solver must call
+    /// this before SOLVER_INFLIGHT_TTL elapses, otherwise its slot is
+    /// evicted and a concurrent caller can claim it. Audit (2026-05-10).
+    ///
+    /// Returns true if the slot was refreshed (the caller still owns
+    /// it), false if the slot is already gone — in which case the
+    /// solver should treat itself as superseded and exit.
+    pub fn refresh_solver_pending(&self, host: &str) -> bool {
+        let key = normalize_host(host);
+        let mut inner = poison_recover_write(&self.inner, "refresh_solver_pending");
+        let now = Instant::now();
+        if let Some(t) = inner.solver_in_flight.get_mut(&key) {
+            *t = now;
+            true
+        } else {
+            false
+        }
     }
 
     /// Release the in-flight solver slot — called after the solver
