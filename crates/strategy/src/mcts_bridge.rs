@@ -186,8 +186,32 @@ impl Environment for WafRiftEnv {
         }
 
         // ── Dimension 4: Header obfuscation (only once per path) ──
+        // Audit (2026-05-10): pre-fix this hardcoded "CaseMixing" so
+        // the MCTS search could only ever pick that one header trick,
+        // even though the engine ships TabSeparator, WhitespacePadding,
+        // LineFolding, DuplicateHeader, UnderscoreSubstitution,
+        // NullByteInjection, TrailingSpace, MultiLineFolding, CommaJoin,
+        // and others. Restricting the action space to a single name
+        // defeats the search. Now we expose every known header trick
+        // as a distinct action so MCTS can actually choose between
+        // them.
         if !self.header_applied {
-            actions.push(TechniqueAction::HeaderTrick("CaseMixing".to_string()));
+            for trick in [
+                "CaseMixing",
+                "TabSeparator",
+                "WhitespacePadding",
+                "LineFolding",
+                "LfOnlyLineFolding",
+                "DuplicateHeader",
+                "UnderscoreSubstitution",
+                "NullByteInjection",
+                "TrailingSpace",
+                "MultiLineFolding",
+                "LfOnlyMultiLineFolding",
+                "CommaJoin",
+            ] {
+                actions.push(TechniqueAction::HeaderTrick(trick.to_string()));
+            }
         }
 
         actions
