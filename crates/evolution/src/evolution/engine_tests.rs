@@ -2,6 +2,7 @@
 
 use crate::evolution::EvolutionEngine;
 use crate::types::{Budget, Feedback, OracleVerdict};
+use rand::{Rng, SeedableRng};
 use std::time::Duration;
 
 #[test]
@@ -381,7 +382,7 @@ fn lineage_no_cycles() {
 
     let best = alg.best().unwrap();
     // Walk lineage tree and ensure no cycles by checking generation monotonicity
-    let mut gen = u32::MAX;
+    let mut last_gen = u32::MAX;
     let mut lineage = &best.lineage;
     loop {
         let current_gen = match lineage {
@@ -390,10 +391,10 @@ fn lineage_no_cycles() {
             Lineage::Mutation { generation, .. } => *generation,
         };
         assert!(
-            current_gen <= gen,
+            current_gen <= last_gen,
             "lineage generation must not increase going backward (cycle detected)"
         );
-        gen = current_gen;
+        last_gen = current_gen;
         match lineage {
             Lineage::Genesis { .. } => break,
             Lineage::Crossover { .. } => break, // Can't traverse Arcs easily in test

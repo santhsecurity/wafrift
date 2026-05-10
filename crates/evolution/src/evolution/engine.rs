@@ -20,7 +20,7 @@ use std::time::Instant;
 #[derive(Debug)]
 pub struct EvolutionEngine {
     /// Search algorithm implementation.
-    algorithm: Box<dyn SearchAlgorithm>,
+    pub(crate) algorithm: Box<dyn SearchAlgorithm>,
     /// Gene pool for creating/mutating chromosomes.
     pub gene_pool: GenePool,
     /// Seeded random number generator.
