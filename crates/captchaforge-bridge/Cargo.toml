@@ -1,0 +1,26 @@
+[package]
+name = "wafrift-captchaforge-bridge"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Glue crate that connects wafrift's managed-challenge flow to the captchaforge headless-browser solver."
+readme = "README.md"
+keywords = ["wafrift", "captcha", "captchaforge", "cloudflare", "challenge"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+wafrift-transport = { workspace = true }
+captchaforge = { path = "../../../captchaforge" }
+chromiumoxide = { version = "0.9", default-features = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+futures = { version = "0.3" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
