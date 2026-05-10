@@ -1644,7 +1644,7 @@ async fn forward_wafrift_request(
             .nth(3)
             .map(|s| format!("/{s}"))
             .unwrap_or_else(|| "/".into());
-        let (_id, rx) = store.register(
+        let (id, rx) = store.register(
             host.clone(),
             evasion_result.request.method.as_str(),
             path_for_intercept,
@@ -1652,6 +1652,11 @@ async fn forward_wafrift_request(
         let decision = tokio::select! {
             d = rx => d.unwrap_or(wafrift_proxy::intercept::InterceptDecision::Release),
             _ = tokio::time::sleep(wafrift_proxy::intercept::INTERCEPT_TIMEOUT) => {
+                // Operator walked away. Cancel the registration so
+                // the sender + pending entry don't leak in the
+                // store forever — without this the BTreeMaps would
+                // grow unbounded under sustained intercept timeouts.
+                store.cancel(id);
                 warn!(
                     host = %host,
                     "intercept default-allow after {} secs (operator did not act)",
