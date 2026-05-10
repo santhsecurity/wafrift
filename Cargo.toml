@@ -25,7 +25,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.9"
+version = "0.2.10"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -49,21 +49,21 @@ unused_must_use = "deny"
 
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)
-wafrift-types = { path = "crates/types", version = "0.2.9" }
-wafrift-encoding = { path = "crates/encoding", version = "0.2.9" }
-wafrift-grammar = { path = "crates/grammar", version = "0.2.9" }
-wafrift-content-type = { path = "crates/content-type", version = "0.2.9" }
-wafrift-smuggling = { path = "crates/smuggling", version = "0.2.9" }
-wafrift-fingerprint = { path = "crates/fingerprint", version = "0.2.9" }
-wafrift-detect = { path = "crates/detect", version = "0.2.9" }
-wafrift-evolution = { path = "crates/evolution", version = "0.2.9" }
-wafrift-strategy = { path = "crates/strategy", version = "0.2.9" }
-wafrift-oracle = { path = "crates/oracle", version = "0.2.9" }
-wafrift-transport = { path = "crates/transport", version = "0.2.9" }
-wafrift-pool = { path = "crates/pool", version = "0.2.9" }
-wafrift-recon = { path = "crates/recon", version = "0.2.9" }
-wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.9" }
-wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.9" }
+wafrift-types = { path = "crates/types", version = "0.2.10" }
+wafrift-encoding = { path = "crates/encoding", version = "0.2.10" }
+wafrift-grammar = { path = "crates/grammar", version = "0.2.10" }
+wafrift-content-type = { path = "crates/content-type", version = "0.2.10" }
+wafrift-smuggling = { path = "crates/smuggling", version = "0.2.10" }
+wafrift-fingerprint = { path = "crates/fingerprint", version = "0.2.10" }
+wafrift-detect = { path = "crates/detect", version = "0.2.10" }
+wafrift-evolution = { path = "crates/evolution", version = "0.2.10" }
+wafrift-strategy = { path = "crates/strategy", version = "0.2.10" }
+wafrift-oracle = { path = "crates/oracle", version = "0.2.10" }
+wafrift-transport = { path = "crates/transport", version = "0.2.10" }
+wafrift-pool = { path = "crates/pool", version = "0.2.10" }
+wafrift-recon = { path = "crates/recon", version = "0.2.10" }
+wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.10" }
+wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.10" }
 mctrust = "=0.4.0"
 # External dependencies (unavailable in this environment)
 # attackstr = { path = "../../libs/offensive/attackstr" }
