@@ -316,6 +316,18 @@ static BODY_PADDING_BYTES: std::sync::atomic::AtomicUsize = std::sync::atomic::A
 static MUTATE_URL_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Process-wide managed-challenge cookie store. Captures `cf_clearance`
+/// / `_abck` / `aws-waf-token` on the response side and replays on
+/// the request side until expiry (default 30min, see
+/// [`wafrift_transport::challenge::DEFAULT_CLEARANCE_TTL`]). Always
+/// initialised — operating cost is one HashMap lookup per request.
+static CHALLENGE_STORE: std::sync::OnceLock<wafrift_transport::challenge::ChallengeStore> =
+    std::sync::OnceLock::new();
+
+fn challenge_store() -> &'static wafrift_transport::challenge::ChallengeStore {
+    CHALLENGE_STORE.get_or_init(wafrift_transport::challenge::ChallengeStore::new)
+}
+
 /// Process-wide TUI event channel. `Some` when `--tui` is set; the
 /// dashboard task drains it. Bounded at 10 k events so a slow TTY can't
 /// produce unbounded memory growth on a heavy-traffic proxy (was
@@ -1530,6 +1542,34 @@ async fn forward_wafrift_request(
         }
     }
 
+    // ── Managed-challenge cookie attach (#115) ──────────────────────
+    // If we have a clearance cookie on file for this host, fold it
+    // into the outgoing Cookie header. Stacks with any existing
+    // Cookie value the operator's browser already attached — we
+    // append, not replace, so we don't kick out the user's session.
+    if let Some(clearance) = challenge_store().get(&host) {
+        let mut found = false;
+        for (k, v) in evasion_result.request.headers.iter_mut() {
+            if k.eq_ignore_ascii_case("cookie") {
+                if !v.contains(&clearance) {
+                    if v.is_empty() {
+                        *v = clearance.clone();
+                    } else {
+                        *v = format!("{v}; {clearance}");
+                    }
+                }
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            evasion_result
+                .request
+                .headers
+                .push(("Cookie".into(), clearance));
+        }
+    }
+
     // ── Upstream fetch ──────────────────────────────────────────────
     // Two paths: default rustls via reqwest, or stealth (browser-
     // identical TLS) via wafrift_transport::stealth::StealthClient
@@ -1693,6 +1733,53 @@ async fn forward_wafrift_request(
         .unwrap_or_default();
     let signal = response_profiles.classify(status_code, &header_pairs, &buf);
     let is_block = signal.classification.is_blocked();
+
+    // ── Managed-challenge handling (#115) ───────────────────────────
+    // Two passes:
+    //   1. CAPTURE: any response carrying a `Set-Cookie:
+    //      cf_clearance=…` (or `_abck`, `aws-waf-token`) is gold
+    //      whether it's a 200 or a 503. Stash it for the next request
+    //      to this host so the operator only has to clear the
+    //      challenge once per 30 minutes.
+    //   2. CLASSIFY + ESCALATE: if the body looks like a challenge
+    //      page AND we don't already have a clearance cookie, surface
+    //      a one-time prompt so the operator knows to clear it (rather
+    //      than the loop stalling silently).
+    {
+        let store = challenge_store();
+        let set_cookie_values: Vec<&str> = header_pairs
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
+            .map(|(_, v)| v.as_str())
+            .collect();
+        if let Some((cookie, kind)) =
+            wafrift_transport::challenge::extract_clearance_cookie(&set_cookie_values)
+        {
+            store.record(host.clone(), cookie, kind, None);
+            info!(
+                host = %host,
+                kind = %kind.label(),
+                "challenge clearance cookie captured"
+            );
+        }
+        // Heuristic challenge classification (only relevant when the
+        // body looks like a challenge page).
+        if status_code == 503 || status_code == 403 {
+            let body_slice = &buf[..buf.len().min(8192)];
+            let kind = wafrift_transport::challenge::classify(body_slice, &header_pairs);
+            if !matches!(kind, wafrift_transport::challenge::ChallengeKind::Unknown)
+                && store.get(&host).is_none()
+                && store.should_prompt_operator(&host)
+            {
+                warn!(
+                    host = %host,
+                    kind = %kind.label(),
+                    "managed challenge detected and no clearance cookie on file — clear the \
+                     challenge in a browser; the cookie will be captured on the next response"
+                );
+            }
+        }
+    }
 
     // ── WAF identification: which product is in front of us? ────────
     // The response signal may have already identified the WAF from a
