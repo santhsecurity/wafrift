@@ -107,10 +107,7 @@ struct PersistedGeneBank {
 fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
     dst.schema = dst.schema.max(src.schema);
     for (host, src_state) in src.hosts {
-        let entry = dst
-            .hosts
-            .entry(host)
-            .or_insert_with(PersistedHostState::default);
+        let entry = dst.hosts.entry(host).or_default();
         for w in src_state.proven_winners {
             if !entry.proven_winners.contains(&w) {
                 entry.proven_winners.push(w);

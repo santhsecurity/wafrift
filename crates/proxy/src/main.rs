@@ -1647,7 +1647,7 @@ async fn forward_wafrift_request(
     // the proxy hot path.
     {
         let path_only = request_log_uri
-            .splitn(2, '?')
+            .split('?')
             .next()
             .unwrap_or(&request_log_uri)
             .to_string();

@@ -28,7 +28,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // FIRST so they're always sampled.
     let mut results: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut push = |v: String, results: &mut Vec<String>, seen: &mut HashSet<String>| {
+    let push = |v: String, results: &mut Vec<String>, seen: &mut HashSet<String>| {
         if seen.insert(v.clone()) {
             results.push(v);
         }
@@ -47,15 +47,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
     //   cn=*        → 200 ✓
     //   +admin*     → 200 ✓
     for wildcard in [
-        "*",
-        "admin*",
-        "*admin",
-        "*adm*",
-        "uid=*",
-        "cn=*",
-        "*)(*",
-        "+admin*",
-        "*@*.*",
+        "*", "admin*", "*admin", "*adm*", "uid=*", "cn=*", "*)(*", "+admin*", "*@*.*",
     ] {
         push(wildcard.to_string(), &mut results, &mut seen);
     }

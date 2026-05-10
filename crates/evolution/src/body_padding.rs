@@ -160,37 +160,37 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
             added: requested_bytes,
         };
     }
-    if let Ok(s) = std::str::from_utf8(body) {
-        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(s) {
-            // Splice _wafrift_pad as first key. serde_json::Map is
-            // insertion-ordered when the `preserve_order` feature is
-            // on. We don't have that feature, so build a fresh object
-            // by serializing the pad first then concatenating.
-            //
-            // Simpler: emit `{"_wafrift_pad":"…",<rest of original
-            // object minus the leading `{`>`. This preserves byte
-            // order of the user's data exactly.
-            // Find the first `{`.
-            if let Some(open) = s.find('{') {
-                let after = &s[open + 1..];
-                // If the original is `{}`, after = "}". That's fine.
-                // If after starts with `}` we don't want a stray comma.
-                let glue = if after.trim_start().starts_with('}') {
-                    ""
-                } else {
-                    ","
-                };
-                let new_body = format!("{{\"{PAD_KEY}\":\"{pad_str}\"{glue}{after}").into_bytes();
-                let added = new_body.len().saturating_sub(body.len());
-                if added >= requested_bytes && map.contains_key(PAD_KEY) {
-                    // A malicious user could pre-set _wafrift_pad to
-                    // collide with our key. Use a unique suffix.
-                }
-                return PadOutcome::Padded {
-                    bytes: new_body,
-                    added,
-                };
+    if let Ok(s) = std::str::from_utf8(body)
+        && let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(s)
+    {
+        // Splice _wafrift_pad as first key. serde_json::Map is
+        // insertion-ordered when the `preserve_order` feature is
+        // on. We don't have that feature, so build a fresh object
+        // by serializing the pad first then concatenating.
+        //
+        // Simpler: emit `{"_wafrift_pad":"…",<rest of original
+        // object minus the leading `{`>`. This preserves byte
+        // order of the user's data exactly.
+        // Find the first `{`.
+        if let Some(open) = s.find('{') {
+            let after = &s[open + 1..];
+            // If the original is `{}`, after = "}". That's fine.
+            // If after starts with `}` we don't want a stray comma.
+            let glue = if after.trim_start().starts_with('}') {
+                ""
+            } else {
+                ","
+            };
+            let new_body = format!("{{\"{PAD_KEY}\":\"{pad_str}\"{glue}{after}").into_bytes();
+            let added = new_body.len().saturating_sub(body.len());
+            if added >= requested_bytes && map.contains_key(PAD_KEY) {
+                // A malicious user could pre-set _wafrift_pad to
+                // collide with our key. Use a unique suffix.
             }
+            return PadOutcome::Padded {
+                bytes: new_body,
+                added,
+            };
         }
     }
     // Non-object JSON (array/string/number) or malformed — wrap.
@@ -397,7 +397,13 @@ mod tests {
     #[test]
     fn malformed_content_type_is_safe() {
         // Garbage Content-Type strings must not panic.
-        for ct in &["", "////", ";;;;", "application/json;;;boundary=", "\x00\x01\x02"] {
+        for ct in &[
+            "",
+            "////",
+            ";;;;",
+            "application/json;;;boundary=",
+            "\x00\x01\x02",
+        ] {
             // Should produce SOME PadOutcome, never panic.
             let _ = pad(b"id=42", ct, 8 * 1024);
         }
@@ -407,7 +413,7 @@ mod tests {
     fn empty_input_with_huge_size() {
         // Empty body + very large pad (but not pathological) — must
         // still produce structurally-valid output.
-        let out = pad(b"", "application/json", 1 * 1024 * 1024);
+        let out = pad(b"", "application/json", 1024 * 1024);
         let PadOutcome::Padded { bytes, .. } = out else {
             panic!()
         };

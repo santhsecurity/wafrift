@@ -16,7 +16,11 @@
 
 ARG RUST_VERSION=1.89
 
-FROM rust:${RUST_VERSION}-slim AS builder
+# Pin to bookworm so the binary uses glibc 2.36 — matching the runtime
+# image below. The default `rust:slim` tracks Debian Trixie (glibc 2.39)
+# which the bookworm runtime can't load:
+#   "/lib/x86_64-linux-gnu/libc.so.6: version GLIBC_2.39 not found"
+FROM rust:${RUST_VERSION}-slim-bookworm AS builder
 
 # Build deps. libssl-dev for native-tls fallback (rustls is the default
 # but reqwest's TLS backend feature can be flipped at compile time);

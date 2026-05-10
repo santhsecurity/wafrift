@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub enum InjectionContext {
+    #[default]
+    PlainBody,
     JsonString,
     JsonNumber,
     XmlAttribute,
@@ -18,13 +20,6 @@ pub enum InjectionContext {
     CookieValue,
     MultipartField,
     MultipartFileName,
-    PlainBody,
-}
-
-impl Default for InjectionContext {
-    fn default() -> Self {
-        Self::PlainBody
-    }
 }
 
 #[derive(Debug, Error, Serialize, Deserialize, Clone, PartialEq)]

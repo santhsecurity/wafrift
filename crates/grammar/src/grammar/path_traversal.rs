@@ -87,7 +87,11 @@ pub fn mutate(payload: &str) -> Vec<String> {
     }
 
     if target.contains("windows") || target.contains("system32") {
-        push("..\\..\\WINDOWS\\system32".to_string(), &mut results, &mut seen);
+        push(
+            "..\\..\\WINDOWS\\system32".to_string(),
+            &mut results,
+            &mut seen,
+        );
     }
 
     if target.contains("/etc/passwd") || target.contains("passwd") {

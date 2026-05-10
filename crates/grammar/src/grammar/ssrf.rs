@@ -194,20 +194,24 @@ pub fn mutate(payload: &str) -> Vec<String> {
     //
     // Live-confirmed against wafrift-bench naxsi for IPv4-as-integer
     // and IPv4-as-octal (already in the address-encoding pass above).
-    let host_only = strip_scheme(payload).split('/').next().unwrap_or("").to_string();
+    let host_only = strip_scheme(payload)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
     if !host_only.is_empty() {
         let path = extract_path(payload)
             .map(|i| payload[i..].to_string())
             .unwrap_or_else(|| "/".to_string());
         for variant in [
-            format!("http:/{host_only}{path}"),       // single slash
-            format!("//{host_only}{path}"),           // protocol-relative
-            format!("{host_only}{path}"),             // bare host
-            format!("http:////{host_only}{path}"),    // quad-slash
+            format!("http:/{host_only}{path}"),    // single slash
+            format!("//{host_only}{path}"),        // protocol-relative
+            format!("{host_only}{path}"),          // bare host
+            format!("http:////{host_only}{path}"), // quad-slash
             // numeric forms with the alt schemes — naxsi already
             // misses bare 2130706433 / 0x7f000001, so combine.
-            format!("//2130706433{path}"),            // protocol-relative + integer
-            format!("//0177.0.0.1{path}"),            // protocol-relative + octal
+            format!("//2130706433{path}"), // protocol-relative + integer
+            format!("//0177.0.0.1{path}"), // protocol-relative + octal
         ] {
             results.insert(variant);
         }

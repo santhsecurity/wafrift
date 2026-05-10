@@ -118,9 +118,10 @@ struct State {
 
 impl State {
     fn new() -> Self {
-        let mut s = Self::default();
-        s.started = Some(Instant::now());
-        s
+        Self {
+            started: Some(Instant::now()),
+            ..Self::default()
+        }
     }
 
     fn record(&mut self, ev: &Event) {
@@ -204,24 +205,23 @@ impl State {
     }
 
     fn avg_latency_ms(&self) -> u64 {
-        if self.total == 0 {
-            0
-        } else {
-            self.latency_sum_ms / self.total
-        }
+        self.latency_sum_ms.checked_div(self.total).unwrap_or(0)
     }
 
     fn bypass_rate(&self) -> f64 {
         if self.total == 0 {
-            0.0
-        } else {
-            (self.bypassed as f64 / self.total as f64) * 100.0
+            return 0.0;
         }
+        // u64 -> f64 is precision-lossy beyond 2^53 but we only ever
+        // see request counters; clippy warning silenced explicitly.
+        #[allow(clippy::cast_precision_loss)]
+        let r = (self.bypassed as f64 / self.total as f64) * 100.0;
+        r
     }
 
     fn top_hosts(&self, n: usize) -> Vec<(&String, &HostStats)> {
         let mut v: Vec<_> = self.hosts.iter().collect();
-        v.sort_by(|a, b| b.1.sent.cmp(&a.1.sent));
+        v.sort_by_key(|b| std::cmp::Reverse(b.1.sent));
         v.truncate(n);
         v
     }

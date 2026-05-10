@@ -98,6 +98,22 @@ pub enum UpstreamClient {
     },
 }
 
+impl std::fmt::Debug for UpstreamClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Reqwest(_) => f.debug_tuple("Reqwest").finish(),
+            #[cfg(feature = "tls-impersonate")]
+            Self::Stealth(_) => f.debug_tuple("Stealth").finish(),
+            #[cfg(feature = "tls-impersonate")]
+            Self::StealthPool { clients, cursor } => f
+                .debug_struct("StealthPool")
+                .field("clients", &clients.len())
+                .field("cursor", cursor)
+                .finish(),
+        }
+    }
+}
+
 impl UpstreamClient {
     /// Build the default reqwest variant from a pre-configured client.
     /// All the SSRF/resolver/cookie wiring stays where it already is in

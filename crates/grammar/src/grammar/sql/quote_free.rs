@@ -275,7 +275,16 @@ mod tests {
     fn pathological_input_doesnt_panic() {
         // Adversarial inputs that have triggered crashes in other
         // payload mutators across other projects:
-        for p in &["", "%", "%%%", "%2", "%XX", "\x00\x01\x02", "a' OR 1\x00=1", "/*\x00*/"] {
+        for p in &[
+            "",
+            "%",
+            "%%%",
+            "%2",
+            "%XX",
+            "\x00\x01\x02",
+            "a' OR 1\x00=1",
+            "/*\x00*/",
+        ] {
             // Just must not panic. Output may be empty.
             let _ = mutations(p, 10);
         }

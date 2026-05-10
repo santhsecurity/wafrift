@@ -111,11 +111,9 @@ impl SessionError {
 }
 
 pub fn extract_csrf(response_body: &str, regex: &regex::Regex) -> Result<String, SessionError> {
-    if let Some(caps) = regex.captures(response_body) {
-        if let Some(m) = caps.get(1) {
-            if !m.as_str().is_empty() {
-                return Ok(m.as_str().to_string());
-            }
+    if let Some(m) = regex.captures(response_body).and_then(|c| c.get(1)) {
+        if !m.as_str().is_empty() {
+            return Ok(m.as_str().to_string());
         }
     }
     Err(SessionError::CsrfTokenNotFound {

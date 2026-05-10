@@ -392,3 +392,127 @@ pub fn all_strategies() -> Vec<Strategy> {
     });
     strategies
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_url_encode_basic() {
+        assert_eq!(encode("A<", Strategy::UrlEncode).unwrap(), "A%3C");
+    }
+
+    #[test]
+    fn encode_url_encode_lower() {
+        assert_eq!(encode("A<", Strategy::UrlEncodeLower).unwrap(), "A%3c");
+    }
+
+    #[test]
+    fn encode_double_url_encode() {
+        assert_eq!(encode("A<", Strategy::DoubleUrlEncode).unwrap(), "%2541%253C");
+    }
+
+    #[test]
+    fn encode_case_alternation() {
+        let result = encode("SELECT", Strategy::CaseAlternation).unwrap();
+        assert!(result.contains("SeL") || result.contains("sEl"));
+    }
+
+    #[test]
+    fn encode_null_byte() {
+        let result = encode("file.php", Strategy::NullByte).unwrap();
+        assert!(result.contains("\x00") || result.contains("%00"));
+    }
+
+    #[test]
+    fn encode_base64() {
+        assert_eq!(encode("hello", Strategy::Base64Encode).unwrap(), "aGVsbG8=");
+    }
+
+    #[test]
+    fn encode_hex() {
+        assert_eq!(encode("ABC", Strategy::HexEncode).unwrap(), "414243");
+    }
+
+    #[test]
+    fn encode_json() {
+        assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "\"A<\"");
+    }
+
+    #[test]
+    fn encode_html_entity() {
+        assert_eq!(encode("A<", Strategy::HtmlEntityEncode).unwrap(), "&#x41;&#x3C;");
+    }
+
+    #[test]
+    fn encode_invalid_utf8_fails() {
+        let invalid = vec![0x80, 0x81, 0x82];
+        let result = encode(&invalid, Strategy::CaseAlternation);
+        assert!(matches!(result, Err(EncodeError::InvalidUtf8)));
+    }
+
+    #[test]
+    fn encode_payload_too_large_fails() {
+        let huge = vec![b'X'; MAX_PAYLOAD_SIZE + 1];
+        let result = encode(&huge, Strategy::UrlEncode);
+        assert!(matches!(result, Err(EncodeError::PayloadTooLarge { .. })));
+    }
+
+    #[test]
+    fn all_strategies_non_empty() {
+        let strategies = all_strategies();
+        assert!(!strategies.is_empty());
+        assert!(strategies.contains(&Strategy::UrlEncode));
+    }
+
+    #[test]
+    fn strategy_as_str_roundtrip() {
+        for s in all_strategies() {
+            assert!(!s.as_str().is_empty());
+        }
+    }
+
+    #[test]
+    fn strategy_contexts_returns_slice() {
+        assert!(Strategy::UrlEncode.contexts().is_empty());
+        assert_eq!(Strategy::JsonEncode.contexts(), &["json"]);
+        assert_eq!(Strategy::SpaceToComment.contexts(), &["sql"]);
+    }
+
+    #[test]
+    fn encode_empty_payload() {
+        assert_eq!(encode("", Strategy::UrlEncode).unwrap(), "");
+    }
+
+    #[test]
+    fn encode_unicode() {
+        let result = encode("A<", Strategy::UnicodeEncode).unwrap();
+        assert!(result.contains("\\u"));
+    }
+
+    #[test]
+    fn encode_chunked_split() {
+        let result = encode("hello", Strategy::ChunkedSplit).unwrap();
+        assert!(result.contains("\r\n"));
+        assert!(result.ends_with("0\r\n\r\n"));
+    }
+
+    #[test]
+    fn encode_parameter_pollution() {
+        let result = encode("key=value", Strategy::ParameterPollution).unwrap();
+        assert!(result.contains("key="));
+    }
+
+    #[test]
+    fn encode_gzip_produces_base64() {
+        let result = encode("hello", Strategy::GzipEncode).unwrap();
+        // Gzip output is base64-encoded
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn encode_iis_unicode() {
+        let result = encode("A<", Strategy::IisUnicodeEncode).unwrap();
+        assert!(result.contains("%u"));
+    }
+}

@@ -907,13 +907,15 @@ mod tests {
 
     #[test]
     fn suggested_techniques_filters_skipped() {
-        let mut state = HostState::default();
-        state.prioritized_techniques = vec![
-            "DoubleUrlEncode".into(),
-            "CaseAlternation".into(),
-            "UnicodeHomoglyph".into(),
-        ];
-        state.avoided_techniques.push("CaseAlternation".into());
+        let state = HostState {
+            prioritized_techniques: vec![
+                "DoubleUrlEncode".into(),
+                "CaseAlternation".into(),
+                "UnicodeHomoglyph".into(),
+            ],
+            avoided_techniques: vec!["CaseAlternation".into()],
+            ..HostState::default()
+        };
         let suggested = state.suggested_techniques();
         assert_eq!(suggested, vec!["DoubleUrlEncode", "UnicodeHomoglyph"]);
     }
