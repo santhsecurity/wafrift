@@ -6,7 +6,7 @@
 use anyhow::Context;
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
-    Issuer, KeyPair, KeyUsagePurpose,
+    Issuer, KeyPair, KeyUsagePurpose, SanType,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -213,6 +213,11 @@ impl CertificateAuthority {
 fn leaf_params_for(tls_server_name: &str) -> anyhow::Result<CertificateParams> {
     let mut leaf_params =
         CertificateParams::new(vec![tls_server_name.to_string()]).context("leaf params")?;
+    // Browsers (and rustls) require iPAddress SAN for IP literals; dNSName
+    // SANs that look like IPs are rejected per RFC 2818 §3.1.
+    if let Ok(ip) = tls_server_name.parse::<std::net::IpAddr>() {
+        leaf_params.subject_alt_names = vec![SanType::IpAddress(ip)];
+    }
     leaf_params.is_ca = IsCa::NoCa;
     leaf_params.use_authority_key_identifier_extension = true;
     leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];

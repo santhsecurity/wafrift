@@ -1174,3 +1174,182 @@ fn challenge_capture_round_trip_via_extract_and_store() {
     assert_eq!(store.get(host), Some("cf_clearance=zzz".into()));
     store.forget(host);
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ADVERSARIAL SWEEP TESTS — 2026-05-10
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── 1. Gene-bank backward compat (v0.1 flat HashMap) ───────────────────────
+
+#[test]
+fn load_gene_bank_v0_1_flat_hashmap_migrates() {
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gb_v01_{}.json",
+        std::process::id()
+    ));
+    // v0.1 format: no schema wrapper, just a flat object.
+    let json = r#"{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":"Cloudflare"}}"#;
+    std::fs::write(&tmp, json).unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 1, "v0.1 must be migrated to schema 1");
+    assert!(bank.hosts.contains_key("api.example.com"));
+    let host = bank.hosts.get("api.example.com").unwrap();
+    assert_eq!(host.proven_winners, vec!["UrlEncode"]);
+    assert_eq!(host.waf_name, Some("Cloudflare".into()));
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_v0_1_empty_object_migrates() {
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gb_v01_empty_{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&tmp, "{}").unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 1);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn load_gene_bank_truly_malformed_returns_default() {
+    // Negative twin: garbage that matches neither format must still
+    // degrade gracefully to an empty bank.
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_gb_bad_{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&tmp, "not json at all").unwrap();
+    let bank = load_gene_bank(&tmp);
+    assert_eq!(bank.schema, 0);
+    assert!(bank.hosts.is_empty());
+    let _ = std::fs::remove_file(&tmp);
+}
+
+// ── 2. restore_gene_bank memory cap ────────────────────────────────────────
+
+#[test]
+fn restore_gene_bank_enforces_10k_cap() {
+    let mut state = ProxyState::default();
+    let mut bank = PersistedGeneBank::default();
+    for i in 0..10_001 {
+        let host = format!("host-{i:05}.example.com");
+        let mut hs = PersistedHostState::default();
+        hs.proven_winners.push("UrlEncode".into());
+        bank.hosts.insert(host, hs);
+    }
+    let restored = restore_gene_bank(&mut state, bank);
+    assert_eq!(restored, 10_001);
+    assert!(
+        state.hosts.len() <= 10_000,
+        "hosts.len() = {}",
+        state.hosts.len()
+    );
+}
+
+#[test]
+fn restore_gene_bank_evicts_oldest_on_overflow() {
+    let mut state = ProxyState::default();
+    let mut bank = PersistedGeneBank::default();
+    for i in 0..10_001 {
+        let host = format!("host-{i:05}.example.com");
+        let mut hs = PersistedHostState::default();
+        hs.proven_winners.push("UrlEncode".into());
+        bank.hosts.insert(host, hs);
+    }
+    restore_gene_bank(&mut state, bank);
+    assert_eq!(state.hosts.len(), 10_000, "must be capped at 10k");
+    assert_eq!(state.host_fifo.len(), 10_000, "fifo must stay in sync");
+    // HashMap iteration order is arbitrary, so we can't predict which
+    // specific host was evicted — only that one of the 10_001 is gone.
+}
+
+#[test]
+fn restore_gene_bank_under_cap_keeps_all() {
+    let mut state = ProxyState::default();
+    let mut bank = PersistedGeneBank::default();
+    for i in 0..100 {
+        let host = format!("host-{i}.example.com");
+        let mut hs = PersistedHostState::default();
+        hs.proven_winners.push("UrlEncode".into());
+        bank.hosts.insert(host, hs);
+    }
+    let restored = restore_gene_bank(&mut state, bank);
+    assert_eq!(restored, 100);
+    assert_eq!(state.hosts.len(), 100);
+}
+
+// ── 3. save_gene_bank tempfile cleanup ─────────────────────────────────────
+
+#[test]
+fn save_gene_bank_cleans_up_tempfile_on_error() {
+    let dir = std::env::temp_dir().join(format!(
+        "wafrift_gb_ro_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gene-bank.json");
+
+    // Make directory read-only so File::create on the tempfile fails.
+    let mut perms = std::fs::metadata(&dir).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&dir, perms.clone()).unwrap();
+
+    let state = ProxyState::default();
+    let result = save_gene_bank(&state, &path);
+    assert!(result.is_err(), "expected write failure in read-only dir");
+
+    let entries: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .map_or(false, |s| s.contains(".json.tmp."))
+        })
+        .collect();
+    assert!(
+        entries.is_empty(),
+        "tempfile must be cleaned up on error: {:?}",
+        entries
+    );
+
+    // Restore permissions for cleanup.
+    perms.set_readonly(false);
+    let _ = std::fs::set_permissions(&dir, perms);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_gene_bank_leaves_no_tempfile_on_success() {
+    let dir = std::env::temp_dir().join(format!(
+        "wafrift_gb_ok_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gene-bank.json");
+
+    let mut state = ProxyState::default();
+    state.hosts.insert("example.com".into(), HostState::default());
+    save_gene_bank(&state, &path).unwrap();
+
+    let entries: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .map_or(false, |s| s.contains(".json.tmp."))
+        })
+        .collect();
+    assert!(
+        entries.is_empty(),
+        "tempfile must not leak on success: {:?}",
+        entries
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -108,4 +108,29 @@ mod tests {
         assert!(should_strip_proxy_header("Custom-Header", &conn));
         assert!(!should_strip_proxy_header("Content-Type", &conn));
     }
+
+    #[test]
+    fn collect_connection_header_names_merges_multiple_headers() {
+        // Defect: the stealth path used .find() which only parsed the
+        // first Connection header, leaking hop-by-hop tokens listed in
+        // subsequent Connection headers to the client.
+        let headers = vec![
+            ("Connection".to_string(), "keep-alive".to_string()),
+            ("CONNECTION".to_string(), "X-Custom-Hop".to_string()),
+            ("X-Custom-Hop".to_string(), "value".to_string()),
+            ("Content-Type".to_string(), "text/html".to_string()),
+        ];
+        let conn = collect_connection_header_names(&headers);
+        assert!(conn.contains("keep-alive"));
+        assert!(conn.contains("x-custom-hop"));
+        assert!(should_strip_proxy_header("X-Custom-Hop", &conn));
+        assert!(!should_strip_proxy_header("Content-Type", &conn));
+    }
+
+    #[test]
+    fn collect_connection_header_names_empty_list() {
+        let headers: Vec<(String, String)> = vec![];
+        let conn = collect_connection_header_names(&headers);
+        assert!(conn.is_empty());
+    }
 }

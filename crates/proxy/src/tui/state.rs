@@ -30,6 +30,11 @@ pub const LATENCY_RING: usize = 1024;
 /// a megabyte from melting the redraw loop.
 pub const MAX_FILTER_LEN: usize = 80;
 
+/// Hard cap on distinct hosts tracked by the TUI. Without this a long-
+/// running proxy scanning high-cardinality host sets leaks memory
+/// indefinitely (each entry is small but unbounded).
+const MAX_TUI_HOSTS: usize = 4096;
+
 /// Toast TTL on the header banner.
 pub const TOAST_TTL: Duration = Duration::from_millis(2400);
 
@@ -395,6 +400,19 @@ impl State {
                         *self.waf_seen.entry(w.clone()).or_insert(0) += 1;
                     }
                     hs.waf_name = Some(w.clone());
+                }
+                // Evict the lowest-traffic host when the cap is exceeded.
+                // This keeps the working set bounded without dropping
+                // high-value targets from the dashboard.
+                if self.hosts.len() > MAX_TUI_HOSTS {
+                    if let Some(evict) = self
+                        .hosts
+                        .iter()
+                        .min_by_key(|(_, v)| v.sent)
+                        .map(|(k, _)| k.clone())
+                    {
+                        self.hosts.remove(&evict);
+                    }
                 }
 
                 if let Some(p) = tls_profile {
@@ -969,5 +987,55 @@ mod tests {
             s.filter_push('a');
         }
         assert_eq!(s.filter_query.chars().count(), MAX_FILTER_LEN);
+    }
+
+    #[test]
+    fn tui_state_evicts_hosts_over_cap() {
+        let mut s = State::new();
+        for i in 0..(MAX_TUI_HOSTS + 50) {
+            s.record(&req(&format!("host-{i:05}.com"), 200, true, false, None));
+        }
+        assert!(
+            s.hosts.len() <= MAX_TUI_HOSTS,
+            "hosts.len() = {}",
+            s.hosts.len()
+        );
+    }
+
+    #[test]
+    fn tui_state_evicts_lowest_sent_host() {
+        let mut s = State::new();
+        // Fill to cap with varying sent counts.
+        for i in 0..MAX_TUI_HOSTS {
+            let e = req(&format!("host-{i}.com"), 200, true, false, None);
+            s.record(&e);
+            if i % 2 == 0 {
+                s.record(&e.clone());
+            }
+        }
+        // Overflow by one.
+        let new_host = "overflow-host.com";
+        s.record(&req(new_host, 200, true, false, None));
+        assert!(s.hosts.len() <= MAX_TUI_HOSTS);
+        // All odd-indexed hosts were recorded once (lowest sent) and
+        // should be candidates for eviction.
+        let mut missing_odd = false;
+        for i in 1..MAX_TUI_HOSTS {
+            if i % 2 != 0 && !s.hosts.contains_key(&format!("host-{i}.com")) {
+                missing_odd = true;
+                break;
+            }
+        }
+        assert!(missing_odd, "a lowest-sent host must have been evicted");
+        assert!(s.hosts.contains_key(new_host), "newly inserted host must survive");
+    }
+
+    #[test]
+    fn tui_state_keeps_hosts_under_cap() {
+        let mut s = State::new();
+        for i in 0..100 {
+            s.record(&req(&format!("host-{i}.com"), 200, true, false, None));
+        }
+        assert_eq!(s.hosts.len(), 100);
     }
 }
