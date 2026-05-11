@@ -1,0 +1,45 @@
+# SSTI introspection markers — substrings that indicate active
+# template-injection exploitation, not just a probe. Append a new
+# `[[marker]]` for new framework primitives (Jinja2, FreeMarker,
+# Velocity, Smarty, Pebble, Thymeleaf, Twig, Mako, …).
+
+[[marker]]
+token = "__class__"
+[[marker]]
+token = "__mro__"
+[[marker]]
+token = "__subclasses__"
+[[marker]]
+token = "__import__"
+[[marker]]
+token = "__builtins__"
+[[marker]]
+token = "getClass()"
+[[marker]]
+token = "forName("
+[[marker]]
+token = "getRuntime()"
+[[marker]]
+token = "exec("
+[[marker]]
+token = "system("
+[[marker]]
+token = "popen("
+[[marker]]
+token = "subprocess"
+[[marker]]
+token = "Runtime"
+[[marker]]
+token = "ProcessBuilder"
+[[marker]]
+token = "range("
+[[marker]]
+token = "lipsum"
+[[marker]]
+token = "cycler"
+[[marker]]
+token = "?new()"
+[[marker]]
+token = "?api"
+[[marker]]
+token = "Class.forName"

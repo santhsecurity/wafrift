@@ -1,0 +1,15 @@
+# HTTP/2 GOAWAY frame reason strings that indicate WAF intervention.
+#
+# When an HTTP/2 stream gets a GOAWAY frame, the reason field is
+# free-form text. WAFs commonly include identifying tokens here
+# (Cloudflare uses ENHANCE_YOUR_CALM, Akamai uses "blocked", etc.).
+# Append a `[[reason]]` row when a new vendor leaks an identifier.
+
+[[reason]]
+phrase = "ENHANCE_YOUR_CALM"
+[[reason]]
+phrase = "refused"
+[[reason]]
+phrase = "blocked"
+[[reason]]
+phrase = "waf"

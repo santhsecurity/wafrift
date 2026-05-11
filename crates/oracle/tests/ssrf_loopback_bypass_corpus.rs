@@ -32,28 +32,48 @@ fn hex_loopback_url_is_valid_ssrf_payload() {
 }
 
 #[test]
-fn nul_byte_in_authority_is_a_known_oracle_gap() {
+fn percent_encoded_nul_in_authority_is_valid_ssrf_payload() {
     // Some backends terminate hostname parsing at NUL but report the
     // full host to the SSRF allowlist — a real split-parsing bypass
     // (CVE-2017-15046, CVE-2018-1002105 family). url::Url::parse
-    // rejects `http://127.0.0.1%00.evil.com/` outright as malformed
-    // authority, so SsrfOracle currently classifies it as
-    // not-SSRF-shaped — meaning the evasion engine will not emit
-    // this bypass family even though it is a real attack against
-    // permissive backends.
-    //
-    // ENGINE GAP: SsrfOracle::has_valid_url_syntax should accept
-    // payloads where the host before the encoded NUL is itself a
-    // valid SSRF target. This test locks in the *current* (broken)
-    // behaviour so a fix flips the assertion and signals progress.
+    // rejects this as malformed authority, so SsrfOracle uses the
+    // nul_in_authority_salvage fallback: strip from the first
+    // %00 onward, re-parse the prefix, accept if the prefix is
+    // SSRF-shaped.
     let oracle = SsrfOracle;
     let original = "http://127.0.0.1/";
     let bypass = "http://127.0.0.1%00.evil.com/";
     assert!(
+        oracle.is_semantically_valid(original, bypass),
+        "%00-in-host bypass {bypass} should still be SSRF-shaped"
+    );
+}
+
+#[test]
+fn literal_nul_in_authority_is_valid_ssrf_payload() {
+    // The unencoded form of the same bypass family. Some sources of
+    // hostile payloads (parser fuzzers, prior-recorded captures)
+    // hit this shape directly.
+    let oracle = SsrfOracle;
+    let original = "http://127.0.0.1/";
+    let bypass = "http://127.0.0.1\0.evil.com/";
+    assert!(
+        oracle.is_semantically_valid(original, bypass),
+        "literal-NUL-in-host bypass should still be SSRF-shaped"
+    );
+}
+
+#[test]
+fn nul_in_non_ssrf_host_is_still_rejected() {
+    // Negative twin: the salvage fallback must not start accepting
+    // arbitrary NUL-bearing URLs as SSRF — only those whose pre-NUL
+    // prefix is itself an SSRF target.
+    let oracle = SsrfOracle;
+    let original = "http://127.0.0.1/";
+    let bypass = "http://example.com%00.evil.com/";
+    assert!(
         !oracle.is_semantically_valid(original, bypass),
-        "if this assertion ever fires, the NUL-in-host gap was \
-         closed — flip the assertion (and the corpus shape count) to \
-         positive, drop this XFAIL-style block."
+        "{bypass} has a public-host prefix, salvage should not promote it"
     );
 }
 
@@ -113,10 +133,10 @@ fn loopback_bypass_corpus_covers_all_shapes() {
     // Sanity: if we ever drop a fixture above, the count check fires.
     // (This is a meta-test on this file's coverage — the per-shape
     // assertions are the real contract.)
-    // NUL-in-host (`http://127.0.0.1%00.evil.com/`) is a known gap —
-    // tracked separately in `nul_byte_in_authority_is_a_known_oracle_gap`.
     let shapes = [
         "http://0x7f000001/",
+        "http://127.0.0.1%00.evil.com/",
+        "http://127.0.0.1\0.evil.com/",
         "http://@127.0.0.1/",
         "http://127.1/",
         "http://[::ffff:127.0.0.1]/",

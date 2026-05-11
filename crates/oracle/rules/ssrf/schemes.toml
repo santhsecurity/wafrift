@@ -1,0 +1,24 @@
+# URL schemes that indicate a network request — used by the SSRF
+# oracle to qualify a payload as making an outbound call. New
+# fetcher-supporting schemes get added here without code changes.
+
+[[scheme]]
+prefix = "http://"
+[[scheme]]
+prefix = "https://"
+[[scheme]]
+prefix = "ftp://"
+[[scheme]]
+prefix = "file://"
+[[scheme]]
+prefix = "dict://"
+[[scheme]]
+prefix = "gopher://"
+[[scheme]]
+prefix = "ldap://"
+[[scheme]]
+prefix = "ldaps://"
+[[scheme]]
+prefix = "tftp://"
+[[scheme]]
+prefix = "sftp://"

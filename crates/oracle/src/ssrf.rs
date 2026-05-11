@@ -21,19 +21,27 @@ pub struct SsrfOracle;
 //  Hardcoded constants (not in TOML - URL schemes are protocol constants)
 // ──────────────────────────────────────────────
 
-/// URL schemes that indicate a network request.
-const URL_SCHEMES: &[&str] = &[
-    "http://",
-    "https://",
-    "ftp://",
-    "file://",
-    "dict://",
-    "gopher://",
-    "ldap://",
-    "ldaps://",
-    "tftp://",
-    "sftp://",
-];
+/// URL schemes that indicate a network request — loaded from
+/// `rules/ssrf/schemes.toml` so the community can extend the set
+/// without touching Rust.
+#[derive(serde::Deserialize)]
+struct SchemeRules {
+    scheme: Vec<SchemePrefix>,
+}
+#[derive(serde::Deserialize)]
+struct SchemePrefix {
+    prefix: String,
+}
+
+fn url_schemes() -> &'static [String] {
+    static CACHE: OnceLock<Vec<String>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let raw = include_str!("../rules/ssrf/schemes.toml");
+        let parsed: SchemeRules =
+            toml::from_str(raw).expect("rules/ssrf/schemes.toml must parse");
+        parsed.scheme.into_iter().map(|s| s.prefix).collect()
+    })
+}
 
 // ──────────────────────────────────────────────
 //  TOML-loaded SSRF indicator rules
@@ -173,7 +181,7 @@ fn has_ssrf_structure(payload: &str) -> bool {
     }
 
     // Must have a URL scheme or be a bare IP/hostname
-    let has_scheme = URL_SCHEMES
+    let has_scheme = url_schemes()
         .iter()
         .any(|scheme| starts_with_ascii_insensitive(payload, scheme));
 
@@ -231,7 +239,7 @@ fn has_valid_url_syntax(payload: &str) -> bool {
     match url::Url::parse(payload) {
         Ok(url) => {
             // Must have a scheme we recognize
-            let scheme_ok = URL_SCHEMES
+            let scheme_ok = url_schemes()
                 .iter()
                 .any(|s| s.trim_end_matches("://") == url.scheme());
             if !scheme_ok {
@@ -245,11 +253,95 @@ fn has_valid_url_syntax(payload: &str) -> bool {
             true
         }
         Err(_) => {
-            // Fallback: allow raw scheme://[ IPv6 fragments that Url rejects
-            // because they lack a closing bracket — we reject these.
-            false
+            // Salvage known split-parsing bypass families where url::Url
+            // rejects the raw form but real backends still ingest it.
+            // Currently covers NUL-in-authority (CVE-2017-15046 family):
+            // `http://127.0.0.1%00.evil.com/` and
+            // `http://127.0.0.1\0.evil.com/` are parsed by some
+            // backend HTTP clients as host=127.0.0.1 while permissive
+            // SSRF allowlists see the suffix and assume it's safe.
+            //
+            // Strategy: locate the first encoded or literal NUL after
+            // the `://` authority boundary, strip it and everything
+            // after, then re-parse the prefix. If the prefix is a
+            // valid SSRF-shaped URL, accept the original.
+            //
+            // Bare `scheme://[ipv6-fragment` (no closing bracket) is
+            // still rejected — the salvage only fires on NUL.
+            nul_in_authority_salvage(payload)
         }
     }
+}
+
+/// Salvage URL parsing for the NUL-in-authority bypass family.
+/// See `has_valid_url_syntax` for the rationale. Returns true iff
+/// the prefix preceding the first encoded-or-literal NUL (after
+/// `://`) parses as a valid URL whose HOST is itself an SSRF
+/// target — the salvage must not promote arbitrary public hosts.
+fn nul_in_authority_salvage(payload: &str) -> bool {
+    // Find the `://` authority boundary; if missing, no salvage.
+    let Some(authority_start) = payload.find("://") else {
+        return false;
+    };
+    let after_scheme = authority_start + "://".len();
+    let tail = &payload[after_scheme..];
+
+    // Look for percent-encoded NUL (case-insensitive) or literal NUL.
+    let mut nul_offset: Option<usize> = None;
+    let bytes = tail.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0 {
+            nul_offset = Some(i);
+            break;
+        }
+        if i + 3 <= bytes.len()
+            && bytes[i] == b'%'
+            && bytes[i + 1] == b'0'
+            && (bytes[i + 2] == b'0')
+        {
+            nul_offset = Some(i);
+            break;
+        }
+        i += 1;
+    }
+    let Some(off) = nul_offset else {
+        return false;
+    };
+
+    // Reconstruct prefix + trailing slash so the parser sees a valid
+    // URL with empty path (rather than authority-only ambiguity).
+    let prefix = &payload[..after_scheme + off];
+    let candidate = format!("{prefix}/");
+
+    let Ok(url) = url::Url::parse(&candidate) else {
+        return false;
+    };
+    if !url_schemes()
+        .iter()
+        .any(|s| s.trim_end_matches("://") == url.scheme())
+    {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    // Salvage gate: the bypass is only "really" SSRF if the
+    // pre-NUL host is one of: an indicator host (127.0.0.1,
+    // localhost, metadata names, ...) OR begins with a private-IP
+    // prefix (10., 127., 192.168., ...). This is the per-host
+    // version of the looser `has_ssrf_structure` check, applied to
+    // the parsed authority instead of the raw payload — so
+    // "%00." substring tricks against public hosts no longer
+    // promote them.
+    let host_lc = host.to_ascii_lowercase();
+    let indicator_hit = ssrf_indicator_hosts()
+        .iter()
+        .any(|h| host_lc == h.to_ascii_lowercase());
+    let private_hit = private_ip_prefixes()
+        .iter()
+        .any(|p| host_lc.starts_with(&p.to_ascii_lowercase()));
+    indicator_hit || private_hit
 }
 
 impl PayloadOracle for SsrfOracle {

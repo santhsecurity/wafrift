@@ -1,0 +1,147 @@
+# XSS oracle structural taxonomy.
+#
+# Used by `XssOracle::is_semantically_valid` to verify a payload still
+# contains at least one delivery mechanism, one event trigger, and one
+# execution sink after a transformation. If any of those three families
+# disappears, the encoding broke the exploit.
+#
+# Community contributions welcome — append a new `[[tag]]`,
+# `[[event]]`, `[[exec_sink]]`, `[[js_uri_scheme]]`, or
+# `[[dangerous_sink]]` stanza. Lookups are O(n) substring scans on a
+# lowercased payload, but n stays small even with hundreds of entries.
+
+# ── HTML tags that serve as XSS delivery mechanisms ──
+[[tag]]
+prefix = "<script"
+[[tag]]
+prefix = "<img"
+[[tag]]
+prefix = "<svg"
+[[tag]]
+prefix = "<body"
+[[tag]]
+prefix = "<iframe"
+[[tag]]
+prefix = "<details"
+[[tag]]
+prefix = "<video"
+[[tag]]
+prefix = "<audio"
+[[tag]]
+prefix = "<input"
+[[tag]]
+prefix = "<marquee"
+[[tag]]
+prefix = "<object"
+[[tag]]
+prefix = "<a "
+[[tag]]
+prefix = "<div"
+[[tag]]
+prefix = "<form"
+[[tag]]
+prefix = "<select"
+[[tag]]
+prefix = "<textarea"
+[[tag]]
+prefix = "<embed"
+[[tag]]
+prefix = "<link"
+[[tag]]
+prefix = "<style"
+[[tag]]
+prefix = "<math"
+[[tag]]
+prefix = "<table"
+[[tag]]
+prefix = "<noscript"
+
+# ── DOM event handlers that trigger JavaScript execution ──
+[[event]]
+name = "onerror"
+[[event]]
+name = "onload"
+[[event]]
+name = "onclick"
+[[event]]
+name = "onfocus"
+[[event]]
+name = "onmouseover"
+[[event]]
+name = "ontoggle"
+[[event]]
+name = "onbegin"
+[[event]]
+name = "onstart"
+[[event]]
+name = "onmouseenter"
+[[event]]
+name = "onanimationend"
+[[event]]
+name = "onhashchange"
+[[event]]
+name = "onpageshow"
+[[event]]
+name = "onscroll"
+[[event]]
+name = "onwheel"
+[[event]]
+name = "onresize"
+
+# ── JavaScript execution sinks (any-of for "exec exists at all") ──
+[[exec_sink]]
+name = "alert"
+[[exec_sink]]
+name = "confirm"
+[[exec_sink]]
+name = "prompt"
+[[exec_sink]]
+name = "eval"
+[[exec_sink]]
+name = "setTimeout"
+[[exec_sink]]
+name = "setInterval"
+[[exec_sink]]
+name = "Function"
+[[exec_sink]]
+name = "constructor"
+[[exec_sink]]
+name = "import("
+[[exec_sink]]
+name = "fetch("
+[[exec_sink]]
+name = "document.cookie"
+[[exec_sink]]
+name = "window.name"
+[[exec_sink]]
+name = "location"
+[[exec_sink]]
+name = "innerHTML"
+
+# ── URI schemes that execute JavaScript when followed ──
+[[js_uri_scheme]]
+prefix = "javascript:"
+[[js_uri_scheme]]
+prefix = "data:text/html"
+
+# ── Dangerous sinks that indicate actual exploitation, not benign HTML ──
+[[dangerous_sink]]
+name = "alert"
+[[dangerous_sink]]
+name = "confirm"
+[[dangerous_sink]]
+name = "prompt"
+[[dangerous_sink]]
+name = "eval"
+[[dangerous_sink]]
+name = "document.write"
+[[dangerous_sink]]
+name = "document.location"
+[[dangerous_sink]]
+name = "window.location"
+[[dangerous_sink]]
+name = "innerhtml"
+[[dangerous_sink]]
+name = "outerhtml"
+[[dangerous_sink]]
+name = "srcdoc"

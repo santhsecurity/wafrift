@@ -30,6 +30,34 @@
 //!     "<ScRiPt>alert(1)</sCrIpT>",
 //! ));
 //! ```
+//!
+//! Pick the right oracle dynamically from the classified payload
+//! type — every grammar in `wafrift-grammar` has a matching oracle:
+//!
+//! ```
+//! use wafrift_grammar::PayloadType;
+//! use wafrift_oracle::oracle_for;
+//!
+//! let oracle = oracle_for(PayloadType::Sql).unwrap();
+//! assert_eq!(oracle.name(), "SQL");
+//! assert!(oracle.is_semantically_valid("1 OR 1=1 --", "1 OR 1=1 --"));
+//! // Mutilated payload that no longer parses as SQL: rejected.
+//! assert!(!oracle.is_semantically_valid("1 OR 1=1 --", "1 O R 1=1 --"));
+//! ```
+//!
+//! Reject SSRF mutations that lose the loopback target (a
+//! transformation engine can call this before emitting a variant):
+//!
+//! ```
+//! use wafrift_oracle::ssrf::SsrfOracle;
+//! use wafrift_oracle::traits::PayloadOracle;
+//!
+//! let oracle = SsrfOracle;
+//! // Same target, different on-the-wire encoding — kept.
+//! assert!(oracle.is_semantically_valid("http://127.0.0.1/", "http://127.1/"));
+//! // Pivot to a public host — semantics lost, rejected.
+//! assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "http://example.com/"));
+//! ```
 
 /// Per-target calibration session.
 pub mod calibration;

