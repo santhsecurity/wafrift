@@ -58,6 +58,11 @@ arboard = { workspace = true, optional = true }
 # flag is rejected at clap-parse time with an actionable hint.
 wafrift-captchaforge-bridge = { workspace = true, optional = true }
 
+# SIGPIPE handler reset on Unix so `wafrift-proxy ... | head` exits silently
+# instead of panicking.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 assert_cmd = { version = "2.1", default-features = false, features = ["color"] }
 axum = { version = "0.7", default-features = false, features = ["tokio", "http1", "http2"] }

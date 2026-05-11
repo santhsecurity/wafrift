@@ -44,6 +44,11 @@ wafrift-smuggling = { workspace = true, features = ["unsafe-probes"] }
 wafrift-content-type = { workspace = true }
 rand = { workspace = true }
 
+# SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
+# instead of panicking.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 proptest = { workspace = true }
 

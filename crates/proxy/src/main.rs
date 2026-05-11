@@ -656,6 +656,19 @@ fn validate_args(args: &Args) -> Result<(), String> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Pentesters routinely pipe `wafrift-proxy --tui-status | head` etc.
+    // Reset SIGPIPE handler so the proxy exits silently when the consumer
+    // closes the pipe instead of panicking with "Broken pipe".
+    #[cfg(unix)]
+    {
+        // SAFETY: signal(2) is async-signal-safe; we install SIG_DFL
+        // before any other I/O so no concurrent writer races the handler.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+
     // rustls 0.23 panics with "no default CryptoProvider installed"
     // on the first TLS handshake unless one is explicitly registered,
     // even when the `aws-lc-rs` feature is enabled. Without this the
