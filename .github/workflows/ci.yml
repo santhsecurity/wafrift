@@ -76,6 +76,26 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    # Best-effort: surface RustSec advisories on the dep graph without
+    # gating PR merges. Some advisories live in transitive deps we can't
+    # patch (e.g. RUSTSEC-2026-0002 against `lru 0.13.0` via `rquest 5.1.0`),
+    # so a strict gate would block all PRs until upstream cuts a fix.
+    # The job still runs every CI so a fix-window upstream is visible.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cargo-audit
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo audit
+        run: cargo audit
+
   docker:
     name: Docker image smoke test
     runs-on: ubuntu-latest
