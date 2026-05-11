@@ -426,6 +426,59 @@ wafrift bypass-probe https://target --paths-file paths.txt \
 Each divergence (status flip, body delta) is reported with a
 reproduce-it `curl` one-liner.
 
+### Burp Suite / Caido / mitmproxy chaining
+
+WafRift is a forward HTTP proxy and slots in next to any other intercepting
+proxy. The conventional pentest layout is:
+
+```
+Browser → Burp (8080) → wafrift-proxy (8181) → Target
+                ▲                  ▲
+                │                  └── applies WAF evasion (encoding,
+                │                      CT switching, padding, fingerprint
+                │                      rotation, MCTS) before forwarding
+                │
+                └── operator inspects/edits requests in Burp's UI as usual
+```
+
+Run wafrift-proxy on a different port (Burp owns 8080 by default; use 8181
+or any free port) and tell Burp to use it as the "Upstream Proxy Server"
+for the target host:
+
+```bash
+# 1. Start wafrift-proxy on 8181 with whichever evasion config you want.
+wafrift-proxy --listen 127.0.0.1:8181 \
+  --content-type-switching \
+  --max-rps-per-host 5 \
+  --tls-impersonate-rotate chrome131,firefox133
+
+# 2. In Burp:  User options → Connections → Upstream Proxy Servers
+#    → Add → Destination host: target.example.com
+#                Proxy host: 127.0.0.1   Proxy port: 8181
+#
+# Caido has the same setting under  Settings → Proxies → Upstreams.
+# mitmproxy:  mitmdump --mode upstream:http://127.0.0.1:8181
+```
+
+The Burp tab still shows every request and lets you intercept / replay /
+scope; wafrift-proxy applies evasion just before the upstream forward and
+records bypasses to its gene bank — so subsequent runs of the same
+target start from the learned winners, not zero discovery.
+
+To replay a captured Burp request directly through wafrift's evasion
+pipeline (no proxy chain needed), copy as cURL and pipe through
+`import-curl`:
+
+```bash
+# Burp → right-click request → Copy as cURL → save to /tmp/req.curl
+xclip -o > /tmp/req.curl
+wafrift import-curl /tmp/req.curl --evade --output /tmp/scan.json
+```
+
+CLI output is line-delimited JSON when `--quiet` is set, so it pipes
+cleanly into `jq`, `head`, `grep -m 1`, etc. (`SIGPIPE` is handled
+silently — no broken-pipe panics on `wafrift evade ... | head`).
+
 ### Proxy scope, rate limit, live findings
 
 ```bash

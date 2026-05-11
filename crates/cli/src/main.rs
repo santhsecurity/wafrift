@@ -274,6 +274,24 @@ struct CompletionArgs {
     shell: Shell,
 }
 fn main() -> ExitCode {
+    // Pentesters routinely pipe wafrift's output to `head`, `jq`, `grep
+    // -m 1`, etc. Rust's default behaviour is to ignore SIGPIPE and
+    // panic on EPIPE the next time stdout is written, which surfaces
+    // as `thread 'main' panicked at 'failed printing to stdout: Broken
+    // pipe'`. Reset the SIGPIPE handler to SIG_DFL so the process
+    // exits silently when the consumer closes the pipe — the canonical
+    // CLI idiom that `cat`, `ls`, `grep`, etc. all use.
+    #[cfg(unix)]
+    {
+        // SAFETY: signal(2) is async-signal-safe; we install SIG_DFL
+        // before any I/O so no concurrent writers race the handler
+        // change.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+
     let cli = Cli::parse();
 
     // Store quiet flag for use in subcommands.
