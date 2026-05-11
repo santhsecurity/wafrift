@@ -24,16 +24,53 @@ Other tools give you one trick: junk padding, header injection, smuggling, or a 
 
 ## What's new (v0.2.12)
 
-- **Workspace polish + organization sweep.** Pedantic clippy down
-  936 → ~440 warnings; `clippy::doc_markdown` cleared 287 → 0 so
-  every public docstring renders cleanly on docs.rs. Three thin
-  crate READMEs (`wafrift-types`, `wafrift-content-type`,
-  `wafrift-pool`) expanded from one-paragraph stubs to structured
-  pages with API surface, stability notes, and usage. README + man
-  page version refs synced; deprecated `challenge::classify` last
-  caller replaced with `classify_with_status`. A test that hung
-  under `cargo test --all-features` is now correctly cfg-gated.
-  142 files touched, 2892 / 2892 tests green.
+- **Pentester acceptance sweep.** Two fixes that matter the moment
+  a pentester actually uses the tool: (a) `wafrift --quiet evade ... |
+  head` no longer panics with "failed printing to stdout: Broken
+  pipe" — both binaries install `SIGPIPE = SIG_DFL` at startup (the
+  canonical Unix CLI idiom). Locked with a regression test. (b)
+  README gained a Burp Suite / Caido / mitmproxy upstream-proxy
+  chaining recipe so `Browser → Burp → wafrift-proxy → Target` is
+  documented end-to-end, including the standard 8080 port collision
+  workaround.
+- **SSRF NUL-in-host engine fix.** `SsrfOracle` now salvages the
+  CVE-2017-15046 family (`http://127.0.0.1%00.evil.com/` and the
+  literal-NUL twin) by stripping at the first encoded-or-literal NUL
+  after `://`, re-parsing the prefix, and accepting iff the parsed
+  host is itself an SSRF indicator. The salvage is gated on the
+  parsed `host_str()` so existing public-host substring FPs can't
+  exploit the new path. Locked with 9 corpus tests including a
+  negative twin.
+- **Doctest coverage 1 → 28** across all 16 library crates. Every
+  public API now ships with a runnable example that compiles, runs
+  under `cargo test --doc`, and renders on docs.rs.
+- **Tier-B TOML migration.** 16 hardcoded `const X: &[&str]` lists
+  across 7 source files moved to TOML data under each crate's
+  `rules/` directory: WAF block indicators (13), XSS validation
+  taxonomy (70), XSS mutator corpus (42), SSRF schemes (10), SSTI
+  introspection markers (20), LDAP grammar (16), HTTP/2 GOAWAY
+  phrases (4). Loaded via `OnceLock` + `include_str!` so cargo
+  install still produces a self-contained binary. ~155 entries are
+  now community-extensible without touching Rust.
+- **CI hardening.** New `cargo audit` job (continue-on-error so
+  transitive-dep advisories don't block PR merges but stay
+  visible). `manpage_in_sync.rs` regression test catches
+  `docs/man/wafrift.1` drift before merge — the manpage shipped
+  stale at three previous releases (0.2.1, 0.2.11, 0.2.12) before
+  this gate. `rust-version` synced 1.85 → 1.88 to match what CI
+  actually proves.
+- **Workspace polish.** Pedantic clippy down 936 → ~440;
+  `clippy::doc_markdown` cleared 287 → 0 so every public docstring
+  renders cleanly on docs.rs. Three thin crate READMEs
+  (`wafrift-types`, `wafrift-content-type`, `wafrift-pool`)
+  expanded from one-paragraph stubs to structured pages with API
+  surface, stability notes, and usage. Five `#[allow(dead_code)]`
+  markers on public API surface dropped. Smoke-alarm encoding
+  tests in `core/tests/encoding_*` (12 sites) hardened to byte-
+  precise %-encoding assertions with span-count and pass-through
+  checks. Orphan `oracle/src/test_url.rs` deleted; URL corpus
+  salvaged into a real `ssrf_loopback_bypass_corpus` integration
+  test. 2926 / 2926 workspace tests green.
 
 ## What's new (v0.2.11)
 
