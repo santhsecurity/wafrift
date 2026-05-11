@@ -248,14 +248,14 @@ fn rule_attribution_partial_eq() {
         rule_id: "SQLI-001".into(),
         rule_name: "SQL Union".into(),
         matched_substring: "UNION".into(),
-        matched_pattern: r#"(?i)union"#.into(),
+        matched_pattern: r"(?i)union".into(),
         confidence: 0.95,
     };
     let b = RuleAttribution {
         rule_id: "SQLI-001".into(),
         rule_name: "SQL Union".into(),
         matched_substring: "UNION".into(),
-        matched_pattern: r#"(?i)union"#.into(),
+        matched_pattern: r"(?i)union".into(),
         confidence: 0.95,
     };
     assert_eq!(a, b);
@@ -271,7 +271,7 @@ fn explanation_full_serde_roundtrip() {
             rule_id: "SQLI-001".into(),
             rule_name: "SQL Union".into(),
             matched_substring: "OR".into(),
-            matched_pattern: r#"(?i)or"#.into(),
+            matched_pattern: r"(?i)or".into(),
             confidence: 0.95,
         }],
         diff: vec![

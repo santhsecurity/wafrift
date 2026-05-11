@@ -1,5 +1,5 @@
 //! Regression coverage for the 2026-05-10 swarm-audit HIGH:
-//!   xss::mutate had a `has_xss_signals` gate that fired on benign
+//!   `xss::mutate` had a `has_xss_signals` gate that fired on benign
 //!   substrings — `confirm(...)` in API docs, `window.onerror` in
 //!   security write-ups, `<select>` HTML dropdowns. The mutator then
 //!   emitted XSS variants from non-XSS input — wasted work the

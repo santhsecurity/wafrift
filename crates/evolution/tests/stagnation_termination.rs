@@ -1,10 +1,10 @@
 //! Regression test for the 2026-05-10 audit finding:
-//! "Stagnation termination is completely dead — evolve() updates
-//!  self.stagnation_counter, but should_terminate() reads
-//!  self.stats.stagnation_counter which is initialized to 0 and never
-//!  written again. budget.stagnation_limit is therefore never enforced."
+//! "Stagnation termination is completely dead — `evolve()` updates
+//!  `self.stagnation_counter`, but `should_terminate()` reads
+//!  `self.stats.stagnation_counter` which is initialized to 0 and never
+//!  written again. `budget.stagnation_limit` is therefore never enforced."
 //!
-//! Pre-fix the test fails because should_terminate() never returns
+//! Pre-fix the test fails because `should_terminate()` never returns
 //! true even when 50 generations have passed without improvement.
 
 use wafrift_evolution::evolution::EvolutionEngine;

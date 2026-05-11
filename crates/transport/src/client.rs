@@ -271,7 +271,7 @@ impl EvasionClient {
                 tracing::info!(
                     host = %host,
                     status = status,
-                    body_preview_size = body_preview.as_ref().map(|b| b.len()).unwrap_or(0),
+                    body_preview_size = body_preview.as_ref().map_or(0, std::vec::Vec::len),
                     techniques = %technique_keys.join(","),
                     attempt = attempt + 1,
                     max = max_attempts,
@@ -280,7 +280,7 @@ impl EvasionClient {
                 {
                     let mut states = self.lock_states();
                     if states.len() >= 10_000 && !states.contains_key(&host) {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                         while let Some(key_to_remove) = fifo.pop_front() {
                             if states.remove(&key_to_remove).is_some() {
                                 break;
@@ -290,7 +290,7 @@ impl EvasionClient {
                     let is_new = !states.contains_key(&host);
                     let state = states.entry(host.clone()).or_default();
                     if is_new {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                         fifo.push_back(host.clone());
                     }
                     if technique_keys.is_empty() {
@@ -307,7 +307,7 @@ impl EvasionClient {
                 {
                     let mut states = self.lock_states();
                     if states.len() >= 10_000 && !states.contains_key(&host) {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                         while let Some(key_to_remove) = fifo.pop_front() {
                             if states.remove(&key_to_remove).is_some() {
                                 break;
@@ -317,7 +317,7 @@ impl EvasionClient {
                     let is_new = !states.contains_key(&host);
                     let state = states.entry(host.clone()).or_default();
                     if is_new {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                         fifo.push_back(host.clone());
                     }
                     if !techniques.is_empty() {
@@ -374,7 +374,7 @@ impl EvasionClient {
     ///
     /// This helper sends the request, reads a bounded portion of the body,
     /// and checks both status codes and body content for WAF indicators.
-    /// Returns (status, body_preview, is_blocked).
+    /// Returns (status, `body_preview`, `is_blocked`).
     async fn send_and_check(
         req_builder: reqwest::RequestBuilder,
         _host: &str,
@@ -389,8 +389,7 @@ impl EvasionClient {
         let blocked_by_status = is_waf_block_status(status);
         let blocked_by_body = body_preview
             .as_ref()
-            .map(|b| is_waf_block(status, b))
-            .unwrap_or(false);
+            .is_some_and(|b| is_waf_block(status, b));
         let is_blocked = blocked_by_status || blocked_by_body;
 
         Ok((status, body_preview, is_blocked))

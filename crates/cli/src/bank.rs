@@ -6,8 +6,8 @@
 //!
 //!   * `wafrift bank list` — show every WAF / host with proven techniques.
 //!   * `wafrift bank export --output bundle.json` — pack the proxy
-//!     gene-bank + every per-WAF GeneBank into a single self-describing
-//!     JSON envelope (schema_version, source paths, contents).
+//!     gene-bank + every per-WAF `GeneBank` into a single self-describing
+//!     JSON envelope (`schema_version`, source paths, contents).
 //!   * `wafrift bank import bundle.json` — restore an envelope onto
 //!     this machine.
 
@@ -182,9 +182,7 @@ fn read_genome_dir(dir: &std::path::Path) -> Result<BTreeMap<String, serde_json:
         }
         let stem = path
             .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "unknown".into());
+            .and_then(|s| s.to_str()).map_or_else(|| "unknown".into(), std::string::ToString::to_string);
         let raw = match fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {

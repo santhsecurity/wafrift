@@ -95,7 +95,7 @@ enum Commands {
     /// Origin discovery via crt.sh + DNS (authorized targets only).
     Recon(recon_cmd::ReconArgs),
     /// Endpoint discovery: parse OpenAPI/Swagger, run GraphQL introspection,
-    /// or fire differential parameter mining. Emits DiscoveredEndpoint JSON
+    /// or fire differential parameter mining. Emits `DiscoveredEndpoint` JSON
     /// suitable for piping into `wafrift scan --from-discovery`.
     Discover(discover_cmd::DiscoverArgs),
     /// Replay a saved bypass against a target — proves reproducibility.
@@ -194,7 +194,7 @@ struct ProbeArgs {
 /// `scan::run_scan` without duplicating CLI state.
 #[derive(clap::Args, Debug)]
 pub struct ScanArgs {
-    /// Target URL to test evasion variants against (e.g., http://localhost:8080).
+    /// Target URL to test evasion variants against (e.g., <http://localhost:8080>).
     #[arg(long)]
     pub target: String,
 
@@ -377,7 +377,7 @@ fn run_man(args: ManArgs) -> ExitCode {
             Some(c) => c,
             None => {
                 let cmd = Cli::command();
-                let names: Vec<&str> = cmd.get_subcommands().map(|c| c.get_name()).collect();
+                let names: Vec<&str> = cmd.get_subcommands().map(clap::Command::get_name).collect();
                 eprintln!("error: unknown subcommand {name:?}. Available: {names:?}");
                 return ExitCode::from(1);
             }
@@ -417,6 +417,14 @@ fn run_interactive() -> ExitCode {
         execute,
         terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
+    use ratatui::{
+        Terminal,
+        backend::CrosstermBackend,
+        layout::{Constraint, Direction, Layout},
+        style::{Color, Modifier, Style},
+        text::{Line, Span},
+        widgets::{Block, Borders, List, ListItem, Paragraph},
+    };
     use std::io::IsTerminal;
 
     // Without a real TTY (CI, piped invocation) the TUI's poll loop would
@@ -429,14 +437,6 @@ fn run_interactive() -> ExitCode {
         );
         return ExitCode::from(1);
     }
-    use ratatui::{
-        Terminal,
-        backend::CrosstermBackend,
-        layout::{Constraint, Direction, Layout},
-        style::{Color, Modifier, Style},
-        text::{Line, Span},
-        widgets::{Block, Borders, List, ListItem, Paragraph},
-    };
 
     // Set up terminal.
     let Ok(()) = enable_raw_mode() else {
@@ -747,6 +747,7 @@ fn run_interactive() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
     let filter = match TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,
@@ -842,6 +843,7 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     let headers = match parse_headers(&args.headers) {
         Ok(headers) => headers,
@@ -883,6 +885,7 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn run_probe(args: ProbeArgs) {
     let probes = if args.quick {
         differential::generate_quick_probes()

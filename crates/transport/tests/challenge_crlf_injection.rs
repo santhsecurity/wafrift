@@ -1,6 +1,6 @@
 //! Regression test for the 2026-05-10 audit finding:
 //!
-//!   extract_clearance_cookie stored raw cookie values without
+//!   `extract_clearance_cookie` stored raw cookie values without
 //!   sanitising control characters or CRLF. A malicious upstream
 //!   Set-Cookie containing \r\n would inject arbitrary headers into
 //!   downstream requests when the captured cookie was replayed.

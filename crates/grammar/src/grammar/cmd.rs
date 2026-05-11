@@ -438,7 +438,7 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdMutation> {
     let arg_no_passwd = if args.contains("passwd") {
         "/etc/hostname".to_string()
     } else {
-        args.to_string()
+        args.clone()
     };
     // Find a UTF-8-safe split point near position 2 so a non-ASCII
     // command name (e.g. "★cat") doesn't panic the mutator on mid-

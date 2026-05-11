@@ -45,7 +45,7 @@ pub async fn probe_http_headers_with_rules(
 
     let status = resp.status().as_u16();
     let mut headers = BTreeMap::new();
-    for (name, value) in resp.headers().iter() {
+    for (name, value) in resp.headers() {
         let key = name.as_str().to_ascii_lowercase();
         // Hyper injects `Date` on every response; it would make back-to-back snapshots
         // non-deterministic for idempotency tests and corpus diffing.

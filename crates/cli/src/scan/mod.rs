@@ -99,7 +99,7 @@ pub(crate) async fn run_scan(
                 .into_iter()
                 .flat_map(|waf| {
                     bank.load(&waf)
-                        .map(|g| g.seed_winners())
+                        .map(wafrift_strategy::gene_bank::WafGenome::seed_winners)
                         .unwrap_or_default()
                 })
                 .collect();
@@ -841,14 +841,14 @@ pub(crate) async fn run_scan(
         // find the mutation payload text and record it.
         // Strategy: re-derive from original mutations — the encode is invertible for our purposes
         // because we're going to re-encode with different strategies anyway.
-        let original_mutations = if !encoding_only {
+        let original_mutations = if encoding_only {
+            Vec::new()
+        } else {
             grammar::mutate_as(
                 &args.payload,
                 payload_type,
                 max_mutations_for_level(args.level),
             )
-        } else {
-            Vec::new()
         };
 
         // Build a lookup: encoded_payload → list of grammar mutations that could produce it
@@ -863,7 +863,7 @@ pub(crate) async fn run_scan(
                         mutation
                             .rules_applied
                             .iter()
-                            .map(|r| r.to_string())
+                            .map(std::string::ToString::to_string)
                             .collect(),
                     ));
                     break; // Don't add the same raw payload multiple times for different strategies
@@ -1104,10 +1104,10 @@ pub(crate) async fn run_scan(
             }
 
             let round_mutations = max_mutations_for_level(args.level) + (round + 1) * 6;
-            let fresh_mutations = if !encoding_only {
-                grammar::mutate_as(&args.payload, payload_type, round_mutations)
-            } else {
+            let fresh_mutations = if encoding_only {
                 Vec::new()
+            } else {
+                grammar::mutate_as(&args.payload, payload_type, round_mutations)
             };
 
             for mutation in &fresh_mutations {
@@ -1285,7 +1285,7 @@ pub(crate) async fn run_scan(
                     }
                     "POST-multipart" => {
                         // Multipart form-data with randomized boundary — confuses WAF parsers
-                        let boundary = format!("----WafRiftBoundary{:x}", total_fired);
+                        let boundary = format!("----WafRiftBoundary{total_fired:x}");
                         let body = format!(
                             "--{boundary}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{payload}\r\n--{boundary}--\r\n",
                             args.param
@@ -1326,7 +1326,7 @@ pub(crate) async fn run_scan(
                         let url =
                             scan_url_with_param(target, &args.param, &urlencoding::encode(payload));
                         http.get(&url)
-                            .header("Referer", format!("https://example.com/?{}", payload))
+                            .header("Referer", format!("https://example.com/?{payload}"))
                             .send()
                             .await
                     }

@@ -32,7 +32,7 @@ use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::rate_limit::RateLimiter;
 use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
-    BogonFilteringResolver, UpstreamPolicy, assert_connect_target_allowed,
+    BogonFilteringResolver, UpstreamPolicy,
     assert_forward_url_allowed,
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
@@ -120,7 +120,7 @@ impl RequestLogger {
 #[derive(Parser, Debug)]
 #[command(name = "wafrift-proxy", about = "WAF Evasion Proxy")]
 struct Args {
-    /// Socket address to bind the proxy server. Examples: 127.0.0.1:8080, 0.0.0.0:8080, [::1]:8080.
+    /// Socket address to bind the proxy server. Examples: 127.0.0.1:8080, 0.0.0.0:8080, [`::1`]:8080.
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: String,
 
@@ -214,25 +214,25 @@ struct Args {
     #[arg(long = "log-dir")]
     log_dir: Option<PathBuf>,
 
-    /// Wear a real browser's TLS ClientHello on every upstream forward.
+    /// Wear a real browser's TLS `ClientHello` on every upstream forward.
     /// Closes the JA3/JA4 fingerprint gap vs Cloudflare / Akamai /
     /// Fastly Sigsci / Imperva Bot Protection — which classify the
     /// inbound TLS connection as "non-browser" before they ever look
     /// at HTTP. Supported profiles: chrome131, chrome120, edge131,
-    /// firefox133, safari18, safari17_5, okhttp5; aliases `chrome`,
+    /// firefox133, safari18, `safari17_5`, okhttp5; aliases `chrome`,
     /// `firefox`, `safari`, `edge` resolve to the latest in each
     /// family. REQUIRES the binary to be built with the
     /// `tls-impersonate` cargo feature (pulls in boring-sys); without
     /// it, this flag errors at startup with an actionable message.
-    /// See docs/TLS_PARITY.md.
+    /// See `docs/TLS_PARITY.md`.
     #[arg(long = "tls-impersonate", conflicts_with = "tls_impersonate_rotate")]
     tls_impersonate: Option<String>,
 
-    /// Rotate the TLS ClientHello fingerprint per upstream request,
+    /// Rotate the TLS `ClientHello` fingerprint per upstream request,
     /// drawn round-robin from this comma-separated profile list (e.g.
     /// `chrome131,firefox133,safari18`). Defeats per-fingerprint rate
     /// limits and reputation systems (Cloudflare bot-management,
-    /// Akamai BMP, PerimeterX) that group requests by JA3 hash.
+    /// Akamai BMP, `PerimeterX`) that group requests by JA3 hash.
     /// Mutually exclusive with --tls-impersonate. REQUIRES
     /// `tls-impersonate` cargo feature.
     #[arg(long = "tls-impersonate-rotate", num_args = 1.., value_delimiter = ',')]
@@ -248,7 +248,7 @@ struct Args {
     /// gets `_wafrift_pad=<bytes>&...`, multipart gets a junk leading
     /// part. Default 0 (off). Recommended values: 8192 (Cloudflare
     /// Pro), 16384 (AWS WAF default), 65536 (Naxsi default), 131072
-    /// (Cloudflare Enterprise / ModSecurity default).
+    /// (Cloudflare Enterprise / `ModSecurity` default).
     #[arg(long = "body-padding-bytes", default_value_t = 0)]
     body_padding_bytes: usize,
 
@@ -333,7 +333,7 @@ static MUTATE_URL_ENABLED: std::sync::atomic::AtomicBool =
 /// / `_abck` / `aws-waf-token` on the response side and replays on
 /// the request side until expiry (default 30min, see
 /// [`wafrift_transport::challenge::DEFAULT_CLEARANCE_TTL`]). Always
-/// initialised — operating cost is one HashMap lookup per request.
+/// initialised — operating cost is one `HashMap` lookup per request.
 static CHALLENGE_STORE: std::sync::OnceLock<wafrift_transport::challenge::ChallengeStore> =
     std::sync::OnceLock::new();
 
@@ -443,7 +443,7 @@ struct ProxyState {
     techniques_used: HashMap<String, u32>,
 }
 
-/// Subset of HostState worth persisting across proxy restarts. Block
+/// Subset of `HostState` worth persisting across proxy restarts. Block
 /// counts and pending discovery state re-accumulate naturally; what we
 /// don't want to lose is the painstakingly-discovered winners pool and
 /// the per-host blocklist.
@@ -566,8 +566,7 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
     let pid = std::process::id();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_nanos());
     let tmp = path.with_extension(format!("json.tmp.{pid}.{nanos}"));
     {
         use std::io::Write;
@@ -649,8 +648,7 @@ fn validate_args(args: &Args) -> Result<(), String> {
         && !matches!(esc.as_str(), "light" | "medium" | "heavy")
     {
         return Err(format!(
-            "--escalation must be one of: light, medium, heavy. Got: {}",
-            esc
+            "--escalation must be one of: light, medium, heavy. Got: {esc}"
         ));
     }
     Ok(())
@@ -1186,7 +1184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match save_gene_bank(&st, path) {
                 Ok(()) => info!(path = %path.display(), "gene bank flushed on shutdown"),
                 Err(e) => {
-                    warn!(path = %path.display(), error = %e, "gene bank flush on shutdown failed")
+                    warn!(path = %path.display(), error = %e, "gene bank flush on shutdown failed");
                 }
             }
         }
@@ -1606,9 +1604,7 @@ async fn forward_wafrift_request(
             .request
             .headers
             .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-            .map(|(_, v)| v.clone())
-            .unwrap_or_else(|| "application/octet-stream".to_string());
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type")).map_or_else(|| "application/octet-stream".to_string(), |(_, v)| v.clone());
         let original = evasion_result.request.body.clone().unwrap_or_default();
         match wafrift_evolution::body_padding::pad(&original, &ct, pad_target) {
             wafrift_evolution::body_padding::PadOutcome::Padded { bytes, added } => {
@@ -1641,9 +1637,7 @@ async fn forward_wafrift_request(
             .request
             .url
             .splitn(4, '/')
-            .nth(3)
-            .map(|s| format!("/{s}"))
-            .unwrap_or_else(|| "/".into());
+            .nth(3).map_or_else(|| "/".into(), |s| format!("/{s}"));
         let (id, rx) = store.register(
             host.clone(),
             evasion_result.request.method.as_str(),
@@ -1680,7 +1674,7 @@ async fn forward_wafrift_request(
     // append, not replace, so we don't kick out the user's session.
     if let Some(clearance) = challenge_store().get(&host) {
         let mut found = false;
-        for (k, v) in evasion_result.request.headers.iter_mut() {
+        for (k, v) in &mut evasion_result.request.headers {
             if k.eq_ignore_ascii_case("cookie") {
                 if !v.contains(&clearance) {
                     if v.is_empty() {
@@ -1766,7 +1760,7 @@ async fn forward_wafrift_request(
             }
             response_builder = response_builder.header(k.as_str(), v.as_str());
         }
-        (response_builder, stealth_resp.body.to_vec())
+        (response_builder, stealth_resp.body.clone())
     } else {
         // Existing reqwest path (default).
         let method = match reqwest::Method::from_bytes(
@@ -1813,7 +1807,7 @@ async fn forward_wafrift_request(
         status_code = status.as_u16();
         let conn_resp = collect_connection_header_names_hyper(resp.headers());
         let mut response_builder = Response::builder().status(status.as_u16());
-        for (k, v) in resp.headers().iter() {
+        for (k, v) in resp.headers() {
             if should_strip_proxy_header(k.as_str(), &conn_resp) {
                 continue;
             }
@@ -1897,7 +1891,11 @@ async fn forward_wafrift_request(
         // body looks like a challenge page).
         if status_code == 503 || status_code == 403 {
             let body_slice = &buf[..buf.len().min(8192)];
-            let kind = wafrift_transport::challenge::classify(body_slice, &header_pairs);
+            let kind = wafrift_transport::challenge::classify_with_status(
+                body_slice,
+                &header_pairs,
+                status_code,
+            );
             if !matches!(kind, wafrift_transport::challenge::ChallengeKind::Unknown)
                 && store.get(&host).is_none()
                 && store.should_prompt_operator(&host)
@@ -1978,9 +1976,7 @@ async fn forward_wafrift_request(
 
             // Success attribution: on Pass, credit the active technique(s).
             if signal.classification == BlockClass::Pass {
-                if !evasion_result.techniques.is_empty() {
-                    hs.record_success_for_many(&evasion_result.techniques);
-                } else {
+                if evasion_result.techniques.is_empty() {
                     let parsed: Vec<wafrift_types::Technique> = technique_keys
                         .iter()
                         .filter_map(|k| wafrift_types::Technique::from_pool_key(k))
@@ -1988,6 +1984,8 @@ async fn forward_wafrift_request(
                     if !parsed.is_empty() {
                         hs.record_success_for_many(&parsed);
                     }
+                } else {
+                    hs.record_success_for_many(&evasion_result.techniques);
                 }
             }
 
@@ -2130,9 +2128,8 @@ async fn mitm_plaintext_request(
     let path_and_q = req
         .uri()
         .path_and_query()
-        .map(|p| p.as_str())
-        .unwrap_or("/");
-    let url = format!("https://{}{}", authority, path_and_q);
+        .map_or("/", hyper::http::uri::PathAndQuery::as_str);
+    let url = format!("https://{authority}{path_and_q}");
     let host = sni_host;
 
     // Limit body collection up front — without this, an attacker
@@ -2187,9 +2184,7 @@ async fn mitm_plaintext_request(
 
     let path_for_scope = req
         .uri()
-        .path_and_query()
-        .map(|p| p.path().to_string())
-        .unwrap_or_else(|| "/".to_string());
+        .path_and_query().map_or_else(|| "/".to_string(), |p| p.path().to_string());
     if !scope.allows(&host, &path_for_scope, &wafrift_req.method) {
         return forward_passthrough(wafrift_req, host, &client, policy, limits).await;
     }
@@ -2459,7 +2454,7 @@ async fn proxy(
     let host = req
         .uri()
         .host()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .or_else(|| {
             req.headers()
                 .get(hyper::header::HOST)
@@ -2528,9 +2523,7 @@ async fn proxy(
 
     let path_for_scope = req
         .uri()
-        .path_and_query()
-        .map(|p| p.path().to_string())
-        .unwrap_or_else(|| "/".to_string());
+        .path_and_query().map_or_else(|| "/".to_string(), |p| p.path().to_string());
 
     // X-WafRift-Evade: off  → skip evasion entirely for this request
     let skip_evasion = evade_override.as_deref() == Some("off");
@@ -2555,7 +2548,7 @@ async fn proxy(
 
     // X-WafRift-Evade: light/medium/heavy → override escalation for this request
     let effective_escalation = match evade_override.as_deref() {
-        Some("light") | Some("medium") | Some("heavy") => evade_override,
+        Some("light" | "medium" | "heavy") => evade_override,
         _ => default_escalation,
     };
 
@@ -2678,7 +2671,7 @@ async fn forward_passthrough(
             }
             response_builder = response_builder.header(k.as_str(), v.as_str());
         }
-        (response_builder, stealth_resp.body.to_vec())
+        (response_builder, stealth_resp.body.clone())
     } else {
         let method = match reqwest::Method::from_bytes(req.method.as_str().as_bytes()) {
             Ok(m) => m,
@@ -2716,7 +2709,7 @@ async fn forward_passthrough(
         let status = resp.status();
         let conn_resp = collect_connection_header_names_hyper(resp.headers());
         let mut response_builder = Response::builder().status(status.as_u16());
-        for (k, v) in resp.headers().iter() {
+        for (k, v) in resp.headers() {
             if should_strip_proxy_header(k.as_str(), &conn_resp) {
                 continue;
             }
@@ -2831,13 +2824,13 @@ fn sanitize_for_markdown(s: &str) -> String {
 
 /// Extract the host:port from a URI authority.
 fn host_addr(uri: &hyper::Uri) -> Option<String> {
-    uri.authority().map(|auth| auth.to_string())
+    uri.authority().map(std::string::ToString::to_string)
 }
 
 /// Cap on bytes transferred per direction per CONNECT tunnel. Prevents
 /// a client from streaming gigabytes through the proxy under a single
 /// CONNECT — without this, `copy_bidirectional` runs unbounded and
-/// MAX_PROXY_BODY_BYTES / max_upstream_response_bytes (which guard the
+/// `MAX_PROXY_BODY_BYTES` / `max_upstream_response_bytes` (which guard the
 /// HTTP-mode paths) do not apply. 2 GiB is generous for legitimate
 /// long-lived TLS sessions while still blocking sustained exfil.
 const MAX_TUNNEL_BYTES_PER_DIRECTION: u64 = 2 * 1024 * 1024 * 1024;
@@ -2849,7 +2842,7 @@ const MAX_TUNNEL_BYTES_PER_DIRECTION: u64 = 2 * 1024 * 1024 * 1024;
 /// of `addr: String`. The string form forced a SECOND DNS lookup at
 /// `TcpStream::connect`, opening a rebinding TOCTOU window after the
 /// caller had already validated the upstream as public. We now pass
-/// the validated SocketAddrs straight in and connect to whichever
+/// the validated `SocketAddrs` straight in and connect to whichever
 /// answers first.
 async fn tunnel(
     upgraded: Upgraded,

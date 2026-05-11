@@ -50,7 +50,7 @@ fn write_varint(out: &mut Vec<u8>, mut v: u64) {
     out.push(v as u8);
 }
 
-/// Returns (value, bytes_consumed).
+/// Returns (value, `bytes_consumed`).
 fn read_varint(buf: &[u8]) -> Option<(u64, usize)> {
     let mut result: u64 = 0;
     let mut shift = 0u32;

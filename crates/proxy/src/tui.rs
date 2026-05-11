@@ -5,7 +5,7 @@
 //!
 //! - [`state`]            — counters, request ring, filter state, toast queue
 //! - [`format`]           — palette + truncation helpers
-//! - [`keymap`]           — keystroke dispatch (Normal + FilterEdit modes)
+//! - [`keymap`]           — keystroke dispatch (Normal + `FilterEdit` modes)
 //! - [`yank`]             — render selected request as `curl` + clipboard set
 //! - [`render_chrome`]    — header bar, tab strip, footer key-help
 //! - [`render_flow`]      — Flow tab: live stream + sparklines + detail pane

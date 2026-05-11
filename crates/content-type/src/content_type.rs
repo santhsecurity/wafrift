@@ -53,7 +53,7 @@ pub enum ContentTypeTechnique {
 
 /// Maximum size of a form-encoded body before parsing is refused.
 ///
-/// Prevents DoS via adversarial multi-gigabyte inputs that would be
+/// Prevents `DoS` via adversarial multi-gigabyte inputs that would be
 /// fully allocated as strings during `split('&')` and `to_string()`.
 const MAX_FORM_BODY_SIZE: usize = 8 * 1024 * 1024;
 
@@ -149,8 +149,8 @@ fn xml_escape(value: &str) -> String {
 
 /// Sanitise a string for use as an XML element name.
 ///
-/// XML 1.0 §2.3 NameStartChar permits any Unicode letter (or `_`) and
-/// NameChar additionally permits digits, `-`, `.`, and the combining/
+/// XML 1.0 §2.3 `NameStartChar` permits any Unicode letter (or `_`) and
+/// `NameChar` additionally permits digits, `-`, `.`, and the combining/
 /// extender ranges. Pre-fix this used `is_ascii_alphabetic` and
 /// `is_ascii_alphanumeric`, which mangled valid Unicode names like
 /// `<日本語>` into all-underscores — a bug that any non-Latin operator

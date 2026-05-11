@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/santhsecurity/wafrift/actions/workflows/ci.yml/badge.svg)](https://github.com/santhsecurity/wafrift/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Crates.io](https://img.shields.io/crates/v/wafrift)](https://crates.io/crates/wafrift)
+[![Crates.io](https://img.shields.io/crates/v/wafrift-cli)](https://crates.io/crates/wafrift-cli)
 
 > Part of the [Santh](https://santh.dev) security research ecosystem.
 
@@ -22,7 +22,54 @@
 
 Other tools give you one trick: junk padding, header injection, smuggling, or a static tamper list. WafRift is the union: encoding, grammar-aware mutation, content-type switching, request smuggling, and TLS/HTTP fingerprint rotation. The CLI exposes every encoding strategy and the grammar layer as fine-grained `--only`/`--exclude` selectors; the rest run as part of the default pipeline. Per-host toggle persistence and a Burp Suite control panel are tracked in the [roadmap](docs/GAP_CLOSURE_ROADMAP.md). Turn the engine loose and a search loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses the target WAF and persists winning pipelines to a per-WAF **gene bank** so the next scan starts with zero discovery phase.
 
-## What's new (Unreleased / v0.2.3-dev)
+## What's new (v0.2.12)
+
+- **Workspace polish + organization sweep.** Pedantic clippy down
+  936 → ~440 warnings; `clippy::doc_markdown` cleared 287 → 0 so
+  every public docstring renders cleanly on docs.rs. Three thin
+  crate READMEs (`wafrift-types`, `wafrift-content-type`,
+  `wafrift-pool`) expanded from one-paragraph stubs to structured
+  pages with API surface, stability notes, and usage. README + man
+  page version refs synced; deprecated `challenge::classify` last
+  caller replaced with `classify_with_status`. A test that hung
+  under `cargo test --all-features` is now correctly cfg-gated.
+  142 files touched, 2892 / 2892 tests green.
+
+## What's new (v0.2.11)
+
+- **Audit-driven hardening sweep (batches 1–9, v0.2.4 → v0.2.11).**
+  Nine review batches landed CRITICAL / HIGH / MEDIUM credibility
+  fixes across the whole workspace: PSL supercookie guard on cookie
+  `Domain=` (`transport`); per-request DNS pinning to close hostname
+  rebinding for `StealthClient`; precision rewrite of XSS signal
+  scoring (`grammar`); `EvasionConfig.allow_private_upstream`
+  (default `false`) blocks RFC1918 / loopback / link-local SSRF
+  unless explicitly opted in; per-host fairness in the global
+  challenge-prompt cap; budget repay on dropped MCTS evals;
+  status-aware classifier kills 200-OK false positives; `HostState`
+  totals lifted to `u64`; CRLF/NUL/`;` rejected in cookie values to
+  block HTTP request splitting; `oracle` cmdi OOM and ssrf "0"
+  indicator FP fixes; bench harness, MITM cert builder, intercept
+  GC, learning-cache atomic-save, and content-type unique-boundary
+  wiring all hardened. 30 hollow content-type tests + 3 smuggling
+  smoke alarms replaced with rigorous structural assertions.
+  2892 / 2892 workspace tests green at v0.2.11.
+- **Genome registry (`wafrift-genome-registry`)** — ed25519-signed
+  community evasion bundles, deterministic canonical encoding,
+  trust list at `~/.wafrift/trusted-keys.toml`, surfaced under
+  `wafrift bank`.
+- **`captchaforge` adapter (`wafrift-captchaforge-bridge`)** —
+  optional managed-challenge solver that subscribes a chromiumoxide
+  solver into wafrift's challenge flow. `wafrift-proxy --captchaforge`.
+- **`wafrift bypass-probe URL`** — Tsai-class differential vuln
+  finder. Fires 184+ probes (auth-bypass headers, path-routing
+  variants, method overrides) against a single URL or a `--paths-file`
+  list, classifies each response vs the baseline, reports HIGH /
+  MEDIUM / LOW divergences with reproduce-it `curl` commands.
+  Bounded-concurrency (`--concurrency 8` default) — 12 paths × ~190
+  probes each finishes in <1 second.
+
+## Earlier changes (v0.2.3)
 
 - **`wafrift bypass-probe URL`** — the Tsai-class differential vuln
   finder. Fires 184+ probes (auth-bypass headers, path-routing
@@ -52,10 +99,10 @@ Other tools give you one trick: junk padding, header injection, smuggling, or a 
 - **Bench corpus**: 579 → 607 cases. New TOML files for
   parser-confusion-authority (SSRF) and routing-disagreement
   (path).
-- See `CHANGELOG.md` `[Unreleased]` section for the full list
-  (lock fix, MCTS body budget, three more UTF-8 mutator panics,
-  `--insecure` warn, gene-bank race fix, eleven misplaced test
-  blocks rescued, clippy `-D warnings` clean).
+- See `CHANGELOG.md` for the full v0.2.3 entry (lock fix, MCTS body
+  budget, three more UTF-8 mutator panics, `--insecure` warn,
+  gene-bank race fix, eleven misplaced test blocks rescued, clippy
+  `-D warnings` clean).
 
 ## Measured bypass rates
 
@@ -151,9 +198,9 @@ mv wafrift wafrift-proxy /usr/local/bin/
 ### From crates.io
 
 ```bash
-cargo install wafrift-cli --version '>=0.2.2'
+cargo install wafrift-cli --version '>=0.2.11'
 # Optional: TLS impersonation (rquest 5.x + BoringSSL, adds boring-sys C build)
-cargo install wafrift-proxy --version '>=0.2.2' --features tls-impersonate
+cargo install wafrift-proxy --version '>=0.2.11' --features tls-impersonate
 ```
 
 This installs the `wafrift` and `wafrift-proxy` binaries. Requires a
@@ -411,7 +458,7 @@ control or have explicit written authorisation to test.
 
 ### CTF / pentest quick recipes
 
-Five common shapes a security practitioner runs into. Every recipe is a single command: no setup beyond `cargo install wafrift` (or `docker run santhsecurity/wafrift`) and the `--target`/`--payload` you'd be testing anyway.
+Five common shapes a security practitioner runs into. Every recipe is a single command: no setup beyond `cargo install wafrift-cli` (or `docker run santhsecurity/wafrift`) and the `--target`/`--payload` you'd be testing anyway.
 
 **1. SQL-injection login bypass.** WAF blocks `' OR 1=1--`; find a variant that lands.
 

@@ -8,7 +8,7 @@
 //! # Coverage
 //!
 //! - Cloudflare challenge page simulation
-//! - ModSecurity block page simulation
+//! - `ModSecurity` block page simulation
 //! - AWS WAF header-only detection
 //! - Silent block detection (200 with WAF body markers)
 //! - Multiple WAFs behind the same endpoint (ambiguity handling)

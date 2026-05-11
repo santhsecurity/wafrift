@@ -18,8 +18,8 @@
 //! These are not "WAF evasion" in the traditional sense — they exploit
 //! the WAF's correct behaviour (passing through unknown headers) plus
 //! the backend's incorrect behaviour (trusting them). Together: real
-//! pre-auth access on hardened-looking deployments. ProxyShell
-//! (CVE-2021-34473) and a long tail of Bugcrowd / HackerOne reports
+//! pre-auth access on hardened-looking deployments. `ProxyShell`
+//! (CVE-2021-34473) and a long tail of Bugcrowd / `HackerOne` reports
 //! are in this class.
 //!
 //! This module emits a list of `(header_name, header_value)` pairs.

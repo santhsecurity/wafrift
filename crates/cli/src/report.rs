@@ -20,8 +20,8 @@ use std::process::ExitCode;
 pub struct ReportArgs {
     /// Path to the proxy gene bank JSON. Repeatable: pass `--proxy-bank a.json
     /// --proxy-bank b.json` to merge multiple banks (engagement teams running
-    /// several wafrift-proxies). Hosts are unioned; per-host proven_winners /
-    /// blocklisted are unioned; the first non-null waf_name wins.
+    /// several wafrift-proxies). Hosts are unioned; per-host `proven_winners` /
+    /// blocklisted are unioned; the first non-null `waf_name` wins.
     /// Default (no flag) `~/.wafrift/gene-bank.json`.
     #[arg(long)]
     pub proxy_bank: Vec<PathBuf>,
@@ -58,7 +58,7 @@ pub struct ReportArgs {
     pub format: String,
 }
 
-/// Stable JSON shape for `--format json`. The schema_version field
+/// Stable JSON shape for `--format json`. The `schema_version` field
 /// mirrors `_wafrift/status` and lets downstream tools detect format
 /// drift across wafrift releases.
 #[derive(Serialize)]
@@ -101,9 +101,9 @@ struct PersistedGeneBank {
 }
 
 /// Union two banks: `dst` is mutated in place with the host union from `src`.
-/// Per host: proven_winners and blocklisted are union-merged (preserving
+/// Per host: `proven_winners` and blocklisted are union-merged (preserving
 /// dst's order, then appending unseen entries from src). The first non-null
-/// waf_name wins. Schema becomes max(dst, src).
+/// `waf_name` wins. Schema becomes max(dst, src).
 fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
     dst.schema = dst.schema.max(src.schema);
     for (host, src_state) in src.hosts {
@@ -450,7 +450,7 @@ mod tests {
         ];
         for raw in &inputs {
             let escaped = shell_escape(raw);
-            let script = format!("echo '{}'", escaped);
+            let script = format!("echo '{escaped}'");
             let output = std::process::Command::new("bash")
                 .arg("-c")
                 .arg(&script)

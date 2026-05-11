@@ -26,7 +26,7 @@ pub struct YankReport {
 pub struct ReplayReport {
     pub path: PathBuf,
     pub bytes: usize,
-    /// `Some(status)` when WAFRIFT_REPLAY_AUTOEXEC=1 was set and the
+    /// `Some(status)` when `WAFRIFT_REPLAY_AUTOEXEC=1` was set and the
     /// shell-out completed (regardless of the upstream HTTP code).
     /// `None` when auto-exec was disabled — the operator is expected
     /// to run the curl command themselves.
@@ -174,8 +174,7 @@ pub fn replay_to_disk_and_optionally_exec(
     }
 
     let autoexec = std::env::var("WAFRIFT_REPLAY_AUTOEXEC")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
     let (upstream_status, upstream_body_excerpt) = if autoexec {
         match std::process::Command::new("bash").arg(&curl_path).output() {
             Ok(out) => {

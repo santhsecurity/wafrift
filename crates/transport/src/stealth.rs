@@ -1,7 +1,7 @@
-//! Wire-identical browser TLS via `rquest` + BoringSSL.
+//! Wire-identical browser TLS via `rquest` + `BoringSSL`.
 //!
 //! `reqwest` (rustls-backed) cannot produce a Chrome/Firefox/Safari
-//! ClientHello bytes-for-bytes — rustls's extension ordering and GREASE
+//! `ClientHello` bytes-for-bytes — rustls's extension ordering and GREASE
 //! placement are library choices, not user-tunable. Edge WAFs
 //! (Cloudflare, Akamai, Fastly's Sigsci, Imperva's Bot Protection) JA3-
 //! and JA4-fingerprint inbound TLS BEFORE looking at HTTP, and a
@@ -10,10 +10,10 @@
 //! evasion has a chance to run.
 //!
 //! `StealthClient` wraps `rquest::Client` (which embeds a forked
-//! BoringSSL stack) and exposes the same `send_and_check`-shaped API
+//! `BoringSSL` stack) and exposes the same `send_and_check`-shaped API
 //! the rest of `wafrift-transport` uses, so the proxy + scan paths can
 //! swap between `EvasionClient` (rustls, default) and `StealthClient`
-//! (BoringSSL impersonation, opt-in via `--features tls-impersonate`)
+//! (`BoringSSL` impersonation, opt-in via `--features tls-impersonate`)
 //! without touching call sites.
 //!
 //! # Profile selection
@@ -26,7 +26,7 @@
 //!
 //! # Build cost
 //!
-//! `rquest` pulls in `boring-sys` which compiles BoringSSL from C.
+//! `rquest` pulls in `boring-sys` which compiles `BoringSSL` from C.
 //! First build adds ~30-60 s on a typical machine; subsequent rebuilds
 //! cache. The dep is gated by the `tls-impersonate` feature so default
 //! `cargo install` consumers pay zero extra cost.

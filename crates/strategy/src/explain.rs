@@ -128,7 +128,7 @@ fn build_summary(
     if matches!(mode, ExplanationMode::Educational) && !bypassed_ids.is_empty() {
         out.push_str("\n\n## Why this works\n");
         for tech in techniques {
-            out.push_str(&format!("- **{}**: ", tech));
+            out.push_str(&format!("- **{tech}**: "));
             out.push_str(why_technique_works(tech));
             out.push('\n');
         }

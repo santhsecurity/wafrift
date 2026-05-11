@@ -1,13 +1,13 @@
 //! Regression coverage for the 2026-05-10 swarm-audit findings on
-//! ip_addr_is_bogon (proxy/upstream_policy.rs):
+//! `ip_addr_is_bogon` (`proxy/upstream_policy.rs)`:
 //!   HIGH: missing IPv4 ranges:
 //!     - 100.64.0.0/10  Carrier-Grade NAT (RFC 6598)
 //!     - 192.0.0.0/24   IETF protocol assignments (RFC 6890)
 //!     - 198.18.0.0/15  benchmark testing (RFC 2544)
 //!   HIGH: missing IPv6 ranges:
-//!     - 2001:0::/32    Teredo (RFC 4380)
-//!     - 2001:20::/28   ORCHIDv2 (RFC 7343)
-//!     - 100::/64       discard-only (RFC 6666)
+//!     - `2001:0::/32`    Teredo (RFC 4380)
+//!     - `2001:20::/28`   `ORCHIDv2` (RFC 7343)
+//!     - `100::/64`       discard-only (RFC 6666)
 //!
 //! Pre-fix every assertion below would have returned false (treating
 //! the bogon address as a public, forward-allowed upstream).

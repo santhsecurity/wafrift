@@ -30,7 +30,7 @@ pub enum Strategy {
     /// Standard URL encoding (%XX) — preserves unreserved chars per RFC 3986.
     /// Safe for: query strings, paths, form data.
     UrlEncode,
-    /// Lowercase hex URL encoding (%xx) — same semantics as UrlEncode.
+    /// Lowercase hex URL encoding (%xx) — same semantics as `UrlEncode`.
     /// Safe for: query strings, paths, form data.
     UrlEncodeLower,
     /// Double URL encoding (%25XX) — bypasses WAFs that decode once.
@@ -57,7 +57,7 @@ pub enum Strategy {
     /// Alternating case (`SeLeCt`) — bypasses case-sensitive keyword filters.
     /// Safe for: any text context where case is preserved.
     CaseAlternation,
-    /// Random alternating case — non-deterministic variant of CaseAlternation.
+    /// Random alternating case — non-deterministic variant of `CaseAlternation`.
     /// Safe for: any text context where case is preserved.
     RandomCase,
     /// Tab insertion BETWEEN tokens — preserves keyword integrity.
@@ -66,8 +66,8 @@ pub enum Strategy {
     /// SQL comment insertion BETWEEN tokens — preserves keyword integrity.
     /// Safe for: SQL contexts where comments are treated as whitespace.
     SqlCommentInsertion,
-    /// MySQL versioned comment (`/*!50000SELECT*/`) — executed by MySQL, ignored by WAFs.
-    /// Safe for: MySQL backends.
+    /// `MySQL` versioned comment (`/*!50000SELECT*/`) — executed by `MySQL`, ignored by WAFs.
+    /// Safe for: `MySQL` backends.
     MysqlVersionedComment,
     /// Null byte injection (%00) — ONLY semantically correct for C-style string parsers.
     /// Context: php, some CGI implementations.
@@ -75,7 +75,7 @@ pub enum Strategy {
     /// Overlong UTF-8 encoding (2-byte) — ONLY works against legacy WAFs that normalize.
     /// Context: iis-6, very old frontends.
     OverlongUtf8,
-    /// Extended overlong UTF-8 encoding (3-byte) — broader coverage than OverlongUtf8.
+    /// Extended overlong UTF-8 encoding (3-byte) — broader coverage than `OverlongUtf8`.
     /// Context: iis-6, very old frontends.
     OverlongUtf8More,
     /// Chunked transfer-encoding split — ONLY valid with `Transfer-Encoding: chunked`.
@@ -109,7 +109,7 @@ pub enum Strategy {
     /// Safe for: SQL contexts.
     SpaceToDash,
     /// Replace spaces with hash comments (`#`).
-    /// Safe for: MySQL contexts.
+    /// Safe for: `MySQL` contexts.
     SpaceToHash,
     /// Replace spaces with plus signs (`+`).
     /// Safe for: URL-encoded form data.
@@ -126,8 +126,8 @@ pub enum Strategy {
     /// Unmagic quotes (`%bf%27`) — multi-byte charset quote escape.
     /// Context: PHP with GBK/Big5/Shift-JIS connections.
     UnmagicQuotes,
-    /// Fullwidth Unicode (ＳＥＬＥＣＴuntouched) — bypasses ASCII keyword regex.
-    /// Context: backends that perform NFKC normalization (Java, .NET, Python 3, PostgreSQL).
+    /// Fullwidth Unicode (`ＳＥＬＥＣＴuntouched`) — bypasses ASCII keyword regex.
+    /// Context: backends that perform NFKC normalization (Java, .NET, Python 3, `PostgreSQL`).
     FullwidthEncode,
     /// Homoglyph substitution — visually identical Unicode chars for `'`, `"`, `<`, `>`, `=`.
     /// Context: byte-level WAFs with Unicode-tolerant backends.
@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn encode_null_byte() {
         let result = encode("file.php", Strategy::NullByte).unwrap();
-        assert!(result.contains("\x00") || result.contains("%00"));
+        assert!(result.contains('\x00') || result.contains("%00"));
     }
 
     #[test]

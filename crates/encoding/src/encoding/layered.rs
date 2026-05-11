@@ -88,14 +88,11 @@ fn redundant_pair(a: Strategy, b: Strategy) -> bool {
     // URL + URL variants are redundant with existing single strategies
     matches!(
         (a, b),
-        (Strategy::UrlEncode, Strategy::UrlEncode)
-            | (Strategy::UrlEncode, Strategy::UrlEncodeLower)
-            | (Strategy::UrlEncodeLower, Strategy::UrlEncode)
-            | (Strategy::UrlEncodeLower, Strategy::UrlEncodeLower)
-            | (Strategy::DoubleUrlEncode, Strategy::UrlEncode)
-            | (Strategy::TripleUrlEncode, Strategy::UrlEncode)
-            | (Strategy::CaseAlternation, Strategy::RandomCase)
-            | (Strategy::RandomCase, Strategy::CaseAlternation)
+        (Strategy::UrlEncode | Strategy::UrlEncodeLower | Strategy::DoubleUrlEncode |
+Strategy::TripleUrlEncode, Strategy::UrlEncode) |
+(Strategy::UrlEncode | Strategy::UrlEncodeLower, Strategy::UrlEncodeLower) |
+(Strategy::CaseAlternation, Strategy::RandomCase) |
+(Strategy::RandomCase, Strategy::CaseAlternation)
     )
 }
 

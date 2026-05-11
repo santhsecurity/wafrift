@@ -97,9 +97,7 @@ fn empty_payload_all_contexts() {
         let result = encode_in_context(b"", Strategy::CaseAlternation, ctx);
         assert!(
             result.is_ok(),
-            "empty payload failed for {:?}: {:?}",
-            ctx,
-            result
+            "empty payload failed for {ctx:?}: {result:?}"
         );
     }
 }
@@ -116,9 +114,7 @@ fn single_byte_payload_all_contexts() {
         let result = encode_in_context(payload, Strategy::CaseAlternation, ctx);
         assert!(
             result.is_ok(),
-            "single byte failed for {:?}: {:?}",
-            ctx,
-            result
+            "single byte failed for {ctx:?}: {result:?}"
         );
     }
 }
@@ -141,8 +137,7 @@ fn max_size_minus_one_all_contexts() {
         };
         assert!(
             encode_in_context(&payload, Strategy::CaseAlternation, ctx).is_ok(),
-            "max_size-1 failed for {:?}",
-            ctx
+            "max_size-1 failed for {ctx:?}"
         );
     }
 }
@@ -161,10 +156,7 @@ fn max_size_plus_one_all_contexts() {
         let err = encode_in_context(&payload, Strategy::CaseAlternation, ctx).unwrap_err();
         assert!(
             err.to_string().contains("too large"),
-            "wrong error for {:?} at size {}: {}",
-            ctx,
-            size,
-            err
+            "wrong error for {ctx:?} at size {size}: {err}"
         );
     }
 }
@@ -299,8 +291,7 @@ fn every_strategy_produces_valid_plain_body() {
         // PlainBody has no structural constraints, so all strategies should succeed
         assert!(
             !out.is_empty(),
-            "strategy {:?} produced empty output",
-            strategy
+            "strategy {strategy:?} produced empty output"
         );
     }
 }
@@ -315,8 +306,7 @@ fn every_strategy_produces_valid_url_query() {
             // URL query must not contain raw spaces
             assert!(
                 !out.contains(' '),
-                "strategy {:?} produced raw space in URL query",
-                strategy
+                "strategy {strategy:?} produced raw space in URL query"
             );
         }
     }

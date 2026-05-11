@@ -1,12 +1,12 @@
 //! Regression coverage for the 2026-05-10 swarm-audit (kimi
 //! evolution sub-batch):
-//!   in_flight grew without TTL — every dropped evaluation
-//!   permanently consumed a max_requests budget slot. Long scans
+//!   `in_flight` grew without TTL — every dropped evaluation
+//!   permanently consumed a `max_requests` budget slot. Long scans
 //!   would terminate prematurely with budget exhausted while the
-//!   in_flight map silently accumulated zombie entries.
+//!   `in_flight` map silently accumulated zombie entries.
 //!
-//! prune_stale_in_flight now drops entries older than the threshold
-//! AND repays request_count for the pruned entries.
+//! `prune_stale_in_flight` now drops entries older than the threshold
+//! AND repays `request_count` for the pruned entries.
 
 use std::time::Duration;
 use wafrift_evolution::evolution::EvolutionEngine;

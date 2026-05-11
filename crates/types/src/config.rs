@@ -25,7 +25,7 @@ pub struct EvasionConfig {
     pub h2_evasion_enabled: bool,
     /// Maximum evasion retry attempts before giving up.
     pub max_attempts: u32,
-    /// Disable TLS verification (danger_accept_invalid_certs).
+    /// Disable TLS verification (`danger_accept_invalid_certs`).
     pub insecure_tls: bool,
     /// Proxies for round-robin IP rotation.
     #[serde(default)]
@@ -59,7 +59,7 @@ pub struct EvasionConfig {
     /// Allow upstream targets that fall in the bogon set
     /// (loopback / RFC1918 / CGN / Teredo / IMDS / etc.).
     ///
-    /// Off by default — wafrift-transport's EvasionClient rejects
+    /// Off by default — wafrift-transport's `EvasionClient` rejects
     /// literal-IP requests to these ranges as a defence-in-depth
     /// against accidental SSRF. Set true when targeting a lab
     /// upstream on 127.0.0.1 / 192.168.x or when running tests
@@ -173,8 +173,7 @@ impl EvasionConfig {
                 && !proxy.starts_with("socks5h://")
             {
                 return Err(format!(
-                    "Invalid proxy URL '{}': must start with http://, https://, socks5://, or socks5h://",
-                    proxy
+                    "Invalid proxy URL '{proxy}': must start with http://, https://, socks5://, or socks5h://"
                 ));
             }
         }

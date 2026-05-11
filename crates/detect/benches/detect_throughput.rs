@@ -32,7 +32,7 @@ fn cloudflare_response() -> (u16, Vec<(String, String)>, Vec<u8>) {
     )
 }
 
-/// Realistic ModSecurity block page.
+/// Realistic `ModSecurity` block page.
 fn modsecurity_response() -> (u16, Vec<(String, String)>, Vec<u8>) {
     (
         403,
@@ -114,7 +114,7 @@ fn bench_waf_detection(c: &mut Criterion) {
                         black_box(body),
                     );
                     black_box(result)
-                })
+                });
             },
         );
     }
@@ -130,7 +130,7 @@ fn bench_fingerprint(c: &mut Criterion) {
         b.iter(|| {
             let fp = fingerprint(black_box(status), black_box(&headers), black_box(&body));
             black_box(fp)
-        })
+        });
     });
 
     let (s1, h1, b1) = clean_response();
@@ -142,7 +142,7 @@ fn bench_fingerprint(c: &mut Criterion) {
         b.iter(|| {
             let drift = compare(black_box(&fp1), black_box(&fp2));
             black_box(drift)
-        })
+        });
     });
 
     group.finish();
@@ -156,7 +156,7 @@ fn bench_blocking_check(c: &mut Criterion) {
         b.iter(|| {
             let result = waf_detect::is_blocked_response(black_box(503), black_box(&body));
             black_box(result)
-        })
+        });
     });
 
     let (_, _, body) = clean_response();
@@ -164,7 +164,7 @@ fn bench_blocking_check(c: &mut Criterion) {
         b.iter(|| {
             let result = waf_detect::is_blocked_response(black_box(200), black_box(&body));
             black_box(result)
-        })
+        });
     });
 
     let (_, _, body) = large_body_response();
@@ -172,7 +172,7 @@ fn bench_blocking_check(c: &mut Criterion) {
         b.iter(|| {
             let result = waf_detect::is_blocked_response(black_box(200), black_box(&body));
             black_box(result)
-        })
+        });
     });
 
     group.finish();

@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 #[derive(Debug, clap::Args)]
 pub struct EgressExampleArgs {
-    /// Preset name: `tor` (SOCKS5h to local Tor).
+    /// Preset name: `tor` (`SOCKS5h` to local Tor).
     #[arg(long, default_value = "tor", value_parser = ["tor"])]
     pub preset: String,
 }

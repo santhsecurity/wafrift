@@ -1,10 +1,10 @@
-//! Regression coverage for the 2026-05-10 proxy rate_limit audit:
-//!   HIGH: RateLimiter::buckets HashMap grew unboundedly. Every unique
-//!     hostname acquired() against the limiter inserted a permanent
+//! Regression coverage for the 2026-05-10 proxy `rate_limit` audit:
+//!   HIGH: `RateLimiter::buckets` `HashMap` grew unboundedly. Every unique
+//!     hostname `acquired()` against the limiter inserted a permanent
 //!     entry. An attacker (or a long-running browser session crawling
 //!     thousands of CDN edges) would OOM the proxy.
 //!
-//! Pre-fix this test would have grown the map past MAX_TRACKED_HOSTS
+//! Pre-fix this test would have grown the map past `MAX_TRACKED_HOSTS`
 //! and kept growing.
 
 use wafrift_proxy::rate_limit::RateLimiter;

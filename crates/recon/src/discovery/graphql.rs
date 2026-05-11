@@ -15,13 +15,13 @@ use wafrift_types::discovery::{
 };
 use wafrift_types::injection_context::InjectionContext;
 
-const INTROSPECTION_QUERY: &str = r#"{
+const INTROSPECTION_QUERY: &str = r"{
   __schema {
     queryType { name fields { name args { name type { name kind ofType { name kind } } } } }
     mutationType { name fields { name args { name type { name kind ofType { name kind } } } } }
     subscriptionType { name fields { name args { name type { name kind ofType { name kind } } } } }
   }
-}"#;
+}";
 
 /// Probe a GraphQL endpoint via introspection and emit one
 /// [`DiscoveredEndpoint`] per top-level field on Query / Mutation /
@@ -107,7 +107,7 @@ pub fn parse_introspection_response(
                 }
             }
             endpoints.push(DiscoveredEndpoint {
-                url: format!("{}#{}.{}", endpoint, op_kind, field_name),
+                url: format!("{endpoint}#{op_kind}.{field_name}"),
                 method: Method::Post,
                 injection_points: points,
                 source: DiscoverySource::GraphQlIntrospection,

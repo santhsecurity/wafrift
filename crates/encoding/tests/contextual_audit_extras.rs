@@ -1,11 +1,11 @@
 //! Regression coverage for the 2026-05-10 swarm-audit findings on
-//! escape_for_context (encoding/contextual.rs):
-//!   HIGH: XmlAttribute escaped `&"<>` but not `'`. A payload containing
+//! `escape_for_context` (encoding/contextual.rs):
+//!   HIGH: `XmlAttribute` escaped `&"<>` but not `'`. A payload containing
 //!     `'` would break out of an `<elem attr='...'>` form.
-//!   HIGH: JsonString did not escape U+2028 / U+2029. Inlined into
-//!     `<script>JSON</script>` or passed to eval(), an attacker-
+//!   HIGH: `JsonString` did not escape U+2028 / U+2029. Inlined into
+//!     `<script>JSON</script>` or passed to `eval()`, an attacker-
 //!     controlled value could close the JS string and inject script.
-//!   HIGH: CookieValue percent-encoded only `; = \\r \\n \\0`. RFC 6265
+//!   HIGH: `CookieValue` percent-encoded only `; = \\r \\n \\0`. RFC 6265
 //!     §4.1.1 cookie-octet excludes space, `,`, `"`, `\\` as well —
 //!     Chrome / Firefox / curl truncate cookies at the offending byte,
 //!     making bypass probes silently lie about the value sent.

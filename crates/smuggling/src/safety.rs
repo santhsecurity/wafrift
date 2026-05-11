@@ -81,7 +81,7 @@ pub enum ConnectionPolicy {
     Multiplex,
 }
 
-/// Circuit-breaker state machine to halt scanning before DoSing the target.
+/// Circuit-breaker state machine to halt scanning before `DoSing` the target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CircuitState {
     Closed,

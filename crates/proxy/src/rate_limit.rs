@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 /// Hard cap on tracked hosts before we evict the least-recently-used.
 /// Prevents an attacker (or even a legit long-running session that
 /// crawls thousands of unique hosts) from growing the buckets map
-/// unboundedly and OOMing the proxy.
+/// unboundedly and `OOMing` the proxy.
 const MAX_TRACKED_HOSTS: usize = 4096;
 
 #[derive(Debug, Clone, Copy)]

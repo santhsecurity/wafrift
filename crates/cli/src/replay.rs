@@ -8,7 +8,7 @@
 //! cally with one command — not by re-pointing Burp at the target and
 //! hoping the proxy re-derives the same chain.
 //!
-//! Replay is fully self-contained: it builds an EvasionResult by feeding
+//! Replay is fully self-contained: it builds an `EvasionResult` by feeding
 //! the saved technique keys into `wafrift_strategy::evade` as proven
 //! winners, then sends the resulting request via reqwest and classifies
 //! the response. JSON output is stable for CI gating.
@@ -70,7 +70,7 @@ pub struct ReplayArgs {
     #[arg(long)]
     pub proxy_bank: Option<PathBuf>,
 
-    /// Pull the technique list from the per-WAF GeneBank by WAF name.
+    /// Pull the technique list from the per-WAF `GeneBank` by WAF name.
     /// Reads from `~/.wafrift/genomes/`.
     ///
     /// Only consulted when both `--technique` and `--from-host` are omitted.

@@ -23,13 +23,13 @@ pub fn classify_response_time(baseline_ms: u64, actual_ms: u64) -> Option<Signal
     let actual = actual_ms.max(1);
 
     let ratio = actual as f64 / baseline as f64;
-    if !(1.0 / BASELINE_MULTIPLIER..=BASELINE_MULTIPLIER).contains(&ratio) {
+    if (1.0 / BASELINE_MULTIPLIER..=BASELINE_MULTIPLIER).contains(&ratio) {
+        None
+    } else {
         Some(Signal::ResponseTimeAnomaly {
             baseline_ms,
             actual_ms,
         })
-    } else {
-        None
     }
 }
 

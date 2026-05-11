@@ -15,9 +15,9 @@ pub fn unicode_encode(payload: &str) -> String {
             let surrogate_base = code - 0x1_0000;
             let high = 0xD800 + ((surrogate_base >> 10) & 0x3FF);
             let low = 0xDC00 + (surrogate_base & 0x3FF);
-            let _ = write!(&mut out, "\\u{:04X}\\u{:04X}", high, low);
+            let _ = write!(&mut out, "\\u{high:04X}\\u{low:04X}");
         } else {
-            let _ = write!(&mut out, "\\u{:04X}", code);
+            let _ = write!(&mut out, "\\u{code:04X}");
         }
     }
     out
@@ -97,7 +97,7 @@ pub fn html_entity_decimal_encode(payload: &str) -> String {
 /// payload executes while the WAF never saw it.
 ///
 /// **Context**: Effective against WAFs in front of servers that normalize Unicode
-/// (Java/Spring, .NET, Python 3, Go, PostgreSQL, etc.).
+/// (Java/Spring, .NET, Python 3, Go, `PostgreSQL`, etc.).
 #[must_use]
 pub fn fullwidth_encode(payload: &str) -> String {
     let mut out = String::with_capacity(payload.len() * 3);

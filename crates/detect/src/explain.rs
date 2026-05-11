@@ -208,7 +208,7 @@ pub fn explain_block(payload: &str, waf: &DetectedWaf) -> Vec<RuleAttribution> {
 /// Reference points (community-known):
 ///   - Cloudflare / Imperva / Akamai: high (0.95) — production-grade WAFs
 ///     with anomaly scoring and multi-decode.
-///   - AWS WAF / ModSecurity: medium-high (0.85) — solid managed rules.
+///   - AWS WAF / `ModSecurity`: medium-high (0.85) — solid managed rules.
 ///   - Sucuri / generic CDN-WAF: medium (0.70) — keyword-tier only.
 ///   - Unknown / unidentified: 0.5 — substring matched something but we
 ///     have no signal whether the WAF in front actually inspects it.

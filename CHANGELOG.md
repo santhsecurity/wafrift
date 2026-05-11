@@ -4,6 +4,217 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.12] — 2026-05-10
+
+### Changed — workspace polish + organization sweep
+
+- **Pedantic clippy clean across the workspace.** 936 → ~440
+  pedantic warnings; `clippy::doc_markdown` cleared from 287 → 0
+  (every identifier in every public docstring is now backticked,
+  so docs.rs renders cleanly). Mechanical rewrites included
+  `format!("{}", x)` → `format!("{x}")`, `.map(...).unwrap_or(...)`
+  → `.map_or(...)`, redundant closure → method-reference,
+  `single_char_pattern`, `manual_let_else`, `unnested_or_patterns`,
+  `if_not_else`, `implicit_clone`, `format_push_string` → `write!`.
+  142 files touched (autofix-driven).
+- **Documentation sync.**
+  - `README.md` "What's new" section retitled from
+    `Unreleased / v0.2.3-dev` to `v0.2.12` and rewritten to reflect
+    the audit-driven hardening sweep that landed across v0.2.4 →
+    v0.2.11. Earlier `v0.2.3` content kept under "Earlier changes".
+  - `README.md` crates.io badge fixed (pointed at the non-existent
+    `wafrift` crate; now correctly tracks `wafrift-cli`).
+  - `README.md` install commands updated from
+    `cargo install wafrift` / `cargo install wafrift-cli --version
+    '>=0.2.2'` to the current version pin.
+  - `docs/man/wafrift.1` version bumped 0.2.1 → 0.2.12 (the manpage
+    title bar and `.SH VERSION` block both lied about the binary
+    version).
+  - `CHANGELOG.md` `[0.2.4]` through `[0.2.11]` retroactively filled
+    in (each release shipped real fixes, but the changelog had not
+    been updated since v0.2.3).
+- **Three thin crate READMEs expanded for crates.io credibility.**
+  `wafrift-types`, `wafrift-content-type`, `wafrift-pool` were
+  one-paragraph stubs (3 lines each). Each now ships a structured
+  README that lists what's in the crate, the public API shape,
+  stability commitments, and a usage snippet. These are the pages
+  that show on crates.io for each subcrate; thin READMEs were a
+  credibility hit.
+- **`run_interactive` (cli/main.rs):** hoisted `use ratatui::*` to
+  function top so the early-return-on-no-TTY check no longer breaks
+  the `items_after_statements` lint (15 warnings → 0).
+- **`run_evade` / `run_detect` / `run_probe` (cli/main.rs):**
+  `#[allow(clippy::needless_pass_by_value)]` — clap-derived `Args`
+  structs are idiomatically taken by value, and these functions
+  consume the argument exactly once.
+
+### Fixed
+
+- **`crates/proxy/src/main.rs:1894`** was the lone caller of the
+  v0.2.9-deprecated `wafrift_transport::challenge::classify(body,
+  headers)`. Switched to `classify_with_status(body, headers,
+  status_code)` so the proxy's challenge-detection path is
+  status-aware (was already gated on `status_code == 503 ||
+  status_code == 403` so behaviour is unchanged; this clears the
+  last `#[warn(deprecated)]` warning in the workspace build).
+- **`crates/proxy/tests/captchaforge_install.rs`:**
+  `captchaforge_install_must_fail_with_actionable_hint` hung
+  forever under `cargo test --workspace --all-features` because
+  the test premise (binary should reject `--captchaforge` without
+  the feature) is invalidated when the feature is enabled — the
+  proxy then accepts the flag and runs indefinitely while the test
+  awaits `child.wait()`. Test now `#[cfg(not(feature =
+  "captchaforge"))]`-gated. The companion
+  `captchaforge_install_must_not_fail_without_flag` still runs in
+  both build modes.
+
+2892 / 2892 workspace tests green at v0.2.12.
+
+## [0.2.11] — 2026-05-10
+
+### Fixed — swarm audit batch 8 (CRITICAL + HIGH)
+
+- **`transport/challenge` — PSL supercookie guard.** Cookie
+  `Domain=` attribute had no Public Suffix List check. Bare eTLDs
+  (`Domain=co.uk`, `Domain=github.io`, `Domain=netlify.app`) were
+  silently accepted — a captured cookie would then replay on every
+  site under that suffix (RFC 6265 §5.2.3). Added
+  `is_safe_cookie_domain` using the embedded `psl` crate (no
+  hardcoded eTLD blocklist that goes stale). Real second-level
+  domains still pass; bare eTLDs are rejected.
+- **`grammar/xss` — `has_xss_signals` precision.** Pre-fix this
+  fired on benign substrings (`confirm(` in API docs,
+  `window.onerror` in security write-ups, `<select>` HTML), so the
+  mutator emitted XSS variants from non-XSS input. Replaced with a
+  2-point threshold: STRONG signals (`<tag attr=`, `javascript:`
+  URL, `on*=`) score 2, WEAK (bare exec function names) score 1.
+  Need ≥ 2 to count.
+- **`transport/stealth` — DNS-rebinding via hostname.** `StealthClient`
+  resolved hostnames inside `rquest`, so a TOCTOU attacker could
+  flip the A record between bogon-check and connect. Now
+  pre-resolves with `tokio::net::lookup_host`, filters via
+  `is_bogon_ip`, then builds a per-request `rquest` client with
+  `.resolve_to_addrs()` pinning the connection to the
+  already-vetted `SocketAddr`s.
+
+### Fixed — swarm audit batch 9 (test rigour)
+
+- **`content-type` — replaced 30 hollow tests** (`auto_0..auto_29`,
+  each only `assert!(!variants.is_empty())`) with a single rigorous
+  structural test that drives the same payload set through
+  `generate_variants_from_body` AND validates body shape per
+  Content-Type variant: multipart bodies have boundary= + correct
+  framing + end marker; `application/json` bodies parse as strict
+  JSON (with comment stripping for `JsonWithComments`);
+  `application/xml` bodies declare `<?xml` preamble and carry both
+  fields.
+- **`smuggling` — 3 hollow tests hardened.**
+  `cache_buster_non_empty` → `cache_buster_unique_and_numeric` now
+  asserts uniqueness across 100 calls + base-10 parseability.
+  `concurrency_stress_*` now asserts each payload contains the Host
+  header and ends with the request terminator.
+  `multibyte_utf8_split_path_no_panic` →
+  `multibyte_utf8_path_round_trips_in_payload` now asserts the
+  literal Japanese characters survive into the wire bytes.
+
+### Changed
+
+- README "What's new" section retitled from `Unreleased / v0.2.3-dev`
+  to `v0.2.11`.
+- 23 pedantic clippy warnings cleared in `wafrift-cli` (mostly
+  `items_after_statements` from `use ratatui::*` after the
+  no-TTY early-return; hoisted `use` to function top).
+- 2892 / 2892 workspace tests green.
+
+## [0.2.10] — 2026-05-10
+
+### Fixed
+
+- **`evolution/engine` — `prune_stale_in_flight` repays budget on
+  dropped evals.** Stale in-flight evaluations leaked from the
+  budget counter when pruned. Now repays the budget correctly so
+  long-running searches don't drift.
+- **`transport/challenge` — `refresh_solver_pending` +
+  warn-on-eviction.** Solver entries get an explicit refresh path
+  (RAII guard pattern), and evictions log a `warn!` rather than
+  silently dropping work.
+- **`strategy/host_state` — `total_attempted` lifted u32 → u64.**
+  Long-running scans against very-high-traffic hosts could overflow
+  `u32` (~4.3 B). u64 buys 4 G× headroom.
+- **`transport/challenge` — per-host fairness in global prompt cap.**
+  One noisy host could starve every other host's challenge prompts
+  by exhausting the global cap. Now reserves slots per-host.
+- **`transport/challenge` — `classify()` deprecated in favour of
+  `classify_with_status`.** Status-aware classification kills 200-OK
+  false positives where a body matched a challenge signature but
+  the response was actually a real success page.
+
+## [0.2.9] — 2026-05-10
+
+### Added — swarm audit batches 6 + 7
+
+- **`EvasionConfig.allow_private_upstream`** (default `false`)
+  blocks RFC1918 / loopback / link-local SSRF unless explicitly
+  opted in. Tests that need wiremock (binds 127.0.0.1) flip the
+  flag.
+- **MCTS** improvements (mctrust 0.4) — higher-precision UCB1
+  scoring + body-budget enforcement.
+- **`grammar/xss` exec sequence** — better signal weighting.
+- **`transport/challenge` HttpOnly + Forwarded RFC7239 honesty,
+  DoublePercent encoding correctness.**
+
+## [0.2.8] — 2026-05-10
+
+### Fixed — swarm audit batches 4 + 5
+
+- **`transport/challenge`** — request-splitting CRLF / NUL / `;` in
+  cookie values rejected.
+- **`proxy` SSRF** — bogon filter applied before connect.
+- **MITM cert builder** — leaf-params extracted to a single helper
+  to remove duplication across public methods.
+- **`HostState` caps + AST walk + crypto perms** hardened.
+
+## [0.2.7] — 2026-05-10
+
+### Fixed — swarm audit batch 3
+
+- **`encoding`** CRITICALs (URL fragment destruction, double path
+  encoding, DoS guard).
+- **`grammar`** dead-vector pruning.
+- **`classify`** false-positive sweep.
+- **`grammar` `mutate_as`** — `max_mutations` contract enforced in
+  SQL + XSS branches.
+
+## [0.2.6] — 2026-05-10
+
+### Fixed
+
+- **`proxy/intercept`** — GC dead senders on register; expose
+  `gc_dead_senders` for tests.
+
+## [0.2.5] — 2026-05-10
+
+### Fixed — swarm audit batch 2 + audit-fix re-publish
+
+- **`smuggling/safety`** + **`content-type/unicode`** hardening.
+- **`proxy/rate_limit`** — buckets HashMap capped at
+  `MAX_TRACKED_HOSTS = 4096` (DoS).
+- **`genome-registry/signing`** — `secret_hex` validated on
+  `Deserialize`.
+- **`content-type`** — `unique_boundary` wired into all multipart
+  variants.
+- **`strategy/learning_cache`** — atomic save + corrupt-file
+  recovery.
+- **`grammar/classifier`** — whole-word shell-cmd match; drop CMDi
+  fallthrough on no-separator path.
+
+## [0.2.4] — 2026-05-10
+
+### Fixed — oracle CRITICALs
+
+- **`oracle/cmdi`** — OOM on adversarial input fixed.
+- **`oracle/ssrf`** — `"0"` indicator FP fixed.
+
 ## [0.2.3] — 2026-05-10
 
 ### Added — community genome registry + ed25519 signing (#111)

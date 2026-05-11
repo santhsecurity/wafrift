@@ -1,14 +1,14 @@
 //! Regression coverage for the 2026-05-10 genome-registry signing
 //! audit finding:
-//!   MEDIUM: SigningKey derived Deserialize, which accepted any string
+//!   MEDIUM: `SigningKey` derived Deserialize, which accepted any string
 //!     for `secret_hex` without validation. The constructor `from_secret_hex`
-//!     validated length + hex shape, but a JSON-loaded SigningKey
+//!     validated length + hex shape, but a JSON-loaded `SigningKey`
 //!     bypassed that check and armed a panic-on-first-use bomb inside
 //!     `verifying_key_hex` and `sign_bytes` (both call
 //!     `hex::decode().expect("constructor checked")`).
 //!
 //! Pre-fix this would have panicked the moment the loaded key was used.
-//! Post-fix the manual Deserialize routes through from_secret_hex and
+//! Post-fix the manual Deserialize routes through `from_secret_hex` and
 //! returns a clean serde error.
 
 use wafrift_genome_registry::SigningKey;

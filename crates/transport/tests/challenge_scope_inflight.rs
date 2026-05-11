@@ -140,8 +140,7 @@ fn operator_prompt_global_cap_throttles_storm() {
     }
     assert_eq!(
         prompts_emitted, OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN,
-        "global cap must throttle the storm to {} prompts; got {}",
-        OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN, prompts_emitted
+        "global cap must throttle the storm to {OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN} prompts; got {prompts_emitted}"
     );
 }
 

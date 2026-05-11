@@ -45,7 +45,7 @@ pub const MAX_USEFUL_PAD: usize = 8 * 1024 * 1024;
 ///
 /// Uses a deterministic xorshift PRNG over `[a-z0-9]` so the padding
 /// looks like normal junk parameter content. A run-of-A filler trips
-/// Naxsi's `BIG_REQUEST` heuristic and ModSecurity's `RX` rules that
+/// Naxsi's `BIG_REQUEST` heuristic and `ModSecurity`'s `RX` rules that
 /// flag long single-character sequences. Random-looking lowercase
 /// alphanumeric is the same alphabet wordlists use, so the WAF
 /// classifies it as boring.

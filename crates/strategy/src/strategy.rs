@@ -284,7 +284,7 @@ pub fn evade_mcts(
     build_mcts_result(result_env, config)
 }
 
-/// Build an EvasionResult from a finalized MCTS environment.
+/// Build an `EvasionResult` from a finalized MCTS environment.
 fn build_mcts_result(env: WafRiftEnv, config: &EvasionConfig) -> Option<EvasionResult> {
     let mut techniques = env.applied_techniques;
 
@@ -469,7 +469,7 @@ pub type WafResponse<'a> = (u16, &'a [(String, String)], &'a [u8]);
 
 /// Unified intelligent evasion: WAF detection → advisor → MCTS → adaptive fallback.
 ///
-/// This is the **highest-level entry point** that combines all of WafRift's
+/// This is the **highest-level entry point** that combines all of `WafRift`'s
 /// intelligence subsystems into a single call:
 ///
 /// 1. **WAF Detection** — Identifies the WAF from previous response headers/body
@@ -553,9 +553,7 @@ fn apply_body_padding(req: &mut Request, techniques: &mut Vec<Technique>, config
     let ct = req
         .headers
         .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-        .map(|(_, v)| v.clone())
-        .unwrap_or_else(|| "application/octet-stream".to_string());
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type")).map_or_else(|| "application/octet-stream".to_string(), |(_, v)| v.clone());
     let original = req.body.clone().unwrap_or_default();
     if let PadOutcome::Padded { bytes, added } = pad(&original, &ct, config.body_padding_bytes) {
         req.body = Some(bytes);

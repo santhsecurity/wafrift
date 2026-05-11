@@ -302,11 +302,11 @@ mod tests {
     }
 
     /// Adversarial coverage replacing 30 hand-generated smoke-alarm
-    /// tests (auto_0..auto_29) flagged by the 2026-05-10 audit. Each
+    /// tests (`auto_0..auto_29`) flagged by the 2026-05-10 audit. Each
     /// of the originals only asserted `!variants.is_empty()` — they
     /// passed regardless of whether the bodies were valid multipart
     /// framing, parseable JSON, or well-formed XML. This replacement
-    /// drives the same payload set through generate_variants_from_body
+    /// drives the same payload set through `generate_variants_from_body`
     /// AND validates the body shape per Content-Type variant.
     #[test]
     fn adversarial_payloads_produce_structurally_valid_variants() {

@@ -30,8 +30,7 @@ fn normalize_host(input: &str) -> Result<String, String> {
     }
     let hostname = hostport
         .rsplit_once('@')
-        .map(|(_, h)| h)
-        .unwrap_or(hostport)
+        .map_or(hostport, |(_, h)| h)
         .trim();
 
     let hostname = if hostname.starts_with('[') {
@@ -110,7 +109,7 @@ async fn run_async(args: &OriginHintsArgs) -> Result<(), String> {
             "{}",
             serde_json::to_string_pretty(&json!({
                 "host": host,
-                "ips": ips.iter().map(|ip| ip.to_string()).collect::<Vec<_>>(),
+                "ips": ips.iter().map(std::string::ToString::to_string).collect::<Vec<_>>(),
                 "origin_bypass_example": origin_bypass_example,
                 "note": "Use the host key that matches your request Host header; verify TLS/SNI and certificate before bypassing the edge.",
             }))

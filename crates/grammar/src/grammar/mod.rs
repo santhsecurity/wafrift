@@ -63,7 +63,7 @@ pub enum PayloadType {
     PathTraversal,
     /// Server-side template injection (SSTI).
     TemplateInjection,
-    /// NoSQL injection (MongoDB, Elastic, Redis, Cassandra).
+    /// `NoSQL` injection (`MongoDB`, Elastic, Redis, Cassandra).
     NoSql,
     /// Unknown — not clearly one of the above.
     Unknown,

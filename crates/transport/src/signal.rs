@@ -1,4 +1,4 @@
-//! Rich response classification — replaces binary is_waf_block with
+//! Rich response classification — replaces binary `is_waf_block` with
 //! a structured signal the strategy engine can learn from.
 //!
 //! Instead of "blocked or not," every upstream response produces a
@@ -32,7 +32,7 @@ pub struct ResponseSignal {
     pub status: u16,
     /// Response body size in bytes.
     pub body_size: usize,
-    /// Inspection model hint from the matched profile (e.g. "single_pass_url_decode").
+    /// Inspection model hint from the matched profile (e.g. "`single_pass_url_decode`").
     pub inspection_model: Option<String>,
 }
 

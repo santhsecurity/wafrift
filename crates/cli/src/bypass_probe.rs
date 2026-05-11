@@ -10,7 +10,7 @@
 //!      (X-Original-URL, X-Rewrite-URL, X-Forwarded-For loopback,
 //!      method-override, scheme-trust, host-trust)
 //!    - All path-routing-disagreement variants from
-//!      `wafrift_grammar::grammar::path_traversal::mutate` (ProxyShell
+//!      `wafrift_grammar::grammar::path_traversal::mutate` (`ProxyShell`
 //!      `?@`, semicolon path-param, double-encoded slash, IIS null
 //!      truncation, fullwidth dot, ...)
 //!    - HTTP method overrides at the wire level (GET → POST/PUT/
@@ -38,7 +38,7 @@ use std::time::Duration;
 pub struct BypassProbeArgs {
     /// Target URL to probe. Must already return 401/403 (or any status
     /// the user wants to bypass) for the probe set to be meaningful.
-    /// When `--paths-file` is set this is the base URL (scheme://host)
+    /// When `--paths-file` is set this is the base URL (<scheme://host>)
     /// and the file supplies the path list.
     pub url: String,
 

@@ -14,7 +14,7 @@
 
 use wafrift_detect::waf_detect;
 
-/// Tier 1 WAFs — the major vendors that WafRift MUST detect
+/// Tier 1 WAFs — the major vendors that `WafRift` MUST detect
 /// with high accuracy.  Missing a Tier 1 WAF is a ship blocker.
 const TIER1_WAFS: &[&str] = &[
     "Cloudflare",

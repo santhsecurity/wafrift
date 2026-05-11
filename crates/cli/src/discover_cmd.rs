@@ -1,4 +1,4 @@
-//! `wafrift discover` — surface the OpenAPI / GraphQL / parameter-mining
+//! `wafrift discover` — surface the `OpenAPI` / GraphQL / parameter-mining
 //! engines as a single CLI command. Output is a list of
 //! `DiscoveredEndpoint`s suitable for piping into `wafrift scan
 //! --from-discovery <file>`.
@@ -23,7 +23,7 @@ pub struct DiscoverArgs {
     #[arg(long)]
     pub target: Option<String>,
 
-    /// Path to an OpenAPI 2.0 (Swagger) or 3.x JSON spec file. The
+    /// Path to an `OpenAPI` 2.0 (Swagger) or 3.x JSON spec file. The
     /// spec's `paths.<path>.<method>` entries become discovered
     /// endpoints; parameters become injection points (Query / Path /
     /// Header / Cookie / Body, with media-type-aware context inference
@@ -33,7 +33,7 @@ pub struct DiscoverArgs {
 
     /// POST a GraphQL introspection query to --target and emit one
     /// endpoint per top-level field on Query / Mutation / Subscription.
-    /// Returns IntrospectionDisabled if the server blocks introspection.
+    /// Returns `IntrospectionDisabled` if the server blocks introspection.
     #[arg(long, default_value_t = false)]
     pub introspect: bool,
 
@@ -45,7 +45,7 @@ pub struct DiscoverArgs {
     pub mine_params: bool,
 
     /// Newline-delimited wordlist file for --mine-params. Required when
-    /// that mode is enabled. Common picks: SecLists' burp-parameter-names.
+    /// that mode is enabled. Common picks: `SecLists`' burp-parameter-names.
     #[arg(long)]
     pub wordlist: Option<PathBuf>,
 

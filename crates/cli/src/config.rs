@@ -1,4 +1,4 @@
-//! TOML configuration file support for WafRift.
+//! TOML configuration file support for `WafRift`.
 //!
 //! Config files are loaded in priority order (CLI flags > env vars > file):
 //!   1. `.wafrift.toml` in the current directory
@@ -188,10 +188,10 @@ quiet = true
 
     #[test]
     fn partial_toml_uses_defaults() {
-        let toml_str = r#"
+        let toml_str = r"
 [scan]
 delay_ms = 200
-"#;
+";
         let config: WafRiftConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.scan.delay_ms, 200);
         // Everything else should use defaults.

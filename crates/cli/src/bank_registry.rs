@@ -551,7 +551,7 @@ fn http_post_blocking(url: &str, body: &str, timeout_secs: u64) -> Result<String
         let status = resp.status();
         let txt = resp.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(format!("HTTP {} {}", status, txt));
+            return Err(format!("HTTP {status} {txt}"));
         }
         Ok(format!("HTTP {} ({} bytes)", status, txt.len()))
     })

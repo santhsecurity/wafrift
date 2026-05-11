@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 /// Maximum length of an individual regex pattern (bytes). Patterns
-/// exceeding this are skipped to mitigate ReDoS and pathological
+/// exceeding this are skipped to mitigate `ReDoS` and pathological
 /// compilation times from malicious or corrupted rule files.
 const MAX_REGEX_PATTERN_LEN: usize = 4096;
 
@@ -249,12 +249,11 @@ impl RuleEngine {
     /// Load all `.toml` files from a directory.
     pub fn load_directory(&mut self, path: &std::path::Path) -> Result<(), DetectRulesError> {
         let mut entries: Vec<_> = std::fs::read_dir(path)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| {
                 e.path()
                     .extension()
-                    .map(|ext| ext.eq_ignore_ascii_case("toml"))
-                    .unwrap_or(false)
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
             })
             .map(|e| e.path())
             .collect();
@@ -574,7 +573,7 @@ pub fn with_engine<F, R>(f: F) -> R
 where
     F: FnOnce(&RuleEngine) -> R,
 {
-    let guard = RULE_DB.read().unwrap_or_else(|e| e.into_inner());
+    let guard = RULE_DB.read().unwrap_or_else(std::sync::PoisonError::into_inner);
     f(&guard)
 }
 
@@ -613,16 +612,14 @@ pub fn suggest_evasion(waf_name: &str) -> Vec<String> {
     with_engine(|engine| {
         engine
             .rules
-            .get(waf_name)
-            .map(|r| r.evasions.clone())
-            .unwrap_or_else(|| {
+            .get(waf_name).map_or_else(|| {
                 vec![
                     "CaseAlternation".into(),
                     "SqlCommentInsertion".into(),
                     "DoubleUrlEncode".into(),
                     "ContentTypeSwitch".into(),
                 ]
-            })
+            }, |r| r.evasions.clone())
     })
 }
 

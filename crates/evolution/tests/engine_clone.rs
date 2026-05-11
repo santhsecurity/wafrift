@@ -2,8 +2,8 @@
 //! `SharedEngine` shared-access pattern.
 //!
 //! Closes blocker #113: previously `clone` round-tripped through
-//! serde_json (`checkpoint` → `restore`), spiking allocations on
-//! populated MapElites grids and novelty archives. The refactor uses
+//! `serde_json` (`checkpoint` → `restore`), spiking allocations on
+//! populated `MapElites` grids and novelty archives. The refactor uses
 //! the trait's `clone_box` method (each in-tree algorithm overrides
 //! with a direct `Clone`) and exposes `SharedEngine` for the proper
 //! shared-state pattern.

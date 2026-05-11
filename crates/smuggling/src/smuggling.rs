@@ -651,7 +651,7 @@ pub fn websocket_smuggle_custom(
             rand::Rng::fill(&mut rand::thread_rng(), &mut nonce);
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, nonce)
         },
-        |k| k.to_string(),
+        std::string::ToString::to_string,
     );
     let protocol_header = protocols.map_or(String::new(), |p| {
         format!("Sec-WebSocket-Protocol: {p}\r\n")

@@ -1,14 +1,14 @@
 //! Regression test for the 2026-05-10 audit finding:
 //!
-//!   batch_candidates generates engine-local eval_ids and stores them
-//!   in in_flight, but MapElites and NoveltySearch track their own
-//!   candidate.id in their PRIVATE in_flight maps. The pre-fix engine
-//!   forwarded its eval_id to algorithm.submit_evaluations, which
+//!   `batch_candidates` generates engine-local `eval_ids` and stores them
+//!   in `in_flight`, but `MapElites` and `NoveltySearch` track their own
+//!   candidate.id in their PRIVATE `in_flight` maps. The pre-fix engine
+//!   forwarded its `eval_id` to `algorithm.submit_evaluations`, which
 //!   missed the algorithm's lookup → the grid / archive never got
 //!   updated and non-cached evaluations were silently dropped.
 //!
 //! This test drives the full engine → algorithm → engine round-trip
-//! through MapElites and asserts that the grid actually fills up.
+//! through `MapElites` and asserts that the grid actually fills up.
 //! Pre-fix: grid stays empty; the test FAILS.
 
 use rand::SeedableRng;

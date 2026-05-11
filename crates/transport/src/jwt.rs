@@ -37,7 +37,7 @@ pub fn manipulate(
     const MAX_JWT_HEADER_BYTES: usize = 16 * 1024;
     if header_bytes.len() > MAX_JWT_HEADER_BYTES {
         return Err(JwtError::InvalidToken {
-            reason: format!("header exceeds {} bytes", MAX_JWT_HEADER_BYTES),
+            reason: format!("header exceeds {MAX_JWT_HEADER_BYTES} bytes"),
         });
     }
 
@@ -54,7 +54,7 @@ pub fn manipulate(
             })?;
             let new_header_b64 =
                 base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_bytes);
-            Ok(format!("{}.{}.", new_header_b64, payload_b64))
+            Ok(format!("{new_header_b64}.{payload_b64}."))
         }
         JwtManipulation::Hs256WithKey => {
             let _ = key.ok_or(JwtError::MissingKey)?;
@@ -69,7 +69,7 @@ pub fn manipulate(
                 base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_bytes);
             // Fake signature for now since we don't have HMAC library in this file
             let sig_b64 = "fakesignature";
-            Ok(format!("{}.{}.{}", new_header_b64, payload_b64, sig_b64))
+            Ok(format!("{new_header_b64}.{payload_b64}.{sig_b64}"))
         }
         JwtManipulation::JwkEmbed { jwk } => {
             header["jwk"] = serde_json::from_str(jwk).unwrap_or(serde_json::Value::Null);

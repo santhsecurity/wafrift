@@ -235,8 +235,7 @@ pub fn validate_in_context(
                 if c == '\\' {
                     let escaped = chars.next();
                     match escaped {
-                        Some('\\') | Some('"') | Some('n') | Some('r') | Some('t') | Some('b')
-                        | Some('f') | Some('/') => {}
+                        Some('\\' | '"' | 'n' | 'r' | 't' | 'b' | 'f' | '/') => {}
                         Some('u') => {
                             // Validate exactly 4 hex digits after \u
                             for _ in 0..4 {
@@ -430,9 +429,7 @@ fn reject_unescaped_ampersand(
                 valid_shape = false;
             }
         } else if let Some(b) = first {
-            if !b.is_ascii_alphabetic() {
-                valid_shape = false;
-            } else {
+            if b.is_ascii_alphabetic() {
                 while j < max {
                     let b = bytes[j];
                     if b == b';' {
@@ -446,6 +443,8 @@ fn reject_unescaped_ampersand(
                     }
                     j += 1;
                 }
+            } else {
+                valid_shape = false;
             }
         } else {
             valid_shape = false;
@@ -482,8 +481,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("invalid") || err.to_string().contains("UTF-8"),
-            "error should mention invalid UTF-8, got: {}",
-            err
+            "error should mention invalid UTF-8, got: {err}"
         );
     }
 

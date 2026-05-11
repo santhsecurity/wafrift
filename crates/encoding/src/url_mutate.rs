@@ -48,7 +48,7 @@ impl Default for UrlMutateConfig {
 
 /// Hard cap on the input size accepted by [`UrlStrategy::DoublePercentEncode`].
 /// Two passes of aggressive percent-encoding can produce up to ~9×
-/// the input length, so an unbounded input is a DoS vector. Real WAF
+/// the input length, so an unbounded input is a `DoS` vector. Real WAF
 /// values are kilobytes at most; 1 MB is generous.
 pub const MAX_DOUBLE_ENCODE_INPUT: usize = 1024 * 1024;
 
@@ -69,14 +69,14 @@ pub enum UrlStrategy {
     /// Insert empty PHP-style array brackets `[]` after the param name
     /// to force HTTP Parameter Pollution path.
     ///
-    /// **Audit (2026-05-10): NOT YET IMPLEMENTED.** apply_bytes only
+    /// **Audit (2026-05-10): NOT YET IMPLEMENTED.** `apply_bytes` only
     /// receives the value — the (name, value) pair lives one layer up
     /// in `mutate_query_string`. The current behaviour is a value
     /// pass-through, which is a stub. Selecting this strategy will
-    /// log a tracing::warn but otherwise return the value unchanged
+    /// log a `tracing::warn` but otherwise return the value unchanged
     /// so existing callers don't break. Real HPP needs a query-level
     /// mutator that operates on the pair list — track via a dedicated
-    /// `query_pollute_pairs()` function rather than as a UrlStrategy
+    /// `query_pollute_pairs()` function rather than as a `UrlStrategy`
     /// variant.
     Hpp,
 }
@@ -94,9 +94,9 @@ impl UrlStrategy {
     /// the raw bytes from a percent-decode on `%FF%FE`) through the
     /// pipeline without it being silently rewritten to U+FFFD by
     /// `String::from_utf8_lossy`. Each strategy that only operates
-    /// on bytes (PercentEncodeAggressive, DoublePercentEncode) is
+    /// on bytes (`PercentEncodeAggressive`, `DoublePercentEncode`) is
     /// byte-pure here. Strategies that need character semantics
-    /// (NonCanonicalSpaces) lossy-convert internally.
+    /// (`NonCanonicalSpaces`) lossy-convert internally.
     #[must_use]
     pub fn apply_bytes(self, value: &[u8]) -> String {
         self.apply_bytes_with_label(value).0
@@ -104,8 +104,8 @@ impl UrlStrategy {
 
     /// Apply the strategy and return BOTH the encoded output AND the
     /// label that honestly describes what was done. For most strategies
-    /// this is just `Self::label()`, but DoublePercentEncode silently
-    /// downgrades to single-percent encoding above MAX_DOUBLE_ENCODE_INPUT
+    /// this is just `Self::label()`, but `DoublePercentEncode` silently
+    /// downgrades to single-percent encoding above `MAX_DOUBLE_ENCODE_INPUT`
     /// (to avoid 9× output blowup) — pre-fix the technique log still
     /// reported `url:double_percent` even though only one pass ran,
     /// poisoning every WAF-decay statistic. Now the downgrade is
@@ -296,7 +296,7 @@ fn mutate_last_segment(path: &str, strategy: UrlStrategy) -> Option<String> {
 /// would be mutated as if `+` were a literal plus sign.
 /// Returns `(mutated_query, Some(honest_label))` if any pair was
 /// mutated, or `(unchanged_query, None)` if not. The label tracks
-/// per-input downgrades — e.g. DoublePercentEncode on an oversize
+/// per-input downgrades — e.g. `DoublePercentEncode` on an oversize
 /// input returns `"url:double_percent_downgraded"` instead of the
 /// nominal `"url:double_percent"`. Audit (2026-05-10).
 fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, Option<&'static str>) {
@@ -321,8 +321,7 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, Option<&'
                 // PREFER the downgraded one — operators care most
                 // about the worst case.
                 if last_label
-                    .map(|l| !l.contains("downgraded"))
-                    .unwrap_or(true)
+                    .is_none_or(|l| !l.contains("downgraded"))
                 {
                     last_label = Some(label);
                 }

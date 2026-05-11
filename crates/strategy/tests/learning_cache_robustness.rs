@@ -1,7 +1,7 @@
-//! Regression coverage for the 2026-05-10 learning_cache audit findings:
-//!   HIGH #1: save() was not atomic — kill-9 between write and rename
+//! Regression coverage for the 2026-05-10 `learning_cache` audit findings:
+//!   HIGH #1: `save()` was not atomic — kill-9 between write and rename
 //!     left a half-written JSON file that crashed every subsequent open.
-//!   HIGH #2: open() crashed on a corrupt file, losing ALL prior
+//!   HIGH #2: `open()` crashed on a corrupt file, losing ALL prior
 //!     learning across the strategy engine.
 //!
 //! Both tests would have failed pre-fix.
@@ -16,8 +16,7 @@ fn unique_tmp(suffix: &str) -> std::path::PathBuf {
     // test runs don't race each other through /tmp.
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_nanos());
     std::env::temp_dir().join(format!(
         "wafrift_lc_robust_{}_{}_{}.json",
         std::process::id(),
@@ -58,11 +57,9 @@ fn open_does_not_crash_on_corrupt_json() {
     let moved_aside = fs::read_dir(dir).unwrap().any(|e| {
         let p = e.unwrap().path();
         p.file_name()
-            .map(|n| n.to_string_lossy().starts_with(&stem))
-            .unwrap_or(false)
+            .is_some_and(|n| n.to_string_lossy().starts_with(&stem))
             && p.extension()
-                .map(|e| e.to_string_lossy().starts_with("corrupt-"))
-                .unwrap_or(false)
+                .is_some_and(|e| e.to_string_lossy().starts_with("corrupt-"))
     });
     assert!(
         moved_aside,
@@ -72,8 +69,7 @@ fn open_does_not_crash_on_corrupt_json() {
     for e in fs::read_dir(dir).unwrap().flatten() {
         let p = e.path();
         if p.file_name()
-            .map(|n| n.to_string_lossy().starts_with(&stem))
-            .unwrap_or(false)
+            .is_some_and(|n| n.to_string_lossy().starts_with(&stem))
         {
             let _ = fs::remove_file(p);
         }
@@ -97,8 +93,7 @@ fn open_does_not_crash_on_truncated_file() {
     for e in fs::read_dir(dir).unwrap().flatten() {
         let p = e.path();
         if p.file_name()
-            .map(|n| n.to_string_lossy().starts_with(&stem))
-            .unwrap_or(false)
+            .is_some_and(|n| n.to_string_lossy().starts_with(&stem))
         {
             let _ = fs::remove_file(p);
         }
@@ -132,8 +127,7 @@ fn open_after_corrupt_file_can_save_again() {
     for e in fs::read_dir(dir).unwrap().flatten() {
         let p = e.path();
         if p.file_name()
-            .map(|n| n.to_string_lossy().starts_with(&stem))
-            .unwrap_or(false)
+            .is_some_and(|n| n.to_string_lossy().starts_with(&stem))
         {
             let _ = fs::remove_file(p);
         }
@@ -173,12 +167,10 @@ fn save_does_not_leave_partial_file_visible() {
             let p = e.path();
             let name_match = p
                 .file_name()
-                .map(|n| n.to_string_lossy().starts_with(&stem))
-                .unwrap_or(false);
+                .is_some_and(|n| n.to_string_lossy().starts_with(&stem));
             let is_tmp = p
                 .extension()
-                .map(|x| x.to_string_lossy().starts_with("tmp."))
-                .unwrap_or(false);
+                .is_some_and(|x| x.to_string_lossy().starts_with("tmp."));
             name_match && is_tmp
         })
         .collect();
@@ -216,7 +208,7 @@ fn save_writes_full_pretty_json_each_call() {
 
     let bytes = fs::read(&path).unwrap();
     let s = std::str::from_utf8(&bytes).expect("save must produce valid utf-8 json");
-    assert!(s.starts_with("{"), "pretty json must start with '{{'");
+    assert!(s.starts_with('{'), "pretty json must start with '{{'");
     assert!(s.contains("\"entries\""), "must contain entries field");
     let parsed: serde_json::Value = serde_json::from_str(s).expect("must reopen as valid json");
     assert_eq!(

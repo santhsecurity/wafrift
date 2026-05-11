@@ -95,7 +95,7 @@ fn method_implies_body(method: &[u8]) -> bool {
     )
 }
 
-/// Decode chunked body; returns (decoded_data, consumed_bytes_from_input).
+/// Decode chunked body; returns (`decoded_data`, `consumed_bytes_from_input`).
 ///
 /// After the final `0` chunk line, consumes terminating CRLF blank lines that close the
 /// chunked encoding (empty trailers).

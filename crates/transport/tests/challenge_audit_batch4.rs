@@ -1,13 +1,13 @@
 //! Regression coverage for the 2026-05-10 swarm-audit findings on
 //! transport/challenge.rs:
-//!   HIGH: AwsWaf.is_cookie_solvable() was false but extract_clearance
+//!   HIGH: `AwsWaf.is_cookie_solvable()` was false but `extract_clearance`
 //!     stored aws-waf-token cookies — the captured cookie was never
 //!     replayed.
 //!   HIGH: Akamai/AWS server-header alone (no body keyword) classified
 //!     every CDN-served 200 as a challenge, parking dispatch in Wait.
 //!   HIGH: Domain attribute kept `:port` suffix, enabling
 //!     domain-confusion bypass (`evil.com:8080` matched `evil.com`).
-//!   MEDIUM: get() observed expired entries but left them in the map,
+//!   MEDIUM: `get()` observed expired entries but left them in the map,
 //!     so a high-churn host could grow the table indefinitely.
 
 use std::time::Duration;

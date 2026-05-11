@@ -111,7 +111,7 @@ fn adversarial_case_sensitivity_creates_different_asts() {
     );
 }
 
-/// MySQL dialect-specific validation.
+/// `MySQL` dialect-specific validation.
 #[test]
 fn mysql_conditional_comments_parse() {
     // Versioned comment wrapping a scalar — valid in a WHERE expression.
@@ -119,7 +119,7 @@ fn mysql_conditional_comments_parse() {
     assert!(parses(seed, "mysql"));
 }
 
-/// PostgreSQL dollar-quoting validation.
+/// `PostgreSQL` dollar-quoting validation.
 #[test]
 fn postgres_dollar_quoting_parses() {
     let seed = "$$admin$$";

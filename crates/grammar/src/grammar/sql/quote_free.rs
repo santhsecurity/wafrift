@@ -63,9 +63,7 @@ pub fn mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     // %271` should be recognised as a boolean-OR injection just like
     // the literal `1' OR '1'='1`. Falls back to the raw string when
     // decoding fails (e.g. percent-mangled).
-    let decoded = urlencoding::decode(payload)
-        .map(|s| s.into_owned())
-        .unwrap_or_else(|_| payload.to_string());
+    let decoded = urlencoding::decode(payload).map_or_else(|_| payload.to_string(), std::borrow::Cow::into_owned);
     let lower = decoded.to_ascii_lowercase();
 
     // Strategy 1: pure tautology rewrite for boolean injections.

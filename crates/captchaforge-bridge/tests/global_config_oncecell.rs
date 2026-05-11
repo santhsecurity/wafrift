@@ -1,4 +1,4 @@
-//! Integration test: `install_global_solver` OnceCell semantics.
+//! Integration test: `install_global_solver` `OnceCell` semantics.
 //!
 //! Spawns 10 concurrent tasks that each call `install_global_solver`.
 //! Asserts:
@@ -7,9 +7,9 @@
 //!  3. `current_config()` returns a consistent, non-panicking value
 //!     across all concurrent readers.
 //!
-//! Note: `SOLVER_INSTALLED` is a process-global static (OnceLock).
+//! Note: `SOLVER_INSTALLED` is a process-global static (`OnceLock`).
 //! This test is designed so that the 10 concurrent callers all race
-//! against each other; the first to win OnceLock::set receives
+//! against each other; the first to win `OnceLock::set` receives
 //! `Installed`. If a prior test in the same process already set the
 //! cell the winner count will be 0, which is also explicitly checked.
 

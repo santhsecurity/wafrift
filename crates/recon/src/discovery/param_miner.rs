@@ -29,7 +29,7 @@ const CANARY: &str = "wafrift_canary_x9k2";
 ///
 /// Without this, a target returning a multi-gigabyte response would
 /// OOM the miner. 4 MiB is well above any realistic web page (the
-/// 95th percentile is ~3 MB per HTTPArchive 2026) yet small enough
+/// 95th percentile is ~3 MB per `HTTPArchive` 2026) yet small enough
 /// that 100 candidate probes won't combined-OOM the process even on
 /// a small workstation.
 const MAX_PROBE_BODY_BYTES: usize = 4 * 1024 * 1024;
@@ -177,7 +177,7 @@ async fn collect_baseline(
 
 async fn probe_one(target: &str, word: &str, client: &reqwest::Client) -> Option<ProbeResult> {
     let sep = if target.contains('?') { "&" } else { "?" };
-    let url = format!("{}{}{}={}", target, sep, word, CANARY);
+    let url = format!("{target}{sep}{word}={CANARY}");
     let start = Instant::now();
     let resp = client.get(&url).send().await.ok()?;
     let status = resp.status().as_u16();
@@ -246,8 +246,7 @@ fn mode_status(statuses: &[u16]) -> u16 {
     counts
         .into_iter()
         .max_by_key(|(_, c)| *c)
-        .map(|(s, _)| s)
-        .unwrap_or(0)
+        .map_or(0, |(s, _)| s)
 }
 
 #[cfg(test)]

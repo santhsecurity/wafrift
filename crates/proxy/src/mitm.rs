@@ -238,7 +238,7 @@ pub fn is_connect_request(req: &hyper::Request<hyper::body::Incoming>) -> bool {
 /// Extract the host and port from a CONNECT request.
 #[must_use]
 pub fn extract_connect_host(req: &hyper::Request<hyper::body::Incoming>) -> Option<String> {
-    req.uri().authority().map(|a| a.to_string())
+    req.uri().authority().map(std::string::ToString::to_string)
 }
 
 /// TLS certificate name from CONNECT authority (e.g. `example.com:443` → `example.com`).
@@ -325,8 +325,7 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+            .is_ok_and(|s| s.success());
 
         // Try Debian/Ubuntu path first.
         let debian_dir = std::path::Path::new("/usr/local/share/ca-certificates");

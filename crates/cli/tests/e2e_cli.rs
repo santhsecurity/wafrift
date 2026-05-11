@@ -7,7 +7,7 @@
 
 use std::process::Command;
 
-/// Helper: run wafrift with args and return (exit_code, stdout, stderr).
+/// Helper: run wafrift with args and return (`exit_code`, stdout, stderr).
 fn wafrift(args: &[&str]) -> (i32, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
         .args(args)

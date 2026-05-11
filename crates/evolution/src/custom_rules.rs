@@ -113,7 +113,7 @@ fn valid_evasion_strategies() -> Vec<String> {
 
 /// Maximum byte length of an accepted custom-rules TOML payload.
 /// Prevents OOM / stack overflow on malicious deeply-nested input
-/// (toml::from_str does not enforce a built-in size or depth limit).
+/// (`toml::from_str` does not enforce a built-in size or depth limit).
 /// 1 MiB is generous for any realistic ruleset.
 const MAX_CUSTOM_RULES_BYTES: usize = 1024 * 1024;
 
@@ -138,15 +138,13 @@ fn validate_rules(rules: &CustomRulesFile) -> std::result::Result<(), String> {
     for (idx, waf) in rules.waf.iter().enumerate() {
         if waf.name.trim().is_empty() {
             return Err(format!(
-                "validation error: waf[{}] missing required field 'name'",
-                idx
+                "validation error: waf[{idx}] missing required field 'name'"
             ));
         }
         for (sig_idx, sig) in waf.header_signatures.iter().enumerate() {
             if sig.name.trim().is_empty() {
                 return Err(format!(
-                    "validation error: waf[{}].header_signatures[{}] missing required field 'name'",
-                    idx, sig_idx
+                    "validation error: waf[{idx}].header_signatures[{sig_idx}] missing required field 'name'"
                 ));
             }
             if !(0.0..=1.0).contains(&sig.confidence) {
@@ -159,8 +157,7 @@ fn validate_rules(rules: &CustomRulesFile) -> std::result::Result<(), String> {
         for (sig_idx, sig) in waf.body_signatures.iter().enumerate() {
             if sig.pattern.trim().is_empty() {
                 return Err(format!(
-                    "validation error: waf[{}].body_signatures[{}] missing required field 'pattern'",
-                    idx, sig_idx
+                    "validation error: waf[{idx}].body_signatures[{sig_idx}] missing required field 'pattern'"
                 ));
             }
             if !(0.0..=1.0).contains(&sig.confidence) {
@@ -173,8 +170,7 @@ fn validate_rules(rules: &CustomRulesFile) -> std::result::Result<(), String> {
         for code in &waf.block_status_codes {
             if *code == 0 || *code > 999 {
                 return Err(format!(
-                    "validation error: waf[{}] invalid status code {} (must be 1-999)",
-                    idx, code
+                    "validation error: waf[{idx}] invalid status code {code} (must be 1-999)"
                 ));
             }
         }
@@ -195,7 +191,7 @@ fn validate_evasion_strategies(rules: &CustomRulesFile) -> std::result::Result<(
     if !unknown_strategies.is_empty() {
         let errors: Vec<String> = unknown_strategies
             .into_iter()
-            .map(|(idx, s)| format!("waf[{}]: unknown evasion_strategy '{}'", idx, s))
+            .map(|(idx, s)| format!("waf[{idx}]: unknown evasion_strategy '{s}'"))
             .collect();
         return Err(format!(
             "validation error: invalid evasion_strategies found:\n  - {}",

@@ -11,7 +11,7 @@ fn valid_rs256_jwt() -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
-    format!("{}.{}.sig", header, payload)
+    format!("{header}.{payload}.sig")
 }
 
 #[allow(dead_code)]
@@ -19,14 +19,14 @@ fn valid_hs256_jwt() -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
-    format!("{}.{}.sig", header, payload)
+    format!("{header}.{payload}.sig")
 }
 
 fn alg_none_jwt() -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
-    format!("{}.{}.sig", header, payload)
+    format!("{header}.{payload}.sig")
 }
 
 // ── StripAlg ───────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ fn manipulate_invalid_base64_header() {
 #[test]
 fn manipulate_invalid_json_header() {
     let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("not json");
-    let token = format!("{}.payload.sig", header);
+    let token = format!("{header}.payload.sig");
     let err = manipulate(&token, &JwtManipulation::StripAlg, None).unwrap_err();
     assert!(matches!(err, JwtError::InvalidToken { .. }));
 }

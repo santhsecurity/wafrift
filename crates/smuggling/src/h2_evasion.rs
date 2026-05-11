@@ -151,7 +151,7 @@ pub fn crlf_request_smuggle(path: &str, smuggled_path: &str) -> Result<H2Evasion
 /// CRLF-injected payloads — it's the technique under test, not a bug.
 /// Callers must only pass this through HTTP/2 codecs that tolerate
 /// the injection (HPACK rejects it; raw frame writers do not). For
-/// every other H2Evasion helper, header inputs ARE sanitised — see
+/// every other `H2Evasion` helper, header inputs ARE sanitised — see
 /// the contract on `authority_host_mismatch`.
 ///
 /// # Safety
@@ -252,8 +252,7 @@ pub fn split_path_across_frames(path: &str) -> ContinuationSplit {
     let mid = path
         .char_indices()
         .nth(path.chars().count() / 2)
-        .map(|(i, _)| i)
-        .unwrap_or(path.len());
+        .map_or(path.len(), |(i, _)| i);
     let (first, second) = path.split_at(mid);
     ContinuationSplit {
         headers_frame: vec![
@@ -486,7 +485,7 @@ pub fn invalid_path_chars() -> Vec<H2Evasion> {
             description: ":path contains forbidden character",
             pseudo_headers: vec![
                 (":method".into(), "GET".into()),
-                (":path".into(), format!("/admin{c}test", c = c)),
+                (":path".into(), format!("/admin{c}test")),
                 (":scheme".into(), "https".into()),
                 (":authority".into(), "example.com".into()),
             ],

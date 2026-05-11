@@ -1,8 +1,8 @@
 //! Regression coverage for the 2026-05-10 swarm-audit finding:
-//!   HIGH | xml_safe_name used `is_ascii_alphabetic` /
+//!   HIGH | `xml_safe_name` used `is_ascii_alphabetic` /
 //!     `is_ascii_alphanumeric`, which mangled valid Unicode XML names
 //!     (e.g. `日本語`, `café`, `Ñame`) into all-underscores. XML 1.0
-//!     §2.3 NameStartChar permits any Unicode letter; an operator
+//!     §2.3 `NameStartChar` permits any Unicode letter; an operator
 //!     submitting non-Latin parameter names would see their data
 //!     silently corrupted.
 //!

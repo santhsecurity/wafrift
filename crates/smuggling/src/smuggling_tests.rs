@@ -43,9 +43,8 @@ mod tests {
             // The chunk line is "{len:x}\r\n"
             let chunk_line = format!("{:x}\r\n", prefix.len() + 2).len();
             assert!(
-                raw.contains(&format!("Content-Length: {}", chunk_line)),
-                "failed for len={}",
-                len
+                raw.contains(&format!("Content-Length: {chunk_line}")),
+                "failed for len={len}"
             );
         }
     }
@@ -74,7 +73,7 @@ mod tests {
         let raw_str = String::from_utf8_lossy(&payload.raw_bytes);
         let smuggled_len = "GET /admin HTTP/1.1\r\nHost: internal\r\n".len();
         let expected_cl = format!("{:x}\r\n", smuggled_len + 2).len();
-        assert!(raw_str.contains(&format!("Content-Length: {}", expected_cl)));
+        assert!(raw_str.contains(&format!("Content-Length: {expected_cl}")));
     }
 
     #[test]

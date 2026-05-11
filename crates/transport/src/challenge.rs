@@ -77,7 +77,7 @@ impl ChallengeKind {
     /// Whether this kind is in scope for cookie-replay solving (vs
     /// requiring a human).
     ///
-    /// Audit (2026-05-10): added AwsWaf — `extract_clearance_cookie`
+    /// Audit (2026-05-10): added `AwsWaf` — `extract_clearance_cookie`
     /// already recognised `aws-waf-token` and stored it in the cookie
     /// store, but `is_cookie_solvable() == false` meant `dispatch`
     /// would always escalate to the operator instead of replaying the
@@ -120,13 +120,13 @@ pub struct CookieScope {
     /// Secure attribute. When true, the cookie must only replay over
     /// HTTPS.
     pub secure: bool,
-    /// HttpOnly attribute. RFC 6265 §4.1.2.6: when true, the cookie
+    /// `HttpOnly` attribute. RFC 6265 §4.1.2.6: when true, the cookie
     /// must be sent ONLY in actual HTTP requests (it's invisible to
     /// document.cookie / XHR / fetch). For wafrift's request-replay
     /// path that means the cookie ALWAYS goes on the wire and is
     /// never exposed by the proxy to client-side JS-injection probes.
     /// Audit (2026-05-10): the field was parsed in tests but absent
-    /// from CookieScope, so the constraint was never enforced.
+    /// from `CookieScope`, so the constraint was never enforced.
     pub http_only: bool,
 }
 
@@ -206,8 +206,8 @@ struct ChallengeInner {
 /// challenge state simultaneously — the per-host cooldown would
 /// otherwise let all N fire at once and overwhelm the operator.
 pub const OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN: usize = 30;
-/// Per-host cap on the share of GLOBAL_PROMPT_WINDOW prompts a single
-/// host may consume. With CAP_PER_MIN = 30 and PER_HOST = 8, a chatty
+/// Per-host cap on the share of `GLOBAL_PROMPT_WINDOW` prompts a single
+/// host may consume. With `CAP_PER_MIN` = 30 and `PER_HOST` = 8, a chatty
 /// host taking its full quota still leaves room for ~3 other hosts to
 /// each take their full quota — fair enough that the operator can
 /// triage incoming requests across distinct sites. Audit (2026-05-10).
@@ -229,7 +229,7 @@ pub const DEFAULT_CLEARANCE_TTL: Duration = Duration::from_secs(30 * 60);
 /// re-triggers the challenge.
 pub const OPERATOR_PROMPT_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 
-/// Acquire a write lock, surfacing poisoning via tracing::warn!
+/// Acquire a write lock, surfacing poisoning via `tracing::warn`!
 /// before recovering. Pre-fix the call sites used `unwrap_or_else(|e|
 /// e.into_inner())` which silently swallowed the panic that
 /// poisoned the lock — making real data-corruption bugs invisible.
@@ -538,7 +538,7 @@ impl ChallengeStore {
     }
 
     /// Refresh the in-flight solver TTL. The owning solver must call
-    /// this before SOLVER_INFLIGHT_TTL elapses, otherwise its slot is
+    /// this before `SOLVER_INFLIGHT_TTL` elapses, otherwise its slot is
     /// evicted and a concurrent caller can claim it. Audit (2026-05-10).
     ///
     /// Returns true if the slot was refreshed (the caller still owns
@@ -566,7 +566,7 @@ impl ChallengeStore {
     }
 
     /// Read-only check: is a solver already in flight for `host`?
-    /// `dispatch` uses this to decide between Wait and EscalateToOperator.
+    /// `dispatch` uses this to decide between Wait and `EscalateToOperator`.
     #[must_use]
     pub fn has_solver_pending(&self, host: &str) -> bool {
         let key = normalize_host(host);
@@ -899,15 +899,14 @@ pub fn dispatch(host: &str, kind: ChallengeKind, store: &ChallengeStore) -> Solv
 
 /// Apply ±25% pseudo-random jitter to `base` so concurrent callers
 /// scheduling the same backoff don't all retry at the same wall
-/// time. Uses Instant::now() nanos as the entropy source so we
+/// time. Uses `Instant::now()` nanos as the entropy source so we
 /// don't pull in a dedicated RNG dep on this hot path.
 #[must_use]
 fn jittered_wait(base: Duration) -> Duration {
     use std::time::SystemTime;
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| d.subsec_nanos() as u64);
     // jitter ∈ [-25%, +25%]
     let quarter_range = base.as_millis() as u64 / 4; // 25% of base in ms
     let offset =

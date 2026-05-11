@@ -16,7 +16,7 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
     let lower = payload.to_ascii_lowercase();
 
     // ── GLOB / MATCH / LIKE alternatives ──
-    if lower.contains("=") {
+    if lower.contains('=') {
         results.push(payload.replace('=', " GLOB "));
         results.push(payload.replace('=', " MATCH "));
     }

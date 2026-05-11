@@ -1,4 +1,4 @@
-//! Parse an OpenAPI 2.0 (Swagger) or 3.x JSON spec into wafrift's
+//! Parse an `OpenAPI` 2.0 (Swagger) or 3.x JSON spec into wafrift's
 //! injection-point graph.
 //!
 //! For each `paths.<path>.<method>` entry, emit one [`DiscoveredEndpoint`]
@@ -31,12 +31,12 @@ pub enum DiscoveryError {
     WordlistEmpty,
 }
 
-/// Parse an OpenAPI spec (2.0 or 3.x JSON) into discovered endpoints.
+/// Parse an `OpenAPI` spec (2.0 or 3.x JSON) into discovered endpoints.
 ///
 /// # Errors
 ///
 /// - [`DiscoveryError::SpecParseError`] on malformed JSON.
-/// - [`DiscoveryError::UnsupportedVersion`] for OpenAPI < 2.0 or
+/// - [`DiscoveryError::UnsupportedVersion`] for `OpenAPI` < 2.0 or
 ///   anything that lacks both `swagger` and `openapi` version keys.
 pub fn from_openapi(spec: &str) -> Result<Vec<DiscoveredEndpoint>, DiscoveryError> {
     let root: Value = serde_json::from_str(spec).map_err(|e| DiscoveryError::SpecParseError {
@@ -86,7 +86,7 @@ pub fn from_openapi(spec: &str) -> Result<Vec<DiscoveredEndpoint>, DiscoveryErro
             let Some(method) = parse_method(method_str) else {
                 continue;
             };
-            let url = format!("{}{}", base_path, path);
+            let url = format!("{base_path}{path}");
             let mut points = Vec::new();
             // path-level parameters apply to every operation
             if let Some(arr) = path_level_params {

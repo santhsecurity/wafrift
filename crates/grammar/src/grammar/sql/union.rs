@@ -11,7 +11,7 @@ use crate::grammar::sql::common::SqlMutation;
 /// Alternate `UNION ... SELECT` spellings.
 ///
 /// Ordered from most likely to succeed (simple whitespace substitution)
-/// to most aggressive (MySQL versioned comments).
+/// to most aggressive (`MySQL` versioned comments).
 pub(crate) const UNION_ALTERNATIVES: &[&str] = &[
     // Basic whitespace substitution
     "UNION SELECT",

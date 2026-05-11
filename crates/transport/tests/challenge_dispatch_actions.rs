@@ -24,8 +24,7 @@ fn dispatch_matrix_without_cookie_cookie_solvable_kinds_wait() {
                 );
             }
             other => panic!(
-                "Fix: {:?} without cookie must Wait for external solver — got {other:?}",
-                kind
+                "Fix: {kind:?} without cookie must Wait for external solver — got {other:?}"
             ),
         }
     }
@@ -51,8 +50,7 @@ fn dispatch_matrix_without_cookie_interactive_kinds_escalate() {
                 assert_eq!(reason, &escalate_reason(kind));
             }
             other => panic!(
-                "Fix: {:?} without cookie must EscalateToOperator — got {other:?}",
-                kind
+                "Fix: {kind:?} without cookie must EscalateToOperator — got {other:?}"
             ),
         }
     }
@@ -107,8 +105,7 @@ fn dispatch_replays_for_every_kind_when_store_has_active_cookie() {
                 );
             }
             other => panic!(
-                "Fix: stored cookie for {:?} must force ReplayWithCookie — got {other:?}",
-                kind
+                "Fix: stored cookie for {kind:?} must force ReplayWithCookie — got {other:?}"
             ),
         }
     }

@@ -85,7 +85,7 @@ impl fmt::Display for ConnectionBehavior {
 pub enum BlockReason {
     /// A specific WAF rule ID was triggered.
     RuleId(String),
-    /// A category of rule was triggered (e.g., "SQLi", "XSS").
+    /// A category of rule was triggered (e.g., "`SQLi`", "XSS").
     RuleCategory(String),
     /// Vendor-specific block reason string.
     VendorReason(String),

@@ -51,12 +51,12 @@ fn chain_order_ab_produces_different_output_than_ba() {
     let tech_ab: Vec<_> = res_ab
         .techniques
         .iter()
-        .map(|t| format!("{:?}", t))
+        .map(|t| format!("{t:?}"))
         .collect();
     let tech_ba: Vec<_> = res_ba
         .techniques
         .iter()
-        .map(|t| format!("{:?}", t))
+        .map(|t| format!("{t:?}"))
         .collect();
     assert_eq!(
         tech_ab,
@@ -94,8 +94,7 @@ fn chain_order_first_encoder_runs_first() {
     // UrlEncode then HexEncode → final output is pure hex digits.
     assert!(
         body.chars().all(|c| c.is_ascii_hexdigit()),
-        "hex-encoded body should be all hex chars, got: {}",
-        body
+        "hex-encoded body should be all hex chars, got: {body}"
     );
 
     let techs: Vec<_> = result.techniques.iter().collect();

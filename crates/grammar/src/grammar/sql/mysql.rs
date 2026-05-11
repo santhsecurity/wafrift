@@ -8,7 +8,7 @@
 //! - Integer/string type juggling
 //! - Information schema enumeration
 
-/// MySQL conditional comment wrapper.
+/// `MySQL` conditional comment wrapper.
 pub const CONDITIONAL_COMMENTS: &[&str] = &["/*!50000 ", "/*!00000 ", "/*!"];
 
 /// Generate MySQL-specific mutations for a payload.
@@ -102,8 +102,8 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
 
     // ── Binary keyword prefix ──
     // BINARY keyword forces byte-level comparison, evading some filters
-    if lower.contains("'") && results.len() < max_mutations {
-        results.push(payload.replacen("'", "BINARY '", 1));
+    if lower.contains('\'') && results.len() < max_mutations {
+        results.push(payload.replacen('\'', "BINARY '", 1));
     }
 
     results.truncate(max_mutations);

@@ -1,5 +1,5 @@
 //! Integration: `extract_clearance_cookie` keeps `name=value` for replay and strips
-//! `Set-Cookie` attributes (Path, Domain, Secure, HttpOnly, Expires, Max-Age).
+//! `Set-Cookie` attributes (Path, Domain, Secure, `HttpOnly`, Expires, Max-Age).
 
 use wafrift_transport::challenge::{ChallengeKind, extract_clearance_cookie};
 

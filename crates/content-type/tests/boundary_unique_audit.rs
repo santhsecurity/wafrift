@@ -1,6 +1,6 @@
 //! Regression coverage for the 2026-05-10 content-type audit finding:
-//!   HIGH: generate_variants used random_boundary() at every call site,
-//!     never wiring up the unique_boundary() helper that was already in
+//!   HIGH: `generate_variants` used `random_boundary()` at every call site,
+//!     never wiring up the `unique_boundary()` helper that was already in
 //!     the public API. An attacker who controlled a param value could
 //!     embed `--<wafrift-boundary-pattern>` and self-frame the multipart
 //!     body, escaping the form parser.

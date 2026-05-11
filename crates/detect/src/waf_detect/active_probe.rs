@@ -33,7 +33,7 @@ pub struct ProbeResult {
     pub drift: FingerprintDrift,
 }
 
-/// Returns the standard probe set: one XSS, one SQLi, one path-traversal.
+/// Returns the standard probe set: one XSS, one `SQLi`, one path-traversal.
 ///
 /// All payloads are benign in structure (no actual exploitation) but
 /// contain substrings that are widely blocked by WAF signatures.

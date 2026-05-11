@@ -1,9 +1,9 @@
 //! Regression coverage for the 2026-05-10 credibility audit findings:
-//!   CRITICAL #1: SigningKey derived Debug, leaking the 32-byte secret_hex
+//!   CRITICAL #1: `SigningKey` derived Debug, leaking the 32-byte `secret_hex`
 //!     into every tracing line, panic message, and `format!("{key:?}")`
-//!     call. A single anyhow::Context macro that captured the key would
+//!     call. A single `anyhow::Context` macro that captured the key would
 //!     leak it to stderr.
-//!   CRITICAL #2: SigningKey did not zeroize on Drop, leaving the secret
+//!   CRITICAL #2: `SigningKey` did not zeroize on Drop, leaving the secret
 //!     in heap memory after the key fell out of scope (visible in process
 //!     dumps, swap, and post-free heap reads).
 //!

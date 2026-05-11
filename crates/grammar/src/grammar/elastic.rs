@@ -1,4 +1,4 @@
-//! Elasticsearch NoSQL injection grammar-aware mutation.
+//! Elasticsearch `NoSQL` injection grammar-aware mutation.
 
 /// Detect Elastic query DSL signals.
 #[must_use]

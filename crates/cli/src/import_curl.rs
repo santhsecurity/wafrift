@@ -10,7 +10,7 @@
 //! that practitioners actually paste in real screenshots are honoured
 //! (`-X`, `-H`, `-A`, `-b`, `-d`/`--data`/`--data-raw`/`--data-urlencode`,
 //! and the bare URL). Anything else is logged + ignored. We emit a
-//! ScanArgs and dispatch through the same code path as `wafrift scan`,
+//! `ScanArgs` and dispatch through the same code path as `wafrift scan`,
 //! so this command stays in sync with whatever scan does.
 
 use clap::Args;
@@ -283,7 +283,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     eprintln!(
         "import-curl: parsed {} headers, body {} bytes, method {} → target {}",
         parsed.headers.len(),
-        parsed.body.as_ref().map(|s| s.len()).unwrap_or(0),
+        parsed.body.as_ref().map_or(0, std::string::String::len),
         parsed
             .method
             .as_deref()

@@ -23,7 +23,7 @@ pub(crate) fn mysql_conditional_comment(keyword: &str) -> String {
 /// `SELECT` → `S/**/E/**/L/**/E/**/C/**/T`
 ///
 /// This defeats regex-based keyword detection while being valid SQL
-/// in MySQL (inline comments are whitespace) and most other engines.
+/// in `MySQL` (inline comments are whitespace) and most other engines.
 pub(crate) fn inline_comment_split(keyword: &str) -> String {
     keyword
         .chars()

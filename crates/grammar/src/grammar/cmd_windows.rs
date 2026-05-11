@@ -20,7 +20,7 @@ pub fn detect_type(payload: &str) -> bool {
     let lower = payload.to_ascii_lowercase();
     lower.contains("cmd ")
         || lower.contains("cmd.exe")
-        || lower.contains("^")
+        || lower.contains('^')
         || lower.contains("for /f")
         || lower.contains("set /p")
         || lower.contains("%comspec%")

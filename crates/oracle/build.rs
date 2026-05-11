@@ -46,7 +46,7 @@ fn read_strings(path: &Path, field: fn(Patterns) -> Vec<String>) -> Vec<String> 
 fn emit_str_array(out: &mut String, name: &str, values: &[String]) {
     out.push_str(&format!("pub const {name}: &[&str] = &[\n"));
     for v in values {
-        out.push_str(&format!("    {:?},\n", v));
+        out.push_str(&format!("    {v:?},\n"));
     }
     out.push_str("];\n\n");
 }

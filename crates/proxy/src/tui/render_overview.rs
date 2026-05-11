@@ -230,7 +230,7 @@ fn draw_tls(f: &mut Frame, area: Rect, state: &State) {
         let row_area = Rect::new(inner.x, y, inner.width, row_height);
         #[allow(clippy::cast_precision_loss)]
         let pct = (**count as f64 / total as f64) * 100.0;
-        let label = format!("{:<14} {:>5} ({:>4.1}%)", profile, count, pct);
+        let label = format!("{profile:<14} {count:>5} ({pct:>4.1}%)");
         #[allow(clippy::cast_precision_loss)]
         let ratio = (**count as f64 / total as f64).min(1.0);
         let g = Gauge::default()

@@ -28,7 +28,7 @@ const DRIFT_BLOCK_LIMIT: u32 = 2;
 
 /// Hard cap on `prioritized_techniques` and `avoided_techniques` so a
 /// long-running scan that ingests many adversarial WAF profiles cannot
-/// grow HostState memory without bound. Audit (2026-05-10).
+/// grow `HostState` memory without bound. Audit (2026-05-10).
 const MAX_HINTS_PER_LIST: usize = 200;
 
 /// Hard cap on `technique_stats` and `winner_consecutive_blocks` —
@@ -82,8 +82,8 @@ pub struct HostState {
     /// Techniques the matched WAF profile says are a waste of requests.
     /// The strategy engine skips these entirely.
     pub avoided_techniques: Vec<String>,
-    /// WAF inspection model hint (e.g. "single_pass_url_decode",
-    /// "multi_regex_scoring"). Informs which encoding dimensions to explore.
+    /// WAF inspection model hint (e.g. "`single_pass_url_decode`",
+    /// "`multi_regex_scoring`"). Informs which encoding dimensions to explore.
     pub inspection_model: Option<String>,
     /// Number of rate-limit (429) responses seen — drives backoff, not
     /// technique change.
@@ -251,7 +251,7 @@ impl HostState {
     /// and isn't blocklisted). Blocklist comparison uses the canonical
     /// `Strategy::as_str()` name — same form `record_block_for_many` /
     /// proxy gene-bank persistence use everywhere else. (Earlier
-    /// versions used `format!("{s:?}")` here, which produced PascalCase
+    /// versions used `format!("{s:?}")` here, which produced `PascalCase`
     /// debug names that did not match the kebab-case strings stored on
     /// blocklist.)
     #[must_use]

@@ -32,7 +32,7 @@ fn extract_csrf_json_response() {
 
 #[test]
 fn extract_csrf_no_match() {
-    let html = r#"<html><body>Hello</body></html>"#;
+    let html = r"<html><body>Hello</body></html>";
     let re = regex::Regex::new(r#"name="csrf" value="([^"]+)""#).unwrap();
     let err = extract_csrf(html, &re).unwrap_err();
     assert!(matches!(err, SessionError::CsrfTokenNotFound { .. }));

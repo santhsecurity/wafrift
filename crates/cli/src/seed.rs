@@ -7,7 +7,7 @@
 //! next `scan` / `proxy` run starts in rotation mode.
 //!
 //! Two destinations are supported:
-//!   * `--waf <name>` writes to the per-WAF GeneBank under
+//!   * `--waf <name>` writes to the per-WAF `GeneBank` under
 //!     `~/.wafrift/genomes/<waf>.json` (used by `scan` and the proxy
 //!     when wafrift-detect identifies the WAF in front of the target).
 //!   * `--host <hostname>` writes to the proxy gene-bank
@@ -29,7 +29,7 @@ pub struct SeedArgs {
     #[arg(long, num_args = 1.., value_delimiter = ',')]
     pub technique: Vec<String>,
 
-    /// Seed the per-WAF GeneBank under `~/.wafrift/genomes/<waf>.json`.
+    /// Seed the per-WAF `GeneBank` under `~/.wafrift/genomes/<waf>.json`.
     /// Mutually exclusive with `--host`.
     #[arg(long)]
     pub waf: Option<String>,

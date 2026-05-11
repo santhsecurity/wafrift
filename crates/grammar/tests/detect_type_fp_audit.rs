@@ -1,8 +1,8 @@
 //! Regression coverage for the 2026-05-10 swarm-audit findings:
-//!   CRITICAL ssrf::detect_type fired on `// TODO`, `Chapter 127.5`,
+//!   CRITICAL `ssrf::detect_type` fired on `// TODO`, `Chapter 127.5`,
 //!     `Java 10.0`, `Version 192.168.something`, anything with `127.`
 //!     inside a benign substring.
-//!   CRITICAL template::detect_type fired on JSON, CSS, C, Python,
+//!   CRITICAL `template::detect_type` fired on JSON, CSS, C, Python,
 //!     Markdown — any string containing `{`, `}`, `#`, or `$` because
 //!     Smarty / Velocity declare 1-char delimiters.
 //!

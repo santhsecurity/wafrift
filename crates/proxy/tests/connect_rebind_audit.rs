@@ -1,13 +1,13 @@
 //! Regression coverage for the 2026-05-10 swarm-audit CRITICAL:
 //!   tunnel(addr: String) re-resolved DNS at connect time after the
-//!   caller had already validated the host via assert_connect_target_
+//!   caller had already validated the host via `assert_connect_target`_
 //!   allowed. An attacker who flipped the DNS record between the two
 //!   lookups (DNS rebinding) could land on 127.0.0.1 or RFC1918 even
 //!   though the validation saw a public IP.
 //!
 //! The fix re-shapes the API:
-//!   resolve_connect_target_allowed() returns the validated SocketAddrs
-//!   tunnel() now takes Vec<SocketAddr> instead of String
+//!   `resolve_connect_target_allowed()` returns the validated `SocketAddrs`
+//!   `tunnel()` now takes Vec<SocketAddr> instead of String
 //!   The CONNECT call site resolves once and passes the addresses down
 //!
 //! This test confirms the new API exists and validates the resolved

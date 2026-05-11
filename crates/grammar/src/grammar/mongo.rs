@@ -1,6 +1,6 @@
-//! MongoDB NoSQL injection grammar-aware mutation.
+//! `MongoDB` `NoSQL` injection grammar-aware mutation.
 
-/// Detect MongoDB NoSQL injection signals.
+/// Detect `MongoDB` `NoSQL` injection signals.
 #[must_use]
 pub fn detect_type(payload: &str) -> bool {
     let p = payload.trim();
@@ -16,7 +16,7 @@ pub fn detect_type(payload: &str) -> bool {
         || p.contains("$expr")
 }
 
-/// Generate MongoDB NoSQL mutation variants.
+/// Generate `MongoDB` `NoSQL` mutation variants.
 #[must_use]
 pub fn mutate(payload: &str) -> Vec<String> {
     if !detect_type(payload) {

@@ -1,8 +1,11 @@
+mod common;
+use common::{pick_free_port, start_proxy_and_wait, stop_proxy};
+#[cfg(not(feature = "captchaforge"))]
+use common::start_proxy_with_output;
+#[cfg(not(feature = "captchaforge"))]
 use std::process::Output;
 
-mod common;
-use common::{pick_free_port, start_proxy_and_wait, start_proxy_with_output, stop_proxy};
-
+#[cfg(not(feature = "captchaforge"))]
 fn combined_output(output: &Output) -> String {
     let mut combined = String::with_capacity(output.stdout.len() + output.stderr.len() + 1);
     combined.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -11,6 +14,11 @@ fn combined_output(output: &Output) -> String {
     combined
 }
 
+// Only meaningful when the feature is OFF — the test asserts the binary
+// rejects --captchaforge with an actionable hint at startup. With the
+// feature ON the flag installs the solver and the proxy runs indefinitely,
+// so cmd.output().await would hang. Skip the test in that build.
+#[cfg(not(feature = "captchaforge"))]
 #[tokio::test]
 async fn captchaforge_install_must_fail_with_actionable_hint() {
     let port = pick_free_port().expect("pick proxy port");

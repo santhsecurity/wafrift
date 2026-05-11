@@ -50,7 +50,7 @@ async fn start_upstream_server() -> (u16, Arc<Mutex<Vec<SeenRequest>>>, tokio::t
     let handle = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
-            .expect("upstream server should serve")
+            .expect("upstream server should serve");
     });
     (port, captured, handle)
 }

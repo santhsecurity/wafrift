@@ -1,7 +1,7 @@
 //! Regression coverage for the 2026-05-10 swarm-audit CRITICAL:
-//!   non_canonical_spaces in url_mutate.rs passed through structural
+//!   `non_canonical_spaces` in `url_mutate.rs` passed through structural
 //!   bytes (& = % # + ? ; \\0 + control chars). After the upstream
-//!   percent_decode_bytes had already turned `%26c%3Devil` into the
+//!   `percent_decode_bytes` had already turned `%26c%3Devil` into the
 //!   literal bytes `&c=evil`, this re-emitted them verbatim — the
 //!   server then split the value at `&` and `=` into THREE pairs
 //!   (HTTP parameter injection). The fix percent-encodes every byte
@@ -32,7 +32,7 @@ fn assert_no_structural_byte(qs: &str, byte: char) {
     // The query-string is `k=...` so the FIRST `=` and `&` in the
     // result are legitimate framing. We only need to check the value
     // portion (after the first `=`).
-    let value_start = qs.find('=').map(|i| i + 1).unwrap_or(0);
+    let value_start = qs.find('=').map_or(0, |i| i + 1);
     let value = &qs[value_start..];
     // For `&` we want to ensure NO additional `&` appears in the value
     // (the value is the only param, so any `&` would be injection).
@@ -54,7 +54,7 @@ fn percent_encoded_ampersand_does_not_inject_a_pair() {
 #[test]
 fn percent_encoded_equals_does_not_create_a_subpair() {
     let qs = run("alpha%3Dbeta");
-    let value_start = qs.find('=').map(|i| i + 1).unwrap_or(0);
+    let value_start = qs.find('=').map_or(0, |i| i + 1);
     let value = &qs[value_start..];
     assert!(
         !value.contains('='),
@@ -67,15 +67,15 @@ fn percent_encoded_percent_is_re_encoded() {
     // `%25` decodes to `%`. The strategy must re-emit it as `%25` so
     // the server doesn't treat it as the start of another escape.
     let qs = run("a%25b");
-    let value_start = qs.find('=').map(|i| i + 1).unwrap_or(0);
+    let value_start = qs.find('=').map_or(0, |i| i + 1);
     let value = &qs[value_start..];
     // Every `%` in the output must be the start of a valid `%XX` pair.
     let bytes = value.as_bytes();
     for (i, b) in bytes.iter().enumerate() {
         if *b == b'%' {
             assert!(
-                bytes.get(i + 1).map(|b| b.is_ascii_hexdigit()).unwrap_or(false)
-                    && bytes.get(i + 2).map(|b| b.is_ascii_hexdigit()).unwrap_or(false),
+                bytes.get(i + 1).is_some_and(u8::is_ascii_hexdigit)
+                    && bytes.get(i + 2).is_some_and(u8::is_ascii_hexdigit),
                 "value {value:?} has a `%` at index {i} not followed by 2 hex digits"
             );
         }
@@ -85,7 +85,7 @@ fn percent_encoded_percent_is_re_encoded() {
 #[test]
 fn percent_encoded_hash_does_not_open_a_fragment() {
     let qs = run("foo%23bar");
-    let value_start = qs.find('=').map(|i| i + 1).unwrap_or(0);
+    let value_start = qs.find('=').map_or(0, |i| i + 1);
     let value = &qs[value_start..];
     assert!(
         !value.contains('#'),
@@ -105,7 +105,7 @@ fn percent_encoded_null_byte_is_re_encoded() {
 #[test]
 fn percent_encoded_question_mark_does_not_double_query() {
     let qs = run("a%3Fb=c");
-    let value_start = qs.find('=').map(|i| i + 1).unwrap_or(0);
+    let value_start = qs.find('=').map_or(0, |i| i + 1);
     let value = &qs[value_start..];
     assert!(
         !value.contains('?'),

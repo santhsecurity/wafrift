@@ -80,7 +80,7 @@ pub fn outcome_color(rec: &RequestRecord) -> Color {
 /// Map a status code to a 6-bucket index (1xx..5xx, other).
 ///
 /// Used by the Overview status-code ribbon so we can keep counts in a
-/// fixed-size array instead of a HashMap that gets cardinality-blown
+/// fixed-size array instead of a `HashMap` that gets cardinality-blown
 /// by exotic codes.
 pub fn status_bucket_index(status: u16) -> usize {
     match status {

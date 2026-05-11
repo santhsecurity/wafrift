@@ -57,7 +57,7 @@ impl TamperRegistry {
                 let context = strategy_config
                     .contexts
                     .as_ref()
-                    .and_then(|v| v.first().map(|s| s.as_str()));
+                    .and_then(|v| v.first().map(std::string::String::as_str));
                 let result = if let Some(ref params) = strategy_config.params {
                     strategy.tamper_with_params(payload, context, params)
                 } else {

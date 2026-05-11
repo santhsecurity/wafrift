@@ -61,8 +61,7 @@ fn oversize_chunk_hex_errors_without_panic() {
     let r = parser.parse(&buf);
     assert!(
         matches!(r, Err(ParseError::InvalidChunkSize)),
-        "Fix: oversized hex must reject cleanly: {:?}",
-        r
+        "Fix: oversized hex must reject cleanly: {r:?}"
     );
 }
 

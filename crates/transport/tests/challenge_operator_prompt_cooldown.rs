@@ -26,8 +26,7 @@ fn distinct_hosts_emit_up_to_global_cap_then_zero_in_cooldown_window() {
     }
     assert_eq!(
         first_round_prompts, OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN,
-        "Fix: global cap must throttle the storm to {} prompts per 60s",
-        OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN
+        "Fix: global cap must throttle the storm to {OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN} prompts per 60s"
     );
 
     let mut second_round_prompts = 0usize;
@@ -38,9 +37,8 @@ fn distinct_hosts_emit_up_to_global_cap_then_zero_in_cooldown_window() {
     }
     assert_eq!(
         second_round_prompts, 0,
-        "Fix: inside OPERATOR_PROMPT_COOLDOWN ({:?}) no host should re-prompt, \
-         AND the global cap is also still saturated",
-        OPERATOR_PROMPT_COOLDOWN
+        "Fix: inside OPERATOR_PROMPT_COOLDOWN ({OPERATOR_PROMPT_COOLDOWN:?}) no host should re-prompt, \
+         AND the global cap is also still saturated"
     );
 }
 

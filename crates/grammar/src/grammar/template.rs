@@ -53,7 +53,7 @@ struct Engine {
 /// Individual payload definition.
 #[derive(Debug, Clone, Deserialize)]
 struct Payload {
-    /// Payload type: expression, rce, control_flow, introspection, etc.
+    /// Payload type: expression, rce, `control_flow`, introspection, etc.
     #[allow(dead_code)]
     #[serde(rename = "type")]
     payload_type: String,

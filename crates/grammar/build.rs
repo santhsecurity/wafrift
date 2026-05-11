@@ -41,7 +41,7 @@ fn main() {
             if i > 0 {
                 out.push_str(", ");
             }
-            out.push_str(&format!("{:?}", ctx));
+            out.push_str(&format!("{ctx:?}"));
         }
         out.push_str("], ");
         out.push_str(&format!("{:?}", p.description));

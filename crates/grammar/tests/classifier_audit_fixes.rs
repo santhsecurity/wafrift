@@ -1,9 +1,9 @@
 //! Regression coverage for the 2026-05-10 classifier audit findings:
-//!   HIGH #1: contains_shell_command used substring matching, so short
+//!   HIGH #1: `contains_shell_command` used substring matching, so short
 //!     command names (`id`, `nc`, `sh`) matched inside ordinary words
 //!     like `consider`, `validate`, `since` and pushed benign text into
-//!     CommandInjection.
-//!   MEDIUM #2: cmd_signals fell through to CommandInjection even when
+//!     `CommandInjection`.
+//!   MEDIUM #2: `cmd_signals` fell through to `CommandInjection` even when
 //!     no separator was present — a bare `/etc/passwd` was being labelled
 //!     as a shell command.
 //!

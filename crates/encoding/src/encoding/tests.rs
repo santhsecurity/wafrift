@@ -141,9 +141,7 @@ fn empty_payload_all_strategies() {
         let result = encode("", strategy);
         assert!(
             result.is_ok(),
-            "strategy {:?} failed on empty input: {:?}",
-            strategy,
-            result
+            "strategy {strategy:?} failed on empty input: {result:?}"
         );
     }
 }

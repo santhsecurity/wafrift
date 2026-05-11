@@ -26,7 +26,7 @@ pub enum EvasionLayer {
     /// the malicious payload sits past the cloud-WAF inspection window
     /// (Cloudflare Pro 8 KB, AWS WAF 16 KB, Akamai 8 KB). Runs LAST in
     /// the pipeline because it operates on the assembled body bytes —
-    /// any layer that re-builds the body (Encoding, ContentType,
+    /// any layer that re-builds the body (Encoding, `ContentType`,
     /// Smuggling) must complete first.
     BodyPadding,
 }

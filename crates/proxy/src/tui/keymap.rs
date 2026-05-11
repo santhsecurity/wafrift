@@ -2,7 +2,7 @@
 //!
 //! Two-mode model:
 //! - **Normal**: keys are commands (tab switching, navigation, yank, …).
-//! - **FilterEdit**: printable chars build the filter query; Esc cancels,
+//! - **`FilterEdit`**: printable chars build the filter query; Esc cancels,
 //!   Enter commits, Backspace deletes.
 
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -64,8 +64,8 @@ fn handle_normal(
 
         // Tab switching
         KeyCode::Tab => state.tab = state.tab.next(),
-        KeyCode::Char('1') | KeyCode::Char('f') | KeyCode::Char('F') => state.tab = Tab::Flow,
-        KeyCode::Char('2') | KeyCode::Char('o') | KeyCode::Char('O')
+        KeyCode::Char('1' | 'f' | 'F') => state.tab = Tab::Flow,
+        KeyCode::Char('2' | 'o' | 'O')
             if !is_flow_outcome_cycle(state, code) =>
         {
             // 'o' / 'O' is bound to outcome filter on Flow; on other tabs
@@ -73,8 +73,8 @@ fn handle_normal(
             state.tab = Tab::Overview;
         }
         KeyCode::Char('2') => state.tab = Tab::Overview,
-        KeyCode::Char('3') | KeyCode::Char('H') => state.tab = Tab::Hosts,
-        KeyCode::Char('4') | KeyCode::Char('t') | KeyCode::Char('T') => {
+        KeyCode::Char('3' | 'H') => state.tab = Tab::Hosts,
+        KeyCode::Char('4' | 't' | 'T') => {
             state.tab = Tab::Techniques;
         }
         KeyCode::Char('5') => state.tab = Tab::Intercept,
@@ -96,7 +96,7 @@ fn handle_normal(
         }
 
         // Pause/follow toggle
-        KeyCode::Char('p') | KeyCode::Char('P') => {
+        KeyCode::Char('p' | 'P') => {
             state.toggle_follow();
             let msg = if state.follow {
                 "follow → ON"
@@ -172,7 +172,7 @@ fn handle_normal(
         }
 
         // Yank curl (Flow with selection only)
-        KeyCode::Char('y') | KeyCode::Char('Y') if state.tab == Tab::Flow => {
+        KeyCode::Char('y' | 'Y') if state.tab == Tab::Flow => {
             do_yank(state);
         }
 
@@ -186,7 +186,7 @@ fn handle_normal(
 
         // Intercept-mode toggle — works from any tab so the operator
         // doesn't have to navigate to enable.
-        KeyCode::Char('i') | KeyCode::Char('I') => {
+        KeyCode::Char('i' | 'I') => {
             let now_on = crate::intercept::toggle_intercept_mode();
             state.set_toast(
                 format!("intercept mode → {}", if now_on { "ON" } else { "OFF" }),

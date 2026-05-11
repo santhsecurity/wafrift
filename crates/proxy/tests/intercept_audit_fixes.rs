@@ -1,10 +1,10 @@
 //! Coverage for the 2026-05-10 intercept.rs audit findings:
-//! - CRITICAL TOCTOU race in toggle_intercept_mode + set_intercept_mode
+//! - CRITICAL TOCTOU race in `toggle_intercept_mode` + `set_intercept_mode`
 //! - HIGH receiver-drop leaking sender + pending entries
 //!
 //! All tests in this file must run sequentially (intercept state is
 //! process-global). The shared `TEST_INTERCEPT_LOCK` from
-//! intercept_rendezvous.rs is the model — we replicate it here so we
+//! `intercept_rendezvous.rs` is the model — we replicate it here so we
 //! don't share static state across files.
 
 use std::sync::OnceLock;

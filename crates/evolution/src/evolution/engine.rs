@@ -30,12 +30,12 @@ pub struct EvolutionEngine {
     /// Hard budget limits.
     pub budget: Budget,
     /// Candidates currently being evaluated:
-    ///   engine_eval_id → (algorithm_candidate_id, Chromosome, sent_at).
+    ///   `engine_eval_id` → (`algorithm_candidate_id`, Chromosome, `sent_at`).
     ///
     /// `algorithm_candidate_id` is the ID the *search algorithm*
     /// originally minted in `request_evaluations` and the same ID it
     /// expects to see back in `submit_evaluations`. Population-based
-    /// algorithms (MapElites, NoveltySearch) keep their own private
+    /// algorithms (`MapElites`, `NoveltySearch`) keep their own private
     /// `in_flight` keyed by that ID — if we forwarded the engine's
     /// `eval_id` instead, their lookup misses and the evaluation is
     /// silently dropped (the grid / archive never gets updated).
@@ -105,14 +105,14 @@ impl Clone for EvolutionEngine {
 /// shared-state worker pool should hold.
 ///
 /// Use this instead of `Clone` whenever multiple async tasks need
-/// access to the same engine's cache + corpus + gene_stats. Cloning
+/// access to the same engine's cache + corpus + `gene_stats`. Cloning
 /// the `Arc` is O(1); cloning the engine itself is O(grid + archive +
-/// gene_stats) and produces an *independent* engine with a fresh
+/// `gene_stats`) and produces an *independent* engine with a fresh
 /// (empty) cache.
 ///
 /// Locking discipline:
-/// - hot read paths (cache hits, diversity_score, best()) → `read()`
-/// - mutation paths (submit_evaluations, gene_stats updates,
+/// - hot read paths (cache hits, `diversity_score`, `best()`) → `read()`
+/// - mutation paths (`submit_evaluations`, `gene_stats` updates,
 ///   checkpoint persistence) → `write()`
 /// - never hold the write lock across an `await` that performs network
 ///   I/O — drop it before the await, re-acquire after
@@ -141,7 +141,7 @@ impl EvolutionEngine {
     /// `population_size` is clamped to the inclusive range `[1, 10_000]`:
     /// 0 would leave the selection helpers (tournament/roulette) with
     /// nothing to index — a contract violation that used to panic.
-    /// 10_000 caps memory at construction so a misconfigured caller
+    /// `10_000` caps memory at construction so a misconfigured caller
     /// can't OOM the process by passing `usize::MAX`.
     #[must_use]
     pub fn new_seeded(population_size: usize, seed: u64) -> Self {
@@ -307,7 +307,7 @@ impl EvolutionEngine {
     /// periodically (or when a Worker pool is reaped) so a dropped
     /// evaluation doesn't permanently consume a budget slot.
     ///
-    /// Audit (2026-05-10): pre-fix in_flight grew without any TTL —
+    /// Audit (2026-05-10): pre-fix `in_flight` grew without any TTL —
     /// every dropped eval permanently consumed a `max_requests` slot,
     /// so a long scan with even moderate eval-loss would terminate
     /// prematurely with budget exhausted while the in-flight map
@@ -433,10 +433,10 @@ impl EvolutionEngine {
             let skip = self.fitness_history.len().saturating_sub(window);
             let recent: Vec<f64> = self.fitness_history.iter().skip(skip).copied().collect();
             let improved = recent.windows(2).any(|w| w[1] > w[0] + 0.001);
-            if !improved {
-                self.stagnation_counter += 1;
-            } else {
+            if improved {
                 self.stagnation_counter = 0;
+            } else {
+                self.stagnation_counter += 1;
             }
         }
         // Mirror into stats so should_terminate() (which reads
@@ -666,7 +666,7 @@ impl EvolutionEngine {
 ///   - `pending_single`: legacy sequential API state, transient.
 ///   - RNG state: search algorithms each capture their own RNG
 ///     state inside `algorithm_state`; the engine-level rng is
-///     used only for next_eval_id minting and gene-pool sampling
+///     used only for `next_eval_id` minting and gene-pool sampling
 ///     when the algorithm doesn't override.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineState {
@@ -681,11 +681,11 @@ pub struct EngineState {
     pub request_count: usize,
     pub stats: SearchStats,
     pub schema_version: u32,
-    /// Saved bypass discoveries — added in schema_version 2.
+    /// Saved bypass discoveries — added in `schema_version` 2.
     /// Defaults to empty for v1 checkpoints loaded by a v2 engine.
     #[serde(default)]
     pub corpus: BypassCorpus,
-    /// Next eval_id to mint — added in schema_version 2 so a
+    /// Next `eval_id` to mint — added in `schema_version` 2 so a
     /// restored engine doesn't recycle IDs that may collide with
     /// any in-flight evaluation that survived the crash.
     #[serde(default)]

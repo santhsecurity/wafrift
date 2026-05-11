@@ -103,8 +103,7 @@ fn gene_bank_list_wafs() {
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+            .map_or(0, |d| d.as_nanos())
     ));
     let _ = fs::remove_dir_all(&tmp);
     let mut bank = GeneBank::open(tmp.clone()).unwrap();
@@ -153,7 +152,7 @@ fn corrupt_genome_is_quarantined_on_load() {
     // A .corrupt. file should exist.
     let quarantined: Vec<_> = fs::read_dir(&tmp)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().contains(".corrupt."))
         .collect();
     assert_eq!(
@@ -203,7 +202,7 @@ fn atomic_write_no_temp_file_left() {
     // No .tmp files should remain.
     let tmp_files: Vec<_> = fs::read_dir(&tmp)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
         .collect();
     assert!(

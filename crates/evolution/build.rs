@@ -33,7 +33,7 @@ struct TagOrFn {
 fn emit_str_array(out: &mut String, name: &str, values: &[String]) {
     out.push_str(&format!("pub(crate) const {name}: &[&str] = &[\n"));
     for v in values {
-        out.push_str(&format!("    {:?},\n", v));
+        out.push_str(&format!("    {v:?},\n"));
     }
     out.push_str("];\n\n");
 }

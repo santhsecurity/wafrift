@@ -1,13 +1,13 @@
 //! Regression coverage for the 2026-05-10 swarm-audit findings on
 //! smuggling/safety.rs:
-//!   CRITICAL: sanitize_input + guard_no_crlf only checked CR/LF.
+//!   CRITICAL: `sanitize_input` + `guard_no_crlf` only checked CR/LF.
 //!     NULL bytes were allowed, but HTTP/1 stacks truncate header
 //!     values at the first NUL — turning benign-looking detection
 //!     probes into active header-injection / smuggling vectors.
-//!   HIGH: ScanPolicy::backoff_delay computed `ms + jitter_ms` with
-//!     plain addition; near u64::MAX max_delay this panics in debug
+//!   HIGH: `ScanPolicy::backoff_delay` computed `ms + jitter_ms` with
+//!     plain addition; near `u64::MAX` `max_delay` this panics in debug
 //!     and wraps in release.
-//!   HIGH: CircuitBreaker::record_failure used plain `+= 1` on a u32,
+//!   HIGH: `CircuitBreaker::record_failure` used plain `+= 1` on a u32,
 //!     which panics in debug after 2^32 failures (and silently wraps
 //!     in release, secretly resetting the breaker).
 

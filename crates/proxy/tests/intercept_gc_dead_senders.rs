@@ -1,12 +1,12 @@
 //! Regression coverage for the 2026-05-10 proxy intercept audit:
 //!   MEDIUM: InterceptStore.{senders, pending} leaked entries when the
 //!     request handler future was cancelled mid-rendezvous (client
-//!     disconnect, hyper drop, panic-induced unwind). Neither resolve()
-//!     nor the timeout's cancel() ran in that path, so the BTreeMap
+//!     disconnect, hyper drop, panic-induced unwind). Neither `resolve()`
+//!     nor the timeout's `cancel()` ran in that path, so the `BTreeMap`
 //!     entries persisted forever and the operator's intercept queue
 //!     filled with ghost entries the TUI couldn't dismiss.
 //!
-//! Pre-fix: register() did not GC dead senders. After 1000 dropped
+//! Pre-fix: `register()` did not GC dead senders. After 1000 dropped
 //! receivers the maps would still hold 1000 stale entries.
 
 use std::time::Duration;

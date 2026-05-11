@@ -1,15 +1,15 @@
 //! Regression coverage for the 2026-05-10 credibility audit finding:
-//!   MEDIUM: validate_in_context() in encoding/contextual.rs had four
-//!     `// TODO: validate ...` arms (XmlCdata, XmlText, HtmlAttribute,
-//!     HtmlText) that were no-op stubs. A direct caller of
-//!     validate_in_context (not via encode_in_context) would receive
+//!   MEDIUM: `validate_in_context()` in encoding/contextual.rs had four
+//!     `// TODO: validate ...` arms (`XmlCdata`, `XmlText`, `HtmlAttribute`,
+//!     `HtmlText`) that were no-op stubs. A direct caller of
+//!     `validate_in_context` (not via `encode_in_context`) would receive
 //!     Ok(()) for clearly-broken payloads — the function pretended to
 //!     validate but did nothing. For a public crate that ships an
 //!     `escape_for_context` + `validate_in_context` pair, that's a
 //!     credibility hole: the validator was a smoke alarm wired to
 //!     nothing.
 //!
-//! Pre-fix all of these tests would have passed Ok() instead of
+//! Pre-fix all of these tests would have passed `Ok()` instead of
 //! returning the explicit Err.
 
 use wafrift_encoding::contextual::validate_in_context;
@@ -36,7 +36,7 @@ fn xml_cdata_accepts_clean_payload() {
 fn xml_text_rejects_raw_lt() {
     let err = validate_in_context("a < b", InjectionContext::XmlText)
         .expect_err("must reject unescaped <");
-    assert!(format!("{err}").contains("<"));
+    assert!(format!("{err}").contains('<'));
 }
 
 #[test]
@@ -59,21 +59,21 @@ fn xml_text_accepts_proper_entity_references() {
 fn html_attribute_rejects_raw_lt() {
     let err = validate_in_context("a < b", InjectionContext::HtmlAttribute)
         .expect_err("must reject <");
-    assert!(format!("{err}").contains("<"));
+    assert!(format!("{err}").contains('<'));
 }
 
 #[test]
 fn html_attribute_rejects_double_quote() {
     let err = validate_in_context("hello \"world\"", InjectionContext::HtmlAttribute)
         .expect_err("must reject double-quote attr breakout");
-    assert!(format!("{err}").contains("\""));
+    assert!(format!("{err}").contains('"'));
 }
 
 #[test]
 fn html_attribute_rejects_single_quote() {
     let err = validate_in_context("don't", InjectionContext::HtmlAttribute)
         .expect_err("must reject single-quote attr breakout");
-    assert!(format!("{err}").contains("'"));
+    assert!(format!("{err}").contains('\''));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn html_attribute_accepts_clean_value() {
 fn html_text_rejects_raw_lt() {
     let err = validate_in_context("<script>", InjectionContext::HtmlText)
         .expect_err("must reject < (would start tag)");
-    assert!(format!("{err}").contains("<"));
+    assert!(format!("{err}").contains('<'));
 }
 
 #[test]

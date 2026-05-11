@@ -37,12 +37,11 @@ fn main() {
 
     let mut entries: Vec<_> = fs::read_dir(rules_dir)
         .expect("failed to read rules/detect")
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| {
             e.path()
                 .extension()
-                .map(|ext| ext.eq_ignore_ascii_case("toml"))
-                .unwrap_or(false)
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
         })
         .map(|e| e.path())
         .collect();

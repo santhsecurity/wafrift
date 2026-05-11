@@ -21,8 +21,7 @@ fn ten_mb_payload_completes_within_5_seconds() {
 
     assert!(
         elapsed < Duration::from_secs(5),
-        "evade on 10 MB payload took {:?}, expected < 5s",
-        elapsed
+        "evade on 10 MB payload took {elapsed:?}, expected < 5s"
     );
     assert!(
         result.request.body.is_some(),
@@ -50,8 +49,7 @@ fn zero_byte_payload_completes_instantly() {
 
     assert!(
         elapsed < Duration::from_millis(100),
-        "empty payload evade took {:?}, expected < 100ms",
-        elapsed
+        "empty payload evade took {elapsed:?}, expected < 100ms"
     );
     assert_eq!(result.request.body, Some(vec![]));
 }
@@ -77,8 +75,7 @@ fn ten_mb_payload_with_heavy_escalation_no_oom() {
 
     assert!(
         elapsed < Duration::from_secs(5),
-        "heavy escalation on 10 MB payload took {:?}, expected < 5s",
-        elapsed
+        "heavy escalation on 10 MB payload took {elapsed:?}, expected < 5s"
     );
     assert!(result.request.body.is_some());
 }

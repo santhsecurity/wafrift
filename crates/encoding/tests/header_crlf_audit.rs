@@ -3,7 +3,7 @@
 //!   caller passing `value = "x\r\nEvil-Header: pwn"` produced response-
 //!   splitting / request-smuggling on the wire — the exact threat the
 //!   crate claims to be probing for, not exposing. Each public mutator
-//!   now sanitises CR / LF / NUL via sanitize_header_value() before
+//!   now sanitises CR / LF / NUL via `sanitize_header_value()` before
 //!   embedding, closing the gap without an API break.
 
 use wafrift_encoding::header::{

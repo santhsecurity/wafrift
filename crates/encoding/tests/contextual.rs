@@ -223,7 +223,7 @@ fn html_attribute_escapes_both_quotes() {
         InjectionContext::HtmlAttribute,
     )
     .unwrap();
-    assert!(out.contains("&#x27;") || out.contains("'")); // may or may not escape depending on impl
+    assert!(out.contains("&#x27;") || out.contains('\'')); // may or may not escape depending on impl
     assert!(out.contains("&quot;") || out.contains('"'));
 }
 
@@ -265,7 +265,7 @@ fn url_query_case_alternation_no_raw_space() {
     .unwrap();
     // CaseAlternation doesn't change spaces, so if strategy doesn't touch them,
     // URL query context should percent-encode
-    assert!(!out.contains(' '), "raw space found in URL query: {}", out);
+    assert!(!out.contains(' '), "raw space found in URL query: {out}");
 }
 
 #[test]
@@ -298,14 +298,14 @@ fn url_path_slash_not_encoded() {
         InjectionContext::UrlPath,
     )
     .unwrap();
-    assert!(out.contains("/"));
+    assert!(out.contains('/'));
 }
 
 #[test]
 fn url_path_space_encoded() {
     let out =
         encode_in_context(b"a b", Strategy::CaseAlternation, InjectionContext::UrlPath).unwrap();
-    assert!(!out.contains(' '), "raw space found in URL path: {}", out);
+    assert!(!out.contains(' '), "raw space found in URL path: {out}");
 }
 
 // ── Header Value ───────────────────────────────────────────────────────────
@@ -590,9 +590,7 @@ fn all_strategies_work_with_plain_body() {
         let result = encode_in_context(payload, strategy, InjectionContext::PlainBody);
         assert!(
             result.is_ok(),
-            "strategy {:?} failed on PlainBody: {:?}",
-            strategy,
-            result
+            "strategy {strategy:?} failed on PlainBody: {result:?}"
         );
     }
 }

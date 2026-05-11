@@ -56,7 +56,7 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
         results.push(
             payload
                 .replace("SLEEP(", "(SELECT pg_sleep(")
-                .replace(")", "))"),
+                .replace(')', "))"),
         );
     }
 

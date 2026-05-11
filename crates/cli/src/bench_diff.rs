@@ -108,19 +108,19 @@ fn load(path: &std::path::Path) -> Result<serde_json::Value, String> {
 
 fn bypass_rate(v: &serde_json::Value) -> f64 {
     v.pointer("/evaded_summary/overall_bypass_rate")
-        .and_then(|x| x.as_f64())
+        .and_then(serde_json::Value::as_f64)
         .unwrap_or(0.0)
 }
 
 fn raw_block_rate(v: &serde_json::Value) -> f64 {
     v.pointer("/raw_block_rate")
-        .and_then(|x| x.as_f64())
+        .and_then(serde_json::Value::as_f64)
         .unwrap_or(0.0)
 }
 
 fn evade_mode(v: &serde_json::Value) -> bool {
     v.pointer("/evade_mode")
-        .and_then(|x| x.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
 }
 

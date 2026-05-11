@@ -64,7 +64,7 @@ const ALL_STRATEGIES: &[&str] = &[
 
 #[derive(Debug, clap::Args)]
 pub struct BenchWafArgs {
-    /// Base URL of the WAF target (e.g. http://127.0.0.1:18081).
+    /// Base URL of the WAF target (e.g. <http://127.0.0.1:18081>).
     /// If omitted, uses `WAFRIFT_BENCH_URL` or `http://127.0.0.1:18081`.
     #[arg(long)]
     pub base_url: Option<String>,
@@ -73,12 +73,12 @@ pub struct BenchWafArgs {
     /// Defaults to the in-tree bench corpus path; if you installed
     /// wafrift via `cargo install` (no checkout), pass `--corpus` to a
     /// directory you cloned from
-    /// https://github.com/santhsecurity/wafrift/tree/main/wafrift-bench/corpus
+    /// <https://github.com/santhsecurity/wafrift/tree/main/wafrift-bench/corpus>
     #[arg(long, default_value = "wafrift-bench/corpus")]
     pub corpus: PathBuf,
 
     /// Restrict to one or more attack classes (sql, xss, cmdi, ssti, path,
-    /// ldap, xxe, ssrf, nosql, log4shell, cve_pocs). Comma-separated.
+    /// ldap, xxe, ssrf, nosql, log4shell, `cve_pocs`). Comma-separated.
     /// Default: all classes found.
     #[arg(long, value_delimiter = ',')]
     pub class: Vec<String>,
@@ -95,14 +95,14 @@ pub struct BenchWafArgs {
     /// Comma-separated list of evasion strategies. Default: heavy.
     /// Pass `--strategies all` to run the full set in one shot.
     /// Available:
-    ///   light / medium / heavy   — payload-string mutation via build_variants
+    ///   light / medium / heavy   — payload-string mutation via `build_variants`
     ///   mcts                      — Monte Carlo Tree Search over actions (mctrust)
     ///   smuggling                 — HTTP request smuggling variants (CL.TE / TE.CL / TE.TE / dual-CL)
     ///   content-type              — Content-Type confusion variants (multipart/json/xml/...)
     ///   redos                     — wrap payload in catastrophic-backtracking patterns
     ///   hill-climb / sim-anneal / tabu / novelty / map-elites
     ///                              — feedback-driven search via wafrift-evolution
-    ///   differential              — class-filtered probes from wafrift-evolution::differential
+    ///   differential              — class-filtered probes from `wafrift-evolution::differential`
     ///                              (rule-fingerprint coverage; "what does this WAF NOT block")
     #[arg(long, value_delimiter = ',', default_value = "heavy")]
     pub strategies: Vec<String>,
@@ -238,7 +238,7 @@ struct StrategyStat {
 /// Returns true if the variant retains the exploit semantics of the original
 /// payload for `class`. Per-class structural validity check via the
 /// corresponding oracle in wafrift-oracle. Falls back to true only for
-/// classes that genuinely have no oracle (cve_pocs is held-out test data).
+/// classes that genuinely have no oracle (`cve_pocs` is held-out test data).
 fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
     match class {
         "sql" => sql_oracle::is_valid_expression_injection(transformed, DatabaseDialect::Generic),
@@ -257,10 +257,10 @@ fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
     }
 }
 
-/// NoSQL injection structural validity: the variant must still contain at
-/// least one MongoDB operator marker ($ne / $gt / $regex / $where / $or /
+/// `NoSQL` injection structural validity: the variant must still contain at
+/// least one `MongoDB` operator marker ($ne / $gt / $regex / $where / $or /
 /// $in / $exists / $type) OR a MongoDB-style operator-key bracket form
-/// (`[$op]=`). Without these the parser won't see it as a NoSQL filter.
+/// (`[$op]=`). Without these the parser won't see it as a `NoSQL` filter.
 fn is_valid_nosql(_original: &str, transformed: &str) -> bool {
     const MONGO_OPS: &[&str] = &[
         "$ne",
@@ -283,7 +283,7 @@ fn is_valid_nosql(_original: &str, transformed: &str) -> bool {
 }
 
 /// XXE structural validity: the transformed payload must still parse as XML
-/// with at least one ENTITY / DOCTYPE / XInclude marker. Otherwise it's just
+/// with at least one ENTITY / DOCTYPE / `XInclude` marker. Otherwise it's just
 /// a string with `<` characters, not an XML attack.
 fn is_valid_xxe(_original: &str, transformed: &str) -> bool {
     let lower = transformed.to_ascii_lowercase();
@@ -300,7 +300,7 @@ fn is_valid_xxe(_original: &str, transformed: &str) -> bool {
     has_xml_decl_or_root && has_xxe_marker
 }
 
-/// Log4Shell structural validity: must still contain a JNDI lookup expression.
+/// `Log4Shell` structural validity: must still contain a JNDI lookup expression.
 /// Common shapes: `${jndi:`, obfuscated `${${lower:j}ndi:`, `${${env:NaN:-j}ndi:`,
 /// percent-encoded `%24%7Bjndi`. We accept anything that resolves to a JNDI
 /// scheme on lookup.
@@ -390,7 +390,7 @@ fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
     println!("corpus integrity:");
     println!("  total cases: {}", cases.len());
     for (cls, n) in &by_class {
-        println!("  {:>10}: {n}", cls);
+        println!("  {cls:>10}: {n}");
     }
     if errors.is_empty() {
         println!("OK ({} cases)", cases.len());
@@ -557,7 +557,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // type one keyword instead of remembering the 11-element list. Keeps
     // user-supplied order otherwise (output ordering matters for diffs).
     if args.strategies.iter().any(|s| s == "all") {
-        args.strategies = ALL_STRATEGIES.iter().map(|s| s.to_string()).collect();
+        args.strategies = ALL_STRATEGIES.iter().map(std::string::ToString::to_string).collect();
     }
 
     let base_url = resolve_base_url(&args);
@@ -585,9 +585,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
 
     // Pick a randomized real-browser User-Agent (vs. the obvious
     // wafrift-bench/0.1 marker) so the WAF doesn't have a free signal.
-    let ua = wafrift_fingerprint::fingerprint::random_profile()
-        .map(|p| p.user_agent.to_string())
-        .unwrap_or_else(|| "Mozilla/5.0".into());
+    let ua = wafrift_fingerprint::fingerprint::random_profile().map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string());
 
     let mut client_builder = Client::builder()
         .timeout(std::time::Duration::from_secs(args.timeout_secs))
@@ -866,7 +864,7 @@ async fn run_evade(
     })
 }
 
-/// Strategy: payload-string mutation (light/medium/heavy via build_variants).
+/// Strategy: payload-string mutation (light/medium/heavy via `build_variants`).
 #[allow(clippy::too_many_arguments)]
 async fn run_payload_strategy(
     client: &Client,
@@ -921,9 +919,9 @@ async fn run_payload_strategy(
     stat
 }
 
-/// Strategy: feedback-driven evolution search — wafrift_evolution::EvolutionEngine
-/// runs one of {hill_climbing, simulated_annealing, tabu_search, novelty_search,
-/// map_elites}. For each round we get a candidate chromosome, render it to a
+/// Strategy: feedback-driven evolution search — `wafrift_evolution::EvolutionEngine`
+/// runs one of {`hill_climbing`, `simulated_annealing`, `tabu_search`, `novelty_search`,
+/// `map_elites`}. For each round we get a candidate chromosome, render it to a
 /// payload (apply the chromosome's grammar + encoding genes to case.payload),
 /// send it, and feed the WAF's verdict back. The algorithm learns which gene
 /// combos beat *this* WAF as the round progresses — same loop the production
@@ -1063,7 +1061,7 @@ fn render_chromosome(
     (encoded, label)
 }
 
-/// Strategy: MCTS — wafrift::strategy::evade_mcts learns the WAF mid-run by
+/// Strategy: MCTS — `wafrift::strategy::evade_mcts` learns the WAF mid-run by
 /// playing N games against it (depth-bounded action search with mctrust 0.4).
 async fn run_mcts_strategy(
     client: &Client,
@@ -1217,7 +1215,7 @@ async fn run_content_type_strategy(
     stat
 }
 
-/// Strategy: ReDoS — wrap payload in catastrophic-backtracking patterns.
+/// Strategy: `ReDoS` — wrap payload in catastrophic-backtracking patterns.
 ///
 /// Goal is to force the WAF's regex engine into exponential evaluation time
 /// so it hits its per-rule timeout. Some WAFs fail-OPEN on rule timeout,
@@ -1546,8 +1544,7 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
                     0.0
                 };
                 println!(
-                    "  {:<14} variants {:>6}  bypass {:>5.1}%  oracle-valid {:>5.1}% of bypass",
-                    name, variants, rate, valid_rate
+                    "  {name:<14} variants {variants:>6}  bypass {rate:>5.1}%  oracle-valid {valid_rate:>5.1}% of bypass"
                 );
             }
         }

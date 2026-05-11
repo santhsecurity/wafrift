@@ -2,7 +2,7 @@
 //!
 //! Wraps either `reqwest::Client` (default, rustls TLS) or
 //! `wafrift_transport::StealthClient` (opt-in via the
-//! `tls-impersonate` feature on `wafrift-transport`, BoringSSL via
+//! `tls-impersonate` feature on `wafrift-transport`, `BoringSSL` via
 //! `rquest` for browser-identical JA3) behind a single `send()` API.
 //!
 //! Both paths return the same [`UpstreamResponse`] shape, so the proxy

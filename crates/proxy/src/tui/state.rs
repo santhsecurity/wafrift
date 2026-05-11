@@ -502,9 +502,7 @@ impl State {
     }
 
     pub fn uptime(&self) -> Duration {
-        self.started
-            .map(|s| s.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0))
+        self.started.map_or_else(|| Duration::from_secs(0), |s| s.elapsed())
     }
 
     pub fn avg_latency_ms(&self) -> u64 {
@@ -583,8 +581,7 @@ impl State {
                         || r.techniques.to_ascii_lowercase().contains(q)
                         || r.waf_name
                             .as_deref()
-                            .map(|w| w.to_ascii_lowercase().contains(q))
-                            .unwrap_or(false)
+                            .is_some_and(|w| w.to_ascii_lowercase().contains(q))
                 }
             })
             .map(|(i, _)| i)
@@ -720,7 +717,7 @@ mod tests {
             bypassed,
             blocked: !bypassed && status == 403,
             techniques: "encoding:UrlEncode".into(),
-            tls_profile: profile.map(|s| s.to_string()),
+            tls_profile: profile.map(std::string::ToString::to_string),
             body_padded: padded,
             upstream_latency_ms: 50,
             waf_name: None,

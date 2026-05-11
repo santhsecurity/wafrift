@@ -11,7 +11,7 @@
 //! 3. DNS rebinding-style hostnames
 //! 4. URL shorthand and scheme tricks
 //! 5. Userinfo and fragment redirect bypass forms
-//! 6. Cloud metadata endpoint substitutions (AWS, GCP, Azure, DigitalOcean)
+//! 6. Cloud metadata endpoint substitutions (AWS, GCP, Azure, `DigitalOcean`)
 //! 7. Percent-encoded dotted-quad hosts
 //! 8. Configurable OOB (out-of-band) interaction domains
 
@@ -43,15 +43,15 @@ pub enum MetadataEndpoint {
     Gcp,
     /// Azure Instance Metadata Service
     Azure,
-    /// Azure WireServer (Windows Azure Agent)
+    /// Azure `WireServer` (Windows Azure Agent)
     AzureWireServer,
-    /// DigitalOcean metadata service
+    /// `DigitalOcean` metadata service
     DigitalOcean,
     /// Alibaba Cloud metadata
     Alibaba,
     /// Oracle Cloud metadata
     Oracle,
-    /// OpenStack metadata
+    /// `OpenStack` metadata
     OpenStack,
     /// Kubernetes service account
     Kubernetes,
@@ -206,9 +206,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
         .unwrap_or("")
         .to_string();
     if !cover_host.is_empty() && cover_host.len() <= 253 {
-        let path_suffix = extract_path(payload)
-            .map(|i| payload[i..].to_string())
-            .unwrap_or_else(|| "/".to_string());
+        let path_suffix = extract_path(payload).map_or_else(|| "/".to_string(), |i| payload[i..].to_string());
         for target in [
             "127.0.0.1",
             "localhost",
@@ -241,9 +239,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
         .unwrap_or("")
         .to_string();
     if !host_only.is_empty() {
-        let path = extract_path(payload)
-            .map(|i| payload[i..].to_string())
-            .unwrap_or_else(|| "/".to_string());
+        let path = extract_path(payload).map_or_else(|| "/".to_string(), |i| payload[i..].to_string());
         for variant in [
             format!("http:/{host_only}{path}"),    // single slash
             format!("//{host_only}{path}"),        // protocol-relative
@@ -386,11 +382,10 @@ pub fn detect_type(payload: &str) -> bool {
         && (host_token_starts_with_octet(&lower, "10.")
             || host_token_starts_with_octet(&lower, "192.168.")
             || (16..=31).any(|i| host_token_starts_with_octet(&lower, &format!("172.{i}."))));
-    if looks_like_private_ip {
-        if is_private_ip(&lower) {
+    if looks_like_private_ip
+        && is_private_ip(&lower) {
             return true;
         }
-    }
 
     false
 }
@@ -458,8 +453,7 @@ fn host_token_starts_with_octet(haystack: &str, needle: &str) -> bool {
             // "Java 10. is too old" would still match.
             let right_ok = h
                 .get(i + n.len())
-                .map(|b| b.is_ascii_digit())
-                .unwrap_or(false);
+                .is_some_and(u8::is_ascii_digit);
             if left_ok && right_ok {
                 return true;
             }

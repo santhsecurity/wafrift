@@ -622,7 +622,7 @@ fn validate_args_accepts_valid_escalation() {
             escalation: Some(level.into()),
             ..default_args()
         };
-        assert!(validate_args(&args).is_ok(), "failed for {}", level);
+        assert!(validate_args(&args).is_ok(), "failed for {level}");
     }
 }
 

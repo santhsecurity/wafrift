@@ -137,7 +137,7 @@ impl SignedBundle {
     ///   `MAX_DESCRIPTION_LEN`, `MAX_TARGET_LEN`)
     /// - excessive cardinality (`MAX_GENOMES_PER_BUNDLE`,
     ///   `MAX_TARGETS_PER_GENOME`)
-    /// - excessive hex (`MAX_HEX_LEN`) on signature / public_key
+    /// - excessive hex (`MAX_HEX_LEN`) on signature / `public_key`
     /// - unknown fields (`#[serde(deny_unknown_fields)]`)
     ///
     /// All limits are conservative — legitimate bundles fit comfortably.
