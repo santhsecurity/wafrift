@@ -6,7 +6,7 @@ evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "Conten
 source = "WAFW00F:fortigate"
 [[waf.signature]]
   body_regex = "//globalurl.fortinet.net"
-  weight = 0.4
+  weight = 0.55
 [[waf.signature]]
   body_regex = "FortiGate Application Control"
   weight = 0.4

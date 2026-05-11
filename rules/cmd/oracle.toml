@@ -131,13 +131,8 @@ description = "Print text to stdout"
 name = "printf"
 description = "Format and print data"
 
-[[shell_command]]
-name = "head"
-description = "Output first part of files"
-
-[[shell_command]]
-name = "tail"
-description = "Output last part of files"
+# "head" / "tail" omitted: tokenized HTML `<head>` / prose like "retail" collide with whole-word
+# matching and cause universal false positives on HTTP bodies.
 
 [[shell_command]]
 name = "grep"
@@ -196,14 +191,5 @@ description = "PATH environment variable"
 pattern = "$PATH"
 description = "PATH variable shorthand"
 
-[[shell_trick]]
-pattern = "\\"
-description = "Backslash line continuation"
-
-[[shell_trick]]
-pattern = "'"
-description = "Single quote (string boundary)"
-
-[[shell_trick]]
-pattern = "\""
-description = "Double quote (string boundary)"
+# Quotes and bare backslash intentionally omitted: they appear in nearly every JSON/HTML
+# response and cause massive false positives when combined with newline separators.

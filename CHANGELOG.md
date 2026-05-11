@@ -68,7 +68,129 @@ All notable changes to wafrift are documented here. The format is based on [Keep
   `captchaforge_install_must_not_fail_without_flag` still runs in
   both build modes.
 
-2892 / 2892 workspace tests green at v0.2.12.
+### Fixed — SSRF NUL-in-host engine gap (CVE-2017-15046 family)
+
+- **`crates/oracle/src/ssrf.rs nul_in_authority_salvage`.**
+  `url::Url::parse` rejects `http://127.0.0.1%00.evil.com/` (and
+  the literal-NUL twin) as malformed authority, so `SsrfOracle`
+  was classifying these as not-SSRF-shaped — meaning the evasion
+  engine never emitted them as variants even though they are real
+  attacks against permissive backends that terminate hostname
+  parsing at NUL but report the full host to the allowlist.
+  Added a salvage fallback: when the raw payload fails to parse,
+  locate the first encoded or literal NUL after the `://`
+  boundary, strip it and the suffix, re-parse the prefix, and
+  accept iff the parsed host is itself an SSRF indicator
+  (loopback, metadata host, or RFC1918 prefix). Stricter than the
+  looser `has_ssrf_structure` so the existing `"0."` substring FP
+  cannot be used to promote public hosts.
+
+  Tests: 9 in `ssrf_loopback_bypass_corpus.rs`, including 2 NUL-
+  bypass shapes (encoded + literal) plus a negative twin that
+  asserts `http://example.com%00.evil.com/` is still rejected.
+
+### Added — doctest coverage across 16 library crates
+
+- **1 → 28 runnable doctests** on every public-API surface.
+  Workspace went from a single oracle XSS example (pre-existing)
+  to 28 across `wafrift-types`, `-encoding`, `-grammar`,
+  `-content-type`, `-smuggling`, `-fingerprint`, `-detect`,
+  `-evolution`, `-strategy`, `-pool`, `-oracle`, `-recon`,
+  `-transport`, `-genome-registry`, `-core`. Each tests a real
+  public-API shape against assertions, so docs.rs renders working
+  examples AND `cargo test --doc` catches API drift.
+  `wafrift-captchaforge-bridge` ships one `ignore`d doctest
+  because chromiumoxide → boring-sys2 → libstdc++ doesn't always
+  link on minimal dev boxes (CI runners and `apt install
+  libstdc++-dev` resolve it).
+
+### Changed — Tier-B TOML migration (16 const lists across 7 files)
+
+- **Hardcoded `const X: &[&str]` lists moved to community-extensible
+  TOML data.** Loaded once via `OnceLock` + `include_str!` so
+  there's no runtime filesystem dependency and `cargo install`
+  still produces a self-contained binary. Per CLAUDE.md "Tier B
+  — community knowledge (TOML data files only, never CLI)".
+  - `crates/detect/rules/blocking/indicators.toml` — 13 WAF
+    block-page body indicators (`BLOCK_INDICATORS`).
+  - `crates/oracle/rules/xss/structure.toml` — 70-entry XSS
+    validation taxonomy (`XSS_TAGS`, `XSS_EVENTS`,
+    `XSS_EXEC_SINKS`, `JS_URI_SCHEMES`, `DANGEROUS_SINKS`).
+  - `crates/grammar/rules/xss/payloads.toml` — 42-entry XSS
+    mutator corpus (`EXEC_FUNCTIONS`, `URI_SCHEMES`,
+    `SVG_PAYLOADS`, `MATHML_PAYLOADS`, `MARKDOWN_PAYLOADS`).
+  - `crates/oracle/rules/ssrf/schemes.toml` — 10 URL schemes the
+    SSRF oracle accepts as network-request-shaped
+    (`URL_SCHEMES`).
+  - `crates/oracle/rules/ssti/markers.toml` — 20 SSTI
+    introspection markers (`INTROSPECTION_MARKERS`).
+  - `crates/oracle/rules/ldap/grammar.toml` — 16-entry LDAP
+    grammar (`LDAP_OPERATORS`, `LDAP_ATTRIBUTES`).
+  - `crates/oracle/rules/h2/goaway.toml` — 4 HTTP/2 GOAWAY reason
+    phrases (`WAF_GOAWAY_REASONS`).
+
+### Fixed — pentester acceptance: SIGPIPE handling
+
+- **`wafrift --quiet evade ... | head` no longer panics with
+  "failed printing to stdout: Broken pipe".** Both binaries
+  (`wafrift` and `wafrift-proxy`) install
+  `signal(SIGPIPE, SIG_DFL)` at the top of `main()` — the
+  canonical Unix CLI idiom that `cat`, `ls`, `grep` all use.
+  Process exits silently on EPIPE instead of panicking. libc dep
+  gated to `[target.'cfg(unix)'.dependencies]` so Windows builds
+  are unaffected. Locked with
+  `crates/cli/tests/sigpipe_does_not_panic.rs`.
+
+### Added — manpage drift gate + cargo audit + dead-code cleanup
+
+- **`crates/cli/tests/manpage_in_sync.rs`** — new regression test
+  runs `wafrift man` and byte-compares to `docs/man/wafrift.1`,
+  with a one-line "regenerate with X" hint on failure. The
+  manpage shipped stale at three prior releases (0.2.1, 0.2.11,
+  initial 0.2.12) before this gate.
+- **`.github/workflows/ci.yml`** — new `audit` job runs
+  `cargo audit` on every CI to surface RustSec advisories.
+  `continue-on-error: true` so transitive-dep findings (e.g.
+  RUSTSEC-2026-0002 in `lru 0.13.0` via `rquest 5.1.0`) don't
+  block PRs but stay visible.
+- **`workspace.package.rust-version` 1.85 → 1.88.** CI was already
+  on 1.88; the workspace metadata claimed 1.85 was supported when
+  CI never actually proved it. Synced to truth.
+- **5 `#[allow(dead_code)]` markers** on public API surface in
+  `crates/detect/src/waf_detect/rules.rs` dropped (the methods
+  are `pub use`-exported from the crate root; the allows were
+  hiding the wrong thing from clippy).
+- **`crates/oracle/src/test_url.rs`** orphan file deleted. URL
+  corpus salvaged into a real integration test
+  (`ssrf_loopback_bypass_corpus.rs`).
+
+### Changed — README: Burp Suite / Caido / mitmproxy chaining recipe
+
+- New "Burp Suite / Caido / mitmproxy chaining" section under
+  Operator reference. Documents the canonical
+  `Browser → Burp:8080 → wafrift-proxy:8181 → Target` layout,
+  explains the 8080 port collision (Burp owns 8080 by default;
+  pick a different port for wafrift-proxy), and shows the
+  upstream-proxy configuration for all three intercepting
+  proxies. Plus the `wafrift import-curl` no-chain workflow.
+
+### Changed — workspace housekeeping
+
+- **License files (`LICENSE-MIT`, `LICENSE-APACHE`) copied into
+  every crate directory** so each crates.io tarball ships its
+  own license texts. Compliance scanners that check per-crate
+  license presence no longer flag wafrift-* crates as
+  unlicensed.
+- **Vendored TOML rules re-synced** with the in-workspace
+  master copies (`rules/sql/operators.toml`, `rules/cmd/oracle.toml`,
+  `rules/detect/cloudfront.toml`, `rules/detect/fortigate.toml`
+  had drifted with 2026-05-10 audit notes only in the crate copies).
+- **Smoke-alarm encoding tests** in `crates/core/tests/encoding_depth.rs`
+  and `encoding_adversarial.rs` (12 sites) hardened to byte-
+  precise %-encoded character assertions with span-count and
+  pass-through checks.
+
+2926 / 2926 workspace tests green at v0.2.12.
 
 ## [0.2.11] — 2026-05-10
 
