@@ -118,7 +118,7 @@ impl RequestLogger {
 
 /// CLI arguments for the proxy binary.
 #[derive(Parser, Debug)]
-#[command(name = "wafrift-proxy", about = "WAF Evasion Proxy")]
+#[command(name = "wafrift-proxy", about = "WAF Evasion Proxy", version)]
 struct Args {
     /// Socket address to bind the proxy server. Examples: 127.0.0.1:8080, 0.0.0.0:8080, [`::1`]:8080.
     #[arg(long, default_value = "127.0.0.1:8080")]

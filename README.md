@@ -99,8 +99,8 @@ Other tools give you one trick: junk padding, header injection, smuggling, or a 
   optional managed-challenge solver that subscribes a chromiumoxide
   solver into wafrift's challenge flow. `wafrift-proxy --captchaforge`.
 - **`wafrift bypass-probe URL`** — Tsai-class differential vuln
-  finder. Fires 184+ probes (auth-bypass headers, path-routing
-  variants, method overrides) against a single URL or a `--paths-file`
+  finder. Fires 136 auth-bypass header probes
+  plus path-routing variants and HTTP method overrides against a single URL or a `--paths-file`
   list, classifies each response vs the baseline, reports HIGH /
   MEDIUM / LOW divergences with reproduce-it `curl` commands.
   Bounded-concurrency (`--concurrency 8` default) — 12 paths × ~190
@@ -109,8 +109,8 @@ Other tools give you one trick: junk padding, header injection, smuggling, or a 
 ## Earlier changes (v0.2.3)
 
 - **`wafrift bypass-probe URL`** — the Tsai-class differential vuln
-  finder. Fires 184+ probes (auth-bypass headers, path-routing
-  variants, method overrides) against a single URL or a `--paths-file`
+  finder. Fires 136 auth-bypass header probes
+  plus path-routing variants and HTTP method overrides against a single URL or a `--paths-file`
   list, classifies each response vs the baseline, reports HIGH /
   MEDIUM / LOW divergences with reproduce-it `curl` commands.
   Bounded-concurrency (`--concurrency 8` default) — 12 paths × ~190
@@ -442,7 +442,7 @@ Unknown selectors fail fast — no silent drops.
 For Tsai-class boundary-mismatch vulns (admin panel gated by WAF
 header rule, `X-Original-URL` rewrite, ProxyShell-style routing
 disagreement, IP-trust spoofing), point bypass-probe at the resource
-and let it fire 184+ probes:
+and let it fire the full 136-probe auth-bypass set plus path/method variants:
 
 ```bash
 # Single URL
