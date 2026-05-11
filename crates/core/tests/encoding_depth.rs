@@ -34,8 +34,13 @@ fn sql_classic_or_1_equals_1_double_url() {
 fn sql_union_select_url_encode() {
     let payload = "UNION SELECT username, password FROM users--";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(!result.is_empty());
-    assert!(!result.is_empty());
+    // Spaces and the comma in the payload must be %-encoded; alphanumerics
+    // pass through unchanged. A pure passthrough or empty return would
+    // miss every one of these assertions.
+    assert!(result.contains("%20"), "space must be %-encoded: {result}");
+    assert!(result.contains("%2C"), "comma must be %-encoded: {result}");
+    assert!(result.contains("UNION"), "alphanumerics pass through: {result}");
+    assert!(result.len() >= payload.len(), "URL encoding never shortens");
 }
 
 #[test]
@@ -97,8 +102,10 @@ fn sql_blind_boolean_url_encode() {
 fn sql_stacked_query_url_encode() {
     let payload = "'; DROP TABLE users;--";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(result.contains("%3B")); // semicolon
-    assert!(!result.is_empty());
+    assert!(result.contains("%3B"), "semicolon: {result}");
+    assert!(result.contains("%27"), "single quote: {result}");
+    assert!(result.contains("%20"), "space: {result}");
+    assert!(result.contains("DROP"), "keyword passes through: {result}");
 }
 
 #[test]
@@ -152,7 +159,9 @@ fn sql_information_schema_case_alt() {
 fn sql_group_by_url_encode() {
     let payload = "GROUP BY column HAVING 1=1";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(!result.is_empty());
+    assert!(result.contains("%20"), "space: {result}");
+    assert!(result.contains("%3D"), "equals sign: {result}");
+    assert!(result.contains("GROUP"), "keyword passes through: {result}");
 }
 
 #[test]
@@ -166,7 +175,13 @@ fn sql_order_by_union_whitespace() {
 fn sql_limit_offset_url_encode() {
     let payload = "LIMIT 1 OFFSET 0";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(!result.is_empty());
+    assert!(result.contains("%20"), "spaces between LIMIT/1/OFFSET/0: {result}");
+    assert!(result.contains("LIMIT"), "keyword passes through: {result}");
+    assert_eq!(
+        result.matches("%20").count(),
+        3,
+        "exactly 3 spaces in payload: {result}"
+    );
 }
 
 #[test]
@@ -224,8 +239,15 @@ fn sql_load_file_whitespace() {
 fn sql_if_statement_url_encode() {
     let payload = "IF(1=1, SLEEP(5), 0)";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(!result.is_empty());
-    assert!(result.contains("%28")); // (
+    assert!(result.contains("%28"), "open paren: {result}");
+    assert!(result.contains("%29"), "close paren: {result}");
+    assert!(result.contains("%3D"), "equals sign: {result}");
+    assert!(result.contains("%2C"), "comma: {result}");
+    assert_eq!(
+        result.matches("%28").count(),
+        2,
+        "two open parens in IF + SLEEP: {result}"
+    );
 }
 
 #[test]
@@ -247,7 +269,13 @@ fn sql_like_wildcard_html_entity() {
 fn sql_between_operator_url_encode() {
     let payload = "id BETWEEN 1 AND 100";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(!result.is_empty());
+    assert!(result.contains("%20"), "spaces: {result}");
+    assert!(result.contains("BETWEEN"), "keyword passes through: {result}");
+    assert_eq!(
+        result.matches("%20").count(),
+        4,
+        "exactly 4 spaces in payload: {result}"
+    );
 }
 
 #[test]
@@ -268,7 +296,14 @@ fn sql_all_any_some_whitespace() {
 fn sql_join_variants_url_encode() {
     let payload = "LEFT JOIN users ON a.id = b.id";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(!result.is_empty());
+    assert!(result.contains("%20"), "spaces between tokens: {result}");
+    assert!(result.contains("%3D"), "equals sign: {result}");
+    assert!(result.contains("LEFT") && result.contains("JOIN"), "keywords pass through: {result}");
+    assert_eq!(
+        result.matches("%20").count(),
+        6,
+        "exactly 6 spaces in payload: {result}"
+    );
 }
 
 #[test]
@@ -682,9 +717,11 @@ fn layered_unicode_then_url_sql() {
     let payload = "' OR 1=1--";
     let result =
         encoding::encode_layered(payload, &[Strategy::UnicodeEncode, Strategy::UrlEncode]).unwrap();
-    // Unicode escapes get URL-encoded - backslash becomes %5C
-    assert!(result.contains("%5C")); // \ is URL-encoded as %5C
-    assert!(!result.is_empty());
+    // Unicode escapes get URL-encoded - backslash becomes %5C, the "u" stays.
+    assert!(result.contains("%5C"), "backslash url-encoded: {result}");
+    assert!(result.contains("u0027"), "single quote unicode-escaped: {result}");
+    assert!(result.contains("u003D"), "equals sign unicode-escaped: {result}");
+    assert!(!result.contains('\''), "raw quote must not survive: {result}");
 }
 
 #[test]

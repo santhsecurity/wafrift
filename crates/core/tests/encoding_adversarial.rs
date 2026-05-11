@@ -221,10 +221,15 @@ fn null_byte_inject_no_dot() {
 fn overlong_utf8_skips_null() {
     let input = "\x00";
     let result = encoding::encode(input, Strategy::OverlongUtf8).unwrap();
-    // The overlong_utf8 function transforms non-alphanumeric ASCII chars
-    // \x00 is a control character (NUL) - is_ascii() returns true for it
-    // Check the actual behavior
-    assert!(!result.is_empty());
+    // overlong_utf8 maps non-alphanumeric ASCII to its 2-byte overlong form.
+    // For NUL specifically, the WAF-bypass-relevant artefact is a sequence
+    // starting with 0xC0 (illegal first byte that some lax decoders accept
+    // as the second leading byte of a 2-byte sequence). The exact strategy
+    // bytes can vary; what cannot is the fact that the output differs from
+    // the input AND that any output we emit is non-empty (encoding NUL must
+    // not silently drop it).
+    assert_ne!(result.as_bytes(), b"\x00", "overlong encoding must transform NUL, not pass it through");
+    assert!(!result.is_empty(), "NUL must produce some encoding, not be dropped");
 }
 
 #[test]
@@ -485,8 +490,12 @@ fn encode_layered_all_strategies() {
     let strategies = encoding::all_strategies();
     let input = "SELECT";
     let result = encoding::encode_layered(input, strategies).unwrap();
-    // Should not panic and produce some transformation
-    assert!(!result.is_empty());
+    // Layering every strategy must (a) not panic, (b) actually transform
+    // the input — passing through `SELECT` unchanged would be a silent
+    // pipeline break.
+    assert!(!result.is_empty(), "must produce output");
+    assert_ne!(result, input, "layered pipeline must transform input");
+    assert!(strategies.len() >= 2, "layered_combinations must drive >1 step");
 }
 
 #[test]
@@ -514,18 +523,33 @@ fn encode_layered_unicode_then_html() {
 #[test]
 fn layered_combinations_not_empty() {
     let combos = encoding::layered_combinations(2);
-    assert!(!combos.is_empty());
+    // The strategy enum has at least 5 base strategies; pairs (without
+    // self-pair) over 5 is 5*4 = 20. Whatever the exact count, expect
+    // a non-trivial fan-out, not just 1 or 0.
+    assert!(combos.len() >= 6, "expected multiple layered pairs, got {}", combos.len());
+    // Each entry must itself be a 2-strategy slice.
+    for combo in &combos {
+        assert_eq!(combo.len(), 2, "len-2 combinations: {combo:?}");
+        assert_ne!(combo[0], combo[1], "no self-pairs: {combo:?}");
+    }
 }
 
 #[test]
 fn layered_combinations_valid_pairs() {
     let combos = encoding::layered_combinations(2);
+    let input = "' UNION SELECT * FROM users --";
     for combo in combos {
         let (s1, s2) = (combo[0], combo[1]);
-        // Each combo should produce different results
-        let input = "' UNION SELECT * FROM users --";
         let layered = encoding::encode_layered(input, &[s1, s2]).unwrap();
-        assert!(!layered.is_empty());
+        // Real assertion: each layered transform must actually transform
+        // the input (a passthrough pair would silently break evasion). We
+        // also require the result to be non-empty (any empty output for a
+        // non-empty input is a contract bug).
+        assert!(!layered.is_empty(), "{s1:?} -> {s2:?} produced empty");
+        assert_ne!(
+            layered, input,
+            "{s1:?} -> {s2:?} passed through unchanged"
+        );
     }
 }
 
