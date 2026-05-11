@@ -97,11 +97,9 @@ struct BodyPatternRef {
 #[derive(Debug, Clone)]
 pub struct CompiledWafRule {
     pub name: String,
-    #[allow(dead_code)]
     pub vendor: String,
     pub confidence_threshold: f64,
     pub evasions: Vec<String>,
-    #[allow(dead_code)]
     pub source: String,
     pub signatures: Vec<CompiledSignature>,
 }
@@ -529,7 +527,6 @@ impl RuleEngine {
 
     /// Lookup evasion techniques for a detected WAF name.
     #[must_use]
-    #[allow(dead_code)]
     pub fn evasions_for(&self, name: &str) -> Vec<&str> {
         self.rules
             .get(name)
@@ -539,13 +536,11 @@ impl RuleEngine {
 
     /// Number of loaded rules.
     #[must_use]
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.rules.len()
     }
 
     #[must_use]
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
