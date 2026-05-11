@@ -495,6 +495,16 @@ fn load_gene_bank(path: &std::path::Path) -> PersistedGeneBank {
                     bank
                 }
                 Err(e) => {
+                    // Backward-compat: v0.1 gene-bank was a flat HashMap without
+                    // the schema wrapper. Don't discard a practitioner's saved
+                    // discovery just because they upgraded from an older build.
+                    if let Ok(flat) = serde_json::from_str::<HashMap<String, PersistedHostState>>(&s) {
+                        warn!(
+                            path = %path.display(),
+                            "loaded v0.1 gene-bank (flat HashMap); migrating to schema 1"
+                        );
+                        return PersistedGeneBank { schema: 1, hosts: flat };
+                    }
                     warn!(
                         path = %path.display(),
                         error = %e,
@@ -568,11 +578,16 @@ fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
     let tmp = path.with_extension(format!("json.tmp.{pid}.{nanos}"));
-    {
+    let write_result = (|| -> std::io::Result<()> {
         use std::io::Write;
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(json.as_bytes())?;
         f.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     std::fs::rename(&tmp, path)?;
     // Fsync parent directory so the rename is durable.
@@ -615,6 +630,16 @@ fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
             state.host_fifo.push_back(host);
         }
     }
+    // Enforce the same runtime cap that applies during request processing.
+    // A malicious or corrupted gene-bank with millions of hosts must not
+    // exhaust proxy RAM on startup.
+    while state.hosts.len() > 10_000 {
+        if let Some(oldest) = state.host_fifo.pop_front() {
+            state.hosts.remove(&oldest);
+        } else {
+            break;
+        }
+    }
     restored
 }
 
@@ -649,6 +674,12 @@ fn validate_args(args: &Args) -> Result<(), String> {
     {
         return Err(format!(
             "--escalation must be one of: light, medium, heavy. Got: {esc}"
+        ));
+    }
+    if args.max_evade_retries > 10 {
+        return Err(format!(
+            "--max-evade-retries must be <= 10, got {}. Values above 10 create per-request retry storms that degrade proxy performance.",
+            args.max_evade_retries
         ));
     }
     Ok(())
@@ -722,6 +753,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Err(msg) = validate_args(&args) {
+        eprintln!("{msg}");
         error!("{msg}");
         std::process::exit(1);
     }
@@ -1756,17 +1788,7 @@ async fn forward_wafrift_request(
         status_code = stealth_resp.status;
         let mut response_builder = Response::builder().status(stealth_resp.status);
         // Build a HashSet view of Connection header tokens for stripping.
-        let conn_resp: std::collections::HashSet<String> = stealth_resp
-            .headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("connection"))
-            .map(|(_, v)| {
-                v.split(',')
-                    .map(|t| t.trim().to_ascii_lowercase())
-                    .filter(|t| !t.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let conn_resp = collect_connection_header_names(&stealth_resp.headers);
         for (k, v) in &stealth_resp.headers {
             if should_strip_proxy_header(k, &conn_resp) {
                 continue;
@@ -2667,17 +2689,7 @@ async fn forward_passthrough(
             }
         };
         let mut response_builder = Response::builder().status(stealth_resp.status);
-        let conn_resp: std::collections::HashSet<String> = stealth_resp
-            .headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("connection"))
-            .map(|(_, v)| {
-                v.split(',')
-                    .map(|t| t.trim().to_ascii_lowercase())
-                    .filter(|t| !t.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let conn_resp = collect_connection_header_names(&stealth_resp.headers);
         for (k, v) in &stealth_resp.headers {
             if should_strip_proxy_header(k, &conn_resp) {
                 continue;
