@@ -1,10 +1,16 @@
-# Practitioner walkthrough — wafrift v0.2.1 against ModSecurity + OWASP CRS @ PL=4
+# Practitioner walkthrough — wafrift against ModSecurity + OWASP CRS @ PL=4
 
-Live session captured 2026-05-09 against the in-tree
-`wafrift-bench/targets/modsec-pl4` stack (ModSecurity 3 + OWASP CRS at
-the most aggressive paranoia level — strongest open-source WAF default
-deployment). Backend: `kennethreitz/httpbin`. Probe target:
+Live session captured **2026-05-09 with wafrift v0.2.1** against the
+in-tree `wafrift-bench/targets/modsec-pl4` stack (ModSecurity 3 + OWASP
+CRS at the most aggressive paranoia level — the strongest open-source
+WAF default deployment). Backend: `kennethreitz/httpbin`. Probe target:
 `http://127.0.0.1:18084/get?q=<payload>`.
+
+> **Snapshot note.** The numbers and commands captured here come from
+> v0.2.1 — the current release is v0.2.12. Every command in this
+> walkthrough still works (the CLI surface is stable since 0.2.0); the
+> bypass rates have only improved since (see the README's "Measured
+> bypass rates" table for the current corpus run).
 
 ## Setup
 
