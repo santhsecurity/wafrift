@@ -5,7 +5,26 @@
 use wafrift_types::Signal;
 
 /// Known GOAWAY reason strings that indicate WAF intervention.
-const WAF_GOAWAY_REASONS: &[&str] = &["ENHANCE_YOUR_CALM", "refused", "blocked", "waf"];
+/// Loaded from `rules/h2/goaway.toml` so the community can add new
+/// vendor identifiers without recompiling.
+#[derive(serde::Deserialize)]
+struct GoawayRules {
+    reason: Vec<GoawayReason>,
+}
+#[derive(serde::Deserialize)]
+struct GoawayReason {
+    phrase: String,
+}
+
+fn waf_goaway_reasons() -> &'static [String] {
+    static CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        let raw = include_str!("../rules/h2/goaway.toml");
+        let parsed: GoawayRules =
+            toml::from_str(raw).expect("rules/h2/goaway.toml must parse");
+        parsed.reason.into_iter().map(|r| r.phrase).collect()
+    })
+}
 
 /// Classify an HTTP/2 GOAWAY frame reason string.
 ///
@@ -14,7 +33,7 @@ const WAF_GOAWAY_REASONS: &[&str] = &["ENHANCE_YOUR_CALM", "refused", "blocked",
 #[must_use]
 pub fn classify_h2_goaway(reason: &str) -> Option<Signal> {
     let lower = reason.to_ascii_lowercase();
-    if WAF_GOAWAY_REASONS
+    if waf_goaway_reasons()
         .iter()
         .any(|r| lower.contains(&r.to_ascii_lowercase()))
     {

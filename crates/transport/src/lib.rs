@@ -15,6 +15,28 @@
 //!     let response = client.get("https://target.com/?q=' OR 1=1--").await;
 //! }
 //! ```
+//!
+//! # Examples
+//!
+//! Sync helpers used inside the retry loop and ratelimit logic — no
+//! HTTP needed, so these run in `cargo test --doc` against any
+//! environment:
+//!
+//! ```
+//! use wafrift_transport::{is_waf_block, is_waf_block_status};
+//!
+//! // Status-only fast path (the body may not have arrived yet).
+//! assert!(is_waf_block_status(403));
+//! assert!(is_waf_block_status(429));
+//! assert!(is_waf_block_status(503));
+//! assert!(!is_waf_block_status(200));
+//! assert!(!is_waf_block_status(404), "404 is not a WAF block");
+//!
+//! // Body-aware version: a 200 page that says "Forbidden by WAF" is
+//! // still a block.
+//! assert!(is_waf_block(200, b"Access denied by Web Application Firewall"));
+//! assert!(!is_waf_block(200, b"<html><body>Welcome</body></html>"));
+//! ```
 
 pub mod challenge;
 mod client;

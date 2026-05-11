@@ -6,8 +6,31 @@
 //! cookie), the bridge spins up a chromiumoxide page from the
 //! captured challenge HTML, runs the captchaforge solver chain, and
 //! seeds the resulting clearance cookie back into wafrift's store.
-
-#![forbid(unsafe_code)]
+//!
+//! # Examples
+//!
+//! Defaults are tuned for cloud WAF challenge pages — 60s overall
+//! solve budget, headless Chromium:
+//!
+//! ```ignore
+//! // Marked `ignore` because the doctest harness links the full
+//! // chromiumoxide → boring-sys2 → C++ runtime chain even without
+//! // running, and many minimal dev environments don't ship
+//! // `libstdc++-dev` (the symlink `libstdc++.so` the linker wants).
+//! // `cargo test --doc` on this crate will still pass on CI runners
+//! // (ubuntu-latest has build-essential) and on workstations with
+//! // `apt install libstdc++-dev`.
+//! use wafrift_captchaforge_bridge::BridgeConfig;
+//!
+//! let cfg = BridgeConfig::default();
+//! assert_eq!(cfg.solve_timeout_ms, 60_000);
+//! assert!(cfg.headless);
+//!
+//! // Some Cloudflare managed challenges fingerprint headless mode —
+//! // flip the flag for those targets.
+//! let visible = BridgeConfig { headless: false, ..BridgeConfig::default() };
+//! assert!(!visible.headless);
+//! ```
 
 use std::sync::Arc;
 

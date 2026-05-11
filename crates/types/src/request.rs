@@ -11,6 +11,25 @@ use serde::{Deserialize, Serialize};
 ///
 /// Using an enum prevents typos like `"POSTT"` and makes exhaustive
 /// matching possible. The `Custom` variant preserves extensibility.
+///
+/// # Examples
+///
+/// Parse from a header line and route on the variant:
+///
+/// ```
+/// use wafrift_types::request::Method;
+///
+/// let m: Method = "POST".parse().unwrap();
+/// assert_eq!(m, Method::Post);
+///
+/// // Lowercase parses fine — case-insensitive.
+/// let m: Method = "delete".parse().unwrap();
+/// assert_eq!(m, Method::Delete);
+///
+/// // Anything not in the standard set becomes `Custom`.
+/// let m: Method = "PURGE".parse().unwrap();
+/// assert_eq!(m, Method::Custom("PURGE".to_string()));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Method {
@@ -100,6 +119,26 @@ impl From<String> for Method {
 /// Use the provided constructors ([`Request::get`], [`Request::post`], etc.)
 /// and builder methods ([`Request::header`], [`Request::with_body`]).
 /// Direct struct construction is prevented by `#[non_exhaustive]`.
+///
+/// # Examples
+///
+/// Build a GET request, attach a header, then a JSON POST body:
+///
+/// ```
+/// use wafrift_types::request::{Method, Request};
+///
+/// let r = Request::get("https://example.com/api")
+///     .header("Accept", "application/json");
+/// assert_eq!(r.method(), &Method::Get);
+/// assert_eq!(r.url(), "https://example.com/api");
+/// assert_eq!(r.headers().len(), 1);
+/// assert_eq!(r.get_header("Accept"), Some("application/json"));
+/// assert!(!r.has_body());
+///
+/// let r = Request::post("https://example.com/login", b"u=admin&p=admin".to_vec());
+/// assert_eq!(r.method(), &Method::Post);
+/// assert_eq!(r.body_bytes().unwrap(), b"u=admin&p=admin");
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Request {

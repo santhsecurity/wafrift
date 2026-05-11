@@ -5,6 +5,36 @@
 //! so existing consumers (`wafrift-cli`, `wafrift-transport`, integration
 //! tests) can continue using `wafrift_core::*`.
 //!
+//! # Examples
+//!
+//! Use the umbrella to drive a payload through three subsystems
+//! without depending on each subcrate by name:
+//!
+//! ```
+//! use wafrift_core::{encoding, grammar};
+//!
+//! // Classify, mutate, encode — three lego-blocks, one façade.
+//! let p = "' OR 1=1 --";
+//! assert_eq!(grammar::classify(p), grammar::PayloadType::Sql);
+//!
+//! let mutations = grammar::mutate(p, 3);
+//! assert!(!mutations.is_empty());
+//!
+//! let encoded = encoding::encode(p, encoding::Strategy::UrlEncode).unwrap();
+//! assert!(encoded.contains("%27"));
+//! ```
+//!
+//! Use the re-exported types to build a request without naming
+//! `wafrift_types`:
+//!
+//! ```
+//! use wafrift_core::{Method, Request};
+//!
+//! let r = Request::get("https://example.com").header("X-Test", "1");
+//! assert_eq!(r.method(), &Method::Get);
+//! assert_eq!(r.headers().len(), 1);
+//! ```
+//!
 //! # Crate structure
 //!
 //! | Crate                   | Purpose                                       |

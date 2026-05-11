@@ -8,6 +8,33 @@
 //! This module fulfills the P3 "Full discovery (CT, historical DNS, leaks)" roadmap item.
 //! It queries public APIs like crt.sh to discover subdomains that might point directly
 //! to origin infrastructure, bypassing the edge WAF.
+//!
+//! # Examples
+//!
+//! Filter a candidate IP list to drop known CDN/WAF edge addresses —
+//! the IPs left over are origin candidates worth probing directly:
+//!
+//! ```
+//! use wafrift_recon::{filter_origin_ips, is_edge_ip};
+//!
+//! // Cloudflare, Fastly, CloudFront edge prefixes are recognised.
+//! assert!(is_edge_ip("104.16.0.1"));     // Cloudflare
+//! assert!(is_edge_ip("151.101.1.1"));    // Fastly
+//! assert!(is_edge_ip("13.32.0.1"));      // CloudFront
+//!
+//! // Public origin IPs and RFC1918 ranges are not edge.
+//! assert!(!is_edge_ip("8.8.8.8"));
+//! assert!(!is_edge_ip("10.0.0.1"));
+//!
+//! let candidates = vec![
+//!     "104.16.0.1".to_string(),    // Cloudflare — drop
+//!     "10.0.0.1".to_string(),      // origin — keep
+//!     "151.101.0.1".to_string(),   // Fastly — drop
+//!     "192.168.1.1".to_string(),   // origin — keep
+//! ];
+//! let origins = filter_origin_ips(&candidates);
+//! assert_eq!(origins, vec!["10.0.0.1", "192.168.1.1"]);
+//! ```
 
 use serde::Deserialize;
 use std::time::Duration;

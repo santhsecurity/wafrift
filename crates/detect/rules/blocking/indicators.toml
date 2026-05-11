@@ -1,0 +1,61 @@
+# WAF block-page body indicators.
+#
+# Phrases that, when found in a response body (case-insensitive),
+# strongly suggest a WAF interception page.
+#
+# Community contributions welcome — append a new `[[indicator]]`
+# stanza. The Aho-Corasick scanner handles any number of patterns
+# in a single O(n) pass, so adding to the list costs nothing at
+# scan time.
+
+[[indicator]]
+phrase = "access denied"
+description = "Generic block phrase used by ModSecurity, Imperva, and many cloud WAFs"
+
+[[indicator]]
+phrase = "blocked"
+description = "Catch-all (must run after status-code check to avoid 404 page false positives)"
+
+[[indicator]]
+phrase = "forbidden"
+description = "HTTP-403-aligned phrase common to nginx error pages and WAF templates"
+
+[[indicator]]
+phrase = "captcha"
+description = "Indicates a managed challenge — Cloudflare, hCaptcha, reCAPTCHA"
+
+[[indicator]]
+phrase = "challenge"
+description = "Cloudflare/Akamai managed-challenge JS interstitials"
+
+[[indicator]]
+phrase = "request denied"
+description = "Imperva default block-page text"
+
+[[indicator]]
+phrase = "security policy"
+description = "ModSecurity / OWASP CRS default phrasing"
+
+[[indicator]]
+phrase = "not acceptable"
+description = "HTTP-406 phrasing — used by mod_security to obscure 403"
+
+[[indicator]]
+phrase = "rate limit"
+description = "Generic 429 / WAF rate-limit page text"
+
+[[indicator]]
+phrase = "too many requests"
+description = "RFC 6585 status text leaked into body"
+
+[[indicator]]
+phrase = "waf"
+description = "Self-identifying block page"
+
+[[indicator]]
+phrase = "firewall"
+description = "Self-identifying block page (often verbose error templates)"
+
+[[indicator]]
+phrase = "request blocked"
+description = "Cloudflare and Imperva block-page templates"

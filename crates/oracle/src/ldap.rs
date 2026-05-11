@@ -15,25 +15,37 @@ use crate::traits::PayloadOracle;
 /// LDAP injection oracle that validates filter structure preservation.
 pub struct LdapOracle;
 
-/// LDAP filter operators that control boolean logic.
-const LDAP_OPERATORS: &[&str] = &["|", "&", "!"];
+/// LDAP grammar — loaded from `rules/ldap/grammar.toml`. Tier-B
+/// community-extensible: append `[[operator]]` / `[[attribute]]`
+/// stanzas in the TOML, no Rust changes required.
+#[derive(serde::Deserialize)]
+struct LdapGrammarRules {
+    operator: Vec<LdapOperator>,
+    attribute: Vec<LdapAttribute>,
+}
+#[derive(serde::Deserialize)]
+struct LdapOperator {
+    symbol: String,
+}
+#[derive(serde::Deserialize)]
+struct LdapAttribute {
+    name: String,
+}
 
-/// Common LDAP attribute names used in injections.
-const LDAP_ATTRIBUTES: &[&str] = &[
-    "uid=",
-    "cn=",
-    "dn=",
-    "dc=",
-    "ou=",
-    "o=",
-    "mail=",
-    "objectClass=",
-    "objectclass=",
-    "memberOf=",
-    "userPassword=",
-    "sn=",
-    "givenName=",
-];
+fn ldap_rules() -> &'static LdapGrammarRules {
+    static CACHE: std::sync::OnceLock<LdapGrammarRules> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        let raw = include_str!("../rules/ldap/grammar.toml");
+        toml::from_str(raw).expect("rules/ldap/grammar.toml must parse")
+    })
+}
+
+fn ldap_operators() -> &'static [LdapOperator] {
+    &ldap_rules().operator
+}
+fn ldap_attributes() -> &'static [LdapAttribute] {
+    &ldap_rules().attribute
+}
 
 /// LDAP filter wildcards for substring searches.
 const LDAP_WILDCARD: &str = "*";
@@ -48,10 +60,12 @@ fn has_ldap_structure(payload: &str) -> bool {
     let has_parentheses = paren_open_count > 0 && paren_close_count > 0;
 
     // Check for LDAP operators
-    let has_operator = LDAP_OPERATORS.iter().any(|op| payload.contains(*op));
+    let has_operator = ldap_operators().iter().any(|op| payload.contains(&op.symbol));
 
     // Check for attribute=value patterns
-    let has_attribute = LDAP_ATTRIBUTES.iter().any(|attr| lower.contains(attr));
+    let has_attribute = ldap_attributes()
+        .iter()
+        .any(|attr| lower.contains(&attr.name));
 
     // Check for wildcards
     let has_wildcard = payload.contains(LDAP_WILDCARD);

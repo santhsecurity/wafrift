@@ -2,6 +2,32 @@
 
 use aho_corasick::AhoCorasick;
 use once_cell::sync::Lazy;
+use serde::Deserialize;
+
+/// Block-page body indicators loaded from `rules/blocking/indicators.toml`.
+///
+/// Tier-B community-extensible data — the Aho-Corasick scanner is O(n)
+/// in body length regardless of the rule count, so contributors can
+/// keep appending to the TOML file at zero scan-time cost.
+#[derive(Deserialize)]
+struct BlockingRules {
+    indicator: Vec<BlockingIndicator>,
+}
+
+#[derive(Deserialize)]
+struct BlockingIndicator {
+    phrase: String,
+    #[serde(default)]
+    #[allow(dead_code)] // Schema field for human readers of the TOML; not consumed at runtime.
+    description: String,
+}
+
+static BLOCK_INDICATORS: Lazy<Vec<String>> = Lazy::new(|| {
+    let raw = include_str!("../../rules/blocking/indicators.toml");
+    let parsed: BlockingRules =
+        toml::from_str(raw).expect("rules/blocking/indicators.toml must parse");
+    parsed.indicator.into_iter().map(|i| i.phrase).collect()
+});
 
 /// Block-indicator patterns compiled into a single Aho-Corasick automaton.
 ///
@@ -10,29 +36,9 @@ use once_cell::sync::Lazy;
 static BLOCK_AC: Lazy<AhoCorasick> = Lazy::new(|| {
     AhoCorasick::builder()
         .ascii_case_insensitive(true)
-        .build(BLOCK_INDICATORS)
+        .build(BLOCK_INDICATORS.iter().map(String::as_str))
         .expect("block indicators are valid AC patterns")
 });
-
-/// Fixed set of block-page indicators.
-///
-/// Extending this list is free — the AC automaton handles any count
-/// with the same single-pass scan.
-const BLOCK_INDICATORS: &[&str] = &[
-    "access denied",
-    "blocked",
-    "forbidden",
-    "captcha",
-    "challenge",
-    "request denied",
-    "security policy",
-    "not acceptable",
-    "rate limit",
-    "too many requests",
-    "waf",
-    "firewall",
-    "request blocked",
-];
 
 /// Returns `true` when an HTTP response looks like a WAF block page.
 ///

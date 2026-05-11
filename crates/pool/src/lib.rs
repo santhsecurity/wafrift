@@ -1,4 +1,28 @@
 //! Proxy pool rotation for wafrift. Provides round-robin HTTP/SOCKS5 proxy rotation.
+//!
+//! # Examples
+//!
+//! ```
+//! use wafrift_pool::ProxyPool;
+//!
+//! // Empty input → Ok(None) so the caller can branch into the
+//! // no-proxy path without an error.
+//! assert!(ProxyPool::new(&[]).unwrap().is_none());
+//!
+//! // Round-robin rotation across two proxies.
+//! let pool = ProxyPool::new(&[
+//!     "http://127.0.0.1:8080".to_string(),
+//!     "socks5://127.0.0.1:9050".to_string(),
+//! ]).unwrap().unwrap();
+//! assert_eq!(pool.len(), 2);
+//! assert_eq!(pool.next_url().as_str(), "http://127.0.0.1:8080/");
+//! assert_eq!(pool.next_url().as_str(), "socks5://127.0.0.1:9050");
+//! assert_eq!(pool.next_url().as_str(), "http://127.0.0.1:8080/");
+//!
+//! // A malformed URL fails fast with the offending URL named.
+//! let err = ProxyPool::new(&["not-a-url".to_string()]).unwrap_err();
+//! assert!(err.to_string().contains("not-a-url"));
+//! ```
 
 use reqwest::Url;
 use std::sync::Arc;

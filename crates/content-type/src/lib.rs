@@ -5,6 +5,37 @@
 //!
 //! Reference: "WAFFLED: Exploiting Parsing Discrepancies to Bypass WAFs"
 //!            Akhavani et al., IEEE S&P 2025
+//!
+//! # Examples
+//!
+//! Generate every Content-Type variant from a raw form body:
+//!
+//! ```
+//! use wafrift_content_type::generate_variants_from_body;
+//!
+//! let body = b"user=admin&pass=' OR 1=1 --";
+//! let variants = generate_variants_from_body(body);
+//! assert!(variants.len() >= 5, "expect multiple Content-Type shapes");
+//! for v in &variants {
+//!     assert!(!v.body.is_empty());
+//!     assert!(!v.content_type.is_empty());
+//! }
+//! ```
+//!
+//! `unique_boundary` takes the user-controlled values to be embedded
+//! and returns a random boundary that does not appear inside any of
+//! them — preventing the body from looking like its own delimiter
+//! and protecting against attacker-supplied boundary collision:
+//!
+//! ```
+//! use wafrift_content_type::unique_boundary;
+//!
+//! let a = unique_boundary(&["admin", "' OR 1=1 --"]);
+//! let b = unique_boundary(&["admin", "' OR 1=1 --"]);
+//! assert_ne!(a, b, "boundaries are RNG-generated per call");
+//! assert!(!a.contains(' '));
+//! assert!(!a.contains("admin"));
+//! ```
 
 mod content_type;
 

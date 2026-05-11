@@ -1,0 +1,39 @@
+# LDAP injection oracle taxonomy.
+#
+# Operators control filter boolean logic; attributes are common
+# directory schema names that show up in LDAP injection payloads.
+# Append `[[operator]]` / `[[attribute]]` rows to extend without code.
+
+[[operator]]
+symbol = "|"
+[[operator]]
+symbol = "&"
+[[operator]]
+symbol = "!"
+
+[[attribute]]
+name = "uid="
+[[attribute]]
+name = "cn="
+[[attribute]]
+name = "dn="
+[[attribute]]
+name = "dc="
+[[attribute]]
+name = "ou="
+[[attribute]]
+name = "o="
+[[attribute]]
+name = "mail="
+[[attribute]]
+name = "objectClass="
+[[attribute]]
+name = "objectclass="
+[[attribute]]
+name = "memberOf="
+[[attribute]]
+name = "userPassword="
+[[attribute]]
+name = "sn="
+[[attribute]]
+name = "givenName="
