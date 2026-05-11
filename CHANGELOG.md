@@ -4,6 +4,80 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.13] — 2026-05-11
+
+### Fixed — proxy adversarial sweep (6 defects)
+
+- **CRITICAL `crates/proxy/src/mitm.rs:214`** — leaf certs for IP
+  literals (`https://127.0.0.1`, `https://[::1]`) used dNSName SAN
+  instead of iPAddress SAN, causing browser TLS errors on every MITM
+  of a private IP. Fixed: detect IP literals in `leaf_params_for` and
+  push `SanType::IpAddress`. Locked with `mitm_ip_san.rs` (135 LOC,
+  IPv4 + IPv6 + DNS-name negative twin).
+- **HIGH `crates/proxy/src/main.rs:1759`** — stealth upstream response
+  path parsed only the first `Connection` header, leaking hop-by-hop
+  tokens from subsequent `Connection` headers to the client. Fixed:
+  replace inline `.find()` with `collect_connection_header_names()`
+  in new `crates/proxy/src/hop_by_hop.rs`.
+- **HIGH `crates/proxy/src/main.rs:479`** — gene-bank loader silently
+  discarded pre-schema-v0.1 flat-HashMap files, destroying all saved
+  discovery on upgrade. Fixed: backward-compat fallback that
+  deserializes flat HashMap and wraps it.
+- **HIGH `crates/proxy/src/main.rs:598`** — `restore_gene_bank`
+  bypassed the 10K host memory cap, allowing a malicious gene-bank
+  to exhaust proxy RAM on startup. Fixed: evict oldest hosts until
+  `len <= 10_000` after restore.
+- **MEDIUM `crates/proxy/src/main.rs:626`** — `--max-evade-retries`
+  had no upper bound; arbitrary u32 values created per-request retry
+  storms that pinned CPU. Fixed: cap at 10 in `validate_args` with
+  actionable error message.
+- **MEDIUM `crates/proxy/src/tui/state.rs:382`** — `State::hosts`
+  grew without bound, leaking memory during long engagements with
+  high host cardinality. Fixed: cap at `MAX_TUI_HOSTS = 4096` and
+  evict lowest-sent on overflow.
+- **LOW `crates/proxy/src/main.rs:570`** — `save_gene_bank` left
+  tempfiles behind when disk-full or I/O errors aborted the flush.
+  Fixed: wrap write in a closure; delete tempfile on any error.
+- New tests: `evade_retry_cap.rs` (53 LOC), `mitm_ip_san.rs` (135 LOC),
+  `proxy_tests.rs` (179 LOC inline) — proving + adversarial pairs for
+  every defect.
+
+### Already shipped between 0.2.12 and 0.2.13 (recap)
+
+The following landed on main between the 0.2.12 release and this bump
+and were credited in earlier in-line patches; recapped here so the
+version bump's CHANGELOG is comprehensive:
+
+- **CRITICAL Cloudflare false-block fix** (commit `fbedf30`,
+  `crates/transport/src/signal.rs`): `SoftBlock` now requires a body-
+  marker hit, not just a vendor-identifying header. Pre-fix every
+  Cloudflare-fronted 200 OK was classified as "blocked" — Pages,
+  Workers, `example.com` itself all showed `Cloudflare 5 SENT 5
+  BLOCKED 0 BYPASSED 0.0%` while every request had returned 200.
+  Locked with `cloudflare_200_not_blocked.rs` (3 tests).
+- **TUI premium UX** (commit `fbedf30`): selected menu item now
+  renders with `▶ ` glyph + REVERSED video (the original
+  `fg(Black)/bg(Cyan)/Bold` styling produced no observable terminal
+  escapes — pentesters had to read the right pane to figure out what
+  was selected). Right pane became per-action (Scan / Gene Bank /
+  Evade / Detect / Probe). New `?` modal help overlay. Footer
+  keybind row expanded to 4 chips, every chip bold for legibility.
+- **`wafrift-proxy --version`** (commit `6bdd2da`): clap derive's
+  `version` attribute was missing; trivial fix.
+- **README probe-count truth** (commit `6bdd2da`): "184+ probes" →
+  "136 auth-bypass header probes plus path-routing variants and
+  HTTP method overrides" in three places.
+- **Manpage drift gate** (commit `e6d3b3b`): `manpage_in_sync.rs`
+  regression test catches `docs/man/wafrift.1` drift before merge —
+  the manpage shipped stale at three previous releases.
+
+### Tests
+
+- 283 / 283 wafrift-proxy tests green (was 280 before the proxy
+  adversarial sweep).
+- Workspace test suite remains green at the level previously verified
+  for 0.2.12.
+
 ## [0.2.12] — 2026-05-10
 
 ### Changed — workspace polish + organization sweep

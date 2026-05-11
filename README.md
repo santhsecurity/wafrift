@@ -22,6 +22,32 @@
 
 Other tools give you one trick: junk padding, header injection, smuggling, or a static tamper list. WafRift is the union: encoding, grammar-aware mutation, content-type switching, request smuggling, and TLS/HTTP fingerprint rotation. The CLI exposes every encoding strategy and the grammar layer as fine-grained `--only`/`--exclude` selectors; the rest run as part of the default pipeline. Per-host toggle persistence and a Burp Suite control panel are tracked in the [roadmap](docs/GAP_CLOSURE_ROADMAP.md). Turn the engine loose and a search loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses the target WAF and persists winning pipelines to a per-WAF **gene bank** so the next scan starts with zero discovery phase.
 
+## What's new (v0.2.13)
+
+- **Proxy adversarial sweep — 6 defects fixed.**
+  - **CRITICAL** `crates/proxy/src/mitm.rs:214` — leaf certs for IP
+    literals (`https://127.0.0.1`, `https://[::1]`) used dNSName SAN
+    instead of iPAddress SAN, causing browser TLS errors on every
+    MITM of a private IP. Fixed: `iPAddress` SAN for IP literals.
+  - **HIGH** `crates/proxy/src/main.rs:1759` — stealth response path
+    parsed only the first `Connection` header, leaking hop-by-hop
+    tokens from later `Connection` headers downstream.
+  - **HIGH** `crates/proxy/src/main.rs:479` — gene-bank loader
+    silently discarded pre-schema-v0.1 flat-HashMap files,
+    destroying all saved discovery on upgrade.
+  - **HIGH** `crates/proxy/src/main.rs:598` — `restore_gene_bank`
+    bypassed the 10K host memory cap; malicious gene-banks could
+    exhaust proxy RAM at startup.
+  - **MEDIUM** `crates/proxy/src/main.rs:626` — `--max-evade-retries`
+    had no upper bound; per-request retry storms pinned CPU.
+  - **MEDIUM** `crates/proxy/src/tui/state.rs:382` — TUI host list
+    grew without bound during long engagements.
+  - **LOW** `crates/proxy/src/main.rs:570` — `save_gene_bank` left
+    tempfiles behind on disk-full / I/O errors.
+  - +367 LOC of new tests across `evade_retry_cap.rs`,
+    `mitm_ip_san.rs`, `proxy_tests.rs`. wafrift-proxy now 283 / 283
+    green.
+
 ## What's new (v0.2.12)
 
 - **Pentester acceptance sweep.** Two fixes that matter the moment
@@ -235,9 +261,9 @@ mv wafrift wafrift-proxy /usr/local/bin/
 ### From crates.io
 
 ```bash
-cargo install wafrift-cli --version '>=0.2.11'
+cargo install wafrift-cli --version '>=0.2.13'
 # Optional: TLS impersonation (rquest 5.x + BoringSSL, adds boring-sys C build)
-cargo install wafrift-proxy --version '>=0.2.11' --features tls-impersonate
+cargo install wafrift-proxy --version '>=0.2.13' --features tls-impersonate
 ```
 
 This installs the `wafrift` and `wafrift-proxy` binaries. Requires a
