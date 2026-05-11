@@ -472,6 +472,7 @@ fn run_interactive() -> ExitCode {
 
     // State.
     let mut selected_menu = 0_usize;
+    let mut show_help = false;
     let menu_items = [
         (
             "🔍  Scan",
@@ -558,20 +559,28 @@ fn run_interactive() -> ExitCode {
                 .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
                 .split(chunks[1]);
 
-            // Menu.
+            // Menu. Use a ▶ prefix on the selected row plus REVERSED
+            // video so the selection is visible on every terminal —
+            // bg/fg color overrides alone don't render reliably under
+            // some emulators (notably when a row's background hasn't
+            // been pre-painted), so the prefix + reverse pair gives
+            // the operator a visible cursor regardless.
             let items: Vec<ListItem> = menu_items
                 .iter()
                 .enumerate()
                 .map(|(i, (name, _))| {
-                    let style = if i == selected_menu {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD)
+                    let (prefix, style) = if i == selected_menu {
+                        (
+                            "▶ ",
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                                .add_modifier(Modifier::REVERSED),
+                        )
                     } else {
-                        Style::default().fg(Color::White)
+                        ("  ", Style::default().fg(Color::White))
                     };
-                    ListItem::new(Line::from(Span::styled(format!("  {name}  "), style)))
+                    ListItem::new(Line::from(Span::styled(format!("{prefix}{name}  "), style)))
                 })
                 .collect();
             let menu = List::new(items).block(
@@ -584,31 +593,80 @@ fn run_interactive() -> ExitCode {
 
             // Info panel.
             let (_, desc) = menu_items[selected_menu];
-            let info_text = vec![
+            // Per-action context block — shows real usage hints
+            // tailored to the highlighted entry, not the same Gene
+            // Bank stats glued to every panel.
+            let mut info_text = vec![
                 Line::from(""),
                 Line::from(Span::styled(
                     format!("  {desc}"),
-                    Style::default().fg(Color::Yellow),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  ── Gene Bank ──",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
                 )),
-                Line::from(Span::styled(
-                    format!("  {gene_bank_info}"),
-                    Style::default().fg(Color::DarkGray),
-                )),
                 Line::from(""),
-                Line::from(Span::styled(
-                    "  Press Enter to launch · q to quit",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                )),
             ];
+            let (heading, body): (&str, Vec<&str>) = match selected_menu {
+                0 => (
+                    "─ Scan example ─",
+                    vec![
+                        "wafrift scan \\",
+                        "    --target https://api.example.com/login \\",
+                        "    --payload \"' OR 1=1 --\" \\",
+                        "    --param q  --level heavy",
+                    ],
+                ),
+                1 => (
+                    "─ Gene Bank ─",
+                    vec![
+                        gene_bank_info.as_str(),
+                        "wafrift bank list                    # show every stored WAF",
+                        "wafrift bank export <waf> -o pack    # share a winning genome",
+                    ],
+                ),
+                2 => (
+                    "─ Evade example ─",
+                    vec![
+                        "wafrift evade --payload \"' OR 1=1 --\" --level heavy",
+                        "wafrift evade --quiet --payload \"<script>\" | jq '.'",
+                    ],
+                ),
+                3 => (
+                    "─ Detect example ─",
+                    vec![
+                        "wafrift detect --status 403 \\",
+                        "    --headers 'Server: cloudflare' \\",
+                        "    --headers 'CF-Ray: abc123-LHR'",
+                    ],
+                ),
+                4 => (
+                    "─ Probe example ─",
+                    vec![
+                        "wafrift probe                # full differential probe set",
+                        "wafrift probe --quick        # smaller set for fast iteration",
+                    ],
+                ),
+                _ => ("", vec![]),
+            };
+            info_text.push(Line::from(Span::styled(
+                format!("  {heading}"),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            for line in &body {
+                info_text.push(Line::from(Span::styled(
+                    format!("  {line}"),
+                    Style::default().fg(Color::Gray),
+                )));
+            }
+            info_text.push(Line::from(""));
+            info_text.push(Line::from(Span::styled(
+                "  Enter  launch  ·  ?  show all keybinds  ·  q  quit",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
             let info = Paragraph::new(info_text).block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -619,11 +677,37 @@ fn run_interactive() -> ExitCode {
 
             // ── Footer ──
             let footer = Paragraph::new(Line::from(vec![
-                Span::styled(" ↑↓ ", Style::default().fg(Color::Black).bg(Color::Cyan)),
+                Span::styled(
+                    " ↑↓ / j k ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Navigate  "),
-                Span::styled(" Enter ", Style::default().fg(Color::Black).bg(Color::Cyan)),
-                Span::raw(" Select  "),
-                Span::styled(" q ", Style::default().fg(Color::Black).bg(Color::Red)),
+                Span::styled(
+                    " Enter ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" Launch  "),
+                Span::styled(
+                    " ? ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" Help  "),
+                Span::styled(
+                    " q / Esc ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Quit  "),
             ]))
             .block(
@@ -632,6 +716,60 @@ fn run_interactive() -> ExitCode {
                     .border_style(Style::default().fg(Color::DarkGray)),
             );
             frame.render_widget(footer, chunks[2]);
+
+            // Help overlay — modal popup, only when show_help is set.
+            if show_help {
+                use ratatui::layout::Rect;
+                let area = frame.area();
+                let pop_w = 60.min(area.width.saturating_sub(4));
+                let pop_h = 16.min(area.height.saturating_sub(4));
+                let pop_x = (area.width.saturating_sub(pop_w)) / 2;
+                let pop_y = (area.height.saturating_sub(pop_h)) / 2;
+                let popup = Rect::new(pop_x, pop_y, pop_w, pop_h);
+                frame.render_widget(ratatui::widgets::Clear, popup);
+                let help_lines = vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Keyboard shortcuts",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(""),
+                    Line::from("    ↑ / k         Move selection up"),
+                    Line::from("    ↓ / j         Move selection down"),
+                    Line::from("    Enter         Launch the selected action"),
+                    Line::from("    ?             Toggle this help"),
+                    Line::from("    q / Esc       Quit"),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Tip: every action prints the exact CLI",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    Line::from(Span::styled(
+                        "  command — paste it into your shell to repeat.",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Press ? again to dismiss.",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::ITALIC),
+                    )),
+                ];
+                let help = Paragraph::new(help_lines).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Help ")
+                        .border_style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                );
+                frame.render_widget(help, popup);
+            }
         });
 
         // Handle input.
@@ -643,6 +781,15 @@ fn run_interactive() -> ExitCode {
                 continue;
             }
             match key.code {
+                KeyCode::Char('?') => {
+                    show_help = !show_help;
+                    continue;
+                }
+                _ if show_help => {
+                    // Any other key dismisses help.
+                    show_help = false;
+                    continue;
+                }
                 KeyCode::Char('q') | KeyCode::Esc => break,
                 KeyCode::Up | KeyCode::Char('k') => {
                     selected_menu = selected_menu.saturating_sub(1);

@@ -228,25 +228,34 @@ impl ResponseProfileDb {
             };
         }
 
-        // Score each profile against the response
+        // Score each profile against the response. Track header-marker
+        // hits separately from body-marker hits: a Server: cloudflare
+        // header on a benign 200 OK page does NOT mean Cloudflare
+        // blocked the request — it just means the site sits behind
+        // Cloudflare. Soft-block must require a body marker hit
+        // (high-confidence "block page text in body") on top of the
+        // vendor identification.
         let mut best_match: Option<(usize, &ResponseProfile)> = None;
+        let mut best_body_hits = 0usize;
 
         for profile in &self.profiles {
             let mut score = 0usize;
+            let mut body_hits = 0usize;
 
             // Status code match
             if profile.block_status_codes.contains(&status) {
                 score += 2;
             }
 
-            // Body marker matches
+            // Body marker matches (high-confidence — block-page text)
             for marker in &profile.body_markers {
                 if body_str.contains(&marker.to_ascii_lowercase()) {
-                    score += 3; // body markers are high-confidence
+                    score += 3;
+                    body_hits += 1;
                 }
             }
 
-            // Header marker matches
+            // Header marker matches (vendor identification only)
             for hm in &profile.header_markers {
                 let header_match = headers.iter().any(|(k, v)| {
                     if !k.eq_ignore_ascii_case(&hm.name) {
@@ -269,16 +278,27 @@ impl ResponseProfileDb {
 
             if score > 0 && best_match.is_none_or(|(best_score, _)| score > best_score) {
                 best_match = Some((score, profile));
+                best_body_hits = body_hits;
             }
         }
 
         // Determine classification
         let classification = if let Some((_, profile)) = best_match {
             if profile.block_status_codes.contains(&status) {
+                // Hard block: status code matches the vendor's known
+                // block status (403 / 503 / etc.).
                 BlockClass::HardBlock
-            } else {
-                // Matched body/header markers but status is 200 → soft block
+            } else if best_body_hits > 0 {
+                // Soft block: status is 200/3xx but the body carries
+                // an explicit WAF block-page marker (e.g. a CF
+                // challenge interstitial served as 200).
                 BlockClass::SoftBlock
+            } else {
+                // Vendor identified by header alone — every Cloudflare-
+                // hosted 200 OK has `Server: cloudflare`. That is NOT
+                // a block; treat as Pass so per-host counters stay
+                // honest.
+                BlockClass::Pass
             }
         } else {
             // No profile matched — fall back to legacy status-based detection
