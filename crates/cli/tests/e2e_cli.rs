@@ -139,6 +139,119 @@ fn evade_all_levels() {
     }
 }
 
+/// Regression for TODO 2026-05-17: `--only encoding/base64/standard` returned
+/// "No variants generated" at the default --level medium because the
+/// medium-level pool was the first 6 strategies sorted by aggressiveness
+/// and base64 sat past that cut. Explicit --only must override the level pool.
+#[test]
+fn evade_only_overrides_level_pool() {
+    let (code, stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "SELECT * FROM users WHERE id=1",
+        "--only",
+        "encoding/base64/standard",
+    ]);
+    assert_eq!(
+        code, 0,
+        "evade --only encoding/base64/standard should succeed: stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("Base64Encode") || stdout.contains("encoding::Base64Encode"),
+        "output should contain a base64 variant: stdout={stdout}"
+    );
+}
+
+#[test]
+fn evade_stdin_reads_payload() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift"))
+        .args([
+            "evade", "--stdin", "--only", "encoding/base64/standard",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn wafrift");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"piped_payload_value")
+        .unwrap();
+    let out = child.wait_with_output().expect("wait");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "exit 0; stdout={stdout}");
+    assert!(
+        stdout.contains("Base64Encode") || stdout.contains("encoding::Base64Encode"),
+        "stdout should contain base64 variant: {stdout}"
+    );
+}
+
+#[test]
+fn evade_stdin_and_payload_conflict() {
+    let (code, _stdout, stderr) = wafrift(&[
+        "evade", "--payload", "x", "--stdin",
+    ]);
+    assert_ne!(code, 0, "must reject --payload + --stdin together");
+    assert!(
+        stderr.to_lowercase().contains("conflict") || stderr.to_lowercase().contains("cannot"),
+        "expected clap conflict message: {stderr}"
+    );
+}
+
+#[test]
+fn evade_neither_payload_nor_stdin_errors() {
+    let (code, _stdout, stderr) = wafrift(&["evade"]);
+    assert_ne!(code, 0, "must require one of --payload / --stdin");
+    assert!(
+        stderr.to_lowercase().contains("required")
+            || stderr.to_lowercase().contains("missing"),
+        "expected required-arg message: {stderr}"
+    );
+}
+
+#[test]
+fn evade_explain_shows_per_technique_lines() {
+    let (code, stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "SELECT 1",
+        "--only",
+        "encoding/base64/standard",
+        "--explain",
+    ]);
+    assert_eq!(code, 0, "exit 0; stderr={stderr}");
+    assert!(
+        stdout.contains("Explain") && stdout.contains("encoding/base64/standard"),
+        "explain block should list base64 path: {stdout}"
+    );
+}
+
+#[test]
+fn evade_target_context_skips_inapplicable_with_reason() {
+    let (code, stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "SELECT 1",
+        "--only",
+        "encoding/compression/gzip",
+        "--target-context",
+        "header",
+        "--explain",
+    ]);
+    // gzip-only + header context => no variants. The error must explain why,
+    // not just say "No variants generated."
+    assert_ne!(code, 0, "gzip in a header is not applicable; should fail");
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("not applicable") || combined.contains("compression"),
+        "must surface applicability reason: {combined}"
+    );
+}
+
 // ── Detect subcommand ──────────────────────────────────────────────────
 
 #[test]

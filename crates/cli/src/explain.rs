@@ -17,10 +17,6 @@ pub enum Outcome {
     NotApplicableToContext(&'static str),
     /// Encoding returned an error for this payload (e.g. invalid UTF-8).
     EncodingError(String),
-    /// Strategy was in the pool but the level cap kept it from running.
-    NotInLevelPool,
-    /// Strategy filtered out by `--exclude` or absent from `--only`.
-    FilteredOut,
 }
 
 #[derive(Debug)]
@@ -95,14 +91,6 @@ impl ExplainTrace {
                 Outcome::EncodingError(msg) => {
                     println!("  {} {path}: encoding failed — {msg}", "✗".red())
                 }
-                Outcome::NotInLevelPool => println!(
-                    "  {} {path}: above current --level threshold (use a higher level or --only)",
-                    "·".dimmed()
-                ),
-                Outcome::FilteredOut => println!(
-                    "  {} {path}: filtered out by --only/--exclude",
-                    "·".dimmed()
-                ),
             }
         }
     }
@@ -121,8 +109,6 @@ impl ExplainTrace {
                         ("not_applicable", json!({ "reason": why }))
                     }
                     Outcome::EncodingError(msg) => ("error", json!({ "reason": msg })),
-                    Outcome::NotInLevelPool => ("not_in_level_pool", json!({})),
-                    Outcome::FilteredOut => ("filtered_out", json!({})),
                 };
                 json!({
                     "technique": strategy_path(e.strategy),
