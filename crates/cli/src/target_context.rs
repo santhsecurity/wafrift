@@ -43,7 +43,7 @@ impl TargetContext {
 /// decides.
 pub fn context_applicability(s: Strategy, ctx: TargetContext) -> Result<(), &'static str> {
     use Strategy::{ChunkedSplit, DeflateEncode, GzipEncode, NullByte, ParameterPollution};
-    use TargetContext::{Body, Cookie, Header, QueryParam};
+    use TargetContext::{Cookie, Header, QueryParam};
     match (s, ctx) {
         (GzipEncode | DeflateEncode, Header | Cookie | QueryParam) => Err(
             "compression produces binary output; HTTP text contexts can't carry it directly (use Content-Encoding on a body)",
@@ -51,8 +51,12 @@ pub fn context_applicability(s: Strategy, ctx: TargetContext) -> Result<(), &'st
         (NullByte, Header | Cookie | QueryParam) => Err(
             "NUL bytes are stripped or rejected by HTTP header / URL parsers",
         ),
-        (ParameterPollution, Body | Header | Cookie) => Err(
-            "parameter pollution operates on the query string (`?a=1&a=2`) — N/A in this context",
+        // Body intentionally NOT included: parameter-pollution output (`a=1&b=2`)
+        // is valid in `application/x-www-form-urlencoded` bodies. Whether it's
+        // useful in a given body subtype (JSON, multipart, raw) is the user's
+        // call — we don't model body subtypes, so we permit and let them decide.
+        (ParameterPollution, Header | Cookie) => Err(
+            "parameter pollution operates on `key=val&key=val` syntax — headers/cookies don't parse that way",
         ),
         (ChunkedSplit, Header | Cookie | QueryParam) => Err(
             "chunked-split is a body transfer encoding — N/A in this context",
@@ -72,12 +76,18 @@ mod tests {
     }
 
     #[test]
-    fn parameter_pollution_only_in_query() {
+    fn parameter_pollution_allowed_in_query_and_body() {
+        // Body is OK because form-urlencoded bodies use `a=1&b=2` syntax —
+        // we don't model body subtypes, so we leave the judgment to the user.
         assert!(
             context_applicability(Strategy::ParameterPollution, TargetContext::QueryParam).is_ok()
         );
+        assert!(context_applicability(Strategy::ParameterPollution, TargetContext::Body).is_ok());
         assert!(
-            context_applicability(Strategy::ParameterPollution, TargetContext::Body).is_err()
+            context_applicability(Strategy::ParameterPollution, TargetContext::Header).is_err()
+        );
+        assert!(
+            context_applicability(Strategy::ParameterPollution, TargetContext::Cookie).is_err()
         );
     }
 

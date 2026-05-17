@@ -148,7 +148,8 @@ struct EvadeArgs {
     payload: Option<String>,
 
     /// Read the payload from stdin instead of `--payload`. Useful for
-    /// piping (`echo 'X' | wafrift evade --stdin ...`).
+    /// piping (`echo 'X' | wafrift evade --stdin ...`). Refuses to run
+    /// on an interactive terminal so it doesn't hang silently.
     #[arg(long)]
     stdin: bool,
 
@@ -977,7 +978,13 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             if let Some(t) = trace.as_ref() {
                 body["explain"] = t.to_json()["explain"].clone();
             }
-            println!("{body}");
+            if let Some(ref path) = args.output {
+                if let Err(e) = std::fs::write(path, format!("{body}\n")) {
+                    eprintln!("failed to write evade output to {}: {e}", path.display());
+                }
+            } else {
+                println!("{body}");
+            }
         } else {
             eprintln!(
                 "{}",
@@ -1085,10 +1092,15 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
 
 /// Resolve the evade payload from either `--payload` or `--stdin`.
 /// Clap's `required_unless_present` + `conflicts_with` enforces that
-/// exactly one is supplied at the CLI layer; this just performs the read.
+/// exactly one is supplied at the CLI layer; this validates the value.
 fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
     if args.stdin {
-        use std::io::Read;
+        use std::io::{IsTerminal, Read};
+        if io::stdin().is_terminal() {
+            return Err(
+                "--stdin requires a pipe (e.g. `echo 'X' | wafrift evade --stdin ...`); refusing to wait on an interactive terminal".to_string(),
+            );
+        }
         let mut buf = String::new();
         io::stdin()
             .read_to_string(&mut buf)
@@ -1099,9 +1111,14 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
         }
         Ok(trimmed)
     } else {
-        args.payload
+        let raw = args
+            .payload
             .clone()
-            .ok_or_else(|| "no payload supplied (use --payload or --stdin)".to_string())
+            .ok_or_else(|| "no payload supplied (use --payload or --stdin)".to_string())?;
+        if raw.is_empty() {
+            return Err("--payload is empty; pass a non-empty string".to_string());
+        }
+        Ok(raw)
     }
 }
 
