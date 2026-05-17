@@ -277,9 +277,30 @@ fn evade_explain_with_encoding_only() {
 }
 
 #[test]
-fn evade_parameter_pollution_rejected_in_body_context() {
-    // Body context: parameter pollution is meaningless. With explain, the
-    // user must see the technique-specific reason rather than a bare error.
+fn evade_parameter_pollution_rejected_in_header_context() {
+    // Headers don't parse `a=1&a=2` syntax — parameter pollution is N/A there.
+    // (Body is intentionally allowed: form-urlencoded bodies use the same syntax.)
+    let (code, stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "X",
+        "--only",
+        "encoding/parameter-pollution",
+        "--target-context",
+        "header",
+        "--explain",
+    ]);
+    assert_ne!(code, 0, "should fail when only inapplicable strategy is selected");
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("parameter pollution") || combined.contains("headers/cookies"),
+        "must surface parameter-pollution applicability reason: {combined}"
+    );
+}
+
+#[test]
+fn evade_parameter_pollution_works_in_body_context() {
+    // Form-urlencoded bodies use `a=1&b=2` — parameter pollution applies.
     let (code, stdout, stderr) = wafrift(&[
         "evade",
         "--payload",
@@ -288,14 +309,63 @@ fn evade_parameter_pollution_rejected_in_body_context() {
         "encoding/parameter-pollution",
         "--target-context",
         "body",
-        "--explain",
     ]);
-    assert_ne!(code, 0, "should fail when only inapplicable strategy is selected");
-    let combined = format!("{stdout}{stderr}");
+    assert_eq!(code, 0, "parameter pollution must be applicable in body: stderr={stderr}");
     assert!(
-        combined.contains("parameter pollution") || combined.contains("query string"),
-        "must surface parameter-pollution applicability reason: {combined}"
+        stdout.contains("ParameterPollute") || stdout.contains("=1&X"),
+        "should produce a polluted variant: {stdout}"
     );
+}
+
+#[test]
+fn evade_rejects_empty_payload() {
+    let (code, _stdout, stderr) = wafrift(&["evade", "--payload", ""]);
+    assert_ne!(code, 0, "empty --payload must error");
+    assert!(
+        stderr.contains("empty"),
+        "stderr should mention emptiness: {stderr}"
+    );
+}
+
+#[test]
+fn evade_stdin_rejects_interactive_terminal() {
+    // No stdin pipe → reading would hang. Must detect and error.
+    let (code, _stdout, stderr) = wafrift(&["evade", "--stdin", "--only", "encoding/base64/standard"]);
+    assert_ne!(code, 0, "--stdin on a TTY-less non-pipe must error, not hang");
+    // In CI / our test harness stdin is closed (no TTY, no pipe), so the
+    // is_terminal check is false and the read_to_string returns empty —
+    // either path must produce a clear error, not hang.
+    assert!(
+        stderr.contains("stdin") || stderr.contains("empty") || stderr.contains("pipe"),
+        "stderr should explain the stdin failure: {stderr}"
+    );
+}
+
+#[test]
+fn evade_empty_variants_writes_error_to_output_file() {
+    use std::fs;
+    let tmp = std::env::temp_dir().join("wafrift_evade_empty_test.json");
+    let _ = fs::remove_file(&tmp);
+    let (code, _stdout, _stderr) = wafrift(&[
+        "--quiet",
+        "evade",
+        "--payload",
+        "X",
+        "--only",
+        "encoding/compression/gzip",
+        "--target-context",
+        "header",
+        "--explain",
+        "--output",
+        tmp.to_str().unwrap(),
+    ]);
+    assert_ne!(code, 0, "no-variants path should exit non-zero");
+    let body = fs::read_to_string(&tmp).expect("output file should be written even on empty-variants");
+    assert!(
+        body.contains("no variants generated") && body.contains("explain"),
+        "output should contain the JSON error blob with explain: {body}"
+    );
+    let _ = fs::remove_file(&tmp);
 }
 
 #[test]
