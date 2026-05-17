@@ -7,7 +7,7 @@
 use std::thread;
 use std::time::Duration;
 use wafrift_transport::challenge::{
-    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, SolveAction, classify,
+    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, SolveAction,
     classify_with_status, dispatch,
 };
 
@@ -22,7 +22,7 @@ fn classify_caps_body_scan_at_64k() {
     huge.extend_from_slice(prefix);
     huge.extend(std::iter::repeat_n(b'X', 16 * 1024 * 1024));
     // Should still classify on the prefix without OOMing on the suffix.
-    let kind = classify(&huge, &[]);
+    let kind = classify_with_status(&huge, &[], 403);
     assert_eq!(kind, ChallengeKind::Turnstile);
 }
 
@@ -34,7 +34,7 @@ fn classify_keyword_after_cap_is_not_seen() {
     let mut body = vec![b' '; CLASSIFY_BODY_SCAN_CAP + 64];
     let kw = b"hcaptcha";
     body.extend_from_slice(kw);
-    let kind = classify(&body, &[]);
+    let kind = classify_with_status(&body, &[], 403);
     assert_eq!(
         kind,
         ChallengeKind::Unknown,
@@ -47,7 +47,7 @@ fn classify_keyword_inside_cap_still_works() {
     // Negative twin: the keyword must still be detected when it's
     // inside the cap.
     let body = b"<html>turnstile</html>";
-    assert_eq!(classify(body, &[]), ChallengeKind::Turnstile);
+    assert_eq!(classify_with_status(body, &[], 403), ChallengeKind::Turnstile);
 }
 
 // ── MEDIUM: host case + port normalization ─────────────────────
@@ -203,8 +203,11 @@ fn classify_status_zero_is_back_compat_scan() {
     // The original `classify` (no status param) must still work
     // exactly as before for callers that haven't been updated.
     let body = b"<html>turnstile</html>";
-    assert_eq!(classify(body, &[]), ChallengeKind::Turnstile);
-    // Internally classify(body, headers) === classify_with_status(body, headers, 0).
+    assert_eq!(
+        classify_with_status(body, &[], 0),
+        ChallengeKind::Turnstile,
+        "back-compat: status=0 sentinel must scan regardless"
+    );
     assert_eq!(
         classify_with_status(body, &[], 0),
         ChallengeKind::Turnstile,

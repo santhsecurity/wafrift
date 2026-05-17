@@ -248,11 +248,20 @@ impl ResponseProfileDb {
             }
 
             // Body marker matches (high-confidence — block-page text)
+            // Audit (2026-05-10): cap body-marker score at +3 per profile
+            // to prevent double-counting when multiple markers match the
+            // same body text (e.g. "Sucuri" is a substring of
+            // "Access Denied - Sucuri", or "support ID" is a substring of
+            // "Your support ID is").
+            let mut body_matched = false;
             for marker in &profile.body_markers {
                 if body_str.contains(&marker.to_ascii_lowercase()) {
-                    score += 3;
+                    body_matched = true;
                     body_hits += 1;
                 }
+            }
+            if body_matched {
+                score += 3;
             }
 
             // Header marker matches (vendor identification only)
@@ -302,7 +311,9 @@ impl ResponseProfileDb {
             }
         } else {
             // No profile matched — fall back to legacy status-based detection
-            if matches!(status, 403 | 406 | 451 | 503) {
+            // Audit (2026-05-10): removed 451 (legal takedown) from the block
+            // list. 451 is NOT a WAF block — it's a legal/geo restriction.
+            if matches!(status, 403 | 406 | 503) {
                 BlockClass::HardBlock
             } else if legacy_body_block_check(&body_str) {
                 BlockClass::SoftBlock
@@ -328,14 +339,15 @@ impl ResponseProfileDb {
 /// Legacy body-based block detection for responses that don't match
 /// any loaded profile. Same indicators as the original `is_waf_block`.
 fn legacy_body_block_check(body_lower: &str) -> bool {
+    // Audit (2026-05-10): removed high-FP generic terms "forbidden",
+    // "security check", "firewall". A benign tutorial about HTTP status
+    // codes, a security audit page, or a networking guide must NOT score
+    // as a block. Keep only explicit block-page language.
     let indicators = [
         "access denied",
         "request blocked",
-        "forbidden",
-        "security check",
         "attention required",
         "captcha",
-        "firewall",
         "blocked by",
         "malicious request",
         "automated request",
@@ -422,6 +434,45 @@ mod tests {
         let db = ResponseProfileDb::empty();
         let sig = db.classify(403, &[], b"Forbidden");
         assert_eq!(sig.classification, BlockClass::HardBlock);
+    }
+
+    #[test]
+    fn classify_legacy_451_is_pass_not_block() {
+        // Audit (2026-05-10): 451 is legal takedown, not a WAF block.
+        let db = ResponseProfileDb::empty();
+        let sig = db.classify(451, &[], b"Unavailable For Legal Reasons");
+        assert_eq!(sig.classification, BlockClass::Pass);
+    }
+
+    #[test]
+    fn classify_legacy_forbidden_in_tutorial_not_blocked() {
+        // Audit (2026-05-10): benign tutorial containing "Forbidden"
+        // must NOT soft-block when no profile matched.
+        let db = ResponseProfileDb::empty();
+        let body = b"<h1>HTTP Status Codes</h1><p>403 Forbidden means refusal.</p>";
+        let sig = db.classify(200, &[], body);
+        assert_eq!(sig.classification, BlockClass::Pass);
+    }
+
+    #[test]
+    fn classify_legacy_firewall_tutorial_not_blocked() {
+        let db = ResponseProfileDb::empty();
+        let body = b"<h1>Network Firewalls</h1><p>A firewall inspects traffic.</p>";
+        let sig = db.classify(200, &[], body);
+        assert_eq!(sig.classification, BlockClass::Pass);
+    }
+
+    #[test]
+    fn classify_double_counting_body_markers_capped() {
+        // F5 profile has "support ID" and "Your support ID is".
+        // Both match the same text; score must cap at +3, not +6.
+        let db = ResponseProfileDb::compiled_in();
+        let body = b"Your support ID is 12345";
+        let sig = db.classify(200, &[], body);
+        // With the cap, the F5 profile gets score 3 (body) not 6.
+        // It should still match because no other profile scores higher.
+        assert_eq!(sig.matched_waf.as_deref(), Some("F5 BIG-IP ASM"));
+        assert_eq!(sig.classification, BlockClass::SoftBlock);
     }
 
     #[test]

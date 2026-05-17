@@ -315,7 +315,9 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, Option<&'
             let form_decoded = value.replace('+', " ");
             let decoded = percent_decode_bytes(&form_decoded);
             let (mutated, label) = strategy.apply_bytes_with_label(&decoded);
-            if mutated.as_bytes() != value.as_bytes() {
+            let is_mutation = mutated.as_bytes() != value.as_bytes();
+            let is_honest_noop = label.contains("unimplemented");
+            if is_mutation || is_honest_noop {
                 // If different inputs in the same query produce
                 // different labels (one downgraded, others not),
                 // PREFER the downgraded one — operators care most
@@ -638,5 +640,27 @@ mod tests {
         let (out, _) = mutate_url("/p?key=b64==", &c);
         // First `=` is the separator; "b64==" is the value
         assert!(out.starts_with("/p?key="));
+    }
+
+    // ── HPP stub (NOT YET IMPLEMENTED) ────────────────────────
+
+    #[test]
+    fn hpp_strategy_is_honest_no_op() {
+        // The Hpp variant is architecturally stubbed — it operates on
+        // values but real HPP needs query-pair-level mutation. Verify
+        // the honest no-op: value passes through unchanged and the
+        // technique log reports `url:hpp_unimplemented`.
+        let c = cfg(UrlStrategy::Hpp, false);
+        let (out, t) = mutate_url("/p?q=test", &c);
+        assert_eq!(out, "/p?q=test", "HPP stub must pass value through");
+        assert!(
+            t.contains(&"url:hpp_unimplemented"),
+            "stub must report url:hpp_unimplemented, got {t:?}"
+        );
+    }
+
+    #[test]
+    fn hpp_strategy_label_is_stable() {
+        assert_eq!(UrlStrategy::Hpp.label(), "url:hpp");
     }
 }

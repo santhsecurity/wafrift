@@ -27,8 +27,14 @@ async fn test_evasion_client_creation() {
 async fn test_is_waf_block_status() {
     assert!(is_waf_block_status(403), "403 should be considered a block");
     assert!(is_waf_block_status(406), "406 should be considered a block");
-    assert!(is_waf_block_status(429), "429 should be considered a block");
-    assert!(is_waf_block_status(451), "451 should be considered a block");
+    assert!(
+        !is_waf_block_status(429),
+        "429 is rate-limit, not a block — engine must back off"
+    );
+    assert!(
+        !is_waf_block_status(451),
+        "451 is legal takedown, not a block — evasion cannot bypass law"
+    );
     assert!(is_waf_block_status(503), "503 should be considered a block");
 
     assert!(!is_waf_block_status(200), "200 should not be a block");
@@ -93,9 +99,9 @@ async fn test_evasion_client_mocked_server_get() {
 async fn test_evasion_client_mocked_server_waf_block() {
     let mock_server = MockServer::start().await;
 
-    // Simulate a WAF that blocks all requests with a 403
+    // Simulate a WAF that blocks all requests with a 403 + explicit block body
     Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Access Denied"))
         .mount(&mock_server)
         .await;
 
@@ -112,7 +118,7 @@ async fn test_evasion_client_mocked_server_waf_block() {
 
     assert!(
         result.was_blocked,
-        "403 WAF response should be classified as blocked"
+        "403 + block-body WAF response should be classified as blocked"
     );
     assert_eq!(result.attempts, 3, "Should exhaust max_attempts");
 }

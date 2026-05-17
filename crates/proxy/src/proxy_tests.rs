@@ -879,9 +879,12 @@ fn ffuf_404_with_akamai_reference_not_blocked() {
 #[test]
 fn ffuf_200_with_same_body_is_blocked() {
     // Same body on 200 SHOULD still be flagged (real WAF block page).
+    // Uses "access denied" — an explicit block-page marker retained
+    // after the 2026-05-10 audit that removed high-FP terms like
+    // "forbidden" to avoid false-positives on benign content.
     assert!(is_waf_block(
         200,
-        b"Forbidden - you cannot access this resource"
+        b"Access Denied - you cannot access this resource"
     ));
 }
 
@@ -1307,7 +1310,7 @@ fn save_gene_bank_cleans_up_tempfile_on_error() {
         .filter(|e| {
             e.file_name()
                 .to_str()
-                .map_or(false, |s| s.contains(".json.tmp."))
+                .is_some_and(|s| s.contains(".json.tmp."))
         })
         .collect();
     assert!(
@@ -1317,6 +1320,7 @@ fn save_gene_bank_cleans_up_tempfile_on_error() {
     );
 
     // Restore permissions for cleanup.
+    #[allow(clippy::permissions_set_readonly_false)]
     perms.set_readonly(false);
     let _ = std::fs::set_permissions(&dir, perms);
     let _ = std::fs::remove_dir_all(&dir);
@@ -1342,7 +1346,7 @@ fn save_gene_bank_leaves_no_tempfile_on_success() {
         .filter(|e| {
             e.file_name()
                 .to_str()
-                .map_or(false, |s| s.contains(".json.tmp."))
+                .is_some_and(|s| s.contains(".json.tmp."))
         })
         .collect();
     assert!(

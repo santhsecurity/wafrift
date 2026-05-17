@@ -75,6 +75,18 @@ fn json_string_null_byte_escaped() {
 }
 
 #[test]
+fn json_string_emoji_passes_through() {
+    // Characters above U+FFFF are valid in JSON strings as raw UTF-8.
+    let out = encode_in_context(
+        "😀".as_bytes(),
+        Strategy::CaseAlternation,
+        InjectionContext::JsonString,
+    )
+    .unwrap();
+    assert_eq!(out, "😀");
+}
+
+#[test]
 fn json_string_with_url_encode_strategy() {
     // URL encoding inside JSON string should still be valid JSON
     let out = encode_in_context(b"a b", Strategy::UrlEncode, InjectionContext::JsonString).unwrap();

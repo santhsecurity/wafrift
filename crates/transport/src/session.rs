@@ -132,3 +132,109 @@ pub fn inject_csrf(request: &mut Request, token: &str, location: CsrfInjectionLo
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_jar_missing_file_returns_empty() {
+        let tmp = std::env::temp_dir().join("wafrift_test_nonexistent_jar_12345.txt");
+        let _ = std::fs::remove_file(&tmp);
+        let jar = load_jar(&tmp).unwrap();
+        // Jar is empty — we can't inspect it, but loading didn't panic.
+        let _ = jar;
+    }
+
+    #[test]
+    fn load_jar_parses_cookie_line() {
+        let tmp = std::env::temp_dir().join("wafrift_test_jar_12345.txt");
+        std::fs::write(&tmp, "session=abc123 | https://example.com/\n").unwrap();
+        let jar = load_jar(&tmp).unwrap();
+        let _ = jar;
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn load_jar_skips_comments_and_empty_lines() {
+        let tmp = std::env::temp_dir().join("wafrift_test_jar_comments_12345.txt");
+        std::fs::write(
+            &tmp,
+            "# comment\n\nfoo=bar | https://example.com/\n# another comment\n",
+        )
+        .unwrap();
+        let jar = load_jar(&tmp).unwrap();
+        let _ = jar;
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn load_jar_invalid_format_errors() {
+        let tmp = std::env::temp_dir().join("wafrift_test_jar_bad_12345.txt");
+        std::fs::write(&tmp, "badline\n").unwrap();
+        let result = load_jar(&tmp);
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn save_jar_creates_file_with_header() {
+        let tmp = std::env::temp_dir().join("wafrift_test_jar_save_12345.txt");
+        let _ = std::fs::remove_file(&tmp);
+        let jar = Jar::default();
+        save_jar(&jar, &tmp).unwrap();
+        let contents = std::fs::read_to_string(&tmp).unwrap();
+        assert!(contents.contains("wafrift cookie jar"));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn extract_csrf_finds_token() {
+        let re = regex::Regex::new(r#"name="csrf" value="([^"]+)""#).unwrap();
+        assert_eq!(
+            extract_csrf(r#"<input name="csrf" value="tok123">"#, &re).unwrap(),
+            "tok123"
+        );
+    }
+
+    #[test]
+    fn extract_csrf_missing_returns_error() {
+        let re = regex::Regex::new(r#"name="csrf" value="([^"]+)""#).unwrap();
+        assert!(extract_csrf("no token here", &re).is_err());
+    }
+
+    #[test]
+    fn inject_csrf_into_header() {
+        let mut req = Request::get("https://example.com/");
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Header);
+        assert!(req.headers.contains(&("X-CSRF-Token".to_string(), "tok123".to_string())));
+    }
+
+    #[test]
+    fn inject_csrf_into_query_no_existing() {
+        let mut req = Request::get("https://example.com/");
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Query);
+        assert_eq!(req.url, "https://example.com/?csrf_token=tok123");
+    }
+
+    #[test]
+    fn inject_csrf_into_query_with_existing() {
+        let mut req = Request::get("https://example.com/?id=1");
+        inject_csrf(&mut req, "tok 123", CsrfInjectionLocation::Query);
+        assert!(req.url.contains("&csrf_token=tok%20123"));
+    }
+
+    #[test]
+    fn inject_csrf_into_empty_body() {
+        let mut req = Request::post("https://example.com/", b"");
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body);
+        assert_eq!(req.body, Some(b"csrf_token=tok123".to_vec()));
+    }
+
+    #[test]
+    fn inject_csrf_into_existing_body() {
+        let mut req = Request::post("https://example.com/", b"id=1");
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body);
+        assert_eq!(req.body, Some(b"id=1&csrf_token=tok123".to_vec()));
+    }
+}

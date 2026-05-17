@@ -154,12 +154,19 @@ pub(crate) fn equality_alternatives() -> &'static [String] {
 }
 
 /// Extract the first single-quoted string value from a payload.
+///
+/// Correctly skips backslash-escaped quotes (`'It\'s'`).
 pub(crate) fn extract_quoted_string(payload: &str) -> Option<String> {
     let chars: Vec<char> = payload.chars().collect();
     let mut start = None;
 
     for (index, ch) in chars.iter().copied().enumerate() {
         if ch != '\'' {
+            continue;
+        }
+
+        // Skip escaped quotes: \' does not open/close a string.
+        if index > 0 && chars[index - 1] == '\\' {
             continue;
         }
 

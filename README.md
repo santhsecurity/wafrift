@@ -4,6 +4,8 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Crates.io](https://img.shields.io/crates/v/wafrift-cli)](https://crates.io/crates/wafrift-cli)
 
+![WafRift Demo](wafrift-demo.gif)
+
 > Part of the [Santh](https://santh.dev) security research ecosystem.
 
 > **Status: BETA.** WafRift is under active development and has **not been

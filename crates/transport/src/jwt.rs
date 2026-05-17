@@ -82,3 +82,103 @@ pub fn manipulate(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_token() -> String {
+        // header: {"alg":"HS256","typ":"JWT"}
+        // payload: {"sub":"123"}
+        // sig: dummy
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.dummy".to_string()
+    }
+
+    #[test]
+    fn manipulate_rejects_malformed_token() {
+        let result = manipulate("not.a.jwt", &JwtManipulation::StripAlg, None);
+        assert!(matches!(result, Err(JwtError::InvalidToken { .. })));
+    }
+
+    #[test]
+    fn manipulate_rejects_two_part_token() {
+        let result = manipulate("eyJhbGc.a", &JwtManipulation::StripAlg, None);
+        assert!(matches!(result, Err(JwtError::InvalidToken { .. })));
+    }
+
+    #[test]
+    fn strip_alg_sets_none() {
+        let out = manipulate(&valid_token(), &JwtManipulation::StripAlg, None).unwrap();
+        let parts: Vec<&str> = out.split('.').collect();
+        assert_eq!(parts.len(), 3);
+        let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[0])
+            .unwrap();
+        let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
+        assert_eq!(header["alg"], "none");
+    }
+
+    #[test]
+    fn hs256_with_key_rejects_missing_key() {
+        let result = manipulate(&valid_token(), &JwtManipulation::Hs256WithKey, None);
+        assert!(matches!(result, Err(JwtError::MissingKey)));
+    }
+
+    #[test]
+    fn hs256_with_key_changes_alg() {
+        let out = manipulate(
+            &valid_token(),
+            &JwtManipulation::Hs256WithKey,
+            Some(b"secret"),
+        )
+        .unwrap();
+        let parts: Vec<&str> = out.split('.').collect();
+        let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[0])
+            .unwrap();
+        let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
+        assert_eq!(header["alg"], "HS256");
+    }
+
+    #[test]
+    fn hs256_rejects_none_alg() {
+        let none_token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjMifQ.dummy";
+        let result = manipulate(none_token, &JwtManipulation::Hs256WithKey, Some(b"secret"));
+        assert!(matches!(result, Err(JwtError::UnsupportedAlgorithm { .. })));
+    }
+
+    #[test]
+    fn jwk_embed_adds_jwk() {
+        let jwk = r#"{"kty":"RSA","n":"abc"}"#;
+        let out = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed { jwk: jwk.into() },
+            None,
+        )
+        .unwrap();
+        let parts: Vec<&str> = out.split('.').collect();
+        let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[0])
+            .unwrap();
+        let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
+        assert_eq!(header["jwk"]["kty"], "RSA");
+    }
+
+    #[test]
+    fn jwk_embed_invalid_json_becomes_null() {
+        let out = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed {
+                jwk: "not json".into(),
+            },
+            None,
+        )
+        .unwrap();
+        let parts: Vec<&str> = out.split('.').collect();
+        let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[0])
+            .unwrap();
+        let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
+        assert!(header["jwk"].is_null());
+    }
+}

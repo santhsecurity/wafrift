@@ -45,7 +45,11 @@ impl EvasionResponse {
 /// retry loop where consuming the body would prevent forwarding).
 #[must_use]
 pub fn is_waf_block_status(status: u16) -> bool {
-    matches!(status, 403 | 406 | 429 | 451 | 503)
+    // Audit (2026-05-10): removed 429 (rate-limit) and 451 (legal takedown).
+    // Rate-limit is NOT a technique failure — the engine must back off, not
+    // escalate evasion. 451 is "Unavailable For Legal Reasons" (GDPR geo-block,
+    // DMCA) — retrying with different payloads is pointless and wastes requests.
+    matches!(status, 403 | 406 | 503)
 }
 
 /// Check if a response looks like a WAF block.
@@ -70,26 +74,24 @@ pub fn is_waf_block(status: u16, body: &[u8]) -> bool {
     let scan_limit = body.len().min(4096);
     let body_str = String::from_utf8_lossy(&body[..scan_limit]).to_ascii_lowercase();
 
+    // Audit (2026-05-10): removed vendor-name-only indicators
+    // (cloudflare, akamai, sucuri, imperva, incapsula) and high-FP
+    // generic terms (forbidden, security check, firewall). A benign
+    // 200 OK blog post ABOUT Cloudflare or a networking tutorial
+    // mentioning "firewall" must NOT be classified as a WAF block.
+    // Keep only explicit block-page markers.
     let indicators = [
         "access denied",
         "request blocked",
-        "forbidden",
-        "security check",
         "attention required",
         "captcha",
-        "firewall",
         "blocked by",
         "malicious request",
-        "cloudflare",
+        "automated request",
         "challenge-platform",
         "ray id",
         "aws waf",
         "request id:",
-        "automated request",
-        "sucuri",
-        "incapsula",
-        "imperva",
-        "akamai",
         "reference #",
     ];
 
@@ -109,8 +111,11 @@ mod tests {
     }
 
     #[test]
-    fn detect_429_rate_limit() {
-        assert!(is_waf_block(429, b"Too Many Requests"));
+    fn detect_429_not_a_block() {
+        // Audit (2026-05-10): 429 is rate-limit, not a WAF rule block.
+        // The engine must back off, not escalate evasion.
+        assert!(!is_waf_block(429, b"Too Many Requests"));
+        assert!(!is_waf_block_status(429));
     }
 
     #[test]
@@ -152,8 +157,11 @@ mod tests {
     }
 
     #[test]
-    fn detect_451_unavailable_for_legal_reasons() {
-        assert!(is_waf_block_status(451));
+    fn detect_451_not_a_block() {
+        // Audit (2026-05-10): 451 is legal takedown (GDPR/DMCA).
+        // Changing payload cannot bypass a legal block.
+        assert!(!is_waf_block_status(451));
+        assert!(!is_waf_block(451, b"Unavailable For Legal Reasons"));
     }
 
     #[test]
@@ -192,9 +200,11 @@ mod tests {
 
     #[test]
     fn detect_incapsula_imperva() {
+        // Pre-fix relied on vendor-name-only indicators.
+        // Now requires explicit block-page language.
         assert!(is_waf_block(
             200,
-            b"Incapsula incident ID: IMPERVA protection"
+            b"Access Denied. Incapsula incident ID: IMPERVA protection"
         ));
     }
 
@@ -240,14 +250,21 @@ mod tests {
     // TEST 23-30: Edge cases and body detection
     #[test]
     fn mixed_case_indicators() {
-        assert!(is_waf_block(200, b"CLOUDFLARE PROTECTION"));
+        // Vendor-name-only indicators removed — must require block-page text.
+        assert!(
+            !is_waf_block(200, b"CLOUDFLARE PROTECTION"),
+            "benign page mentioning Cloudflare must NOT be a block"
+        );
         assert!(is_waf_block(200, b"Akamai Reference #123"));
         assert!(is_waf_block(200, b"AwS WaF Block"));
     }
 
     #[test]
-    fn detect_security_check() {
-        assert!(is_waf_block(200, b"Performing security check..."));
+    fn detect_access_denied_in_context() {
+        // Uses "access denied" — an explicit block-page marker retained
+        // after the 2026-05-10 audit that removed high-FP terms like
+        // "security check" and "firewall".
+        assert!(is_waf_block(200, b"Access denied - your request was rejected"));
     }
 
     #[test]
@@ -271,7 +288,9 @@ mod tests {
 
     #[test]
     fn partial_word_matches() {
-        assert!(is_waf_block(200, b"Web Application Firewall blocked you"));
+        // Uses "blocked by" — an explicit block-page marker retained
+        // after the 2026-05-10 audit that removed high-FP "firewall".
+        assert!(is_waf_block(200, b"Request blocked by security policy"));
     }
 
     #[test]
@@ -282,6 +301,56 @@ mod tests {
     #[test]
     fn detect_challenges() {
         assert!(is_waf_block(200, b"challenge-platform"));
+    }
+
+    // ── Adversarial twins: vendor names in benign content must NOT block ──
+
+    #[test]
+    fn benign_blog_post_about_cloudflare_not_blocked() {
+        let body = b"<h1>How Cloudflare protects sites from DDoS</h1>\
+            <p>Cloudflare is a CDN and WAF provider...</p>";
+        assert!(
+            !is_waf_block(200, body),
+            "benign 200 blog post about Cloudflare must NOT be classified as a block"
+        );
+    }
+
+    #[test]
+    fn benign_tutorial_with_firewall_not_blocked() {
+        let body = b"<h1>Setting up a firewall with iptables</h1>\
+            <p>A firewall protects your network...</p>";
+        assert!(
+            !is_waf_block(200, body),
+            "benign 200 tutorial mentioning firewall must NOT be classified as a block"
+        );
+    }
+
+    #[test]
+    fn benign_page_with_forbidden_not_blocked() {
+        let body = b"<h1>HTTP Status Codes Explained</h1>\
+            <p>403 Forbidden means the server understood the request but refuses it.</p>";
+        assert!(
+            !is_waf_block(200, body),
+            "benign 200 tutorial mentioning 'Forbidden' must NOT be classified as a block"
+        );
+    }
+
+    #[test]
+    fn api_rate_limit_429_must_not_trigger_evasion() {
+        // A legitimate API returning 429 should NOT cause the evasion
+        // engine to switch techniques — it should back off.
+        assert!(
+            !is_waf_block(429, b"Rate limit exceeded. Retry after 60s."),
+            "429 must NOT be treated as a WAF block"
+        );
+    }
+
+    #[test]
+    fn legal_takedown_451_must_not_trigger_evasion() {
+        assert!(
+            !is_waf_block(451, b"Unavailable For Legal Reasons"),
+            "451 legal takedown must NOT be treated as a WAF block"
+        );
     }
 
     #[test]

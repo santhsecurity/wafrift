@@ -7,7 +7,8 @@ use wafrift_strategy::HostState;
 use wafrift_strategy::strategy::evade;
 use wafrift_types::{EvasionConfig, Request};
 
-use crate::response::{EvasionResponse, is_waf_block, is_waf_block_status};
+use crate::response::EvasionResponse;
+use crate::signal::{BlockClass, ResponseProfileDb, ResponseSignal};
 
 /// Reject upstream targets that fall in the bogon set.
 ///
@@ -28,26 +29,71 @@ fn is_bogon_ip(ip: std::net::IpAddr) -> bool {
             {
                 return true;
             }
-            let o = v.octets();
-            (o[0] == 100 && (o[1] & 0xc0) == 0x40)
-                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
-                || (o[0] == 198 && (o[1] & 0xfe) == 18)
-                || (o[0] == 169 && o[1] == 254 && o[2] == 169 && o[3] == 254)
+            // Audit additions (2026-05-10):
+            //   100.64.0.0/10  — Carrier-Grade NAT (RFC 6598)
+            //   192.0.0.0/24   — IETF protocol assignments (RFC 6890)
+            //   198.18.0.0/15  — benchmark testing (RFC 2544)
+            let octets = v.octets();
+            if octets[0] == 100 && (octets[1] & 0xc0) == 0x40 {
+                return true; // 100.64.0.0/10
+            }
+            if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
+                return true; // 192.0.0.0/24
+            }
+            if octets[0] == 198 && (octets[1] & 0xfe) == 18 {
+                return true; // 198.18.0.0/15
+            }
+            false
         }
         IpAddr::V6(v) => {
-            if let Some(m) = v.to_ipv4_mapped() {
-                return is_bogon_ip(IpAddr::V4(m));
+            // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) would otherwise sneak
+            // past the V6 bogon checks. Re-check the embedded V4 explicitly.
+            if let Some(mapped) = v.to_ipv4_mapped() {
+                return is_bogon_ip(IpAddr::V4(mapped));
             }
+            // IPv4-compatible (deprecated) form.
+            if let Some(compat) = v.to_ipv4() {
+                return is_bogon_ip(IpAddr::V4(compat));
+            }
+            // 6to4 (RFC 3056) embeds an IPv4 in `2002:WWXX:YYZZ::/48`.
+            // If the embedded V4 is a bogon, the V6 transitively is.
             let segs = v.segments();
+            if segs[0] == 0x2002 {
+                let v4 = std::net::Ipv4Addr::new(
+                    (segs[1] >> 8) as u8,
+                    (segs[1] & 0xff) as u8,
+                    (segs[2] >> 8) as u8,
+                    (segs[2] & 0xff) as u8,
+                );
+                if is_bogon_ip(IpAddr::V4(v4)) {
+                    return true;
+                }
+            }
+            // RFC 3849 documentation prefix.
+            if segs[0] == 0x2001 && segs[1] == 0x0db8 {
+                return true;
+            }
+            // 2001:0::/32 — Teredo tunneling (RFC 4380).
+            // 2001:20::/28 — ORCHIDv2 (RFC 7343).
+            // 100::/64 — discard-only address block (RFC 6666).
+            if segs[0] == 0x2001 && segs[1] == 0x0000 {
+                return true; // Teredo
+            }
+            if segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020 {
+                return true; // ORCHIDv2
+            }
+            if segs[0] == 0x0100
+                && segs[1] == 0
+                && segs[2] == 0
+                && segs[3] == 0
+            {
+                return true; // 100::/64 discard
+            }
             v.is_loopback()
                 || v.is_multicast()
                 || v.is_unspecified()
                 || v.is_unique_local()
                 || v.is_unicast_link_local()
-                || (segs[0] == 0x2001 && segs[1] == 0x0db8)
-                || (segs[0] == 0x2001 && segs[1] == 0x0000)
-                || (segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020)
-                || (segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0)
         }
     }
 }
@@ -71,6 +117,8 @@ pub struct EvasionClient {
     /// FIFO insertion order for deterministic eviction when the map
     /// exceeds its cap.
     host_fifo: Mutex<VecDeque<String>>,
+    /// Compiled-in WAF response profiles for rich classification.
+    profile_db: ResponseProfileDb,
 }
 
 impl EvasionClient {
@@ -133,6 +181,7 @@ impl EvasionClient {
             config,
             host_states: Mutex::new(HashMap::new()),
             host_fifo: Mutex::new(VecDeque::new()),
+            profile_db: ResponseProfileDb::compiled_in(),
         })
     }
 
@@ -152,6 +201,7 @@ impl EvasionClient {
             config,
             host_states: Mutex::new(HashMap::new()),
             host_fifo: Mutex::new(VecDeque::new()),
+            profile_db: ResponseProfileDb::compiled_in(),
         })
     }
 
@@ -249,8 +299,8 @@ impl EvasionClient {
             // Send and get response with body (CRITICAL FIX #1)
             // We need to read the body for WAF fingerprinting, but also preserve it
             // for the caller. We use a bounded read to avoid memory issues.
-            let (status, body_preview, is_blocked) =
-                match Self::send_and_check(req_builder, &host).await {
+            let (status, body_preview, signal) =
+                match self.send_and_check(req_builder, &host).await {
                     Ok(result) => result,
                     Err(EvasionError::Transport(ref e)) if attempt + 1 < max_attempts => {
                         tracing::warn!(
@@ -265,83 +315,159 @@ impl EvasionClient {
                     Err(e) => return Err(e),
                 };
 
-            if is_blocked && attempt + 1 < max_attempts {
-                let technique_keys: Vec<String> =
-                    techniques.iter().map(ToString::to_string).collect();
-                tracing::info!(
-                    host = %host,
-                    status = status,
-                    body_preview_size = body_preview.as_ref().map_or(0, std::vec::Vec::len),
-                    techniques = %technique_keys.join(","),
-                    attempt = attempt + 1,
-                    max = max_attempts,
-                    "WAF block detected — escalating evasion"
-                );
-                {
-                    let mut states = self.lock_states();
-                    if states.len() >= 10_000 && !states.contains_key(&host) {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                        while let Some(key_to_remove) = fifo.pop_front() {
-                            if states.remove(&key_to_remove).is_some() {
-                                break;
+            let classification = signal.classification;
+            let matched_waf = signal.matched_waf;
+            let prioritize = signal.prioritize;
+            let avoid = signal.avoid;
+            let inspection_model = signal.inspection_model;
+            let technique_keys: Vec<String> =
+                techniques.iter().map(ToString::to_string).collect();
+
+            // Audit (2026-05-10): rich classification replaces binary is_waf_block.
+            // RateLimit / Challenge → back off (don't penalize technique).
+            // HardBlock / SoftBlock → escalate evasion.
+            // Pass → return response.
+            match classification {
+                BlockClass::HardBlock | BlockClass::SoftBlock if attempt + 1 < max_attempts => {
+                    tracing::info!(
+                        host = %host,
+                        status = status,
+                        body_preview_size = body_preview.as_ref().map_or(0, std::vec::Vec::len),
+                        techniques = %technique_keys.join(","),
+                        attempt = attempt + 1,
+                        max = max_attempts,
+                        classification = ?classification,
+                        "WAF block detected — escalating evasion"
+                    );
+                    {
+                        let mut states = self.lock_states();
+                        if states.len() >= 10_000 && !states.contains_key(&host) {
+                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            while let Some(key_to_remove) = fifo.pop_front() {
+                                if states.remove(&key_to_remove).is_some() {
+                                    break;
+                                }
                             }
                         }
+                        let is_new = !states.contains_key(&host);
+                        let state = states.entry(host.clone()).or_default();
+                        if is_new {
+                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            fifo.push_back(host.clone());
+                        }
+                        state.record_signal(
+                            classification == BlockClass::HardBlock,
+                            classification == BlockClass::SoftBlock,
+                            false,
+                            false,
+                            matched_waf.as_deref(),
+                            &prioritize,
+                            &avoid,
+                            inspection_model.as_deref(),
+                            &technique_keys,
+                        );
                     }
-                    let is_new = !states.contains_key(&host);
-                    let state = states.entry(host.clone()).or_default();
-                    if is_new {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                        fifo.push_back(host.clone());
-                    }
-                    if technique_keys.is_empty() {
-                        state.record_block();
-                    } else {
-                        state.record_block_for_many(&technique_keys);
-                    }
+                    continue;
                 }
-                continue;
-            }
-
-            // Not blocked (or last attempt) — record success and return
-            if !is_blocked {
-                {
-                    let mut states = self.lock_states();
-                    if states.len() >= 10_000 && !states.contains_key(&host) {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                        while let Some(key_to_remove) = fifo.pop_front() {
-                            if states.remove(&key_to_remove).is_some() {
-                                break;
+                BlockClass::RateLimit | BlockClass::Challenge if attempt + 1 < max_attempts => {
+                    tracing::info!(
+                        host = %host,
+                        status = status,
+                        classification = ?classification,
+                        attempt = attempt + 1,
+                        max = max_attempts,
+                        "Rate-limit or challenge detected — backing off"
+                    );
+                    {
+                        let mut states = self.lock_states();
+                        if states.len() >= 10_000 && !states.contains_key(&host) {
+                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            while let Some(key_to_remove) = fifo.pop_front() {
+                                if states.remove(&key_to_remove).is_some() {
+                                    break;
+                                }
                             }
                         }
+                        let is_new = !states.contains_key(&host);
+                        let state = states.entry(host.clone()).or_default();
+                        if is_new {
+                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            fifo.push_back(host.clone());
+                        }
+                        state.record_signal(
+                            false,
+                            false,
+                            classification == BlockClass::RateLimit,
+                            classification == BlockClass::Challenge,
+                            matched_waf.as_deref(),
+                            &prioritize,
+                            &avoid,
+                            inspection_model.as_deref(),
+                            &technique_keys,
+                        );
                     }
-                    let is_new = !states.contains_key(&host);
-                    let state = states.entry(host.clone()).or_default();
-                    if is_new {
-                        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                        fifo.push_back(host.clone());
+                    // Simple 1-second backoff to avoid thundering herd.
+                    // Per-host because the retry loop is per-host.
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    continue;
+                }
+                _ => {
+                    // Pass or last attempt — record success (if Pass) and return
+                    if !classification.is_blocked() {
+                        let mut states = self.lock_states();
+                        if states.len() >= 10_000 && !states.contains_key(&host) {
+                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            while let Some(key_to_remove) = fifo.pop_front() {
+                                if states.remove(&key_to_remove).is_some() {
+                                    break;
+                                }
+                            }
+                        }
+                        let is_new = !states.contains_key(&host);
+                        let state = states.entry(host.clone()).or_default();
+                        if is_new {
+                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            fifo.push_back(host.clone());
+                        }
+                        if !techniques.is_empty() {
+                            state.record_success_for_many(&techniques);
+                        }
+                        // Ingest WAF profile hints even on Pass (first-contact profiling).
+                        if let Some(ref waf) = matched_waf && state.waf_name.is_none() {
+                            state.waf_name = Some(waf.clone());
+                            state.waf_confirmed = true;
+                        }
+                        for tech in prioritize.iter().take(200) {
+                            if !state.prioritized_techniques.contains(tech) {
+                                state.prioritized_techniques.push(tech.clone());
+                            }
+                        }
+                        for tech in avoid.iter().take(200) {
+                            if !state.avoided_techniques.contains(tech) {
+                                state.avoided_techniques.push(tech.clone());
+                            }
+                        }
+                        if let Some(ref model) = inspection_model && state.inspection_model.is_none() {
+                            state.inspection_model = Some(model.clone());
+                        }
                     }
-                    if !techniques.is_empty() {
-                        state.record_success_for_many(&techniques);
-                    }
+
+                    // Build response - note: body was consumed for fingerprinting
+                    let response = reqwest::Response::from(
+                        http::Response::builder()
+                            .status(status)
+                            .body(body_preview.unwrap_or_default())
+                            .map_err(|e| EvasionError::InvalidResponse(e.to_string()))?,
+                    );
+
+                    return Ok(EvasionResponse {
+                        inner: response,
+                        techniques_applied: techniques,
+                        was_blocked: classification.is_blocked(),
+                        attempts: attempt as u32 + 1,
+                    });
                 }
             }
-
-            // Build response - note: body was consumed for fingerprinting
-            // The response in EvasionResponse will have empty body since we read it
-            // Callers should check was_blocked flag
-            let response = reqwest::Response::from(
-                http::Response::builder()
-                    .status(status)
-                    .body(body_preview.unwrap_or_default())
-                    .map_err(|e| EvasionError::InvalidResponse(e.to_string()))?,
-            );
-
-            return Ok(EvasionResponse {
-                inner: response,
-                techniques_applied: techniques,
-                was_blocked: is_blocked,
-                attempts: attempt as u32 + 1,
-            });
         }
 
         Err(EvasionError::MaxAttemptsReached {
@@ -368,31 +494,47 @@ impl EvasionClient {
     /// Reset evasion state for all hosts.
     pub fn reset(&self) {
         self.lock_states().clear();
+        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        fifo.clear();
     }
 
-    /// Send request and check for WAF block using status + body fingerprinting.
+    /// Send request and check for WAF block using rich signal classification.
     ///
-    /// This helper sends the request, reads a bounded portion of the body,
-    /// and checks both status codes and body content for WAF indicators.
-    /// Returns (status, `body_preview`, `is_blocked`).
+    /// Audit (2026-05-10): upgraded from binary `is_waf_block` to
+    /// `ResponseProfileDb::classify` using compiled-in profiles. This lets
+    /// the retry loop distinguish HardBlock / SoftBlock / RateLimit /
+    /// Challenge / Pass and apply the correct action (escalate vs back off).
     async fn send_and_check(
+        &self,
         req_builder: reqwest::RequestBuilder,
         _host: &str,
-    ) -> Result<(u16, Option<Vec<u8>>, bool), EvasionError> {
+    ) -> Result<(u16, Option<Vec<u8>>, ResponseSignal), EvasionError> {
         let response = req_builder.send().await.map_err(EvasionError::Transport)?;
         let status = response.status().as_u16();
+
+        // Extract headers BEFORE consuming the body for fingerprinting.
+        let headers: Vec<(String, String)> = response
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().to_ascii_lowercase(),
+                    String::from_utf8_lossy(v.as_bytes()).into_owned(),
+                )
+            })
+            .collect();
 
         // Read bounded body for WAF fingerprinting
         let body_preview = Self::read_body_preview_from_response(response).await;
 
-        // Check both status and body for WAF indicators
-        let blocked_by_status = is_waf_block_status(status);
-        let blocked_by_body = body_preview
-            .as_ref()
-            .is_some_and(|b| is_waf_block(status, b));
-        let is_blocked = blocked_by_status || blocked_by_body;
+        // Rich classification using compiled-in profiles
+        let signal = self.profile_db.classify(
+            status,
+            &headers,
+            body_preview.as_deref().unwrap_or_default(),
+        );
 
-        Ok((status, body_preview, is_blocked))
+        Ok((status, body_preview, signal))
     }
 
     /// Read a bounded preview of the response body for WAF fingerprinting.
@@ -452,6 +594,7 @@ impl Default for EvasionClient {
                 config: EvasionConfig::default(),
                 host_states: std::sync::Mutex::new(std::collections::HashMap::new()),
                 host_fifo: std::sync::Mutex::new(std::collections::VecDeque::new()),
+                profile_db: ResponseProfileDb::compiled_in(),
             }
         })
     }
@@ -631,6 +774,49 @@ mod tests {
             extract_host("example.com:8080/path").unwrap(),
             "example.com"
         );
+    }
+
+    // ── bogon regression tests ─────────────────────────────────
+    // Keep in sync with wafrift-proxy::upstream_policy::ip_addr_is_bogon.
+
+    #[test]
+    fn bogon_v4_loopback() {
+        assert!(is_bogon_ip("127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn bogon_v4_public_ok() {
+        assert!(!is_bogon_ip("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn bogon_v4_cgnat() {
+        assert!(is_bogon_ip("100.64.0.1".parse().unwrap()));
+        assert!(is_bogon_ip("100.127.255.255".parse().unwrap()));
+        assert!(!is_bogon_ip("100.63.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn bogon_v6_loopback_mapped() {
+        assert!(is_bogon_ip("::ffff:127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn bogon_v6_6to4_embeds_private_v4() {
+        // 6to4 encodes 127.0.0.1 => 2002:7f00:1:: — MUST be rejected.
+        assert!(is_bogon_ip("2002:7f00:1::".parse().unwrap()));
+        assert!(is_bogon_ip("2002:c0a8:101::".parse().unwrap())); // 192.168.1.1
+        assert!(!is_bogon_ip("2002:808:808::".parse().unwrap())); // 8.8.8.8
+    }
+
+    #[test]
+    fn bogon_v6_teredo() {
+        assert!(is_bogon_ip("2001::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn bogon_v6_discard() {
+        assert!(is_bogon_ip("0100::1".parse().unwrap()));
     }
 
     // TEST 16-25: EvasionClient configuration and state
