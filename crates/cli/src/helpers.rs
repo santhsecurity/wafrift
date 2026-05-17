@@ -8,6 +8,8 @@ use wafrift_evolution::differential::ProbeTarget;
 use wafrift_grammar::grammar::{self, PayloadType};
 
 use crate::Level;
+use crate::explain::{ExplainTrace, Outcome};
+use crate::target_context::{TargetContext, context_applicability};
 
 pub(crate) const LIGHT_VARIANTS: usize = 4;
 pub(crate) const MEDIUM_VARIANTS: usize = 12;
@@ -47,6 +49,20 @@ pub fn strategies_for_level(level: Level) -> Vec<Strategy> {
         Level::Light => all.iter().copied().take(3).collect(),
         Level::Medium => all.iter().copied().take(6).collect(),
         Level::Heavy => all.to_vec(),
+    }
+}
+
+/// Strategy pool for a `--level`, widened to the full set when the user
+/// has named techniques explicitly via `--only`. Rationale: a user who
+/// types `--only encoding/base64/standard --level light` expects base64
+/// to run, not be silently dropped because base64 sits above the
+/// light-level aggressiveness cut. `--level` still bounds the variant
+/// count via `max_mutations_for_level`.
+pub fn strategy_pool(level: Level, explicit_selection: bool) -> Vec<Strategy> {
+    if explicit_selection {
+        encoding::all_strategies().to_vec()
+    } else {
+        strategies_for_level(level)
     }
 }
 
@@ -235,6 +251,146 @@ pub fn build_variants(
                 confidence: variant_confidence(payload_type, 0, false, Strategy::CaseAlternation),
             },
         );
+    }
+
+    variants
+}
+
+/// Like `build_variants` but optionally filters strategies by target
+/// context and records per-strategy outcomes into an `ExplainTrace`.
+///
+/// Pass `target_context = None` to skip applicability filtering. Pass
+/// `trace = None` to disable trace collection (then the result is
+/// equivalent to `build_variants`, modulo context filtering).
+pub fn build_variants_explained(
+    payload: &str,
+    payload_type: PayloadType,
+    encoding_only: bool,
+    strategies: &[Strategy],
+    max_mutations: usize,
+    target_context: Option<TargetContext>,
+    mut trace: Option<&mut ExplainTrace>,
+) -> Vec<Variant> {
+    let applicable: Vec<Strategy> = strategies
+        .iter()
+        .copied()
+        .filter(|s| match target_context {
+            None => true,
+            Some(ctx) => match context_applicability(*s, ctx) {
+                Ok(()) => true,
+                Err(reason) => {
+                    if let Some(t) = trace.as_deref_mut() {
+                        t.record(*s, Outcome::NotApplicableToContext(reason));
+                    }
+                    false
+                }
+            },
+        })
+        .collect();
+
+    let mut seen = HashSet::new();
+    let mut variants = Vec::new();
+
+    let grammar_mutations = if encoding_only {
+        Vec::new()
+    } else {
+        grammar::mutate_as(payload, payload_type, max_mutations)
+    };
+
+    for mutation in &grammar_mutations {
+        if seen.insert(mutation.payload.clone()) {
+            let techniques: Vec<String> = mutation
+                .rules_applied
+                .iter()
+                .map(|rule| (*rule).to_string())
+                .collect();
+            variants.push(Variant {
+                payload: mutation.payload.clone(),
+                techniques,
+                confidence: variant_confidence(
+                    payload_type,
+                    mutation.rules_applied.len(),
+                    false,
+                    Strategy::CaseAlternation,
+                ),
+            });
+        }
+    }
+
+    for mutation in &grammar_mutations {
+        for strategy in &applicable {
+            match encoding::encode(&mutation.payload, *strategy) {
+                Ok(encoded) => {
+                    if seen.insert(encoded.clone()) {
+                        let mut techniques: Vec<String> = mutation
+                            .rules_applied
+                            .iter()
+                            .map(|rule| (*rule).to_string())
+                            .collect();
+                        techniques.push(format!("encoding::{strategy:?}"));
+                        variants.push(Variant {
+                            payload: encoded,
+                            techniques,
+                            confidence: variant_confidence(
+                                payload_type,
+                                mutation.rules_applied.len(),
+                                false,
+                                *strategy,
+                            ),
+                        });
+                        if let Some(t) = trace.as_deref_mut() {
+                            t.record(*strategy, Outcome::Applied { variant_count: 1 });
+                        }
+                    } else if let Some(t) = trace.as_deref_mut() {
+                        t.record(*strategy, Outcome::AllDuplicates);
+                    }
+                }
+                Err(e) => {
+                    if let Some(t) = trace.as_deref_mut() {
+                        t.record(*strategy, Outcome::EncodingError(format!("{e:?}")));
+                    }
+                }
+            }
+        }
+    }
+
+    for strategy in &applicable {
+        match encoding::encode(payload, *strategy) {
+            Ok(encoded) => {
+                if seen.insert(encoded.clone()) {
+                    variants.push(Variant {
+                        payload: encoded,
+                        techniques: vec![format!("encoding::{strategy:?}")],
+                        confidence: variant_confidence(payload_type, 0, encoding_only, *strategy),
+                    });
+                    if let Some(t) = trace.as_deref_mut() {
+                        t.record(*strategy, Outcome::Applied { variant_count: 1 });
+                    }
+                } else if let Some(t) = trace.as_deref_mut() {
+                    t.record(*strategy, Outcome::AllDuplicates);
+                }
+            }
+            Err(e) => {
+                if let Some(t) = trace.as_deref_mut() {
+                    t.record(*strategy, Outcome::EncodingError(format!("{e:?}")));
+                }
+            }
+        }
+    }
+
+    if !encoding_only && seen.insert(payload.to_string()) {
+        variants.insert(
+            0,
+            Variant {
+                payload: payload.to_string(),
+                techniques: vec!["original".to_string()],
+                confidence: variant_confidence(payload_type, 0, false, Strategy::CaseAlternation),
+            },
+        );
+    }
+
+    if let Some(t) = trace.as_deref_mut() {
+        t.finalize();
     }
 
     variants

@@ -19,6 +19,7 @@ mod bypass_probe;
 mod config;
 mod discover_cmd;
 mod egress_example;
+mod explain;
 mod helpers;
 mod import_curl;
 mod init_cmd;
@@ -28,12 +29,15 @@ mod replay;
 mod report;
 mod scan;
 mod seed;
+mod target_context;
 mod technique_filter;
 
+use explain::ExplainTrace;
 use helpers::{
-    build_variants, confidence_badge, max_mutations_for_level, parse_headers, payload_type_label,
-    probe_target_label, strategies_for_level,
+    build_variants_explained, confidence_badge, max_mutations_for_level, parse_headers,
+    payload_type_label, probe_target_label, strategy_pool,
 };
+use target_context::TargetContext;
 use technique_filter::TechniqueFilter;
 
 #[derive(Parser, Debug)]
@@ -139,9 +143,14 @@ struct ManArgs {
 
 #[derive(clap::Args, Debug)]
 struct EvadeArgs {
-    /// Payload to mutate and encode.
+    /// Payload to mutate and encode. Mutually exclusive with `--stdin`.
+    #[arg(long, conflicts_with = "stdin", required_unless_present = "stdin")]
+    payload: Option<String>,
+
+    /// Read the payload from stdin instead of `--payload`. Useful for
+    /// piping (`echo 'X' | wafrift evade --stdin ...`).
     #[arg(long)]
-    payload: String,
+    stdin: bool,
 
     /// Evasion intensity.
     #[arg(long, value_enum, default_value_t = Level::Medium)]
@@ -154,6 +163,8 @@ struct EvadeArgs {
 
     /// Restrict to listed technique paths (comma-separated; e.g.
     /// `encoding/url,grammar`). Run `wafrift techniques list` for paths.
+    /// Explicit selection here overrides `--level` for which strategies
+    /// are eligible (the level still bounds variant count).
     #[arg(long, num_args = 1.., value_delimiter = ',')]
     only: Vec<String>,
 
@@ -161,6 +172,17 @@ struct EvadeArgs {
     /// `encoding/url/triple,smuggling`).
     #[arg(long, num_args = 1.., value_delimiter = ',')]
     exclude: Vec<String>,
+
+    /// Filter techniques by where the payload will land (header, body,
+    /// query-param, cookie). Encoding strategies whose output is
+    /// unusable in the chosen context are skipped (visible with --explain).
+    #[arg(long, value_enum)]
+    target_context: Option<TargetContext>,
+
+    /// Show per-technique trace: which strategies ran, which were
+    /// skipped, and why.
+    #[arg(long)]
+    explain: bool,
 
     /// Write output to a file instead of stdout.
     #[arg(long, short)]
@@ -914,6 +936,14 @@ fn run_interactive() -> ExitCode {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
+    let payload = match resolve_payload(&args) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("{} {msg}", "Input error:".red().bold());
+            return ExitCode::from(2);
+        }
+    };
+
     let filter = match TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,
         Err(msg) => {
@@ -921,24 +951,33 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let payload_type = grammar::classify(&args.payload);
-    let strategies = filter.filter_strategies(strategies_for_level(args.level));
+    let payload_type = grammar::classify(&payload);
+    let pool = strategy_pool(args.level, !args.only.is_empty());
+    let strategies = filter.filter_strategies(pool);
     let max_mutations = max_mutations_for_level(args.level);
     let encoding_only = args.encoding_only || !filter.grammar_enabled();
-    let variants = build_variants(
-        &args.payload,
+
+    let mut trace = args.explain.then(ExplainTrace::default);
+    let variants = build_variants_explained(
+        &payload,
         payload_type,
         encoding_only,
         &strategies,
         max_mutations,
+        args.target_context,
+        trace.as_mut(),
     );
 
     if variants.is_empty() {
         if quiet {
-            println!(
-                "{}",
-                json!({ "error": "no variants generated", "payload_type": payload_type_label(payload_type) })
-            );
+            let mut body = json!({
+                "error": "no variants generated",
+                "payload_type": payload_type_label(payload_type),
+            });
+            if let Some(t) = trace.as_ref() {
+                body["explain"] = t.to_json()["explain"].clone();
+            }
+            println!("{body}");
         } else {
             eprintln!(
                 "{}",
@@ -946,12 +985,28 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
                     .red()
                     .bold()
             );
+            if let Some(ctx) = args.target_context {
+                eprintln!(
+                    "  Target context: {} — strategies whose output is unusable here were skipped.",
+                    ctx.label()
+                );
+            }
+            if !args.only.is_empty() && !args.explain {
+                eprintln!(
+                    "  Hint: re-run with --explain to see which techniques were considered and why each was skipped."
+                );
+            }
+            if let Some(t) = trace.as_ref() {
+                t.print_text();
+            }
         }
         return ExitCode::from(1);
     }
 
     if quiet {
-        // JSON output: one object per line (NDJSON)
+        // JSON output: one object per line (NDJSON), then an optional trailing
+        // {"explain": [...]} object so consumers can stream variants and still
+        // pick up the trace.
         let mut buf = String::new();
         for variant in &variants {
             let obj = json!({
@@ -964,6 +1019,15 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
                 buf.push('\n');
             } else {
                 println!("{obj}");
+            }
+        }
+        if let Some(t) = trace.as_ref() {
+            let explain_obj = t.to_json();
+            if args.output.is_some() {
+                buf.push_str(&explain_obj.to_string());
+                buf.push('\n');
+            } else {
+                println!("{explain_obj}");
             }
         }
         if let Some(ref path) = args.output {
@@ -984,6 +1048,13 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             "Encoding Level:".bold().cyan(),
             format!("{:?}", args.level).to_lowercase().yellow()
         );
+        if let Some(ctx) = args.target_context {
+            println!(
+                "{} {}",
+                "Target Context:".bold().cyan(),
+                ctx.label().yellow()
+            );
+        }
 
         for (index, variant) in variants.iter().enumerate() {
             println!(
@@ -1003,9 +1074,35 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
                 variant.payload.bright_white()
             );
         }
+
+        if let Some(t) = trace.as_ref() {
+            t.print_text();
+        }
     }
 
     ExitCode::SUCCESS
+}
+
+/// Resolve the evade payload from either `--payload` or `--stdin`.
+/// Clap's `required_unless_present` + `conflicts_with` enforces that
+/// exactly one is supplied at the CLI layer; this just performs the read.
+fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
+    if args.stdin {
+        use std::io::Read;
+        let mut buf = String::new();
+        io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("failed to read payload from stdin: {e}"))?;
+        let trimmed = buf.trim_end_matches(['\n', '\r']).to_string();
+        if trimmed.is_empty() {
+            return Err("stdin produced an empty payload".to_string());
+        }
+        Ok(trimmed)
+    } else {
+        args.payload
+            .clone()
+            .ok_or_else(|| "no payload supplied (use --payload or --stdin)".to_string())
+    }
 }
 
 #[allow(clippy::needless_pass_by_value)]
