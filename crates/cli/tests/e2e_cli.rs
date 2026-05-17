@@ -231,6 +231,74 @@ fn evade_explain_shows_per_technique_lines() {
 }
 
 #[test]
+fn evade_explain_quiet_emits_trailing_json_object() {
+    let (code, stdout, stderr) = wafrift(&[
+        "--quiet", "evade", "--payload", "X", "--only", "encoding/base64/standard", "--explain",
+    ]);
+    assert_eq!(code, 0, "exit 0; stderr={stderr}");
+    // Last non-empty line should be an explain object.
+    let last = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .last()
+        .expect("at least one line");
+    assert!(
+        last.contains("\"explain\""),
+        "last line should be the explain object: {last}"
+    );
+    // And every other line must be a variant object (has "payload" key).
+    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+        if line == last {
+            continue;
+        }
+        assert!(
+            line.contains("\"payload\""),
+            "variant line should contain payload: {line}"
+        );
+    }
+}
+
+#[test]
+fn evade_explain_with_encoding_only() {
+    let (code, stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "SELECT 1",
+        "--encoding-only",
+        "--only",
+        "encoding/base64/standard",
+        "--explain",
+    ]);
+    assert_eq!(code, 0, "exit 0; stderr={stderr}");
+    assert!(
+        stdout.contains("Explain") && stdout.contains("encoding/base64/standard"),
+        "explain should still show under --encoding-only: {stdout}"
+    );
+}
+
+#[test]
+fn evade_parameter_pollution_rejected_in_body_context() {
+    // Body context: parameter pollution is meaningless. With explain, the
+    // user must see the technique-specific reason rather than a bare error.
+    let (code, stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "X",
+        "--only",
+        "encoding/parameter-pollution",
+        "--target-context",
+        "body",
+        "--explain",
+    ]);
+    assert_ne!(code, 0, "should fail when only inapplicable strategy is selected");
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("parameter pollution") || combined.contains("query string"),
+        "must surface parameter-pollution applicability reason: {combined}"
+    );
+}
+
+#[test]
 fn evade_target_context_skips_inapplicable_with_reason() {
     let (code, stdout, stderr) = wafrift(&[
         "evade",

@@ -160,6 +160,11 @@ pub(crate) fn probe_target_label(target: &ProbeTarget) -> String {
 }
 
 /// Build encoding × grammar variants for a given payload.
+///
+/// Backwards-compatible wrapper around `build_variants_explained` for
+/// callers (bench_waf, scan) that don't need context filtering or a
+/// trace. Behavior is identical to the pre-explain implementation:
+/// no applicability filtering, no per-strategy logging.
 pub fn build_variants(
     payload: &str,
     payload_type: PayloadType,
@@ -167,93 +172,15 @@ pub fn build_variants(
     strategies: &[Strategy],
     max_mutations: usize,
 ) -> Vec<Variant> {
-    let mut seen = HashSet::new();
-    let mut variants = Vec::new();
-
-    let grammar_mutations = if encoding_only {
-        Vec::new()
-    } else {
-        grammar::mutate_as(payload, payload_type, max_mutations)
-    };
-
-    for mutation in &grammar_mutations {
-        // First: add the RAW grammar mutation without any encoding.
-        // Keyword-free payloads (like '1-0', '+0+') are designed to bypass
-        // WAFs without encoding — extra encoding can hurt by triggering
-        // anomaly rules on the encoded characters.
-        if seen.insert(mutation.payload.clone()) {
-            let techniques: Vec<String> = mutation
-                .rules_applied
-                .iter()
-                .map(|rule| (*rule).to_string())
-                .collect();
-            variants.push(Variant {
-                payload: mutation.payload.clone(),
-                techniques,
-                confidence: variant_confidence(
-                    payload_type,
-                    mutation.rules_applied.len(),
-                    false,
-                    Strategy::CaseAlternation, // baseline confidence
-                ),
-            });
-        }
-    }
-
-    for mutation in &grammar_mutations {
-        // Then: apply encoding strategies on top.
-        for strategy in strategies {
-            let encoded = match encoding::encode(&mutation.payload, *strategy) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            if seen.insert(encoded.clone()) {
-                let mut techniques: Vec<String> = mutation
-                    .rules_applied
-                    .iter()
-                    .map(|rule| (*rule).to_string())
-                    .collect();
-                techniques.push(format!("encoding::{strategy:?}"));
-                variants.push(Variant {
-                    payload: encoded,
-                    techniques,
-                    confidence: variant_confidence(
-                        payload_type,
-                        mutation.rules_applied.len(),
-                        false,
-                        *strategy,
-                    ),
-                });
-            }
-        }
-    }
-
-    for strategy in strategies {
-        let encoded = match encoding::encode(payload, *strategy) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if seen.insert(encoded.clone()) {
-            variants.push(Variant {
-                payload: encoded,
-                techniques: vec![format!("encoding::{strategy:?}")],
-                confidence: variant_confidence(payload_type, 0, encoding_only, *strategy),
-            });
-        }
-    }
-
-    if !encoding_only && seen.insert(payload.to_string()) {
-        variants.insert(
-            0,
-            Variant {
-                payload: payload.to_string(),
-                techniques: vec!["original".to_string()],
-                confidence: variant_confidence(payload_type, 0, false, Strategy::CaseAlternation),
-            },
-        );
-    }
-
-    variants
+    build_variants_explained(
+        payload,
+        payload_type,
+        encoding_only,
+        strategies,
+        max_mutations,
+        None,
+        None,
+    )
 }
 
 /// Like `build_variants` but optionally filters strategies by target
@@ -458,5 +385,55 @@ mod tests {
             "sql_keyword:union"
         );
         assert_eq!(probe_target_label(&ProbeTarget::Baseline), "baseline");
+    }
+
+    #[test]
+    fn strategy_pool_widens_only_on_explicit_selection() {
+        let default_light = strategy_pool(Level::Light, false);
+        assert_eq!(default_light.len(), 3);
+
+        let explicit_light = strategy_pool(Level::Light, true);
+        let all = encoding::all_strategies();
+        assert_eq!(explicit_light.len(), all.len());
+        assert!(explicit_light.contains(&Strategy::Base64Encode));
+        assert!(explicit_light.contains(&Strategy::OverlongUtf8));
+    }
+
+    #[test]
+    fn build_variants_explained_filters_by_context() {
+        let mut trace = ExplainTrace::default();
+        let variants = build_variants_explained(
+            "SELECT 1",
+            PayloadType::Sql,
+            true,
+            &[Strategy::GzipEncode, Strategy::Base64Encode],
+            4,
+            Some(TargetContext::Header),
+            Some(&mut trace),
+        );
+        let payloads: Vec<&str> = variants.iter().map(|v| v.payload.as_str()).collect();
+        assert!(
+            payloads.iter().any(|p| p.contains("U0VMRUNUIDE=")),
+            "base64 variant should appear: {payloads:?}"
+        );
+        let recorded_paths: Vec<&str> = trace
+            .entries
+            .iter()
+            .map(|e| crate::technique_filter::strategy_path(e.strategy))
+            .collect();
+        assert!(
+            recorded_paths.contains(&"encoding/compression/gzip"),
+            "gzip should be in the trace as not_applicable: {recorded_paths:?}"
+        );
+    }
+
+    #[test]
+    fn build_variants_unchanged_signature_still_works() {
+        let variants =
+            build_variants("hello", PayloadType::Unknown, true, &[Strategy::Base64Encode], 4);
+        assert!(
+            variants.iter().any(|v| v.payload == "aGVsbG8="),
+            "base64 of 'hello' should appear"
+        );
     }
 }
