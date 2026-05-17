@@ -4,6 +4,47 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.14] — 2026-05-17
+
+### Fixed
+
+- **`crates/cli/src/main.rs` — `evade --only` at low levels silently dropped
+  techniques.** `wafrift evade --only encoding/base64/standard` returned
+  "No variants generated" at the default `--level medium` because the
+  medium-level pool was the first 6 strategies sorted by aggressiveness
+  and base64 sat past that cut. Explicit `--only` now overrides the
+  level-based pool; `--level` still bounds the variant count via
+  `max_mutations_for_level`.
+
+### Added — `evade` UX (2026-05-17 dogfooding sweep)
+
+- **`--stdin`** — read payload from stdin for piped workflows:
+  `echo 'X' | wafrift evade --stdin --only encoding/base64/standard`.
+  Mutually exclusive with `--payload`; refuses to run on an interactive
+  terminal so it can't hang silently.
+- **`--target-context {header,body,query-param,cookie}`** — filter
+  techniques whose output is unusable in the chosen HTTP context.
+  Conservative rules: compression / NUL-byte / chunked-split blocked in
+  text contexts; parameter-pollution blocked in header/cookie (allowed
+  in body for `application/x-www-form-urlencoded`).
+- **`--explain`** — per-technique trace showing which strategies ran,
+  which were skipped, and why (applied / duplicate /
+  not-applicable-to-context / encoding-error). Rendered as colored
+  text or, in `--quiet` mode, a trailing `{"explain":[...]}` JSON object
+  after the NDJSON variants.
+- **`--output` now writes the JSON error blob on the empty-variants
+  path** instead of dropping it.
+
+### Internal
+
+- `crates/cli/src/target_context.rs` — `TargetContext` + applicability rules.
+- `crates/cli/src/explain.rs` — `ExplainTrace` (text + JSON renderer).
+- `helpers::strategy_pool(level, explicit_selection)` — drives the bug
+  fix above; widens to the full strategy set when `--only` is set.
+- `helpers::build_variants` now delegates to `build_variants_explained`
+  (eliminated ~95 lines of duplicated encoding/grammar logic).
+- New e2e + unit tests cover all of the above.
+
 ## [0.2.13] — 2026-05-11
 
 ### Fixed — proxy adversarial sweep (6 defects)

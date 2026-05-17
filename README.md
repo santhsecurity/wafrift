@@ -24,6 +24,26 @@
 
 Other tools give you one trick: junk padding, header injection, smuggling, or a static tamper list. WafRift is the union: encoding, grammar-aware mutation, content-type switching, request smuggling, and TLS/HTTP fingerprint rotation. The CLI exposes every encoding strategy and the grammar layer as fine-grained `--only`/`--exclude` selectors; the rest run as part of the default pipeline. Per-host toggle persistence and a Burp Suite control panel are tracked in the [roadmap](docs/GAP_CLOSURE_ROADMAP.md). Turn the engine loose and a search loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses the target WAF and persists winning pipelines to a per-WAF **gene bank** so the next scan starts with zero discovery phase.
 
+## What's new (v0.2.14)
+
+- **`evade` UX sweep (from 2026-05-17 dogfooding).** Three fixes in
+  one release; full notes in CHANGELOG.
+  - **Fixed:** `wafrift evade --only encoding/base64/standard` returned
+    "No variants generated" at default `--level medium` because the
+    medium pool was the first 6 strategies sorted by aggressiveness and
+    base64 sat past that cut. Explicit `--only` now overrides the
+    level-based pool.
+  - **Added: `--stdin`** — pipe payloads in
+    (`echo 'X' | wafrift evade --stdin ...`). Refuses to run on a TTY
+    so it can't hang waiting on input.
+  - **Added: `--target-context {header,body,query-param,cookie}`** —
+    filter techniques whose output is unusable in the chosen HTTP
+    context (e.g. gzip in a header, NUL byte in a cookie).
+  - **Added: `--explain`** — per-technique trace showing what ran,
+    what was skipped, and why. Renders as colored text or, in
+    `--quiet` mode, a trailing `{"explain":[...]}` JSON object after
+    the NDJSON variants.
+
 ## What's new (v0.2.13)
 
 - **Proxy adversarial sweep — 6 defects fixed.**
@@ -263,9 +283,9 @@ mv wafrift wafrift-proxy /usr/local/bin/
 ### From crates.io
 
 ```bash
-cargo install wafrift-cli --version '>=0.2.13'
+cargo install wafrift-cli --version '>=0.2.14'
 # Optional: TLS impersonation (rquest 5.x + BoringSSL, adds boring-sys C build)
-cargo install wafrift-proxy --version '>=0.2.13' --features tls-impersonate
+cargo install wafrift-proxy --version '>=0.2.14' --features tls-impersonate
 ```
 
 This installs the `wafrift` and `wafrift-proxy` binaries. Requires a
