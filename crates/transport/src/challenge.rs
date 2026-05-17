@@ -1062,44 +1062,62 @@ mod tests {
     fn classify_cloudflare_from_cf_ray_and_marker() {
         let body = b"<title>Just a moment...</title><script>cf_chl_opt = ...</script>";
         let headers = vec![("cf-ray".into(), "8c2a3f4d4d4f9b2c-FRA".into())];
-        assert_eq!(classify(body, &headers), ChallengeKind::CloudflareManaged);
+        assert_eq!(
+            classify_with_status(body, &headers, 403),
+            ChallengeKind::CloudflareManaged
+        );
     }
 
     #[test]
     fn classify_cloudflare_from_server_header_and_body_marker() {
         let body = b"checking your browser before accessing example.com";
         let headers = vec![("server".into(), "cloudflare".into())];
-        assert_eq!(classify(body, &headers), ChallengeKind::CloudflareManaged);
+        assert_eq!(
+            classify_with_status(body, &headers, 403),
+            ChallengeKind::CloudflareManaged
+        );
     }
 
     #[test]
     fn classify_turnstile_takes_precedence_over_cloudflare_managed() {
         let body = b"<div class=\"cf-turnstile\" data-sitekey=\"X\"></div>";
         let headers = vec![("cf-ray".into(), "X".into())];
-        assert_eq!(classify(body, &headers), ChallengeKind::Turnstile);
+        assert_eq!(
+            classify_with_status(body, &headers, 403),
+            ChallengeKind::Turnstile
+        );
     }
 
     #[test]
     fn classify_hcaptcha_recognised() {
         let body = b"<script src=\"https://hcaptcha.com/1/api.js\"></script>";
-        assert_eq!(classify(body, &[]), ChallengeKind::Hcaptcha);
+        assert_eq!(
+            classify_with_status(body, &[], 403),
+            ChallengeKind::Hcaptcha
+        );
     }
 
     #[test]
     fn classify_recaptcha_recognised() {
         let body = b"<script src=\"https://www.google.com/recaptcha/api.js\"></script>";
-        assert_eq!(classify(body, &[]), ChallengeKind::Recaptcha);
+        assert_eq!(
+            classify_with_status(body, &[], 403),
+            ChallengeKind::Recaptcha
+        );
     }
 
     #[test]
     fn classify_unknown_when_no_marker() {
-        assert_eq!(classify(b"hello world", &[]), ChallengeKind::Unknown);
+        assert_eq!(
+            classify_with_status(b"hello world", &[], 200),
+            ChallengeKind::Unknown
+        );
     }
 
     #[test]
     fn classify_does_not_panic_on_invalid_utf8() {
         let body = vec![0xff, 0xfe, 0xfd];
-        let _ = classify(&body, &[]);
+        let _ = classify_with_status(&body, &[], 403);
     }
 
     // ── extract_clearance_cookie ─────────────────────────────

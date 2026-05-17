@@ -404,15 +404,14 @@ impl State {
                 // Evict the lowest-traffic host when the cap is exceeded.
                 // This keeps the working set bounded without dropping
                 // high-value targets from the dashboard.
-                if self.hosts.len() > MAX_TUI_HOSTS {
-                    if let Some(evict) = self
+                if self.hosts.len() > MAX_TUI_HOSTS
+                    && let Some(evict) = self
                         .hosts
                         .iter()
                         .min_by_key(|(_, v)| v.sent)
                         .map(|(k, _)| k.clone())
-                    {
-                        self.hosts.remove(&evict);
-                    }
+                {
+                    self.hosts.remove(&evict);
                 }
 
                 if let Some(p) = tls_profile {

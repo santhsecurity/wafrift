@@ -27,7 +27,7 @@
 //!
 //! // Status-only fast path (the body may not have arrived yet).
 //! assert!(is_waf_block_status(403));
-//! assert!(is_waf_block_status(429));
+//! assert!(!is_waf_block_status(429), "429 is rate-limit, not a block");
 //! assert!(is_waf_block_status(503));
 //! assert!(!is_waf_block_status(200));
 //! assert!(!is_waf_block_status(404), "404 is not a WAF block");

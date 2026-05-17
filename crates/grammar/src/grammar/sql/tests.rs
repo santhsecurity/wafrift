@@ -1,7 +1,9 @@
 use super::{
     blind::order_by_probes,
+    common::{and_alternatives, equality_alternatives, extract_quoted_string, or_alternatives},
     mutate,
-    strings::{hex_literal, split_string_concat},
+    operators::{replace_comment_terminator, replace_equality, replace_logical_operator},
+    strings::{hex_literal, no_space_wrap, split_string_concat},
 };
 
 #[test]
@@ -163,4 +165,220 @@ fn order_by_probes_generated() {
     assert_eq!(probes.len(), 5);
     assert!(probes[0].contains("ORDER BY 1"));
     assert!(probes[4].contains("ORDER BY 5"));
+}
+
+// ── common.rs tests ──
+
+#[test]
+fn extract_quoted_string_basic() {
+    assert_eq!(
+        extract_quoted_string("'admin'"),
+        Some("admin".to_string())
+    );
+}
+
+#[test]
+fn extract_quoted_string_ignores_escaped_quotes() {
+    // The value between the outer quotes should be "It\'s", but
+    // extract_quoted_string returns the raw content including the
+    // backslash.  The key point is that the escaped quote does NOT
+    // terminate the string prematurely.
+    assert_eq!(
+        extract_quoted_string("'It\\'s a test'"),
+        Some("It\\'s a test".to_string())
+    );
+}
+
+#[test]
+fn extract_quoted_string_too_long_returns_none() {
+    let long = "'".to_string() + &"a".repeat(21) + "'";
+    assert_eq!(extract_quoted_string(&long), None);
+}
+
+#[test]
+fn extract_quoted_string_no_quotes_returns_none() {
+    assert_eq!(extract_quoted_string("admin"), None);
+}
+
+#[test]
+fn extract_quoted_string_empty_returns_none() {
+    assert_eq!(extract_quoted_string("''"), None);
+}
+
+#[test]
+fn or_alternatives_not_empty() {
+    assert!(!or_alternatives().is_empty());
+}
+
+#[test]
+fn and_alternatives_not_empty() {
+    assert!(!and_alternatives().is_empty());
+}
+
+#[test]
+fn equality_alternatives_not_empty() {
+    assert!(!equality_alternatives().is_empty());
+}
+
+// ── operators.rs tests ──
+
+#[test]
+fn replace_comment_terminator_hash_to_dash() {
+    assert_eq!(
+        replace_comment_terminator("' OR 1=1#", "--"),
+        Some("' OR 1=1--".to_string())
+    );
+}
+
+#[test]
+fn replace_comment_terminator_longest_first() {
+    // "-- -" must match before "--" so we don't leave a trailing space.
+    assert_eq!(
+        replace_comment_terminator("' OR 1=1-- -", "#"),
+        Some("' OR 1=1#".to_string())
+    );
+}
+
+#[test]
+fn replace_comment_terminator_no_match() {
+    assert_eq!(replace_comment_terminator("' OR 1=1", "#"), None);
+}
+
+// ── strings.rs tests ──
+
+#[test]
+fn no_space_wrap_replaces_select() {
+    assert_eq!(
+        no_space_wrap("' UNION select username FROM users--"),
+        Some("' UNION(SELECT(username FROM users--".to_string())
+    );
+}
+
+#[test]
+fn no_space_wrap_no_select_returns_none() {
+    assert_eq!(no_space_wrap("' OR 1=1--"), None);
+}
+
+#[test]
+fn split_string_concat_short_input() {
+    let r = split_string_concat("ab");
+    assert!(r.iter().any(|s| s.contains("'a'||'b'")),
+        "should include concatenation variant: {r:?}");
+    assert!(r.iter().any(|s| s.starts_with("0x")),
+        "should include hex variant: {r:?}");
+}
+
+#[test]
+fn split_string_concat_decimal_for_short() {
+    // Values <= 8 chars get a CONV(base36) variant.
+    let r = split_string_concat("test");
+    assert!(r.iter().any(|s| s.contains("CONV(")),
+        "should include CONV variant for short string: {r:?}");
+}
+
+#[test]
+fn split_string_concat_no_decimal_for_long() {
+    // Values > 8 chars do NOT get a CONV variant.
+    let r = split_string_concat("verylongstringindeed");
+    assert!(!r.iter().any(|s| s.contains("CONV(")),
+        "should NOT include CONV variant for long string: {r:?}");
+}
+
+// ── operators.rs direct tests ──
+
+#[test]
+fn replace_logical_operator_or_basic() {
+    let alts = vec!["||".to_string()];
+    let result = replace_logical_operator("' OR 1=1", &alts, "or");
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(result.contains("||"), "expected || replacement: {result}");
+}
+
+#[test]
+fn replace_logical_operator_and_basic() {
+    let alts = vec!["&&".to_string()];
+    let result = replace_logical_operator("' AND 1=1", &alts, "and");
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(result.contains("&&"), "expected && replacement: {result}");
+}
+
+#[test]
+fn replace_logical_operator_skips_inside_single_quotes() {
+    let alts = vec!["||".to_string()];
+    // The OR is inside single quotes — must NOT be replaced.
+    let result = replace_logical_operator("'hello or world' OR 1=1", &alts, "or");
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(
+        result.contains("'hello or world'"),
+        "quoted OR must be preserved: {result}"
+    );
+    assert!(
+        result.contains("||"),
+        "unquoted OR must still be replaced: {result}"
+    );
+}
+
+#[test]
+fn replace_logical_operator_skips_inside_double_quotes() {
+    let alts = vec!["&&".to_string()];
+    let result = replace_logical_operator("\"foo and bar\" AND 1=1", &alts, "and");
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(
+        result.contains("\"foo and bar\""),
+        "quoted AND must be preserved: {result}"
+    );
+}
+
+#[test]
+fn replace_logical_operator_no_match() {
+    let alts = vec!["||".to_string()];
+    assert_eq!(replace_logical_operator("' = 1", &alts, "or"), None);
+}
+
+#[test]
+fn replace_equality_basic() {
+    assert_eq!(
+        replace_equality("' OR 1=1", " LIKE "),
+        Some("' OR 1 LIKE 1".to_string())
+    );
+}
+
+#[test]
+fn replace_equality_skips_inside_quotes() {
+    let result = replace_equality("'a=b' OR 1=1", " LIKE ");
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(
+        result.contains("'a=b'"),
+        "quoted = must be preserved: {result}"
+    );
+    assert!(
+        result.contains(" LIKE "),
+        "unquoted = must be replaced: {result}"
+    );
+}
+
+#[test]
+fn replace_equality_skips_compound_operators() {
+    // !=, <=, >=, and == should NOT match standalone = replacement.
+    assert_eq!(replace_equality("' OR 1!=1", " LIKE "), None);
+    assert_eq!(replace_equality("' OR 1<=1", " LIKE "), None);
+    assert_eq!(replace_equality("' OR 1>=1", " LIKE "), None);
+    assert_eq!(replace_equality("' OR 1==1", " LIKE "), None);
+}
+
+#[test]
+fn replace_equality_no_equals() {
+    assert_eq!(replace_equality("' OR 1 AND 1", " LIKE "), None);
+}
+
+#[test]
+fn replace_equality_first_equals_only() {
+    // Should replace only the first unquoted =.
+    let result = replace_equality("a=b=c", " LIKE ").unwrap();
+    assert_eq!(result, "a LIKE b=c");
 }

@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 use wafrift_transport::challenge::{
-    ChallengeKind, ChallengeStore, CookieScope, classify, extract_clearance_cookie_scoped,
+    ChallengeKind, ChallengeStore, CookieScope, classify_with_status, extract_clearance_cookie_scoped,
 };
 
 // ── HIGH: AwsWaf cookie-solvable alignment ──────────────────────────
@@ -32,7 +32,7 @@ fn akamai_server_header_alone_does_not_classify_as_challenge() {
     // Pre-fix: any response with `Server: AkamaiGHost` was labelled
     // AkamaiBmp regardless of body content. Now requires `_abck` body.
     let headers = vec![("Server".to_string(), "AkamaiGHost".to_string())];
-    let kind = classify(b"<html>normal page</html>", &headers);
+    let kind = classify_with_status(b"<html>normal page</html>", &headers, 403);
     assert_ne!(
         kind,
         ChallengeKind::AkamaiBmp,
@@ -43,7 +43,7 @@ fn akamai_server_header_alone_does_not_classify_as_challenge() {
 #[test]
 fn aws_server_header_alone_does_not_classify_as_challenge() {
     let headers = vec![("Server".to_string(), "awselb/2.0".to_string())];
-    let kind = classify(b"<html>regular page</html>", &headers);
+    let kind = classify_with_status(b"<html>regular page</html>", &headers, 403);
     assert_ne!(
         kind,
         ChallengeKind::AwsWaf,
@@ -55,14 +55,14 @@ fn aws_server_header_alone_does_not_classify_as_challenge() {
 fn akamai_with_body_marker_still_classifies() {
     // Negative twin — the precision fix must not regress recall.
     let headers = vec![("Server".to_string(), "AkamaiGHost".to_string())];
-    let kind = classify(b"<html>_abck challenge here</html>", &headers);
+    let kind = classify_with_status(b"<html>_abck challenge here</html>", &headers, 403);
     assert_eq!(kind, ChallengeKind::AkamaiBmp);
 }
 
 #[test]
 fn aws_with_body_marker_still_classifies() {
     let headers = vec![("Server".to_string(), "awselb/2.0".to_string())];
-    let kind = classify(b"<html>aws-waf-token check</html>", &headers);
+    let kind = classify_with_status(b"<html>aws-waf-token check</html>", &headers, 403);
     assert_eq!(kind, ChallengeKind::AwsWaf);
 }
 
