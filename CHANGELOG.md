@@ -4,6 +4,20 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.15] — 2026-05-17
+
+### Fixed
+
+- **`evade --explain` printed dozens of repeat "folded" lines for the
+  same strategy.** `build_variants_explained` iterates encoding
+  strategies inside the grammar-mutation loop, so a strategy that
+  produced a duplicate on every grammar mutation got recorded
+  dozens of times. `ExplainTrace::record` now folds repeat
+  observations of the same (strategy, outcome-variant) into a
+  single entry — the trace becomes a summary again instead of
+  scroll noise. Found via smoke-testing `evade --target-context
+  header --explain`.
+
 ## [0.2.14] — 2026-05-17
 
 ### Fixed

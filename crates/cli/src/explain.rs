@@ -51,6 +51,18 @@ impl ExplainTrace {
             });
             return;
         }
+        // For non-Applied outcomes, fold repeat observations of the same
+        // (strategy, outcome-variant) into a single entry. Without this,
+        // a strategy that produces a duplicate on every grammar
+        // mutation prints "folded" N times — the trace becomes scroll
+        // noise instead of a summary.
+        let already_recorded = self.entries.iter().any(|e| {
+            e.strategy == strategy
+                && std::mem::discriminant(&e.outcome) == std::mem::discriminant(&outcome)
+        });
+        if already_recorded {
+            return;
+        }
         self.entries.push(ExplainEntry { strategy, outcome });
     }
 
@@ -135,6 +147,34 @@ mod tests {
             Outcome::Applied { variant_count } => assert_eq!(variant_count, 5),
             _ => panic!("expected Applied"),
         }
+    }
+
+    #[test]
+    fn repeated_non_applied_outcomes_fold_to_one_entry() {
+        // Smoke-test gap: build_variants_explained iterates strategies
+        // inside the grammar-mutation loop, so a strategy can record
+        // AllDuplicates dozens of times. The trace must collapse them.
+        let mut t = ExplainTrace::default();
+        for _ in 0..30 {
+            t.record(Strategy::WhitespaceInsertion, Outcome::AllDuplicates);
+        }
+        assert_eq!(
+            t.entries.len(),
+            1,
+            "30 identical AllDuplicates records must collapse to 1"
+        );
+    }
+
+    #[test]
+    fn distinct_non_applied_outcomes_per_strategy_still_separate() {
+        let mut t = ExplainTrace::default();
+        t.record(
+            Strategy::WhitespaceInsertion,
+            Outcome::NotApplicableToContext("test"),
+        );
+        t.record(Strategy::WhitespaceInsertion, Outcome::AllDuplicates);
+        // Different outcome variants for the same strategy: keep both.
+        assert_eq!(t.entries.len(), 2);
     }
 
     #[test]
