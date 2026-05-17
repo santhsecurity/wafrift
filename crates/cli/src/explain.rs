@@ -61,12 +61,10 @@ impl ExplainTrace {
     /// Promote any strategy that recorded `AllDuplicates` AND later
     /// `Applied` into just `Applied` (the duplicate observation was per-call).
     pub fn finalize(&mut self) {
-        let applied: std::collections::HashSet<Strategy> = self
+        let applied: Vec<Strategy> = self
             .entries
             .iter()
-            .filter_map(|e| {
-                matches!(e.outcome, Outcome::Applied { .. }).then_some(e.strategy)
-            })
+            .filter_map(|e| matches!(e.outcome, Outcome::Applied { .. }).then_some(e.strategy))
             .collect();
         self.entries.retain(|e| {
             !(matches!(e.outcome, Outcome::AllDuplicates) && applied.contains(&e.strategy))
