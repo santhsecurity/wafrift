@@ -285,28 +285,47 @@ fn content_type_empty_params_list() {
     }
 }
 
-/// BUG: Param with 10KB value may cause performance issues or buffer limits
+/// Regression for the content-type memory-amplification DoS.
+///
+/// This test used to *assert the bug*: "no size limits… JSON escape
+/// makes it even larger… body.len() >= input". `generate_variants`
+/// re-emits every param across ~12 reformattings, so an unbounded value
+/// fed by the proxy per request was a ~100 MB/req amplification. The fix
+/// (`MAX_VARIANT_VALUE_BYTES` in wafrift-content-type) caps the
+/// expandable value, so a 10 KB value is ACCEPTED (no panic, variants
+/// still generated) but the output is now BOUNDED, not input-scaled.
 #[test]
-fn content_type_10kb_param_value() {
-    let huge_value = "X".repeat(10 * 1024); // 10KB
+fn content_type_10kb_param_value_is_bounded_not_unbounded() {
+    let huge_value = "X".repeat(10 * 1024); // 10 KB
     let params = vec![("data".into(), huge_value.clone())];
     let variants = generate_variants(&params);
 
-    // BUG: No size limits or chunking - may cause memory issues
-    // Also JSON unicode escape will make it even larger
-
+    // Still robust: a big value must not break generation or panic.
     assert!(!variants.is_empty(), "10KB value broke variant generation");
 
-    // Find JSON variant - it will be HUGE
-    let json_var = variants
+    // The fix: the value is capped (8 KiB), so the JSON variant body is
+    // far below an unbounded JSON-escape of 10 KB (which would be
+    // 10 KB × up-to-6 for \uXXXX ≈ 60 KB). Assert it stayed bounded —
+    // i.e. the amplification DoS is gone.
+    if let Some(jv) = variants
         .iter()
-        .find(|v| v.technique == ContentTypeTechnique::JsonUnicodeEscape);
-
-    if let Some(jv) = json_var {
-        // JSON escaping may significantly increase size
+        .find(|v| v.technique == ContentTypeTechnique::JsonUnicodeEscape)
+    {
         assert!(
-            jv.body.len() >= huge_value.len(),
-            "JSON variant body smaller than input - data lost?"
+            jv.body.len() < huge_value.len(),
+            "JSON variant body ({}) is NOT bounded below the 10 KB input — \
+             the value cap regressed and the amplification DoS is back",
+            jv.body.len()
+        );
+    }
+    // No single variant may exceed a sane absolute ceiling regardless
+    // of input — the actual contract of the fix.
+    for v in &variants {
+        assert!(
+            v.body.len() <= 256 * 1024,
+            "variant {:?} body {} bytes exceeds the bounded ceiling",
+            v.technique,
+            v.body.len()
         );
     }
 }

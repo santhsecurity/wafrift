@@ -44,6 +44,35 @@ const MAX_BODY_REGEX_PATTERNS: usize = 2000;
 /// benign 404 pages containing "forbidden"), so require stronger evidence.
 const BODY_ONLY_MIN_CONFIDENCE: f64 = 0.5;
 
+/// Take up to `max` bytes of `s` starting at byte offset `start`,
+/// snapping both ends to UTF-8 character boundaries so the slice can
+/// never panic.
+///
+/// `Regex::find` returns char-boundary-aligned `start`/`end`, but the
+/// previous code computed the end as `m.end().min(m.start() + 40)` —
+/// `m.start() + 40` is an arbitrary byte offset that lands mid-codepoint
+/// whenever a multibyte character (any non-ASCII byte in a WAF block
+/// page or header value — `é`, `”`, `→`, NBSP, …) straddles it. That
+/// slice panicked the whole detector on attacker-influenced response
+/// text. This helper is the bounded, boundary-safe replacement.
+fn clamped_snippet(s: &str, start: usize, max: usize) -> &str {
+    if start >= s.len() {
+        return "";
+    }
+    // Snap `start` down to a char boundary (it should already be one
+    // from a regex match, but never trust the offset).
+    let mut lo = start;
+    while lo > 0 && !s.is_char_boundary(lo) {
+        lo -= 1;
+    }
+    // Snap the desired end up/down to a char boundary within bounds.
+    let mut hi = lo.saturating_add(max).min(s.len());
+    while hi > lo && !s.is_char_boundary(hi) {
+        hi -= 1;
+    }
+    &s[lo..hi]
+}
+
 /// Global in-memory rule database.
 static RULE_DB: Lazy<RwLock<RuleEngine>> = Lazy::new(|| {
     let engine = RuleEngine::load_embedded().unwrap_or_else(|e| {
@@ -430,7 +459,7 @@ impl RuleEngine {
 
             // Extract match snippet for the indicator message.
             if let Some(m) = self.body_regexes[pattern_idx].find(body) {
-                let snippet = &body[m.start()..m.end().min(m.start() + 40)];
+                let snippet = clamped_snippet(body, m.start(), 40);
                 entry.1.push(format!("body: {snippet}"));
             }
         }
@@ -468,7 +497,7 @@ impl RuleEngine {
                             matched = true;
                             entry.1.push(format!(
                                 "header {k}: {}",
-                                &v[m.start()..m.end().min(m.start() + 40)]
+                                clamped_snippet(v, m.start(), 40)
                             ));
                             break;
                         }

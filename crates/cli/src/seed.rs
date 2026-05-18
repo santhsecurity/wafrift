@@ -26,7 +26,12 @@ pub struct SeedArgs {
     /// Comma-separated technique pool keys to seed. Each key is a string
     /// like `EncodingDoubleUrl`, `GrammarTautology`, `SmugglingClTeBasic`.
     /// Run `wafrift techniques list` for the canonical list.
-    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    ///
+    /// `required = true` so `--help` renders the `[required]` marker and
+    /// clap rejects a missing value at parse time — previously the help
+    /// text implied it was optional and the failure only surfaced as a
+    /// hand-rolled runtime `error:` after argument parsing succeeded.
+    #[arg(long, num_args = 1.., value_delimiter = ',', required = true)]
     pub technique: Vec<String>,
 
     /// Seed the per-WAF `GeneBank` under `~/.wafrift/genomes/<waf>.json`.

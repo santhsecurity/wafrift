@@ -337,11 +337,115 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         );
     }
 
+    // ── Anti-rig chokepoint ──────────────────────────────────────────
+    // A "mutation" of an attack must still BE that attack. Several
+    // generators (json_xml, keywordless, canned-tautology, …) emit
+    // fixed library payloads with ZERO relation to the input — so a
+    // request to evade `1 AND extractvalue(...)` came back as
+    // `' OR JSON_EXTRACT('{"a":1}','$.a')=1--`. That destroys the
+    // exploit and is exactly what made the bench report fake bypasses.
+    //
+    // For a boolean tautology, a canned tautology IS equivalent — skip
+    // the filter there (adversarial-twin: legit keyword-free rewrites
+    // must survive). For any structured attack (UNION / error-based /
+    // stacked / blind / time), every returned variant MUST still carry
+    // at least one significant token of the original — checked after
+    // stripping SQL comments + whitespace so legitimate
+    // comment-injection evasions (`extr/**/actvalue`) still pass.
+    if is_structured_attack(payload) {
+        let markers = significant_tokens(payload);
+        if !markers.is_empty() {
+            results.retain(|m| {
+                let norm = strip_sql_comments_ws(&m.payload);
+                let var_tokens: std::collections::HashSet<String> =
+                    norm.split(|c: char| !c.is_ascii_alphanumeric())
+                        .filter(|t| t.len() >= 4)
+                        .map(str::to_ascii_lowercase)
+                        .collect();
+                markers.iter().any(|mk| var_tokens.contains(mk))
+            });
+        }
+    }
+
     // Final truncate: dialect mutations are allowed to extend beyond base
     // budget during collection so each dialect gets a fair share, but the
     // public contract promises at most `max_mutations` results.
     results.truncate(max_mutations);
     results
+}
+
+/// True when the payload is a STRUCTURED attack: it has a data-
+/// exfiltration or secondary effect (UNION read, error-based extract,
+/// time/boolean blind, stacked statement, file/proc access) — NOT just
+/// "make the WHERE true".
+///
+/// This is the axis that matters for the anti-rig gate. A pure boolean
+/// tautology or an `'admin'--` auth bypass CAN be swapped for an
+/// equivalent always-true expression (same effect) — that is a valid
+/// mutation. A structured attack CANNOT: replacing `extractvalue(...)`
+/// or `UNION SELECT pw` with `1 OR 1=1` throws the exploit away. So:
+///   * structured  → forbid canned substitution, enforce token
+///     preservation (the variant must still be THIS attack);
+///   * not structured → canned/keyword-free tautology rewrites are
+///     legitimate equivalents, no preservation filter.
+///
+/// The old `contains_tautology` substring check got this exactly wrong:
+/// `1 AND IF(1=1,SLEEP(5),0)` (time-blind) "contained `1=1`" so it was
+/// treated as a tautology and its payload replaced by `'+0+'`.
+pub(crate) fn is_structured_attack(payload: &str) -> bool {
+    let s = strip_sql_comments_ws(payload);
+    const STRUCTURED: &[&str] = &[
+        "union", "select", "sleep(", "benchmark(", "waitfor", "extractvalue",
+        "updatexml", "load_file", "into outfile", "into dumpfile", ";", "insert ",
+        "update ", "delete ", "drop ", "exec ", "xp_", "sp_", "pg_sleep", "dbms_",
+        "utl_", "case when", "regexp ", "rlike ", "@@", "0x", "char(", "chr(",
+        "concat", "ascii(", "substring", "substr(", "hex(", "unhex(", "if(",
+        "floor(", "rand(", "count(", "group by", "having ", "procedure ",
+    ];
+    STRUCTURED.iter().any(|m| s.contains(m))
+}
+
+/// Significant lowercase tokens (alphanumeric runs ≥ 4 chars) of a
+/// payload — the attack's class-defining vocabulary
+/// (`extractvalue`, `union`, `select`, `concat`, `sleep`, …). A real
+/// evasion preserves at least one; a canned substitution carries none.
+fn significant_tokens(payload: &str) -> std::collections::HashSet<String> {
+    strip_sql_comments_ws(payload)
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| t.len() >= 4 && t.chars().any(|c| c.is_ascii_alphabetic()))
+        .map(str::to_ascii_lowercase)
+        .collect()
+}
+
+/// Lowercased copy with SQL comments removed and whitespace collapsed,
+/// so comment-injection evasions (`UN/**/ION`, `sel--\nect`) normalise
+/// back to the keyword they evade rather than reading as a new token.
+fn strip_sql_comments_ws(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if i + 1 < b.len() && b[i] == b'/' && b[i + 1] == b'*' {
+            // Skip /* … */ (including /*! … */ MySQL conditional).
+            i += 2;
+            while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+                i += 1;
+            }
+            i += 2;
+        } else if b[i] == b'-' && i + 1 < b.len() && b[i + 1] == b'-' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if b[i] == b'#' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else {
+            out.push(b[i] as char);
+            i += 1;
+        }
+    }
+    out.to_ascii_lowercase()
 }
 
 fn extend_strings_until_limit(

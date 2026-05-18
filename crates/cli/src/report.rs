@@ -26,6 +26,20 @@ pub struct ReportArgs {
     #[arg(long)]
     pub proxy_bank: Vec<PathBuf>,
 
+    /// One or more `wafrift scan --format json` output files to fold
+    /// into the report. This is what makes `scan` → `report` compose:
+    /// previously `report` only read the proxy gene bank, so a user who
+    /// ran `scan` then `report` got "No bypasses recorded yet" even
+    /// with findings in hand. Repeatable.
+    #[arg(long)]
+    pub scan_json: Vec<PathBuf>,
+
+    /// Read a `wafrift scan --format json` blob from stdin, so
+    /// `wafrift scan ... --format json | wafrift report --scan-stdin`
+    /// works as a one-liner.
+    #[arg(long, default_value_t = false)]
+    pub scan_stdin: bool,
+
     /// Restrict the report to hosts matching this glob (`*.example.com`).
     /// Repeatable / comma-separated. Empty = all hosts.
     #[arg(long, num_args = 1.., value_delimiter = ',')]
@@ -124,43 +138,162 @@ fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
     }
 }
 
+/// Reduce a target URL to a bare host (the gene-bank/report key).
+fn host_from_target(target: &str) -> String {
+    let no_scheme = target
+        .split_once("://")
+        .map_or(target, |(_, rest)| rest);
+    let host_port = no_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(no_scheme);
+    // Strip userinfo and port.
+    let host = host_port
+        .rsplit_once('@')
+        .map_or(host_port, |(_, h)| h);
+    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
+    if host.is_empty() {
+        "unknown-host".to_string()
+    } else {
+        host.to_ascii_lowercase()
+    }
+}
+
+/// Parse a `wafrift scan --format json` blob into the same host-keyed
+/// model the proxy gene bank uses, so both sources flow through the
+/// identical render path. Accepts the bare `scan` object or the
+/// `--report-layers` wrapper that nests it under `"scan"`.
+fn ingest_scan_json(raw: &str, src: &str) -> Result<PersistedGeneBank, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("parse scan JSON from {src}: {e}"))?;
+    let scan = v.get("scan").filter(|s| s.is_object()).unwrap_or(&v);
+
+    let target = scan
+        .get("target")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!("{src}: not a wafrift scan JSON (no `target` field) — did you pipe `scan --format json`?")
+        })?;
+    let host = host_from_target(target);
+
+    let mut techniques: Vec<String> = Vec::new();
+    if let Some(arr) = scan.get("bypass_variants").and_then(serde_json::Value::as_array) {
+        for bv in arr {
+            if let Some(ts) = bv.get("techniques").and_then(serde_json::Value::as_array) {
+                for t in ts {
+                    if let Some(s) = t.as_str()
+                        && !techniques.iter().any(|x| x == s)
+                    {
+                        techniques.push(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let waf_name = scan
+        .get("waf")
+        .and_then(serde_json::Value::as_str)
+        .filter(|w| !w.is_empty() && !w.eq_ignore_ascii_case("none"))
+        .map(str::to_string);
+
+    let mut hosts = HashMap::new();
+    hosts.insert(
+        host,
+        PersistedHostState {
+            proven_winners: techniques,
+            blocklisted: Vec::new(),
+            waf_name,
+        },
+    );
+    Ok(PersistedGeneBank { schema: 1, hosts })
+}
+
 pub fn run_report(args: ReportArgs) -> ExitCode {
-    let paths = match resolve_paths(&args.proxy_bank) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("error: {msg}");
+    let has_scan_src = !args.scan_json.is_empty() || args.scan_stdin;
+    let mut merged = PersistedGeneBank::default();
+
+    // ── scan JSON sources ──
+    if args.scan_stdin {
+        use std::io::Read;
+        let mut raw = String::new();
+        if let Err(e) = std::io::stdin().read_to_string(&mut raw) {
+            eprintln!("error: read scan JSON from stdin: {e}");
             return ExitCode::from(1);
         }
-    };
-
-    let mut merged = PersistedGeneBank::default();
-    for path in &paths {
-        let raw = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                eprintln!(
-                    "error: gene bank not found: {}\n\n\
-                     hint: the gene bank is created automatically by wafrift-proxy.\n\
-                     Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and browse\n\
-                     through it, then re-run `wafrift report`.\n\
-                     Or pass `--proxy-bank <path>` to use a specific file.",
-                    path.display()
-                );
+        match ingest_scan_json(&raw, "stdin") {
+            Ok(b) => merge_banks(&mut merged, b),
+            Err(e) => {
+                eprintln!("error: {e}");
                 return ExitCode::from(1);
             }
+        }
+    }
+    for path in &args.scan_json {
+        let raw = match fs::read_to_string(path) {
+            Ok(s) => s,
             Err(e) => {
                 eprintln!("error: read {}: {e}", path.display());
                 return ExitCode::from(1);
             }
         };
-        let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
-            Ok(b) => b,
+        match ingest_scan_json(&raw, &path.display().to_string()) {
+            Ok(b) => merge_banks(&mut merged, b),
             Err(e) => {
-                eprintln!("error: parse {}: {e}", path.display());
+                eprintln!("error: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+
+    // ── proxy gene bank sources ──
+    // Load when explicitly requested, or as the sole source when no
+    // scan JSON was supplied (preserves the original default). When
+    // scan JSON IS supplied and no bank is explicitly named, don't
+    // hard-fail on a missing default bank — the scan data stands alone.
+    let load_proxy = !args.proxy_bank.is_empty() || !has_scan_src;
+    if load_proxy {
+        let paths = match resolve_paths(&args.proxy_bank) {
+            Ok(p) => p,
+            Err(msg) => {
+                eprintln!("error: {msg}");
                 return ExitCode::from(1);
             }
         };
-        merge_banks(&mut merged, bank);
+        for path in &paths {
+            let raw = match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    if has_scan_src {
+                        // Scan data already loaded; a missing default
+                        // bank is not an error in that mode.
+                        continue;
+                    }
+                    eprintln!(
+                        "error: gene bank not found: {}\n\n\
+                         hint: the gene bank is created automatically by wafrift-proxy.\n\
+                         Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and browse\n\
+                         through it, then re-run `wafrift report`.\n\
+                         Or pass `--scan-json <file>` / `--scan-stdin` to report from\n\
+                         `wafrift scan --format json` output instead.",
+                        path.display()
+                    );
+                    return ExitCode::from(1);
+                }
+                Err(e) => {
+                    eprintln!("error: read {}: {e}", path.display());
+                    return ExitCode::from(1);
+                }
+            };
+            let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("error: parse {}: {e}", path.display());
+                    return ExitCode::from(1);
+                }
+            };
+            merge_banks(&mut merged, bank);
+        }
     }
     let bank = merged;
 
@@ -415,6 +548,8 @@ mod tests {
             .collect();
         let args = ReportArgs {
             proxy_bank: vec![],
+            scan_json: vec![],
+            scan_stdin: false,
             only_host: vec![],
             output: None,
             target_template: None,
@@ -479,6 +614,8 @@ mod tests {
         };
         let args = ReportArgs {
             proxy_bank: vec![],
+            scan_json: vec![],
+            scan_stdin: false,
             only_host: vec![],
             output: None,
             target_template: None,
@@ -501,6 +638,8 @@ mod tests {
         hosts.sort_by(|a, b| a.0.cmp(b.0));
         let args = ReportArgs {
             proxy_bank: vec![],
+            scan_json: vec![],
+            scan_stdin: false,
             only_host: vec![],
             output: None,
             target_template: None,
@@ -539,6 +678,8 @@ mod tests {
         };
         let args = ReportArgs {
             proxy_bank: vec![],
+            scan_json: vec![],
+            scan_stdin: false,
             only_host: vec![],
             output: None,
             target_template: None,

@@ -23,24 +23,33 @@ use crate::scan::ScanArgs;
 
 #[derive(Args, Debug)]
 pub struct ImportCurlArgs {
-    /// Path to a file containing a curl invocation. Mutually exclusive
-    /// with `--from-stdin`.
-    #[arg(long)]
+    /// The curl invocation itself, as one shell-quoted argument —
+    /// `wafrift import-curl 'curl -s https://t/login -H "Cookie: s=1"'`.
+    /// This is the form you get from Burp / Chromium "Copy as cURL".
+    /// Mutually exclusive with `--curl-file` / `--from-stdin`.
+    #[arg(value_name = "CURL", conflicts_with_all = ["curl_file", "from_stdin"])]
+    pub curl: Option<String>,
+
+    /// Path to a file containing a curl invocation.
+    #[arg(long, conflicts_with = "from_stdin")]
     pub curl_file: Option<PathBuf>,
 
-    /// Read the curl invocation from stdin. Mutually exclusive with
-    /// `--curl-file`.
+    /// Read the curl invocation from stdin.
     #[arg(long, default_value_t = false)]
     pub from_stdin: bool,
 
-    /// Query/body parameter name to inject the payload into. Must
-    /// already exist in the parsed curl request OR will be appended.
+    /// Query/body parameter name to inject the payload into. Defaults
+    /// to `q` when `--payload` is given. Ignored when no payload is
+    /// supplied (then the command just fingerprints the parsed target).
     #[arg(long)]
-    pub param: String,
+    pub param: Option<String>,
 
-    /// Raw payload to mutate via the evasion engine.
+    /// Raw payload to mutate via the evasion engine. OPTIONAL: with no
+    /// payload, `import-curl` parses the request and runs WAF detection
+    /// against it (the natural "what's in front of this endpoint?"
+    /// first step) instead of erroring.
     #[arg(long)]
-    pub payload: String,
+    pub payload: Option<String>,
 
     /// Evasion intensity. Maps to `wafrift scan --level`.
     #[arg(long, default_value = "heavy", value_parser = ["light", "medium", "heavy"])]
@@ -235,19 +244,19 @@ fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
 }
 
 pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
-    if args.curl_file.is_some() && args.from_stdin {
-        eprintln!("error: --curl-file and --from-stdin are mutually exclusive");
-        return ExitCode::from(1);
-    }
-    let raw = match (&args.curl_file, args.from_stdin) {
-        (Some(p), false) => match fs::read_to_string(p) {
+    // Source precedence: inline positional arg → file → stdin. clap's
+    // `conflicts_with_all` already rejects more than one being set, so
+    // here we just pick the one that is.
+    let raw = match (&args.curl, &args.curl_file, args.from_stdin) {
+        (Some(s), _, _) => s.clone(),
+        (None, Some(p), false) => match fs::read_to_string(p) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("error: read {}: {e}", p.display());
                 return ExitCode::from(1);
             }
         },
-        (None, true) => {
+        (None, None, true) => {
             let mut buf = String::new();
             if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
                 eprintln!("error: read stdin: {e}");
@@ -255,11 +264,15 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
             }
             buf
         }
-        (None, false) => {
-            eprintln!("error: pick one of --curl-file <path> / --from-stdin");
+        (None, None, false) => {
+            eprintln!(
+                "error: supply the curl command — as a positional arg \
+                 (`wafrift import-curl 'curl https://t/...'`), `--curl-file <path>`, \
+                 or piped with `--from-stdin`"
+            );
             return ExitCode::from(1);
         }
-        (Some(_), true) => unreachable!(),
+        (None, Some(_), true) => unreachable!("clap conflicts_with prevents this"),
     };
     let tokens = match shell_tokenize(&raw) {
         Ok(t) => t,
@@ -276,7 +289,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         }
     };
 
-    let Some(target) = parsed.url else {
+    let Some(target) = parsed.url.clone() else {
         eprintln!("error: parse curl: no URL found in curl command");
         return ExitCode::from(1);
     };
@@ -302,7 +315,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     // a one-liner the practitioner can hand to scan AND prints the
     // parsed context for transparency.
     eprintln!();
-    eprintln!("=== parsed request context (handed to scan via the standard CLI) ===");
+    eprintln!("=== parsed request context ===");
     if let Some(ua) = &parsed.user_agent {
         eprintln!("  User-Agent: {ua}");
     }
@@ -314,10 +327,33 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     }
     eprintln!();
 
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: tokio runtime: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    // No payload → the practitioner just wants "what's guarding this
+    // request?" Fingerprint the parsed target (with its auth/cookie
+    // context applied) instead of erroring out on a missing --payload.
+    let Some(payload) = args.payload else {
+        eprintln!(
+            "no --payload supplied → running WAF detection on the parsed request \
+             (add --payload '<attack>' to scan for evasions instead)\n"
+        );
+        return rt.block_on(detect_parsed_target(&target, &parsed, args.insecure));
+    };
+
     let scan_args = ScanArgs {
-        target,
-        payload: args.payload,
-        param: args.param,
+        target: Some(target),
+        from_discovery: None,
+        payload,
+        // Without an explicit --param the canonical default is `q`,
+        // matching `wafrift scan`'s own default — consistency, not a
+        // hard error the user has to guess their way past.
+        param: args.param.unwrap_or_else(|| "q".to_string()),
         level: parse_level(&args.level),
         encoding_only: false,
         delay_ms: args.delay_ms,
@@ -330,15 +366,77 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         output: None,
     };
 
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
+    let cancel = tokio_util::sync::CancellationToken::new();
+    rt.block_on(async { crate::scan::run_scan(scan_args, cancel).await })
+}
+
+/// Fetch the parsed request (method/headers/cookie/UA/body applied) and
+/// run WAF detection on the live response. This is the natural first
+/// step when you paste a Burp request and just want to know what's in
+/// front of the endpoint before crafting payloads.
+async fn detect_parsed_target(
+    target: &str,
+    parsed: &ParsedCurl,
+    insecure: bool,
+) -> ExitCode {
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none());
+    if insecure {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    let client = match builder.build() {
+        Ok(c) => c,
         Err(e) => {
-            eprintln!("error: tokio runtime: {e}");
+            eprintln!("error: build HTTP client: {e}");
             return ExitCode::from(1);
         }
     };
-    let cancel = tokio_util::sync::CancellationToken::new();
-    rt.block_on(async { crate::scan::run_scan(scan_args, cancel).await })
+    let method = parsed
+        .method
+        .as_deref()
+        .unwrap_or(if parsed.body.is_some() { "POST" } else { "GET" });
+    let reqwest_method = reqwest::Method::from_bytes(method.as_bytes())
+        .unwrap_or(reqwest::Method::GET);
+    let mut req = client.request(reqwest_method, target);
+    for (k, v) in &parsed.headers {
+        req = req.header(k, v);
+    }
+    if let Some(ua) = &parsed.user_agent {
+        req = req.header("User-Agent", ua);
+    }
+    if let Some(c) = &parsed.cookie {
+        req = req.header("Cookie", c);
+    }
+    if let Some(b) = &parsed.body {
+        req = req.body(b.clone());
+    }
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: request to {target} failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let status = resp.status().as_u16();
+    let headers: Vec<(String, String)> = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("<binary>").to_string()))
+        .collect();
+    let body = resp.bytes().await.unwrap_or_default();
+    let body = &body[..body.len().min(64 * 1024)];
+    eprintln!("probe: {method} {target} → HTTP {status} ({} headers)", headers.len());
+    let detected = wafrift_detect::waf_detect::detect(status, &headers, body);
+    if let Some(top) = detected.first() {
+        println!("Detected WAF: {} ({:.0}% confidence)", top.name, top.confidence * 100.0);
+        for ind in &top.indicators {
+            println!("  - {ind}");
+        }
+    } else {
+        println!("No WAF confidently detected on the parsed request (HTTP {status}).");
+    }
+    ExitCode::SUCCESS
 }
 
 fn parse_level(s: &str) -> crate::Level {

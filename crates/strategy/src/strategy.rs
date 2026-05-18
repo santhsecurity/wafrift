@@ -805,7 +805,15 @@ fn apply_header_obfuscation(
         // Insert obs-fold: newline + space/continuation
         // This can break simple header parsing while still being valid HTTP/1.1
         if value.len() > 20 && !value.contains('\n') {
-            let fold_pos = value.len() / 2;
+            // `value.len() / 2` is an arbitrary byte offset; a custom
+            // User-Agent with any multibyte character (operators set
+            // these via `import-curl -A`, `--stealth-browser`, or a
+            // crafted request) would land mid-codepoint and panic the
+            // entire evasion pipeline. Snap down to a char boundary.
+            let mut fold_pos = value.len() / 2;
+            while fold_pos > 0 && !value.is_char_boundary(fold_pos) {
+                fold_pos -= 1;
+            }
             let folded = format!("{}\r\n {}", &value[..fold_pos], &value[fold_pos..]);
             req.headers[ua_idx] = ("User-Agent".into(), folded);
             techniques.push(Technique::HeaderObfuscation("ObsFold".into()));

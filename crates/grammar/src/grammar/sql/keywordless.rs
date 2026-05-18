@@ -90,16 +90,35 @@ pub(crate) fn keywordless_mutations(payload: &str, max_mutations: usize) -> Vec<
         .trim_end_matches("/*")
         .trim();
 
-    // Strategy 1: Replace the whole payload with keyword-free injections
-    for (injection, rule) in KEYWORDLESS_INJECTIONS {
-        if results.len() >= max_mutations {
-            break;
+    // GATE: substituting a canned keyword-free fragment for the WHOLE
+    // payload is only a *semantics-preserving* mutation when the
+    // payload's exploit IS a boolean tautology (login bypass / `OR
+    // 1=1`). For an error-based (`extractvalue(...)`), UNION, stacked
+    // (`; DROP`), or blind/time payload, replacing it with `'+0+'`
+    // DESTROYS the attack — the variant is a different, weaker (often
+    // useless) payload. The bench then either scored it as a fake
+    // "bypass" (the rig) or the operator shipped a non-exploit.
+    // Real evasion of those payloads is done by the
+    // comment/case/encoding/AST-metamorph generators, which transform
+    // the ACTUAL payload instead of swapping it out.
+    // Canned substitution is a valid equivalent for tautology / value
+    // auth-bypass injections, but DESTROYS a structured attack
+    // (UNION/error-based/blind/stacked). Allow it only for the former.
+    let allow_canned = !super::is_structured_attack(payload);
+
+    // Strategy 1: replace the whole payload with a keyword-free
+    // tautology — ONLY when that is semantically equivalent.
+    if allow_canned {
+        for (injection, rule) in KEYWORDLESS_INJECTIONS {
+            if results.len() >= max_mutations {
+                break;
+            }
+            results.push(SqlMutation {
+                payload: (*injection).to_string(),
+                description: format!("keyword-free injection: {injection}"),
+                rules_applied: vec!["keywordless", rule],
+            });
         }
-        results.push(SqlMutation {
-            payload: (*injection).to_string(),
-            description: format!("keyword-free injection: {injection}"),
-            rules_applied: vec!["keywordless", rule],
-        });
     }
 
     // Strategy 2: If the payload has a tautology with keywords, replace with arithmetic
@@ -120,16 +139,21 @@ pub(crate) fn keywordless_mutations(payload: &str, max_mutations: usize) -> Vec<
         }
     }
 
-    // Strategy 3: Arithmetic probes for numeric parameter contexts
-    for (arith, rule) in KEYWORDLESS_TAUTOLOGIES {
-        if results.len() >= max_mutations {
-            break;
+    // Strategy 3: bare arithmetic tautology probes — again, only a
+    // valid substitute when the original is NOT a structured attack.
+    // (`1-0`/`0+1` in place of an `extractvalue` exfil is not the
+    // same attack.)
+    if allow_canned {
+        for (arith, rule) in KEYWORDLESS_TAUTOLOGIES {
+            if results.len() >= max_mutations {
+                break;
+            }
+            results.push(SqlMutation {
+                payload: (*arith).to_string(),
+                description: format!("arithmetic probe: {arith}"),
+                rules_applied: vec!["arithmetic_probe", rule],
+            });
         }
-        results.push(SqlMutation {
-            payload: (*arith).to_string(),
-            description: format!("arithmetic probe: {arith}"),
-            rules_applied: vec!["arithmetic_probe", rule],
-        });
     }
 
     results.truncate(max_mutations);

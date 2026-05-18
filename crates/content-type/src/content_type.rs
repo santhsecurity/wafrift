@@ -57,6 +57,68 @@ pub enum ContentTypeTechnique {
 /// fully allocated as strings during `split('&')` and `to_string()`.
 const MAX_FORM_BODY_SIZE: usize = 8 * 1024 * 1024;
 
+/// Aggregate key+value budget (bytes) that [`generate_variants`] will
+/// re-serialise.
+///
+/// `generate_variants` emits ~12 reformattings, **each containing every
+/// param**, so its output is `≈ Σ(key+value) × variant_count`. With
+/// only the 8 MiB `parse_form_body` guard, an 8 MiB body amplifies to
+/// ~100 MB per call — and the proxy calls this once per intercepted
+/// request, so a handful of concurrent large bodies OOMs the process.
+/// The WAF-parser-discrepancy signal does not grow with body size: a
+/// few KB of params already exercises every divergent parser. Cap the
+/// expandable input so output is bounded regardless of how large (or
+/// how adversarially padded) the request body is.
+const MAX_VARIANT_INPUT_BYTES: usize = 64 * 1024;
+
+/// Per-value cap so a single giant value can't blow the whole budget
+/// (and starve the parser-divergence coverage that needs *multiple*
+/// params, not one huge one).
+const MAX_VARIANT_VALUE_BYTES: usize = 8 * 1024;
+
+/// Truncate a parameter list down to [`MAX_VARIANT_INPUT_BYTES`] of
+/// aggregate key+value bytes, snapping every truncation to a UTF-8
+/// char boundary (these strings flow straight into XML/JSON/multipart
+/// serialisers that must stay valid). Returns the original slice
+/// untouched in the common small-body case (no allocation).
+fn bound_params(params: &[(String, String)]) -> std::borrow::Cow<'_, [(String, String)]> {
+    let total: usize = params
+        .iter()
+        .map(|(k, v)| k.len() + v.len())
+        .sum();
+    let oversize_value = params.iter().any(|(_, v)| v.len() > MAX_VARIANT_VALUE_BYTES);
+    if total <= MAX_VARIANT_INPUT_BYTES && !oversize_value {
+        return std::borrow::Cow::Borrowed(params);
+    }
+    fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+        idx = idx.min(s.len());
+        while idx > 0 && !s.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        idx
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut used = 0usize;
+    for (k, v) in params {
+        if used >= MAX_VARIANT_INPUT_BYTES {
+            break;
+        }
+        let k = k[..floor_char_boundary(k, MAX_VARIANT_VALUE_BYTES)].to_string();
+        let v = v[..floor_char_boundary(v, MAX_VARIANT_VALUE_BYTES)].to_string();
+        let remaining = MAX_VARIANT_INPUT_BYTES - used;
+        let cost = k.len() + v.len();
+        if cost > remaining {
+            // Trim the value to fit the remaining budget exactly.
+            let vb = floor_char_boundary(&v, remaining.saturating_sub(k.len()));
+            out.push((k.clone(), v[..vb].to_string()));
+            break;
+        }
+        used += cost;
+        out.push((k, v));
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// Parse form-encoded body into key-value pairs.
 ///
 /// Only segments containing `=` are considered valid key-value pairs.
@@ -147,35 +209,75 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-/// Sanitise a string for use as an XML element name.
+/// `NameStartChar` per XML 1.0 (5th ed.) §2.3.
 ///
-/// XML 1.0 §2.3 `NameStartChar` permits any Unicode letter (or `_`) and
-/// `NameChar` additionally permits digits, `-`, `.`, and the combining/
-/// extender ranges. Pre-fix this used `is_ascii_alphabetic` and
-/// `is_ascii_alphanumeric`, which mangled valid Unicode names like
-/// `<日本語>` into all-underscores — a bug that any non-Latin operator
-/// would notice immediately.
+/// NOT the same as Rust's `char::is_alphabetic`: that follows the
+/// Unicode `Alphabetic` derived property, which XML does not. The
+/// previous implementation used `is_alphabetic`/`is_alphanumeric`,
+/// which **accepts characters XML forbids in a Name** — e.g. `²`
+/// (U+00B2, category `No`) is `is_alphanumeric() == true` but is not a
+/// `NameChar`, so `xml_safe_name("0²")` returned `"_²"`, an invalid
+/// element name that makes the generated XML malformed and the
+/// Content-Type/XML evasion variant silently useless.
+fn is_xml_name_start(c: char) -> bool {
+    c == ':'
+        || c == '_'
+        || c.is_ascii_alphabetic()
+        || ('\u{C0}'..='\u{D6}').contains(&c)
+        || ('\u{D8}'..='\u{F6}').contains(&c)
+        || ('\u{F8}'..='\u{2FF}').contains(&c)
+        || ('\u{370}'..='\u{37D}').contains(&c)
+        || ('\u{37F}'..='\u{1FFF}').contains(&c)
+        || ('\u{200C}'..='\u{200D}').contains(&c)
+        || ('\u{2070}'..='\u{218F}').contains(&c)
+        || ('\u{2C00}'..='\u{2FEF}').contains(&c)
+        || ('\u{3001}'..='\u{D7FF}').contains(&c)
+        || ('\u{F900}'..='\u{FDCF}').contains(&c)
+        || ('\u{FDF0}'..='\u{FFFD}').contains(&c)
+        || ('\u{10000}'..='\u{EFFFF}').contains(&c)
+}
+
+/// `NameChar` per XML 1.0 (5th ed.) §2.3 = `NameStartChar` plus a
+/// closed set of continuation characters.
+fn is_xml_name_char(c: char) -> bool {
+    is_xml_name_start(c)
+        || c == '-'
+        || c == '.'
+        || c.is_ascii_digit()
+        || c == '\u{B7}'
+        || ('\u{0300}'..='\u{036F}').contains(&c)
+        || ('\u{203F}'..='\u{2040}').contains(&c)
+}
+
+/// Sanitise an arbitrary string into a syntactically valid XML 1.0
+/// element/attribute Name.
+///
+/// Contract (exercised by `tests/panic_safety_audit.rs` against the XML
+/// grammar for *any* input): the result is non-empty, its first char is
+/// a `NameStartChar`, every other char is a `NameChar`, and it does not
+/// start with the reserved `xml` prefix (XML §2.3: names beginning
+/// "xml" in any case are reserved). Valid Unicode names like `日本語`
+/// pass through unchanged; invalid characters become `_`.
 #[must_use]
 pub fn xml_safe_name(name: &str) -> String {
-    let mut result = String::with_capacity(name.len());
+    let mut result = String::with_capacity(name.len() + 1);
     for (i, ch) in name.chars().enumerate() {
         if i == 0 {
-            if ch.is_alphabetic() || ch == '_' {
-                result.push(ch);
-            } else {
-                result.push('_');
-            }
-        } else if ch.is_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
-            result.push(ch);
+            result.push(if is_xml_name_start(ch) { ch } else { '_' });
         } else {
-            result.push('_');
+            result.push(if is_xml_name_char(ch) { ch } else { '_' });
         }
     }
     if result.is_empty() {
-        "_".to_string()
-    } else {
-        result
+        result.push('_');
     }
+    // The literal sequence "xml" (any case) is a reserved prefix; a
+    // strict parser rejects it. Shift it out of the reserved space.
+    let lower: String = result.chars().take(3).collect::<String>().to_lowercase();
+    if lower == "xml" {
+        result.insert(0, '_');
+    }
+    result
 }
 
 /// Build a standard multipart body from params using the given boundary.
@@ -213,6 +315,12 @@ fn build_multipart_body(params: &[(String, String)], boundary: &str) -> Vec<u8> 
 #[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant> {
+    // Bound the expandable input first: every variant below re-emits
+    // the full param set, so unbounded input here is a memory-
+    // amplification DoS (see `MAX_VARIANT_INPUT_BYTES`).
+    let bounded = bound_params(params);
+    let params: &[(String, String)] = bounded.as_ref();
+
     let mut variants = Vec::new();
     // Pre-fix every variant called random_boundary() and never checked
     // for collisions with the param values. If a param value happened to

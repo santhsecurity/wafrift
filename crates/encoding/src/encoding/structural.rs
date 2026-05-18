@@ -114,9 +114,19 @@ pub fn parameter_pollute(payload: impl AsRef<[u8]>) -> Result<String, EncodeErro
         let key = std::str::from_utf8(&payload[..eq_pos]).map_err(|_| EncodeError::InvalidUtf8)?;
         Ok(format!("{key}=safe&{payload_str}"))
     } else {
+        // Deterministic decoy: a plausible 8-letter junk parameter name
+        // derived from the payload via FNV-1a. Identical input ⇒
+        // identical output — a non-deterministic encoder cannot be
+        // regression-pinned and makes a successful bypass impossible to
+        // reproduce (the rest of the evasion pipeline, e.g. the equiv
+        // generator, is deterministic-seeded for exactly this reason).
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for &b in payload {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
         let decoy: String = (0..8)
-            .map(|_| rand::random::<u8>() % 26 + b'a')
-            .map(|b| b as char)
+            .map(|i| (b'a' + (((h >> (i * 8)) as u8) % 26)) as char)
             .collect();
         Ok(format!("{decoy}=1&{payload_str}"))
     }
@@ -330,6 +340,17 @@ mod tests {
         let result = parameter_pollute("payload").unwrap();
         assert!(result.ends_with("&payload"));
         assert!(!result.contains("_wafrift_decoy"));
+        // The decoy is a deterministic 8-letter lowercase junk param.
+        let decoy = result.strip_suffix("=1&payload").expect("decoy=1&payload shape");
+        assert_eq!(decoy.len(), 8, "decoy must be 8 chars: {result}");
+        assert!(
+            decoy.bytes().all(|b| b.is_ascii_lowercase()),
+            "decoy must be [a-z]{{8}}: {result}"
+        );
+        // Deterministic: identical payload ⇒ byte-identical output, and
+        // a different payload yields a different decoy.
+        assert_eq!(result, parameter_pollute("payload").unwrap());
+        assert_ne!(result, parameter_pollute("payloae").unwrap());
     }
 
     #[test]

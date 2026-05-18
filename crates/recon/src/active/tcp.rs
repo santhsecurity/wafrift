@@ -79,14 +79,76 @@ pub async fn probe_tcp_banner(
 
 fn classify_line(line: &str) -> TcpServiceClass {
     let t = line.trim_start();
-    if t.len() >= 4 && t[..4].eq_ignore_ascii_case("SSH-") {
+    // `t` is `from_utf8_lossy` of an attacker-controlled TCP banner, so
+    // it may contain multibyte codepoints (and U+FFFD from lossy
+    // decode). `t[..4]` is a BYTE slice on a `&str`: `t.len() >= 4`
+    // does not imply byte 4 is a char boundary, so a non-ASCII-prefixed
+    // banner (e.g. two leading invalid bytes → `��`) panics. The probe
+    // prefixes are pure ASCII, so a byte-slice compare is exactly
+    // equivalent and boundary-safe.
+    let b = t.as_bytes();
+    if b.len() >= 4 && b[..4].eq_ignore_ascii_case(b"SSH-") {
         return TcpServiceClass::Ssh;
     }
-    if t.len() >= 5 && t[..5].eq_ignore_ascii_case("HTTP/") {
+    if b.len() >= 5 && b[..5].eq_ignore_ascii_case(b"HTTP/") {
         return TcpServiceClass::Http;
     }
     if t.starts_with("220 ") || t.starts_with("220-") {
         return TcpServiceClass::Smtp;
     }
     TcpServiceClass::Unknown
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_line_recognises_real_banners() {
+        assert_eq!(classify_line("SSH-2.0-OpenSSH_9.6"), TcpServiceClass::Ssh);
+        assert_eq!(classify_line("ssh-2.0-libssh"), TcpServiceClass::Ssh);
+        assert_eq!(classify_line("HTTP/1.1 200 OK"), TcpServiceClass::Http);
+        assert_eq!(
+            classify_line("  HTTP/1.0 404 Not Found"),
+            TcpServiceClass::Http
+        );
+        assert_eq!(
+            classify_line("220 smtp.example.com ESMTP Postfix"),
+            TcpServiceClass::Smtp
+        );
+        assert_eq!(classify_line("220-multiline greeting"), TcpServiceClass::Smtp);
+        assert_eq!(classify_line("+OK POP3 ready"), TcpServiceClass::Unknown);
+    }
+
+    /// Regression: a non-ASCII-prefixed banner used to `t[..4]`-panic
+    /// (byte slice on a `&str` past a char boundary). The banner is
+    /// `from_utf8_lossy` of attacker bytes, so this is attacker-reachable.
+    #[test]
+    fn classify_line_never_panics_on_multibyte_or_lossy_banners() {
+        let hostile = [
+            // two U+FFFD (what `\xff\xff` lossy-decodes to) then "SSH-"
+            "\u{FFFD}\u{FFFD}SSH-2.0",
+            "日本語SSH-2.0",        // 3-byte chars straddling index 4/5
+            "→éHTTP/1.1",          // 3-byte + 2-byte prefix
+            "\u{FFFD}",            // shorter than every prefix
+            "ab",
+            "",
+            "   ",
+            "\u{1F3F4}\u{200D}\u{2620}\u{FE0F}", // pirate-flag ZWJ emoji
+            "Ⓢ Ⓢ Ⓗ -",
+        ];
+        for b in hostile {
+            // Must not panic; a non-ASCII prefix is simply not a known
+            // ASCII service banner.
+            assert_eq!(
+                classify_line(b),
+                TcpServiceClass::Unknown,
+                "hostile banner {b:?} misclassified"
+            );
+        }
+        // The exact real code path: lossy-decode of raw attacker bytes.
+        let raw = b"\xff\xfe\xff SSH-2.0-x\r\n";
+        let line = String::from_utf8_lossy(raw).trim().to_string();
+        let _ = classify_line(&line); // the assertion is "did not panic"
+    }
 }

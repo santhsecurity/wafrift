@@ -227,14 +227,17 @@ mod tests {
     }
 
     #[test]
-    fn ldap_oracle_validates_filter_structure() {
+    fn ldap_oracle_accepts_injections_and_rejects_standalone_benign_filters() {
         let oracle = ldap::LdapOracle;
-        // Valid LDAP filter
-        assert!(oracle.is_semantically_valid("(uid=admin)", "(uid=admin)"));
-        // Boolean operator
-        assert!(
-            oracle.is_semantically_valid("(|(uid=admin)(uid=root))", "(|(uid=admin)(uid=root))",)
-        );
+        // A filter-break injection is accepted.
+        assert!(oracle.is_semantically_valid("(uid=x)", "*)(|(uid=*"));
+        // ANTI-RIG: a standalone, well-formed *benign* filter is NOT an
+        // injection. The previous assertion here accepted `(uid=admin)`
+        // — that is the exact rig `ldap.rs`'s doctrine + MUST-REJECT
+        // battery exist to kill (it would let the bench score benign
+        // passthrough as a bypass).
+        assert!(!oracle.is_semantically_valid("(uid=admin)", "(uid=admin)"));
+        assert!(!oracle.is_semantically_valid("alice", "alice"));
     }
 
     #[test]

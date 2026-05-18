@@ -9,6 +9,18 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// Map a config `scan.level` string onto the CLI `Level` enum. Unknown
+/// values return `None` (keep the existing value) rather than silently
+/// snapping to a default the operator didn't write.
+fn parse_config_level(s: &str) -> Option<crate::Level> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "light" => Some(crate::Level::Light),
+        "medium" => Some(crate::Level::Medium),
+        "heavy" => Some(crate::Level::Heavy),
+        _ => None,
+    }
+}
+
 /// Operational configuration (Tier A) — runtime behavior tuning.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -120,6 +132,54 @@ impl WafRiftConfig {
         }
 
         Self::default()
+    }
+
+    /// Overlay this config onto parsed `scan` arguments with correct
+    /// precedence: **CLI flag > config file > compiled default**.
+    ///
+    /// Correctness hinges on `clap`'s `ValueSource`: a field is only
+    /// overridden by config when clap reports the value came from the
+    /// compiled default (or the arg is absent), never when the operator
+    /// actually typed it. This is what makes `.wafrift.toml` real
+    /// instead of the documented-but-ignored stub the scaffold warned
+    /// about.
+    #[must_use]
+    pub fn apply_to_scan(
+        &self,
+        mut args: crate::ScanArgs,
+        m: Option<&clap::ArgMatches>,
+    ) -> crate::ScanArgs {
+        use clap::parser::ValueSource;
+        // True when the operator did NOT explicitly set this arg.
+        let from_default = |name: &str| {
+            m.is_none_or(|m| {
+                !matches!(m.value_source(name), Some(ValueSource::CommandLine))
+            })
+        };
+        if from_default("delay_ms") {
+            args.delay_ms = self.scan.delay_ms;
+        }
+        if from_default("param") {
+            args.param.clone_from(&self.scan.param);
+        }
+        if from_default("encoding_only") {
+            args.encoding_only = self.scan.encoding_only;
+        }
+        if from_default("format") {
+            args.format.clone_from(&self.output.format);
+        }
+        if from_default("insecure") {
+            args.insecure = self.http.insecure;
+        }
+        if from_default("level")
+            && let Some(level) = parse_config_level(&self.scan.level)
+        {
+            args.level = level;
+        }
+        if from_default("stealth_browser") && args.stealth_browser.is_none() {
+            args.stealth_browser.clone_from(&self.http.stealth_browser);
+        }
+        args
     }
 
     /// Load configuration from a specific file path.

@@ -34,6 +34,10 @@ path = "examples/layered.rs"
 
 [dev-dependencies]
 proptest = { workspace = true }
+urlencoding = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

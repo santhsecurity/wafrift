@@ -55,10 +55,14 @@ pub(crate) async fn run_scan(
     args: ScanArgs,
     cancel: tokio_util::sync::CancellationToken,
 ) -> ExitCode {
-    let target = args.target.trim_end_matches('/');
+    // `--from-discovery` expansion (handled in main.rs) always sets a
+    // concrete target; the direct path is clap-guaranteed to have one.
+    let target_owned = args.target.clone().unwrap_or_default();
+    let target = target_owned.trim_end_matches('/');
     if target.is_empty() {
         eprintln!(
-            "{} --target must be a valid URL (e.g. https://example.com/search)",
+            "{} --target must be a valid URL (e.g. https://example.com/search), \
+             or use --from-discovery <report.json|->",
             "Input error:".red().bold()
         );
         return ExitCode::from(1);
@@ -182,6 +186,21 @@ pub(crate) async fn run_scan(
         );
         println!();
     }
+
+    // Unconditional startup line on STDERR — even in `--format json`
+    // mode, where every `println!` above is suppressed and the only
+    // stdout is the final JSON blob. Without this a JSON-mode scan
+    // against a rate-limiting/slow target (the dogfood: 180 s of total
+    // silence on try.discourse.org) is indistinguishable from a hung
+    // process. stderr keeps stdout pure for `| jq`.
+    let scan_started = std::time::Instant::now();
+    eprintln!(
+        "[wafrift scan] {} variants → {target} (param={}, level={:?}, delay={}ms) — progress on stderr, results on stdout",
+        variants.len(),
+        args.param,
+        args.level,
+        args.delay_ms
+    );
 
     // Step 1: WAF detection — fetch target and identify WAF.
     let http = match reqwest::Client::builder()
@@ -525,6 +544,108 @@ pub(crate) async fn run_scan(
         );
     }
 
+    // Step 2e: Equivalence moat (B→C→A) — the flagship engine.
+    //
+    // The sound-by-construction `(payload × delivery)` generator + the
+    // per-WAF learned decision boundary (averaged-perceptron + CEGIS).
+    // This is the EXACT loop the corpus bench measures
+    // (`equiv_engine::run_equiv_cegis`) — here it runs against the live
+    // target, keyed on the DETECTED WAF so the boundary compounds
+    // across engagements (run #2 vs the same WAF warm-starts from
+    // learned knowledge). Every member is independently
+    // `verified_bypass`-gated: WAF passed + request reached the app +
+    // the per-class oracle confirms it is still a structurally-valid
+    // attack. No member is counted on shape alone.
+    if !cancel.is_cancelled() {
+        if let Some(class) = crate::equiv_engine::class_for_payload_type(payload_type) {
+            if scan_text {
+                println!(
+                    "\n{}",
+                    format!(
+                        "[2e/7] Equivalence moat — B→C→A ({class}, learned-WAF CEGIS vs {waf_name})..."
+                    )
+                    .bold()
+                    .cyan()
+                );
+            }
+            let equiv_budget = match args.level {
+                crate::Level::Light => 16usize,
+                crate::Level::Medium => 40,
+                crate::Level::Heavy => 96,
+            };
+            let moat = crate::equiv_engine::run_equiv_cegis(
+                &http,
+                |d, p| crate::equiv_engine::build_live_request_for_delivery(target, d, p),
+                class,
+                &args.payload,
+                target,
+                &args.param,
+                equiv_budget,
+                args.delay_ms,
+                wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+                &waf_name,
+            )
+            .await;
+
+            for b in &moat.bypasses {
+                bypassed += 1;
+                total_fired += 1;
+                let techs = vec![
+                    format!("equiv-moat::{}::{}", b.phase, b.delivery_label),
+                    format!("equiv-rules::{}", b.rules.join("+")),
+                ];
+                variant_outcomes.push((techs.clone(), false));
+                // Oracle-gated verified bypass → top confidence band.
+                bypass_variants.push((total_fired, b.payload.clone(), techs, 0.97));
+            }
+            // Sends that did NOT yield a verified bypass are non-wins
+            // (WAF-blocked, or slipped but oracle-rejected) — counted
+            // truthfully as blocked, never as bypass.
+            let non_bypass = moat.variants.saturating_sub(moat.bypasses.len());
+            total_fired += non_bypass;
+            blocked += u32::try_from(non_bypass).unwrap_or(u32::MAX);
+
+            if scan_text {
+                println!(
+                    "  {} {} verified bypass / {} sent · {} slipped-but-oracle-rejected{}",
+                    if moat.bypasses.is_empty() {
+                        "✗".red().bold()
+                    } else {
+                        "⚡".bright_green().bold()
+                    },
+                    format!("{}", moat.bypasses.len()).bold(),
+                    moat.variants,
+                    moat.unverified_not_blocked,
+                    if moat.model_saved {
+                        " · per-WAF boundary refined+persisted".to_string()
+                    } else {
+                        String::new()
+                    }
+                );
+                for b in moat.bypasses.iter().take(6) {
+                    let shown: String = b.payload.chars().take(88).collect();
+                    println!(
+                        "    {} [{}|{}] {} (HTTP {})",
+                        "→".bright_green(),
+                        b.phase,
+                        b.delivery_label.cyan(),
+                        shown.yellow(),
+                        b.status
+                    );
+                }
+            }
+        } else if scan_text {
+            println!(
+                "\n  {}",
+                format!(
+                    "[2e/7] Equivalence moat — skipped: no sound model for {} yet",
+                    payload_type_label(payload_type)
+                )
+                .bright_black()
+            );
+        }
+    }
+
     // Step 3: Explore — fire all pre-generated variants.
     if scan_text {
         if cache_hit_bypass {
@@ -557,6 +678,19 @@ pub(crate) async fn run_scan(
     let concurrency = if delay.is_zero() { 8_usize } else { 4 };
 
     // Fire variants in concurrent batches.
+    //
+    // `aborted_rate_limited` is set when the target is so uniformly
+    // rate-limiting that continuing is pointless and dishonest: every
+    // 429 the oracle returns is *not* a bypass and *not* a block, it's
+    // the target saying "slow down". The old code fired the entire
+    // variant + tamper + header + vector set anyway — minutes of
+    // requests producing a meaningless "0 bypasses" verdict. Now we
+    // detect the condition early, cancel the run (every later phase
+    // already polls `cancel.is_cancelled()`), and report it truthfully
+    // with an exit code distinct from "scan completed, no bypass".
+    let mut aborted_rate_limited = false;
+    let mut batches_done = 0_u32;
+    let mut last_heartbeat = std::time::Instant::now();
     let mut variant_idx = 0_usize;
     while variant_idx < variants.len() {
         if cancel.is_cancelled() {
@@ -671,10 +805,56 @@ pub(crate) async fn run_scan(
         }
 
         variant_idx = batch_end;
+        batches_done += 1;
 
-        // Inter-batch delay: double if rate-limited, otherwise normal.
+        // Heartbeat on stderr at most every 3 s (cache-window-friendly,
+        // not spammy) so JSON-mode users — and anyone watching a
+        // rate-limited target crawl — can see the scan is alive and
+        // making progress instead of staring at a frozen terminal.
+        if last_heartbeat.elapsed() >= Duration::from_secs(3) {
+            eprintln!(
+                "[wafrift scan] fired {total_fired}/{} · bypass {bypassed} · blocked {blocked} · rate-limited {_rate_limited} · err {errors} · {}s",
+                variants.len(),
+                scan_started.elapsed().as_secs()
+            );
+            last_heartbeat = std::time::Instant::now();
+        }
+
+        // Early rate-limit abort. Once we have a real sample
+        // (≥12 fired) and the target has rate-limited ≥80% of them,
+        // every additional request just deepens the ban and tells us
+        // nothing. Stop, explain, and hand the operator the actual
+        // remedies instead of silently grinding for minutes.
+        if total_fired >= 12
+            && f64::from(_rate_limited) / total_fired.max(1) as f64 >= 0.80
+        {
+            aborted_rate_limited = true;
+            eprintln!(
+                "\n[wafrift scan] {} {}/{} probes were rate-limited (HTTP 429/slow-down). \
+                 Aborting — the target is throttling us, so any \"bypass/blocked\" \
+                 verdict would be noise, not signal.\n  Remedies:\n    \
+                 • raise --delay-ms (e.g. --delay-ms 2000) to stay under the limit\n    \
+                 • spread requests across egress IPs (origin-bypass / proxy-pool / Tor)\n    \
+                 • test an endpoint that is not behind the per-IP limiter",
+                "RATE-LIMITED:".yellow().bold(),
+                _rate_limited,
+                total_fired
+            );
+            // Cancel so every subsequent phase (tamper/header/vector),
+            // which already checks `cancel.is_cancelled()`, stops too.
+            cancel.cancel();
+            break;
+        }
+
+        // Inter-batch delay: escalating backoff when rate-limited
+        // (×2 per consecutive throttled batch, capped) so we ease off
+        // the target instead of hammering a fixed 2× delay.
         if batch_rate_limited {
-            tokio::time::sleep(delay * 2).await;
+            let factor = 2_u32.saturating_pow(batches_done.min(4));
+            let backoff = (delay.max(Duration::from_millis(50)))
+                .saturating_mul(factor)
+                .min(Duration::from_secs(30));
+            tokio::time::sleep(backoff).await;
         } else if !delay.is_zero() {
             tokio::time::sleep(delay).await;
         }
@@ -1681,6 +1861,8 @@ pub(crate) async fn run_scan(
             "bypassed": bypassed,
             "blocked": blocked,
             "errors": errors,
+            "rate_limited": _rate_limited,
+            "aborted_rate_limited": aborted_rate_limited,
             "bypass_rate_pct": bypass_rate,
             "elapsed_ms": elapsed.as_secs_f64() * 1000.0,
             "bypass_variants": bypass_variants.iter().map(|(idx, payload, techniques, conf)| {
@@ -1739,7 +1921,14 @@ pub(crate) async fn run_scan(
                 } else {
                     println!("{s}");
                 }
-                return ExitCode::SUCCESS;
+                // Exit 5 = run aborted because the target rate-limited
+                // us; distinct from 0 (clean, no bypass) so CI / wrapper
+                // scripts don't read throttling as "WAF held".
+                return if aborted_rate_limited {
+                    ExitCode::from(5)
+                } else {
+                    ExitCode::SUCCESS
+                };
             }
             Err(e) => {
                 eprintln!("failed to serialize scan JSON: {e}");
@@ -1976,5 +2165,9 @@ pub(crate) async fn run_scan(
     }
 
     println!();
-    ExitCode::SUCCESS
+    if aborted_rate_limited {
+        ExitCode::from(5)
+    } else {
+        ExitCode::SUCCESS
+    }
 }

@@ -35,6 +35,7 @@ pub mod cassandra;
 pub mod cmd;
 pub mod cmd_windows;
 pub mod elastic;
+pub mod equiv;
 pub mod ldap;
 pub mod mongo;
 pub mod path_traversal;

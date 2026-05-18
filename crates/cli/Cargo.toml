@@ -43,6 +43,7 @@ wafrift-types = { workspace = true }
 wafrift-smuggling = { workspace = true, features = ["unsafe-probes"] }
 wafrift-content-type = { workspace = true }
 rand = { workspace = true }
+base64 = { workspace = true }
 
 # SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
 # instead of panicking.

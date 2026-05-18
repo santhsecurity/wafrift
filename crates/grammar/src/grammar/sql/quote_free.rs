@@ -114,12 +114,25 @@ pub fn mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     }
 
     // Strategy 3: pure-tautology replacement (no boolean op needed).
-    // For payloads like `'admin'--` where the original is a value
-    // injection, replace with a quote-free tautology that any column
-    // would evaluate truthy on.
-    if lower.contains("admin")
-        || lower.contains("root")
-        || (lower.starts_with('\'') && lower.ends_with("--"))
+    // For an auth-bypass value injection like `'admin'--` a quote-free
+    // truthy tautology is equivalent. But `admin`/`root` also appear in
+    // non-tautology attacks (`UNION SELECT pw FROM admin_users`,
+    // `'; DROP TABLE root_sessions--`) — replacing those with a bare
+    // tautology destroys the exploit. Only fire when the payload is a
+    // value/auth injection terminated by a comment AND is not already
+    // a structured (UNION/stacked/error-based) attack.
+    let structured = lower.contains("union")
+        || lower.contains("select ")
+        || lower.contains(';')
+        || lower.contains("extractvalue")
+        || lower.contains("updatexml")
+        || lower.contains("sleep(")
+        || lower.contains("benchmark(")
+        || lower.contains("waitfor ");
+    if !structured
+        && (lower.contains("admin")
+            || lower.contains("root")
+            || (lower.starts_with('\'') && lower.ends_with("--")))
     {
         for taut in QUOTE_FREE_TAUTOLOGIES.iter().take(2) {
             if out.len() >= max_mutations {

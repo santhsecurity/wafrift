@@ -34,22 +34,30 @@ fn test_ldap_adversarial() -> Result<(), Box<dyn std::error::Error>> {
     let oracle = LdapOracle;
     let payload = "(uid=admin)";
 
-    // Empty input
+    // Empty input → not an injection, no panic.
     assert!(!oracle.is_semantically_valid(payload, ""));
 
-    // Null bytes
-    assert!(oracle.is_semantically_valid(payload, "(uid=admin)\x00"));
-
-    // Invalid UTF-8 bytes
+    // ANTI-RIG: a benign equality filter is NOT an injection — not
+    // with a trailing NUL, an invalid-UTF-8 byte, nor a megabyte of
+    // padding. Each must be handled WITHOUT PANIC and classified
+    // honestly. (The previous assertions here asserted `true` for all
+    // three — the exact rig `ldap.rs`'s doctrine + MUST-REJECT battery
+    // exist to kill: it would let the bench score benign passthrough.)
+    assert!(!oracle.is_semantically_valid(payload, "(uid=admin)\x00"));
     let invalid_utf8 = vec![
         b'(', b'u', b'i', b'd', b'=', b'a', b'd', b'm', b'i', b'n', b')', 0xFF,
     ];
     let invalid_str = String::from_utf8_lossy(&invalid_utf8);
-    assert!(oracle.is_semantically_valid(payload, &invalid_str));
-
-    // Huge input (simulate ~1MB)
+    assert!(!oracle.is_semantically_valid(payload, &invalid_str));
     let huge = "(uid=admin)".to_string() + &" ".repeat(1024 * 1024);
-    assert!(oracle.is_semantically_valid(payload, &huge));
+    assert!(!oracle.is_semantically_valid(payload, &huge));
+
+    // The gate still FIRES on real injections under the same hostile
+    // shapes (megabyte-padded filter-break; NUL-truncation auth
+    // bypass) — proves it is not a no-op in the other direction.
+    let huge_break = "*)(|(uid=*".to_string() + &"\t".repeat(1024 * 1024);
+    assert!(oracle.is_semantically_valid(payload, &huge_break));
+    assert!(oracle.is_semantically_valid(payload, "*))%00"));
 
     Ok(())
 }

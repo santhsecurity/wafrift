@@ -9,15 +9,20 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
-    // Prefer the in-crate vendored copy (the only one that survives a
-    // `cargo publish`); fall back to the workspace tree for monorepo
-    // builds where the vendored copy may be a symlink/missing.
+    // Prefer the workspace canonical tree (`<repo>/rules/detect`) when
+    // it exists — that is the file contributors and the README edit.
+    // The old behaviour embedded the in-crate vendored copy first, so
+    // an edit to the canonical CloudFront rule had ZERO effect (stale
+    // signatures shipped silently). Fall back to the vendored copy for
+    // `cargo publish` artifacts where `../../rules/detect` is gone; a
+    // drift-guard test keeps the two byte-identical so that fallback is
+    // never stale either.
     let in_crate = Path::new("rules/detect");
     let workspace = Path::new("../../rules/detect");
-    let rules_dir = if in_crate.is_dir() {
-        in_crate
-    } else {
+    let rules_dir = if workspace.is_dir() {
         workspace
+    } else {
+        in_crate
     };
 
     if !rules_dir.is_dir() {

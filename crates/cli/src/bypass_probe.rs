@@ -200,6 +200,16 @@ struct UrlReport {
     target: String,
     baseline_status: u16,
     baseline_body_len: usize,
+    /// Probes whose response was a throttle/unavailable code (429/503/…)
+    /// — excluded from `divergences` and surfaced so the operator knows
+    /// the run was degraded rather than "clean, nothing found".
+    rate_limited_probes: u32,
+    /// Total probes fired (denominator for the rate-limited ratio).
+    probes_fired: usize,
+    /// True when the *baseline* itself was throttled — every delta in
+    /// this report is then measured against an error page and the whole
+    /// run is inconclusive.
+    baseline_was_throttled: bool,
     divergences: Vec<Divergence>,
 }
 
@@ -301,6 +311,16 @@ async fn probe_one_url(
     let body_thresh = args.body_diff_threshold_pct;
     let url_owned = url.to_string();
     let base_origin = url.split('/').take(3).collect::<Vec<_>>().join("/");
+    let probes_fired = work.len();
+    let rate_limited = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let baseline_was_throttled = is_throttle_or_unavailable(baseline_status);
+    if baseline_was_throttled && !args.quiet {
+        eprintln!(
+            "WARNING: baseline GET {url} returned HTTP {baseline_status} (throttled/unavailable) — \
+             every divergence below is measured against an error page and the whole run is \
+             inconclusive. Slow down (--delay-ms) or test off the rate limiter."
+        );
+    }
 
     let mut handles = Vec::with_capacity(work.len());
     for job in work {
@@ -308,6 +328,7 @@ async fn probe_one_url(
         let client_c = client.clone();
         let url_c = url_owned.clone();
         let base_origin_c = base_origin.clone();
+        let rl_c = rate_limited.clone();
         handles.push(tokio::spawn(async move {
             let _permit = sem_c.acquire_owned().await.ok()?;
             if delay_ms > 0 {
@@ -321,6 +342,7 @@ async fn probe_one_url(
                 baseline_status,
                 baseline_len,
                 body_thresh,
+                &rl_c,
             )
             .await
         }));
@@ -331,6 +353,15 @@ async fn probe_one_url(
         if let Ok(Some(div)) = h.await {
             divergences.push(div);
         }
+    }
+    let rate_limited_probes = rate_limited.load(std::sync::atomic::Ordering::Relaxed);
+    if rate_limited_probes > 0 && !args.quiet {
+        let pct = f64::from(rate_limited_probes) / probes_fired.max(1) as f64 * 100.0;
+        eprintln!(
+            "RATE-LIMITED: {rate_limited_probes}/{probes_fired} probes ({pct:.0}%) were \
+             rate-limited (HTTP 429/503/…) and excluded from divergences — they are the \
+             target throttling us, not access bypasses."
+        );
     }
 
     divergences.sort_by(|a, b| {
@@ -346,6 +377,9 @@ async fn probe_one_url(
         target: url.to_string(),
         baseline_status,
         baseline_body_len: baseline_len,
+        rate_limited_probes,
+        probes_fired,
+        baseline_was_throttled,
         divergences,
     })
 }
@@ -357,6 +391,7 @@ enum ProbeJob {
     Method(String),
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_probe_job(
     client: &Client,
     url: &str,
@@ -365,7 +400,14 @@ async fn run_probe_job(
     baseline_status: u16,
     baseline_len: usize,
     body_thresh: f64,
+    rate_limited: &std::sync::atomic::AtomicU32,
 ) -> Option<Divergence> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let note_throttle = |status: u16| {
+        if is_throttle_or_unavailable(status) {
+            rate_limited.fetch_add(1, Relaxed);
+        }
+    };
     match job {
         ProbeJob::Header(probe) => {
             let resp = client
@@ -375,6 +417,7 @@ async fn run_probe_job(
                 .await
                 .ok()?;
             let status = resp.status().as_u16();
+            note_throttle(status);
             let body = resp.bytes().await.unwrap_or_default();
             classify(
                 "headers",
@@ -401,6 +444,7 @@ async fn run_probe_job(
             };
             let resp = client.get(&probe_url).send().await.ok()?;
             let status = resp.status().as_u16();
+            note_throttle(status);
             let body = resp.bytes().await.unwrap_or_default();
             classify(
                 "paths",
@@ -418,6 +462,7 @@ async fn run_probe_job(
             let method = Method::from_str(&m).ok()?;
             let resp = client.request(method, url).send().await.ok()?;
             let status = resp.status().as_u16();
+            note_throttle(status);
             let body = resp.bytes().await.unwrap_or_default();
             classify(
                 "methods",
@@ -438,11 +483,31 @@ fn print_report_text(r: &UrlReport) {
     println!();
     println!("=== bypass-probe results: {} ===", r.target);
     println!(
-        "baseline:  HTTP {} ({} bytes)",
-        r.baseline_status, r.baseline_body_len
+        "baseline:  HTTP {} ({} bytes){}",
+        r.baseline_status,
+        r.baseline_body_len,
+        if r.baseline_was_throttled {
+            "  ⚠ THROTTLED — results inconclusive"
+        } else {
+            ""
+        }
     );
+    if r.rate_limited_probes > 0 {
+        let pct = f64::from(r.rate_limited_probes) / r.probes_fired.max(1) as f64 * 100.0;
+        println!(
+            "rate-limited: {}/{} probes ({pct:.0}%) returned 429/503/… — excluded from \
+             divergences (target throttling, not a bypass)",
+            r.rate_limited_probes, r.probes_fired
+        );
+    }
     if r.divergences.is_empty() {
-        println!("no divergences — every probe matched the baseline.");
+        let why = if r.baseline_was_throttled || r.rate_limited_probes * 2 >= r.probes_fired as u32 {
+            "no divergences — but the run was dominated by rate-limiting, so this is \
+             INCONCLUSIVE, not a clean bill of health. Re-run slower / off the limiter."
+        } else {
+            "no divergences — every probe matched the baseline."
+        };
+        println!("{why}");
     } else {
         println!(
             "{} divergences (sorted by interestingness):",
@@ -473,8 +538,24 @@ fn severity_rank(s: &str) -> u8 {
     }
 }
 
+/// HTTP statuses that mean "the target is throttling or temporarily
+/// unavailable", NOT "you bypassed the control". A 429 (or a 503 / 502
+/// / 504 / 408, or Cloudflare's 520–527 origin-error band) is the
+/// target telling us to slow down — turning it into a "LOW severity
+/// bypass divergence" (the dogfood bug: 135/191 probes were 429 against
+/// try.discourse.org and every one was flagged) is a false positive
+/// that buries any real finding in rate-limit noise.
+fn is_throttle_or_unavailable(status: u16) -> bool {
+    matches!(status, 408 | 429 | 502 | 503 | 504 | 520..=527)
+}
+
 /// Decide whether a probe's response is meaningfully different from
 /// the baseline, and if so build a `Divergence` describing it.
+///
+/// Returns `None` for throttle/unavailable probe responses: they are
+/// never bypass evidence, regardless of how far the body length drifted
+/// from baseline (a 429 error page is ~always far smaller than the real
+/// resource, which is exactly why the old code mis-scored them).
 #[allow(clippy::too_many_arguments)]
 fn classify(
     family: &'static str,
@@ -496,6 +577,12 @@ fn classify(
     let body_changed = body_delta.abs() >= body_threshold_pct;
 
     if !status_changed && !body_changed {
+        return None;
+    }
+
+    // A throttled/unavailable probe response is inconclusive, never a
+    // bypass — drop it before the severity heuristic can mislabel it.
+    if is_throttle_or_unavailable(probe_status) {
         return None;
     }
 

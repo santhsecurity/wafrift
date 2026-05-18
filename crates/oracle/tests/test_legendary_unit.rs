@@ -80,7 +80,12 @@ fn test_cmdi_oracle() -> Result<(), Box<dyn std::error::Error>> {
 fn test_ldap_oracle() -> Result<(), Box<dyn std::error::Error>> {
     let oracle = LdapOracle;
     assert_eq!(oracle.name(), "LDAP");
-    assert!(oracle.is_semantically_valid("orig", "(uid=admin)"));
+    // A real filter-break injection is valid.
+    assert!(oracle.is_semantically_valid("(uid=x)", "*)(|(uid=*"));
+    // ANTI-RIG: a standalone benign equality filter is NOT an
+    // injection (the previous assertion asserted it was — the rig).
+    assert!(!oracle.is_semantically_valid("orig", "(uid=admin)"));
+    // No filter structure at all is likewise not an injection.
     assert!(!oracle.is_semantically_valid("orig", "uid=admin"));
     Ok(())
 }

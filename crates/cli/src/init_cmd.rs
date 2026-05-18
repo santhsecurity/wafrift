@@ -49,12 +49,53 @@ pub fn run_init(args: InitArgs) -> ExitCode {
         out_path.display()
     );
     eprintln!("Next steps:");
-    eprintln!("  1. Edit the file — uncomment the keys you want to override.");
     eprintln!(
-        "  2. Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and point your client at it."
+        "  1. Edit the file — uncomment the keys you want. `wafrift scan` \
+         auto-loads it (CLI flags still win)."
     );
+    match locate_proxy() {
+        Some(p) => eprintln!(
+            "  2. Run `{} --listen 127.0.0.1:8080 --mitm` and point your client at it.",
+            p.display()
+        ),
+        None => {
+            eprintln!(
+                "  2. `wafrift-proxy` is NOT on your PATH. It is a separate binary in the \
+                 same workspace — build/install it with:"
+            );
+            eprintln!("       cargo install --path crates/proxy   # from a wafrift checkout");
+            eprintln!(
+                "       (or `cargo build -p wafrift-proxy` and run target/.../wafrift-proxy)"
+            );
+            eprintln!(
+                "     then: wafrift-proxy --listen 127.0.0.1:8080 --mitm"
+            );
+        }
+    }
     eprintln!("  3. Run `wafrift report` after you have findings.");
     ExitCode::SUCCESS
+}
+
+/// Best-effort lookup of the `wafrift-proxy` binary so `init` can give
+/// accurate next-steps instead of telling the operator to run a command
+/// that may not exist. Checks each `$PATH` entry plus the directory of
+/// the current executable (the common `cargo build` side-by-side case).
+fn locate_proxy() -> Option<PathBuf> {
+    let exe = if cfg!(windows) {
+        "wafrift-proxy.exe"
+    } else {
+        "wafrift-proxy"
+    };
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(path) = std::env::var("PATH") {
+        dirs.extend(std::env::split_paths(&path));
+    }
+    if let Ok(cur) = std::env::current_exe()
+        && let Some(parent) = cur.parent()
+    {
+        dirs.push(parent.to_path_buf());
+    }
+    dirs.into_iter().map(|d| d.join(exe)).find(|p| p.is_file())
 }
 
 const SCAFFOLD: &str = r#"# .wafrift.toml — wafrift configuration scaffold.
@@ -63,10 +104,10 @@ const SCAFFOLD: &str = r#"# .wafrift.toml — wafrift configuration scaffold.
 # Every key below is commented out, so an unmodified file behaves
 # identically to the compiled defaults — uncomment what you need.
 #
-# NOTE: `wafrift scan` does not yet auto-load this file. The `[scan]`
-# section below documents the keys that match `ScanArgs` flags; they
-# must be passed as CLI flags until the config-integration pass wires
-# `WafRiftConfig::load()` into the scan command.
+# `wafrift scan` AUTO-LOADS this file (./.wafrift.toml, then
+# ~/.config/wafrift/config.toml). Precedence is: CLI flag > this file >
+# compiled default — an explicit flag always wins, so the config only
+# fills in values you didn't pass on the command line.
 #
 # wafrift-proxy is configured via CLI flags, not this file. The values
 # below mirror the proxy flag names so you can copy-paste them into a

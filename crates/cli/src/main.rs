@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use colored::Colorize;
 use serde_json::json;
@@ -19,6 +19,7 @@ mod bypass_probe;
 mod config;
 mod discover_cmd;
 mod egress_example;
+mod equiv_engine;
 mod explain;
 mod helpers;
 mod import_curl;
@@ -51,7 +52,8 @@ use technique_filter::TechniqueFilter;
                     2  bench-waf: zero bypasses on any case in --evade mode\n\
                     2  replay:    saved bypass got blocked (regression signal)\n\
                     3  bench-diff: regression vs baseline (see --bypass-drop-pp)\n\
-                    4  bench-waf --validate-only: corpus integrity errors",
+                    4  bench-waf --validate-only: corpus integrity errors\n\
+                    5  scan: aborted — target rate-limited the probes (inconclusive, not 'no bypass')",
     version
 )]
 struct Cli {
@@ -143,15 +145,38 @@ struct ManArgs {
 
 #[derive(clap::Args, Debug)]
 struct EvadeArgs {
-    /// Payload to mutate and encode. Mutually exclusive with `--stdin`.
-    #[arg(long, conflicts_with = "stdin", required_unless_present = "stdin")]
+    /// Payload to mutate and encode. Mutually exclusive with `--stdin`
+    /// and `--payload-b64`.
+    #[arg(
+        long,
+        conflicts_with_all = ["stdin", "payload_b64"],
+        required_unless_present_any = ["stdin", "payload_b64"]
+    )]
     payload: Option<String>,
 
+    /// Base64-encoded payload, for bytes a shell cannot pass on argv.
+    /// `--payload $'\x00\x01\x02'` is silently truncated at the first
+    /// NUL by the OS (argv is NUL-terminated C strings), so binary /
+    /// control-byte payloads MUST come in out-of-band: base64 here, or
+    /// raw bytes via `--stdin`. Decoded bytes are interpreted as UTF-8
+    /// (lossless for control/extended characters; the engine is text).
+    #[arg(long, value_name = "BASE64", conflicts_with_all = ["payload", "stdin"])]
+    payload_b64: Option<String>,
+
     /// Read the payload from stdin instead of `--payload`. Useful for
-    /// piping (`echo 'X' | wafrift evade --stdin ...`). Refuses to run
-    /// on an interactive terminal so it doesn't hang silently.
+    /// piping (`echo 'X' | wafrift evade --stdin ...`) and the only
+    /// binary-safe path for payloads containing NUL/control bytes.
+    /// Refuses to run on an interactive terminal so it doesn't hang
+    /// silently.
     #[arg(long)]
     stdin: bool,
+
+    /// Output format: `text` (default) or `json`. `--format json` is
+    /// equivalent to the global `--quiet` for this command and exists
+    /// so `evade` matches `scan`/`bypass-probe`/`import-curl`, whose
+    /// `--format` flag pentesters already script against.
+    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    format: String,
 
     /// Evasion intensity.
     #[arg(long, value_enum, default_value_t = Level::Medium)]
@@ -192,17 +217,50 @@ struct EvadeArgs {
 
 #[derive(clap::Args, Debug)]
 struct DetectArgs {
-    /// HTTP status code.
-    #[arg(long)]
-    status: u16,
+    /// Fetch the target URL directly and run detection on the live
+    /// response — no manual `curl` + `--status`/`--headers` round-trip.
+    /// `wafrift detect --url https://target.com`. Mutually exclusive
+    /// with `--status`/`--headers`.
+    #[arg(long, conflicts_with_all = ["status", "headers"])]
+    url: Option<String>,
 
-    /// Repeated "key: value" header arguments.
-    #[arg(long, required = true)]
+    /// HTTP status code (100–599). Required unless `--url` is given.
+    #[arg(long, value_parser = parse_http_status, required_unless_present = "url")]
+    status: Option<u16>,
+
+    /// Repeated "key: value" header arguments. Required unless `--url`
+    /// is given.
+    #[arg(long, required_unless_present = "url")]
     headers: Vec<String>,
 
     /// Response body fragment.
     #[arg(long, default_value = "")]
     body: String,
+
+    /// With `--url`: per-request timeout in seconds.
+    #[arg(long, default_value_t = 10)]
+    timeout_secs: u64,
+
+    /// With `--url`: disable TLS certificate verification (lab targets).
+    #[arg(long, default_value_t = false)]
+    insecure: bool,
+}
+
+/// clap value-parser for an HTTP status code. RFC 9110 status codes are
+/// three digits in the range 100–599; anything else (`0`, `99`, `999`,
+/// `1000`) is a typo or an attempt to smuggle a nonsense value past
+/// detection and is rejected at parse time rather than silently scored.
+fn parse_http_status(s: &str) -> Result<u16, String> {
+    let n: u16 = s
+        .parse()
+        .map_err(|_| format!("`{s}` is not a number; HTTP status codes are 100–599"))?;
+    if (100..=599).contains(&n) {
+        Ok(n)
+    } else {
+        Err(format!(
+            "HTTP status code {n} is out of range — valid codes are 100–599"
+        ))
+    }
 }
 
 #[derive(clap::Args, Debug)]
@@ -217,9 +275,19 @@ struct ProbeArgs {
 /// `scan::run_scan` without duplicating CLI state.
 #[derive(clap::Args, Debug)]
 pub struct ScanArgs {
-    /// Target URL to test evasion variants against (e.g., <http://localhost:8080>).
+    /// Target URL to test evasion variants against (e.g.,
+    /// <http://localhost:8080>). Required unless `--from-discovery` is
+    /// given (then targets come from the discovery report).
+    #[arg(long, required_unless_present = "from_discovery")]
+    pub target: Option<String>,
+
+    /// Ingest a `wafrift discover` JSON report (file, or `-` for
+    /// stdin) and scan every discovered endpoint × injection point with
+    /// `--payload`. This is the gossan/recon → wafrift pipe the docs
+    /// promised but never actually wired:
+    /// `wafrift discover ... | wafrift scan --from-discovery - --payload '<x>'`.
     #[arg(long)]
-    pub target: String,
+    pub from_discovery: Option<PathBuf>,
 
     /// Payload to mutate and test.
     #[arg(long)]
@@ -315,7 +383,15 @@ fn main() -> ExitCode {
         }
     }
 
-    let cli = Cli::parse();
+    // Keep the raw `ArgMatches` (not just the derived struct) so the
+    // scan path can ask clap whether each field came from the command
+    // line vs a compiled default — required to layer `.wafrift.toml`
+    // underneath CLI flags with correct precedence.
+    let matches = Cli::command().get_matches();
+    let cli = match Cli::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => e.exit(),
+    };
 
     // Store quiet flag for use in subcommands.
     if cli.quiet {
@@ -324,7 +400,7 @@ fn main() -> ExitCode {
     }
 
     // Load config file (--config flag overrides default search paths).
-    let _cfg = if let Some(ref path) = cli.config {
+    let cfg = if let Some(ref path) = cli.config {
         match config::WafRiftConfig::load_from(path) {
             Ok(c) => c,
             Err(e) => {
@@ -346,6 +422,8 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Scan(args)) => {
+            // Layer .wafrift.toml under the CLI flags (CLI wins).
+            let args = cfg.apply_to_scan(args, matches.subcommand_matches("scan"));
             let rt = match tokio::runtime::Runtime::new() {
                 Ok(r) => r,
                 Err(e) => {
@@ -368,7 +446,11 @@ fn main() -> ExitCode {
                         cancel_clone.cancel();
                     }
                 });
-                scan::run_scan(args, cancel).await
+                if args.from_discovery.is_some() {
+                    run_scan_from_discovery(args, cancel).await
+                } else {
+                    scan::run_scan(args, cancel).await
+                }
             })
         }
         Some(Commands::BenchWaf(args)) => bench_waf::run_bench_waf(args),
@@ -937,6 +1019,10 @@ fn run_interactive() -> ExitCode {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
+    // `--format json` is the per-command spelling of the global
+    // `--quiet`: both select machine-readable NDJSON. Shadow `quiet`
+    // so every downstream branch honours either spelling.
+    let quiet = quiet || args.format == "json";
     let payload = match resolve_payload(&args) {
         Ok(p) => p,
         Err(msg) => {
@@ -1090,10 +1176,38 @@ fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Resolve the evade payload from either `--payload` or `--stdin`.
-/// Clap's `required_unless_present` + `conflicts_with` enforces that
-/// exactly one is supplied at the CLI layer; this validates the value.
+/// Resolve the evade payload from `--payload`, `--payload-b64`, or
+/// `--stdin`. Clap's `required_unless_present_any` + `conflicts_with`
+/// guarantees exactly one source at the CLI layer; this validates and
+/// decodes the value.
+///
+/// Binary-safety: `--stdin` is read as raw bytes (not
+/// `read_to_string`, which hard-errors on the first invalid UTF-8 byte
+/// and so could never accept a binary payload) and `--payload-b64`
+/// carries arbitrary bytes past the shell's NUL-terminated argv. Both
+/// are lossily decoded to UTF-8 because the mutation/encoding engine
+/// is text — control bytes (`\x00`–`\x1f`) survive losslessly; only
+/// genuinely invalid UTF-8 sequences become U+FFFD.
 fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
+    use base64::Engine as _;
+
+    if let Some(b64) = &args.payload_b64 {
+        let trimmed = b64.trim();
+        if trimmed.is_empty() {
+            return Err("--payload-b64 is empty".to_string());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(trimmed)
+            .or_else(|_| {
+                base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed)
+            })
+            .map_err(|e| format!("--payload-b64 is not valid base64: {e}"))?;
+        if bytes.is_empty() {
+            return Err("--payload-b64 decoded to zero bytes".to_string());
+        }
+        return Ok(String::from_utf8_lossy(&bytes).into_owned());
+    }
+
     if args.stdin {
         use std::io::{IsTerminal, Read};
         if io::stdin().is_terminal() {
@@ -1101,38 +1215,293 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
                 "--stdin requires a pipe (e.g. `echo 'X' | wafrift evade --stdin ...`); refusing to wait on an interactive terminal".to_string(),
             );
         }
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         io::stdin()
-            .read_to_string(&mut buf)
+            .read_to_end(&mut buf)
             .map_err(|e| format!("failed to read payload from stdin: {e}"))?;
-        let trimmed = buf.trim_end_matches(['\n', '\r']).to_string();
-        if trimmed.is_empty() {
+        // Strip a single trailing newline (the `echo 'x' |` case) without
+        // mangling embedded control bytes in a deliberate binary payload.
+        if buf.last() == Some(&b'\n') {
+            buf.pop();
+            if buf.last() == Some(&b'\r') {
+                buf.pop();
+            }
+        }
+        if buf.is_empty() {
             return Err("stdin produced an empty payload".to_string());
         }
-        Ok(trimmed)
-    } else {
-        let raw = args
-            .payload
-            .clone()
-            .ok_or_else(|| "no payload supplied (use --payload or --stdin)".to_string())?;
-        if raw.is_empty() {
-            return Err("--payload is empty; pass a non-empty string".to_string());
-        }
-        Ok(raw)
+        return Ok(String::from_utf8_lossy(&buf).into_owned());
     }
+
+    let raw = args.payload.clone().ok_or_else(|| {
+        "no payload supplied (use --payload, --payload-b64, or --stdin)".to_string()
+    })?;
+    if raw.is_empty() {
+        // The overwhelmingly common cause of an *empty* `--payload`
+        // value is a shell binary literal: `--payload $'\x00\x01\x02'`.
+        // execve(2) passes argv as NUL-terminated C strings, so the
+        // kernel truncates the argument at the first NUL *before* the
+        // process ever sees it — wafrift receives "", not the bytes.
+        // No amount of in-process parsing can recover them; the only
+        // fix is an out-of-band channel. Say so, with the exact
+        // commands.
+        return Err(
+            "--payload is empty. If you passed binary/NUL bytes (e.g. \
+             $'\\x00\\x01\\x02'), the shell truncated the argument at the \
+             first NUL byte before wafrift could see it — argv cannot \
+             carry NULs. Use a binary-safe channel instead:\n  \
+             printf '\\x00\\x01\\x02' | wafrift evade --stdin ...\n  \
+             wafrift evade --payload-b64 \"$(printf '\\x00\\x01\\x02' | base64)\" ..."
+                .to_string(),
+        );
+    }
+    Ok(raw)
+}
+
+/// Fetch a URL for passive WAF detection: one GET, redirects NOT
+/// followed (a 301/302/403 may itself be the WAF/CDN response we want
+/// to fingerprint), realistic browser UA so the edge behaves normally.
+/// Returns `(status, headers, body)` with the body capped at 64 KiB —
+/// WAF/CDN banners and block pages are always in the head.
+fn fetch_for_detect(
+    url: &str,
+    timeout_secs: u64,
+    insecure: bool,
+) -> Result<(u16, Vec<(String, String)>, Vec<u8>), String> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs.clamp(1, 120)))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        );
+    if insecure {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    let client = builder
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("failed to start tokio runtime: {e}"))?;
+    rt.block_on(async move {
+        let resp = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("request to {url} failed: {e}"))?;
+        let status = resp.status().as_u16();
+        let headers: Vec<(String, String)> = resp
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().to_string(),
+                    v.to_str().unwrap_or("<binary>").to_string(),
+                )
+            })
+            .collect();
+        // Cap the body read: don't let a hostile/huge response OOM the CLI.
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("read body: {e}"))?;
+        let body = bytes[..bytes.len().min(64 * 1024)].to_vec();
+        Ok((status, headers, body))
+    })
+}
+
+/// Infrastructure markers worth surfacing even when no WAF crosses the
+/// confidence threshold — so `detect` on an nginx/CDN-fronted host
+/// (e.g. meta.discourse.org) reports *what is in front of the origin*
+/// instead of a bare, useless "No WAF confidently detected."
+fn infra_markers(headers: &[(String, String)]) -> Vec<(String, String)> {
+    const KEYS: &[&str] = &[
+        "server",
+        "via",
+        "x-cache",
+        "x-amz-cf-id",
+        "x-amz-cf-pop",
+        "cf-ray",
+        "cf-cache-status",
+        "x-akamai-transformed",
+        "x-sucuri-id",
+        "x-sucuri-cache",
+        "x-cdn",
+        "x-served-by",
+        "x-powered-by",
+        "fastly-debug-digest",
+        "x-fastly-request-id",
+        "x-iinfo",
+        "x-cdn-provider",
+    ];
+    headers
+        .iter()
+        .filter(|(k, _)| {
+            let lk = k.to_ascii_lowercase();
+            KEYS.contains(&lk.as_str())
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+/// Expand a `wafrift discover` JSON report into one `run_scan` per
+/// (endpoint URL × injection-point name) and run them in sequence with
+/// the operator's `--payload`. This is the recon → wafrift pipe the
+/// help text advertised for releases but never actually implemented
+/// (`scan --from-discovery` was a documented flag that did not exist).
+async fn run_scan_from_discovery(
+    args: ScanArgs,
+    cancel: tokio_util::sync::CancellationToken,
+) -> ExitCode {
+    let Some(ref src) = args.from_discovery else {
+        unreachable!("caller checked from_discovery.is_some()");
+    };
+    let raw = if src.as_os_str() == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut buf) {
+            eprintln!("{} read discovery report from stdin: {e}", "error:".red());
+            return ExitCode::from(1);
+        }
+        buf
+    } else {
+        match std::fs::read_to_string(src) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{} read {}: {e}", "error:".red(), src.display());
+                return ExitCode::from(1);
+            }
+        }
+    };
+    let report: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{} parse discovery report: {e}", "error:".red());
+            return ExitCode::from(1);
+        }
+    };
+    let endpoints = report
+        .get("endpoints")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if endpoints.is_empty() {
+        eprintln!(
+            "{} discovery report has no `endpoints` — nothing to scan (is this `wafrift discover` JSON?)",
+            "error:".red()
+        );
+        return ExitCode::from(1);
+    }
+
+    // Flatten to concrete (url, param) jobs. An endpoint with no
+    // injection points still gets scanned on the default param so a
+    // bare URL list is usable.
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    for ep in &endpoints {
+        let Some(url) = ep.get("url").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let points: Vec<String> = ep
+            .get("injection_points")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| {
+                        p.get("name").and_then(serde_json::Value::as_str).map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if points.is_empty() {
+            jobs.push((url.to_string(), args.param.clone()));
+        } else {
+            for name in points {
+                jobs.push((url.to_string(), name));
+            }
+        }
+    }
+
+    eprintln!(
+        "[wafrift scan] --from-discovery: {} endpoint(s) → {} scan job(s)",
+        endpoints.len(),
+        jobs.len()
+    );
+
+    let mut last = ExitCode::SUCCESS;
+    for (i, (url, param)) in jobs.iter().enumerate() {
+        if cancel.is_cancelled() {
+            eprintln!("[wafrift scan] cancelled — {} job(s) not run", jobs.len() - i);
+            break;
+        }
+        eprintln!(
+            "\n[wafrift scan] ── job {}/{}: {url} (param={param}) ──",
+            i + 1,
+            jobs.len()
+        );
+        let job_args = ScanArgs {
+            target: Some(url.clone()),
+            from_discovery: None,
+            payload: args.payload.clone(),
+            param: param.clone(),
+            level: args.level,
+            encoding_only: args.encoding_only,
+            delay_ms: args.delay_ms,
+            format: args.format.clone(),
+            stealth_browser: args.stealth_browser.clone(),
+            insecure: args.insecure,
+            report_layers: args.report_layers,
+            only: args.only.clone(),
+            exclude: args.exclude.clone(),
+            output: None, // per-job: don't clobber one file repeatedly
+        };
+        last = scan::run_scan(job_args, cancel.clone()).await;
+    }
+    last
 }
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
-    let headers = match parse_headers(&args.headers) {
-        Ok(headers) => headers,
-        Err(message) => {
-            eprintln!("{} {}", "Header parse error:".red().bold(), message);
-            return ExitCode::from(2);
-        }
-    };
+    // Two input modes: live `--url` fetch, or the manual
+    // `--status`/`--headers`/`--body` triple. clap's
+    // `required_unless_present`/`conflicts_with_all` guarantees exactly
+    // one mode is selected.
+    let (status, headers, body): (u16, Vec<(String, String)>, Vec<u8>) =
+        if let Some(ref url) = args.url {
+            match fetch_for_detect(url, args.timeout_secs, args.insecure) {
+                Ok((s, h, b)) => {
+                    if !quiet {
+                        eprintln!(
+                            "{} GET {url} → HTTP {s} ({} headers, {} body bytes)",
+                            "probe:".bright_black(),
+                            h.len(),
+                            b.len()
+                        );
+                    }
+                    (s, h, b)
+                }
+                Err(e) => {
+                    eprintln!("{} {e}", "Probe error:".red().bold());
+                    return ExitCode::from(1);
+                }
+            }
+        } else {
+            let headers = match parse_headers(&args.headers) {
+                Ok(headers) => headers,
+                Err(message) => {
+                    eprintln!("{} {}", "Header parse error:".red().bold(), message);
+                    return ExitCode::from(2);
+                }
+            };
+            // clap enforces `--status` present in this branch.
+            let status = args.status.unwrap_or_else(|| {
+                unreachable!("clap requires --status unless --url is present")
+            });
+            (status, headers, args.body.clone().into_bytes())
+        };
 
-    let detected = waf_detect::detect(args.status, &headers, args.body.as_bytes());
+    let detected = waf_detect::detect(status, &headers, &body);
     if quiet {
         let results: Vec<_> = detected
             .iter()
@@ -1144,7 +1513,14 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 })
             })
             .collect();
-        println!("{}", json!({ "detected": results }));
+        let infra: Vec<_> = infra_markers(&headers)
+            .into_iter()
+            .map(|(k, v)| json!({ "header": k, "value": v }))
+            .collect();
+        println!(
+            "{}",
+            json!({ "status": status, "detected": results, "infrastructure": infra })
+        );
         ExitCode::SUCCESS
     } else if let Some(result) = detected.first() {
         println!("{} {}", "Detected WAF:".bold().green(), result.name.bold());
@@ -1160,6 +1536,34 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         println!("{}", "No WAF confidently detected.".yellow().bold());
+        let infra = infra_markers(&headers);
+        if infra.is_empty() {
+            println!(
+                "  {}",
+                "(no CDN/edge/origin markers in the response headers either)".bright_black()
+            );
+        } else {
+            println!(
+                "{}",
+                "Infrastructure in front of / serving the origin:"
+                    .bold()
+                    .cyan()
+            );
+            for (k, v) in &infra {
+                println!(
+                    "  {} {}: {}",
+                    "-".bright_black(),
+                    k.yellow(),
+                    v.bright_white()
+                );
+            }
+            println!(
+                "  {}",
+                "These are CDN/proxy/origin banners, not a WAF verdict — \
+                 a WAF may still be present in monitor-only mode."
+                    .bright_black()
+            );
+        }
         ExitCode::SUCCESS
     }
 }

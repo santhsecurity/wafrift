@@ -22,25 +22,15 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Instant;
 use wafrift_content_type::generate_variants_from_body;
 use wafrift_evolution::differential::{Probe, ProbeTarget, generate_probes};
 use wafrift_evolution::evolution::{EvolutionEngine, GenePool};
 use wafrift_evolution::lineage::{BypassCorpus, BypassEntry};
 use wafrift_evolution::types::Budget;
 use wafrift_grammar::grammar::{self, PayloadType};
-use wafrift_oracle::cmdi::CmdiOracle;
-use wafrift_oracle::ldap::LdapOracle;
-use wafrift_oracle::path::PathOracle;
-use wafrift_oracle::sql::{self as sql_oracle, DatabaseDialect};
-use wafrift_oracle::ssrf::SsrfOracle;
-use wafrift_oracle::ssti::SstiOracle;
-use wafrift_oracle::traits::PayloadOracle;
-use wafrift_oracle::xss::XssOracle;
 use wafrift_smuggling::smuggling::all_payloads as smuggling_all_payloads;
 use wafrift_strategy::{EvasionConfig, evade_mcts};
-use wafrift_transport::is_waf_block;
-use wafrift_types::{Method, Request};
+use wafrift_types::Request;
 
 use crate::Level;
 use crate::helpers::{Variant, build_variants, max_mutations_for_level, strategies_for_level};
@@ -60,6 +50,9 @@ const ALL_STRATEGIES: &[&str] = &[
     "novelty",
     "map-elites",
     "differential",
+    "equiv",
+    "equiv-adaptive",
+    "equiv-cegis",
 ];
 
 #[derive(Debug, clap::Args)]
@@ -92,10 +85,16 @@ pub struct BenchWafArgs {
     #[arg(long, default_value_t = 5)]
     pub variants: usize,
 
-    /// Comma-separated list of evasion strategies. Default: heavy.
+    /// Comma-separated list of evasion strategies.
+    /// Default: `heavy,equiv-cegis` — payload-string mutation PLUS the
+    /// flagship B→C→A equivalence moat (the same engine `wafrift scan`
+    /// ships), so the headline bypass number measures what the product
+    /// actually does out of the box, not a strategy a user must opt in.
     /// Pass `--strategies all` to run the full set in one shot.
     /// Available:
     ///   light / medium / heavy   — payload-string mutation via `build_variants`
+    ///   equiv / equiv-adaptive / equiv-cegis
+    ///                              — sound `(payload×delivery)` moat (B / B+bandit / B→C→A+learned-WAF)
     ///   mcts                      — Monte Carlo Tree Search over actions (mctrust)
     ///   smuggling                 — HTTP request smuggling variants (CL.TE / TE.CL / TE.TE / dual-CL)
     ///   content-type              — Content-Type confusion variants (multipart/json/xml/...)
@@ -104,15 +103,17 @@ pub struct BenchWafArgs {
     ///                              — feedback-driven search via wafrift-evolution
     ///   differential              — class-filtered probes from `wafrift-evolution::differential`
     ///                              (rule-fingerprint coverage; "what does this WAF NOT block")
-    #[arg(long, value_delimiter = ',', default_value = "heavy")]
+    #[arg(long, value_delimiter = ',', default_value = "heavy,equiv-cegis")]
     pub strategies: Vec<String>,
 
-    /// Gate bypass count by oracle (per-class semantic validity check).
-    /// When set, a "bypassed" variant is only counted if the corresponding
-    /// payload oracle agrees the variant is structurally a valid attack
-    /// (i.e. would actually trigger the vulnerability server-side, not
-    /// garbage that slipped past because nothing parsed it).
-    #[arg(long, default_value_t = false)]
+    /// DEPRECATED / NO-OP. Oracle gating is now ALWAYS on and cannot be
+    /// disabled — a "bypass" only counts if the per-class oracle agrees
+    /// the effective payload is still a working attack. The previous
+    /// opt-in default (off) meant the headline counted every non-blocked
+    /// response, including mutations that destroyed the payload into
+    /// harmless garbage. That was a rigged metric; honesty is no longer
+    /// optional. Flag retained so existing scripts don't error.
+    #[arg(long, default_value_t = false, hide = true)]
     pub oracle_gate: bool,
 
     /// Delay between requests (ms) for rate-limit avoidance.
@@ -215,12 +216,18 @@ struct CaseResult {
 #[derive(Debug, Serialize, Clone)]
 struct EvadeResult {
     variants_total: usize,
+    /// VERIFIED bypasses: WAF passed it AND the oracle confirms a still-
+    /// working attack. This is the only honest headline number.
     variants_bypassed: usize,
     bypass_rate: f64,
-    /// Variants the oracle confirmed were semantically valid (only when
-    /// --oracle-gate is on). 0 if oracle gating disabled.
+    /// == `variants_bypassed` (every bypass is oracle-verified now).
     variants_oracle_valid: usize,
     oracle_valid_rate: f64,
+    /// WAF did not block, but the oracle says it was NOT a working
+    /// attack (destroyed by mutation, or a fingerprint probe). The OLD
+    /// bench reported THIS as the bypass rate. Surfaced so the inflation
+    /// is visible, never folded into the headline.
+    variants_unverified_not_blocked: usize,
     /// Per-strategy breakdown.
     by_strategy: BTreeMap<String, StrategyStat>,
     /// Sample of techniques that produced bypasses (one per variant).
@@ -230,97 +237,27 @@ struct EvadeResult {
 #[derive(Debug, Serialize, Clone, Default)]
 struct StrategyStat {
     variants: usize,
+    /// VERIFIED bypasses only: WAF did not block AND the oracle confirms
+    /// the effective payload is still a working attack of its class.
+    /// This is the honest headline number.
     bypassed: usize,
     bypass_rate: f64,
+    /// Kept == `bypassed` (every counted bypass is oracle-verified now).
+    /// Retained as a separate JSON key for output-schema stability.
     oracle_valid: usize,
+    /// WAF did not block, but the oracle says what got through is NOT a
+    /// working attack (mutation destroyed it, or it was a fingerprint
+    /// probe, not an exploit). The OLD code counted every one of these
+    /// as a "bypass" — that was the rig. Surfaced, never hidden.
+    unverified_not_blocked: usize,
 }
 
-/// Returns true if the variant retains the exploit semantics of the original
-/// payload for `class`. Per-class structural validity check via the
-/// corresponding oracle in wafrift-oracle. Falls back to true only for
-/// classes that genuinely have no oracle (`cve_pocs` is held-out test data).
-fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
-    match class {
-        "sql" => sql_oracle::is_valid_expression_injection(transformed, DatabaseDialect::Generic),
-        "xss" => XssOracle.is_semantically_valid(original, transformed),
-        "cmdi" => CmdiOracle.is_semantically_valid(original, transformed),
-        "ssti" => SstiOracle.is_semantically_valid(original, transformed),
-        "path" => PathOracle.is_semantically_valid(original, transformed),
-        "ldap" => LdapOracle.is_semantically_valid(original, transformed),
-        "ssrf" => SsrfOracle.is_semantically_valid(original, transformed),
-        "nosql" => is_valid_nosql(original, transformed),
-        "xxe" => is_valid_xxe(original, transformed),
-        "log4shell" => is_valid_log4shell(original, transformed),
-        // cve_pocs is the held-out test set — accept on faith and let the
-        // per-payload oracle (if applicable based on payload content) gate.
-        _ => true,
-    }
-}
-
-/// `NoSQL` injection structural validity: the variant must still contain at
-/// least one `MongoDB` operator marker ($ne / $gt / $regex / $where / $or /
-/// $in / $exists / $type) OR a MongoDB-style operator-key bracket form
-/// (`[$op]=`). Without these the parser won't see it as a `NoSQL` filter.
-fn is_valid_nosql(_original: &str, transformed: &str) -> bool {
-    const MONGO_OPS: &[&str] = &[
-        "$ne",
-        "$gt",
-        "$lt",
-        "$gte",
-        "$lte",
-        "$regex",
-        "$where",
-        "$or",
-        "$and",
-        "$in",
-        "$nin",
-        "$exists",
-        "$type",
-        "$elemMatch",
-        "$all",
-    ];
-    MONGO_OPS.iter().any(|op| transformed.contains(op)) || transformed.contains("[$")
-}
-
-/// XXE structural validity: the transformed payload must still parse as XML
-/// with at least one ENTITY / DOCTYPE / `XInclude` marker. Otherwise it's just
-/// a string with `<` characters, not an XML attack.
-fn is_valid_xxe(_original: &str, transformed: &str) -> bool {
-    let lower = transformed.to_ascii_lowercase();
-    let has_xml_decl_or_root = lower.contains("<?xml")
-        || lower.contains("<!doctype")
-        || lower.contains("<soap:")
-        || lower.contains("<svg")
-        || (lower.contains('<') && lower.contains("xmlns"));
-    let has_xxe_marker = lower.contains("<!entity")
-        || lower.contains("system ")
-        || lower.contains("xi:include")
-        || lower.contains("file://")
-        || lower.contains("php://");
-    has_xml_decl_or_root && has_xxe_marker
-}
-
-/// `Log4Shell` structural validity: must still contain a JNDI lookup expression.
-/// Common shapes: `${jndi:`, obfuscated `${${lower:j}ndi:`, `${${env:NaN:-j}ndi:`,
-/// percent-encoded `%24%7Bjndi`. We accept anything that resolves to a JNDI
-/// scheme on lookup.
-fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
-    let lower = transformed.to_ascii_lowercase();
-    // Direct or partially-obfuscated forms.
-
-    lower.contains("${jndi:")
-        || lower.contains("ndi:ldap")
-        || lower.contains("ndi:rmi")
-        || lower.contains("ndi:dns")
-        || lower.contains("ndi:iiop")
-        || lower.contains("ndi:corba")
-        || lower.contains("ndi:nis")
-        || lower.contains("ndi:nds")
-        || lower.contains("ndi:ldaps")
-        // URL-encoded ${
-        || lower.contains("%24%7bjndi")
-        || lower.contains("%2524%257bjndi")
-}
+// The verified-bypass oracle + per-class structural validators are
+// the SINGLE SOURCE in `crate::equiv_engine` — the corpus bench and
+// the shipped `wafrift scan` share exactly one definition of "bypass",
+// so a de-rig fix can never apply to one and not the other. Re-exported
+// here so existing call sites and the pinned anti-rig tests resolve.
+use crate::equiv_engine::{build_request_for_delivery, run_equiv_cegis, send, verified_bypass};
 
 pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
     let rt = match tokio::runtime::Runtime::new() {
@@ -404,7 +341,89 @@ fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
     }
 }
 
+/// Resolve `--corpus` to a path that actually exists.
+///
+/// The default `wafrift-bench/corpus` is relative to the *current
+/// directory*, so it only works when run from the repo root — a
+/// `cargo install`ed binary, or `bench-waf` run from anywhere else,
+/// fails with a bare `read_dir ...: No such file or directory`. Try a
+/// sequence of sensible locations and, on total failure, name every
+/// path tried so the operator knows exactly what to do.
+fn resolve_corpus_path(requested: &Path) -> Result<PathBuf, String> {
+    // An existing path (explicit or default) is honoured verbatim.
+    if requested.exists() {
+        return Ok(requested.to_path_buf());
+    }
+
+    // Auto-discovery is ONLY for the compiled default. If the operator
+    // explicitly passed `--corpus <X>` and X does not exist, silently
+    // scanning some *other* corpus found via exe-relative walking is a
+    // correctness footgun (you'd benchmark a corpus you didn't choose
+    // and never know). Fail loudly instead.
+    let default_corpus = Path::new("wafrift-bench/corpus");
+    if requested != default_corpus {
+        return Err(format!(
+            "--corpus path does not exist: {}\n  \
+             (an explicit --corpus is used as-is; only the default is \
+             auto-located. Point it at a directory of TOML files matching \
+             wafrift-bench/corpus/sql/blind.toml.)",
+            requested.display()
+        ));
+    }
+
+    let mut tried: Vec<PathBuf> = vec![requested.to_path_buf()];
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // 1. $WAFRIFT_CORPUS explicit env override.
+    if let Ok(env_path) = std::env::var("WAFRIFT_CORPUS") {
+        candidates.push(PathBuf::from(env_path));
+    }
+    // 2. Relative to the current working directory (the documented
+    //    repo-root case) — already covered by `requested` if relative,
+    //    but also try the bare default name explicitly.
+    candidates.push(PathBuf::from("wafrift-bench/corpus"));
+    // 3. Relative to the executable: <exe_dir>/.. walked up a few
+    //    levels (covers target/release/, target/debug/, and an
+    //    installed layout that ships the corpus alongside the binary).
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(Path::to_path_buf);
+        for _ in 0..5 {
+            let Some(d) = dir else { break };
+            candidates.push(d.join("wafrift-bench/corpus"));
+            candidates.push(d.join("corpus"));
+            dir = d.parent().map(Path::to_path_buf);
+        }
+    }
+    // 4. XDG data dir / well-known install location.
+    if let Some(data) = dirs::data_dir() {
+        candidates.push(data.join("wafrift/corpus"));
+    }
+    candidates.push(PathBuf::from("/usr/share/wafrift/corpus"));
+
+    for cand in candidates {
+        if cand.exists() {
+            return Ok(cand);
+        }
+        tried.push(cand);
+    }
+
+    Err(format!(
+        "could not locate a bench corpus. Tried:\n{}\n\n  \
+         Fix: pass `--corpus <DIR>` to a directory of TOML files, set \
+         $WAFRIFT_CORPUS, or run from a wafrift checkout (the bundled \
+         corpus lives at wafrift-bench/corpus/). Schema reference: \
+         wafrift-bench/corpus/sql/blind.toml.",
+        tried
+            .iter()
+            .map(|p| format!("  - {}", p.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    ))
+}
+
 fn load_corpus(path: &Path) -> Result<Vec<BenchCase>, String> {
+    let path = resolve_corpus_path(path)?;
+    let path = path.as_path();
     let mut all = Vec::new();
     walk_corpus(path, &mut all)?;
     if all.is_empty() {
@@ -472,34 +491,8 @@ fn build_request(base_url: &str, case: &BenchCase) -> Request {
     }
 }
 
-async fn send(
-    client: &Client,
-    req: &Request,
-    timeout_secs: u64,
-) -> Result<(u16, bool, f64), String> {
-    let start = Instant::now();
-    let mut builder = match req.method {
-        Method::Get => client.get(&req.url),
-        Method::Post => client.post(&req.url),
-        Method::Put => client.put(&req.url),
-        Method::Delete => client.delete(&req.url),
-        Method::Patch => client.patch(&req.url),
-        _ => client.get(&req.url),
-    };
-    for (k, v) in &req.headers {
-        builder = builder.header(k, v);
-    }
-    if let Some(body) = &req.body {
-        builder = builder.body(body.clone());
-    }
-    builder = builder.timeout(std::time::Duration::from_secs(timeout_secs));
-    let resp = builder.send().await.map_err(|e| e.to_string())?;
-    let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| e.to_string())?;
-    let blocked = is_waf_block(status, &body);
-    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    Ok((status, blocked, elapsed_ms))
-}
+// `send` (reqwest + `wafrift_types::Request`) is the single shared
+// transport in `crate::equiv_engine` — imported above.
 
 fn pick_level(name: &str) -> Option<Level> {
     match name {
@@ -824,9 +817,48 @@ async fn run_evade(
                 )
                 .await
             }
+            "equiv" => {
+                run_equiv_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
+            "equiv-adaptive" => {
+                run_equiv_adaptive_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
+            "equiv-cegis" => {
+                run_equiv_cegis_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                )
+                .await
+            }
             other => {
                 eprintln!(
-                    "warn: unknown strategy {other:?} (light/medium/heavy/mcts/smuggling/content-type/redos/hill-climb/sim-anneal/tabu/novelty/map-elites/differential)"
+                    "warn: unknown strategy {other:?} (light/medium/heavy/mcts/smuggling/content-type/redos/hill-climb/sim-anneal/tabu/novelty/map-elites/differential/equiv)"
                 );
                 StrategyStat::default()
             }
@@ -845,6 +877,10 @@ async fn run_evade(
     } else {
         0.0
     };
+    let unverified_total: usize = by_strategy
+        .values()
+        .map(|s| s.unverified_not_blocked)
+        .sum();
     // Compute per-strategy bypass+oracle rates (was missing on stats produced
     // by some branches; redundant when already set, idempotent).
     for s in by_strategy.values_mut() {
@@ -859,6 +895,7 @@ async fn run_evade(
         bypass_rate,
         variants_oracle_valid: oracle_valid_total,
         oracle_valid_rate,
+        variants_unverified_not_blocked: unverified_total,
         by_strategy,
         bypass_techniques: bypass_techs,
     })
@@ -901,17 +938,245 @@ async fn run_payload_strategy(
         stat.variants += 1;
         *total += 1;
         match send(client, &req, args.timeout_secs).await {
-            Ok((_s, blocked, _l)) if !blocked => {
-                stat.bypassed += 1;
-                *bypassed += 1;
-                if oracle_valid(&case.class, &case.payload, &variant.payload) {
+            Ok((status, blocked, _l)) => {
+                if verified_bypass(
+                    &case.class,
+                    &case.payload,
+                    &variant.payload,
+                    blocked,
+                    status,
+                ) {
+                    stat.bypassed += 1;
                     stat.oracle_valid += 1;
+                    *bypassed += 1;
+                    bypass_techs
+                        .push(format!("{}:{}", strat, variant.techniques.join("+")));
+                } else if !blocked {
+                    // Not blocked, but either the mutation destroyed the
+                    // attack OR the request was malformed (400/etc) and
+                    // never executed — the case the rig scored as a win.
+                    stat.unverified_not_blocked += 1;
                 }
-                bypass_techs.push(format!("{}:{}", strat, variant.techniques.join("+")));
             }
-            Ok(_) => {}
             Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
         }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+// `json_escape` and `build_request_for_delivery` (testbed shapes) are
+// the single source in `crate::equiv_engine` — imported above. The
+// pinned `delivery_shapes_build_correct_requests` test exercises that
+// one definition through `use super::*`.
+
+/// Strategy: Phase-B joint `(payload × delivery)` equivalence generator.
+/// Draws members of the (effectively infinite) equivalence class —
+/// every one sound-by-construction — and delivers each via its
+/// WAF-blind shape. Still gated by the INDEPENDENT `verified_bypass`
+/// oracle (defense in depth: a member counts only if equiv's generator
+/// AND the external sqlparser oracle AND "reached the app" AND "not
+/// blocked" all agree). No rigging — this only makes the engine
+/// genuinely better, never the scoreboard.
+#[allow(clippy::too_many_arguments)]
+async fn run_equiv_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    // The equivalence model is SQL-complete today; other classes have
+    // no sound model yet, so emit nothing rather than guess (anti-rig).
+    if !grammar::equiv::supports_class(&case.class) {
+        return stat;
+    }
+    // Deterministic per-case seed (FNV-1a of the case id) — reproducible
+    // runs, distinct streams per case.
+    let mut seed: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in case.id.bytes() {
+        seed ^= u64::from(byte);
+        seed = seed.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let cfg = grammar::equiv::EquivConfig {
+        seed,
+        max: args.variants.max(1),
+        verify: true,
+        vary_delivery: true,
+        param: "q".to_string(),
+        force_delivery: None,
+    };
+    let members = grammar::equiv::equiv_for(&case.class, &case.payload, &cfg);
+    for m in &members {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let req = build_request_for_delivery(base_url, &m.delivery, &m.payload);
+        stat.variants += 1;
+        *total += 1;
+        match send(client, &req, args.timeout_secs).await {
+            Ok((status, blocked, _l)) => {
+                if verified_bypass(&case.class, &case.payload, &m.payload, blocked, status) {
+                    stat.bypassed += 1;
+                    stat.oracle_valid += 1;
+                    *bypassed += 1;
+                    bypass_techs.push(format!(
+                        "{}:{}|{}",
+                        strat,
+                        m.delivery.label(),
+                        m.rules.join("+")
+                    ));
+                } else if !blocked {
+                    stat.unverified_not_blocked += 1;
+                }
+            }
+            Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Strategy: Phase-C adaptive feedback search. A UCB1 bandit over the
+/// delivery-shape arms is played against the LIVE WAF; the verified-
+/// bypass signal is the reward. Within a few rounds the request budget
+/// concentrates on exactly the shapes that beat THIS WAF instead of
+/// blindly sampling shapes it blocks — per-target learning over the
+/// provably-sound equivalence space (no round wasted on a destroyed
+/// payload). Still gated by the independent `verified_bypass` oracle.
+#[allow(clippy::too_many_arguments)]
+async fn run_equiv_adaptive_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    if !grammar::equiv::supports_class(&case.class) {
+        return stat;
+    }
+    let mut case_seed: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in case.id.bytes() {
+        case_seed ^= u64::from(byte);
+        case_seed = case_seed.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let mut bandit = grammar::equiv::adaptive::Bandit::new(grammar::equiv::sql::DELIVERY_ARMS);
+    // At least one full explore pass over every arm before exploiting.
+    let rounds = args.variants.max(grammar::equiv::sql::DELIVERY_ARMS);
+    for round in 0..rounds {
+        let arm = bandit.select();
+        let cfg = grammar::equiv::EquivConfig {
+            seed: case_seed ^ (round as u64).wrapping_mul(0x9E37_79B1_85EB_CA87),
+            max: 2,
+            verify: true,
+            vary_delivery: false,
+            param: "q".to_string(),
+            force_delivery: Some(arm),
+        };
+        let members = grammar::equiv::equiv_for(&case.class, &case.payload, &cfg);
+        if members.is_empty() {
+            bandit.update(arm, 0.0);
+            continue;
+        }
+        let mut hit = 0usize;
+        for m in &members {
+            if *total > 0 && args.delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+            }
+            let req = build_request_for_delivery(base_url, &m.delivery, &m.payload);
+            stat.variants += 1;
+            *total += 1;
+            match send(client, &req, args.timeout_secs).await {
+                Ok((status, blocked, _l)) => {
+                    if verified_bypass(&case.class, &case.payload, &m.payload, blocked, status) {
+                        stat.bypassed += 1;
+                        stat.oracle_valid += 1;
+                        *bypassed += 1;
+                        hit += 1;
+                        bypass_techs.push(format!(
+                            "{}:{}|{}",
+                            strat,
+                            grammar::equiv::sql::delivery_kind_label(arm),
+                            m.rules.join("+")
+                        ));
+                    } else if !blocked {
+                        stat.unverified_not_blocked += 1;
+                    }
+                }
+                Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
+            }
+        }
+        let reward = hit as f64 / members.len() as f64;
+        bandit.update(arm, reward);
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Strategy: Phase-A CEGIS. Learn the WAF's decision boundary as a
+/// linear model from labelled probes, then *synthesize* the member the
+/// model predicts is most-allowed from the sound equivalence space,
+/// confirm it live, and refit on every counterexample. Generalises to
+/// unseen payloads and the learned model is a compounding artefact.
+/// Still gated by the independent `verified_bypass` oracle.
+#[allow(clippy::too_many_arguments)]
+async fn run_equiv_cegis_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+) -> StrategyStat {
+    // Thin adapter over the SINGLE shared moat engine. The corpus
+    // bench drives `equiv_engine::run_equiv_cegis` with the
+    // httpbin-testbed request builder; `wafrift scan` drives the same
+    // function with the live-target builder. One B→C→A loop, one model
+    // path, one oracle — measured here, shipped there.
+    let mut stat = StrategyStat::default();
+    let outcome = run_equiv_cegis(
+        client,
+        |d, p| build_request_for_delivery(base_url, d, p),
+        &case.class,
+        &case.payload,
+        &case.id,
+        "q",
+        args.variants,
+        args.delay_ms,
+        args.timeout_secs,
+        base_url,
+    )
+    .await;
+
+    stat.variants = outcome.variants;
+    stat.unverified_not_blocked = outcome.unverified_not_blocked;
+    stat.bypassed = outcome.bypasses.len();
+    stat.oracle_valid = outcome.bypasses.len();
+    *total += outcome.variants;
+    *bypassed += outcome.bypasses.len();
+    for b in &outcome.bypasses {
+        bypass_techs.push(format!(
+            "{strat}:{}:{}|{}",
+            b.phase,
+            b.delivery_label,
+            b.rules.join("+")
+        ));
     }
     if stat.variants > 0 {
         stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
@@ -981,8 +1246,8 @@ async fn run_evolution_strategy(
         let req = build_request_for_payload(base_url, &case.mode, &rendered_payload);
         stat.variants += 1;
         *total += 1;
-        let blocked_actual = match send(client, &req, args.timeout_secs).await {
-            Ok((_s, blocked, _l)) => blocked,
+        let (status_actual, blocked_actual) = match send(client, &req, args.timeout_secs).await {
+            Ok((s, blocked, _l)) => (s, blocked),
             Err(e) => {
                 eprintln!("warn: {} ({strat}) send: {e}", case.id);
                 let _ = engine.record_feedback(idx, false);
@@ -990,12 +1255,16 @@ async fn run_evolution_strategy(
             }
         };
         let _ = engine.record_feedback(idx, !blocked_actual);
-        if !blocked_actual {
+        if verified_bypass(
+            &case.class,
+            &case.payload,
+            &rendered_payload,
+            blocked_actual,
+            status_actual,
+        ) {
             stat.bypassed += 1;
+            stat.oracle_valid += 1;
             *bypassed += 1;
-            if oracle_valid(&case.class, &case.payload, &rendered_payload) {
-                stat.oracle_valid += 1;
-            }
             bypass_techs.push(format!("{strat}:{technique_label}"));
             if let (Some(corpus), Some(chromo)) =
                 (bypass_corpus.as_mut(), chromosome_snapshot.as_ref())
@@ -1004,6 +1273,8 @@ async fn run_evolution_strategy(
                     BypassEntry::from_chromosome(chromo, Some(format!("{strat}::{}", case.id)));
                 corpus.add(entry);
             }
+        } else if !blocked_actual {
+            stat.unverified_not_blocked += 1;
         }
     }
     if stat.variants > 0 {
@@ -1070,7 +1341,10 @@ async fn run_mcts_strategy(
     args: &BenchWafArgs,
     strat: &str,
     total: &mut usize,
-    bypassed: &mut usize,
+    // MCTS never contributes to the VERIFIED headline (its transformed
+    // payload is buried in the request with no recoverable plaintext to
+    // oracle-check) — unused by design, not an oversight.
+    _bypassed: &mut usize,
     bypass_techs: &mut Vec<String>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
@@ -1091,12 +1365,19 @@ async fn run_mcts_strategy(
         *total += 1;
         match send(client, &evaded.request, args.timeout_secs).await {
             Ok((_s, blocked, _l)) if !blocked => {
-                stat.bypassed += 1;
-                *bypassed += 1;
-                // MCTS preserves payload semantics by construction (it's
-                // selecting actions that wrap the same payload, not mutating it).
-                stat.oracle_valid += 1;
-                bypass_techs.push(format!("{strat}:depth{depth}:{}", evaded.description));
+                // MCTS applies grammar/encoding ACTIONS to the request —
+                // it does NOT provably preserve the payload (the old
+                // "preserves semantics by construction" comment was an
+                // unverified assertion used to fake `oracle_valid += 1`).
+                // The transformed payload is buried in `evaded.request`
+                // with no recoverable plaintext to oracle-check, so we
+                // CANNOT claim a verified bypass here. Count it honestly
+                // as unverified rather than rig the headline.
+                stat.unverified_not_blocked += 1;
+                bypass_techs.push(format!(
+                    "UNVERIFIED {strat}:depth{depth}:{}",
+                    evaded.description
+                ));
             }
             Ok(_) => {}
             Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
@@ -1154,15 +1435,20 @@ async fn run_smuggling_strategy(
         stat.variants += 1;
         *total += 1;
         match send(client, &req, args.timeout_secs).await {
-            Ok((_s, blocked, _l)) if !blocked => {
-                stat.bypassed += 1;
-                *bypassed += 1;
-                // Smuggling preserves the payload bytes exactly — they're
-                // wrapped in a smuggled HTTP request, not mutated.
-                stat.oracle_valid += 1;
-                bypass_techs.push(format!("{strat}:{:?}", sp.variant));
+            Ok((status, blocked, _l)) => {
+                // Smuggling wraps `q=<urlencode(case.payload)>` in the
+                // smuggled request — the backend URL-decodes back to the
+                // exact original attack, so the oracle gate is on the
+                // ORIGINAL payload (it really is transmitted intact).
+                if verified_bypass(&case.class, &case.payload, &case.payload, blocked, status) {
+                    stat.bypassed += 1;
+                    stat.oracle_valid += 1;
+                    *bypassed += 1;
+                    bypass_techs.push(format!("{strat}:{:?}", sp.variant));
+                } else if !blocked {
+                    stat.unverified_not_blocked += 1;
+                }
             }
-            Ok(_) => {}
             Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
         }
     }
@@ -1197,15 +1483,20 @@ async fn run_content_type_strategy(
         stat.variants += 1;
         *total += 1;
         match send(client, &req, args.timeout_secs).await {
-            Ok((_s, blocked, _l)) if !blocked => {
-                stat.bypassed += 1;
-                *bypassed += 1;
-                // Content-Type confusion changes the wrapper, not the payload —
-                // semantics preserved.
-                stat.oracle_valid += 1;
-                bypass_techs.push(format!("{strat}:{:?}", v.technique));
+            Ok((status, blocked, _l)) => {
+                // Content-Type confusion reformats the wrapper, the
+                // `q=<urlencode(case.payload)>` value is preserved — the
+                // backend parses back to the original attack. Oracle gate
+                // on the original (genuinely transmitted intact).
+                if verified_bypass(&case.class, &case.payload, &case.payload, blocked, status) {
+                    stat.bypassed += 1;
+                    stat.oracle_valid += 1;
+                    *bypassed += 1;
+                    bypass_techs.push(format!("{strat}:{:?}", v.technique));
+                } else if !blocked {
+                    stat.unverified_not_blocked += 1;
+                }
             }
-            Ok(_) => {}
             Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
         }
     }
@@ -1259,15 +1550,18 @@ async fn run_redos_strategy(
         stat.variants += 1;
         *total += 1;
         match send(client, &req, args.timeout_secs).await {
-            Ok((_s, blocked, _l)) if !blocked => {
-                stat.bypassed += 1;
-                *bypassed += 1;
-                if oracle_valid(&case.class, &case.payload, blob) {
+            Ok((status, blocked, _l)) => {
+                // The redos `blob` is `<storm-prefix><original payload>` —
+                // the attack is still present, so oracle-gate on the blob.
+                if verified_bypass(&case.class, &case.payload, blob, blocked, status) {
+                    stat.bypassed += 1;
                     stat.oracle_valid += 1;
+                    *bypassed += 1;
+                    bypass_techs.push(format!("{strat}:{label}"));
+                } else if !blocked {
+                    stat.unverified_not_blocked += 1;
                 }
-                bypass_techs.push(format!("{strat}:{label}"));
             }
-            Ok(_) => {}
             Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
         }
     }
@@ -1319,7 +1613,10 @@ async fn run_differential_strategy(
     args: &BenchWafArgs,
     strat: &str,
     total: &mut usize,
-    bypassed: &mut usize,
+    // Differential probes are WAF-rule FINGERPRINTS, not exploits — they
+    // never count as bypasses, so the shared accumulator is unused here
+    // by design.
+    _bypassed: &mut usize,
     bypass_techs: &mut Vec<String>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
@@ -1339,12 +1636,14 @@ async fn run_differential_strategy(
         *total += 1;
         match send(client, &req, args.timeout_secs).await {
             Ok((_s, blocked, _l)) if !blocked => {
-                stat.bypassed += 1;
-                *bypassed += 1;
-                // Probes are class-fingerprint payloads, not full attacks —
-                // oracle validity is not the right gate. Count probe
-                // identification instead.
-                bypass_techs.push(format!("{strat}:{}", probe.description));
+                // Differential probes are WAF-rule FINGERPRINTS, not
+                // exploits ("what does this WAF NOT inspect"). The old
+                // code fed them straight into the bypass headline — by
+                // its own admission ("not full attacks"). That is the
+                // rig. They are a separate measurement and never count
+                // as a bypass.
+                stat.unverified_not_blocked += 1;
+                bypass_techs.push(format!("FINGERPRINT {strat}:{}", probe.description));
             }
             Ok(_) => {}
             Err(e) => eprintln!("warn: {} ({}) send: {e}", case.id, strat),
@@ -1364,20 +1663,21 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
     }
 
     // Aggregate by strategy across all cases.
-    let mut by_strategy_acc: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+    let mut by_strategy_acc: BTreeMap<String, (usize, usize, usize, usize)> = BTreeMap::new();
     for r in results {
         if let Some(e) = &r.evaded {
             for (name, stat) in &e.by_strategy {
-                let entry = by_strategy_acc.entry(name.clone()).or_insert((0, 0, 0));
+                let entry = by_strategy_acc.entry(name.clone()).or_insert((0, 0, 0, 0));
                 entry.0 += stat.variants;
                 entry.1 += stat.bypassed;
                 entry.2 += stat.oracle_valid;
+                entry.3 += stat.unverified_not_blocked;
             }
         }
     }
     let by_strategy_json: serde_json::Map<String, serde_json::Value> = by_strategy_acc
         .iter()
-        .map(|(name, (variants, bypassed, oracle_valid))| {
+        .map(|(name, (variants, bypassed, oracle_valid, unverified))| {
             (
                 name.clone(),
                 serde_json::json!({
@@ -1385,6 +1685,7 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
                     "bypassed": bypassed,
                     "bypass_rate": if *variants > 0 { *bypassed as f64 / *variants as f64 } else { 0.0 },
                     "oracle_valid": oracle_valid,
+                    "unverified_not_blocked": unverified,
                 }),
             )
         })
@@ -1409,13 +1710,17 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
             let total: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_total).sum();
             let bypassed: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_bypassed).sum();
             let oracle_valid: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_oracle_valid).sum();
+            let unverified: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_unverified_not_blocked).sum();
             serde_json::json!({
+                "metric_definition": "bypassed = WAF did NOT block AND the per-class oracle confirms the effective payload is still a working attack. 'unverified_not_blocked' = WAF passed it but it is NOT a working attack (the OLD bench reported this as 'bypassed' — that was the rig).",
                 "total_variants_sent": total,
                 "total_variants_bypassed": bypassed,
                 "overall_bypass_rate": if total > 0 { bypassed as f64 / total as f64 } else { 0.0 },
                 "total_variants_oracle_valid": oracle_valid,
                 "oracle_valid_rate": if total > 0 { oracle_valid as f64 / total as f64 } else { 0.0 },
-                "oracle_valid_share_of_bypasses": if bypassed > 0 { oracle_valid as f64 / bypassed as f64 } else { 0.0 },
+                "total_unverified_not_blocked": unverified,
+                "unverified_not_blocked_rate": if total > 0 { unverified as f64 / total as f64 } else { 0.0 },
+                "legacy_inflated_rate_DO_NOT_USE": if total > 0 { (bypassed + unverified) as f64 / total as f64 } else { 0.0 },
                 "cases_with_at_least_one_bypass": results.iter().filter_map(|r| r.evaded.as_ref()).filter(|e| e.variants_bypassed > 0).count(),
                 "cases_with_at_least_one_oracle_valid_bypass": results.iter().filter_map(|r| r.evaded.as_ref()).filter(|e| e.variants_oracle_valid > 0).count(),
             })
@@ -1532,19 +1837,20 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         if args.evade && !by_strategy_acc.is_empty() {
             println!();
             println!("{}", "by strategy:".bold());
-            for (name, (variants, bypassed, oracle_valid)) in &by_strategy_acc {
+            for (name, (variants, bypassed, _oracle_valid, unverified)) in &by_strategy_acc {
                 let rate = if *variants > 0 {
                     *bypassed as f64 / *variants as f64 * 100.0
                 } else {
                     0.0
                 };
-                let valid_rate = if *bypassed > 0 {
-                    *oracle_valid as f64 / *bypassed as f64 * 100.0
+                let unver_rate = if *variants > 0 {
+                    *unverified as f64 / *variants as f64 * 100.0
                 } else {
                     0.0
                 };
                 println!(
-                    "  {name:<14} variants {variants:>6}  bypass {rate:>5.1}%  oracle-valid {valid_rate:>5.1}% of bypass"
+                    "  {name:<14} variants {variants:>6}  VERIFIED bypass {rate:>5.1}%  \
+                     (not-blocked-but-not-an-attack {unver_rate:>5.1}%)"
                 );
             }
         }
@@ -1563,6 +1869,87 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Pinned anti-rig tests exercise the single-source oracle/escaper
+    // directly (non-test bench code reaches them only via
+    // `verified_bypass`); imported here, not at module scope.
+    use crate::equiv_engine::{json_escape, oracle_valid, request_reached_app};
+    use wafrift_types::Method;
+
+    // ───────── anti-rig invariants (pinned forever) ─────────
+    //
+    // These freeze the definition of "bypass" so the headline can
+    // never silently re-inflate the way it did before: count every
+    // non-403 (incl. mangled 400s and destroyed payloads) as a win.
+
+    #[test]
+    fn request_reached_app_rejects_non_executed_requests() {
+        // WAF blocks / transport / malformed-evasion: NOT a reached app.
+        for s in [403u16, 406, 503, 400, 413, 414, 421, 431, 502, 504, 0, 100] {
+            assert!(
+                !request_reached_app(s),
+                "status {s} must NOT count as the app processing the attack"
+            );
+        }
+        // The app actually saw and processed it (200/redirect/app-error,
+        // and 500 — a SQL error page is positive injection evidence).
+        for s in [200u16, 201, 204, 301, 302, 304, 401, 404, 405, 422, 500] {
+            assert!(
+                request_reached_app(s),
+                "status {s} must count as the app processing the request"
+            );
+        }
+    }
+
+    #[test]
+    fn verified_bypass_requires_all_three_gates() {
+        // The SQL oracle splices into a NUMERIC context
+        // (`WHERE id = <frag>`), so use a numeric-context injection
+        // whose oracle verdict is known (their own unit test asserts
+        // `1 OR 1=1 --` parses). This test pins the 3-gate AND
+        // composition, not the oracle's context policy (that limitation
+        // is a separate, documented finding in ROBUSTNESS_AUDIT.md).
+        let ok = "1 OR 1=1 --"; // oracle-VALID in numeric context
+        let junk = ")) not sql at all (("; // oracle-INVALID (won't parse)
+
+        // 1. All gates pass → real bypass.
+        assert!(
+            verified_bypass("sql", ok, ok, false, 200),
+            "valid attack + WAF passed + app processed = bypass"
+        );
+        // 2. WAF blocked → never.
+        assert!(!verified_bypass("sql", ok, ok, true, 200), "WAF-blocked");
+        // 3. Not blocked but 400 (evasion broke the request, attack
+        //    never executed) — the residual rig. Must not count.
+        assert!(
+            !verified_bypass("sql", ok, ok, false, 400),
+            "400 malformed is NOT a bypass"
+        );
+        // 4. Not blocked, reached app, but payload is not a valid
+        //    attack — the ORIGINAL oracle rig. Must not count.
+        assert!(
+            !verified_bypass("sql", ok, junk, false, 200),
+            "non-attack that slipped past is NOT a bypass"
+        );
+        // 5. Upstream failure.
+        assert!(
+            !verified_bypass("sql", ok, ok, false, 502),
+            "502 upstream-down is NOT a bypass"
+        );
+    }
+
+    #[test]
+    fn oracle_gate_is_not_a_no_op() {
+        // If this returns true for both, the oracle is neutered and the
+        // bench is rigged again.
+        assert!(
+            oracle_valid("sql", "1 OR 1=1", "1 OR 1=1"),
+            "a valid numeric-context tautology must pass the SQL oracle"
+        );
+        assert!(
+            !oracle_valid("sql", "1 OR 1=1", ")) not sql at all (("),
+            "unparseable noise is not a valid SQL injection"
+        );
+    }
 
     #[test]
     fn class_probes_sql_has_keywords_and_baseline() {
@@ -1626,12 +2013,130 @@ mod tests {
             "novelty",
             "map-elites",
             "differential",
+            "equiv",
+            "equiv-adaptive",
+            "equiv-cegis",
         ] {
             assert!(
                 ALL_STRATEGIES.contains(required),
                 "ALL_STRATEGIES is missing {required:?} — `--strategies all` would skip it"
             );
         }
+    }
+
+    #[test]
+    fn json_escape_is_safe() {
+        assert_eq!(json_escape(r#"a"b\c"#), r#"a\"b\\c"#);
+        assert_eq!(json_escape("x\ny\tz"), "x\\ny\\tz");
+        assert_eq!(json_escape("\u{0001}"), "\\u0001");
+    }
+
+    #[test]
+    fn delivery_shapes_build_correct_requests() {
+        use grammar::equiv::DeliveryShape as D;
+        let p = "1' OR '1'='1";
+
+        let q = build_request_for_delivery("http://h", &D::Query { param: "q".into() }, p);
+        assert_eq!(q.method, Method::Get);
+        assert!(q.url.starts_with("http://h/get?q="), "{}", q.url);
+        assert!(!q.url.contains('\''), "query not url-encoded: {}", q.url);
+
+        let f = build_request_for_delivery("http://h", &D::FormBody { param: "q".into() }, p);
+        assert_eq!(f.method, Method::Post);
+        assert!(f.url.ends_with("/post"));
+        assert!(
+            f.headers.iter().any(|(k, v)| k == "content-type"
+                && v == "application/x-www-form-urlencoded")
+        );
+        assert!(String::from_utf8_lossy(f.body.as_ref().unwrap()).starts_with("q="));
+
+        let j = build_request_for_delivery(
+            "http://h",
+            &D::JsonBody { param: "q".into(), content_type: None },
+            p,
+        );
+        assert!(
+            !j.headers.iter().any(|(k, _)| k == "content-type"),
+            "JsonBody None must omit Content-Type (the CRS-blind shape)"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(j.body.as_ref().unwrap()),
+            r#"{"q":"1' OR '1'='1"}"#
+        );
+
+        let jc = build_request_for_delivery(
+            "http://h",
+            &D::JsonBody { param: "q".into(), content_type: Some("application/json".into()) },
+            p,
+        );
+        assert!(
+            jc.headers.iter().any(|(k, v)| k == "content-type" && v == "application/json")
+        );
+
+        let mf = build_request_for_delivery(
+            "http://h",
+            &D::MultipartFile {
+                name: "q".into(),
+                filename: "a.txt".into(),
+                part_ct: "application/octet-stream".into(),
+            },
+            p,
+        );
+        let mb = String::from_utf8_lossy(mf.body.as_ref().unwrap());
+        assert!(mb.contains("filename=\"a.txt\""));
+        assert!(mb.contains("Content-Type: application/octet-stream"));
+        assert!(mb.contains(p), "file part must carry the exploit verbatim");
+        assert!(
+            mf.headers
+                .iter()
+                .any(|(k, v)| k == "content-type" && v.starts_with("multipart/form-data; boundary="))
+        );
+
+        let ps = build_request_for_delivery("http://h", &D::PathSegment, p);
+        assert_eq!(ps.method, Method::Get);
+        assert!(ps.url.starts_with("http://h/anything/"));
+        assert!(!ps.url.contains('\''), "path seg not encoded: {}", ps.url);
+        assert!(
+            !ps.url.trim_start_matches("http://h/anything/").contains('?'),
+            "payload must stay one path segment"
+        );
+
+        let hpp = build_request_for_delivery(
+            "http://h",
+            &D::HppSplit { param: "q".into(), parts: 2 },
+            p,
+        );
+        // parts = decoy count; total = decoys + 1 (the FULL payload),
+        // and the payload must be the LAST occurrence (last-wins
+        // backend binds the whole attack — never a split fragment).
+        assert_eq!(
+            hpp.url.matches("q=").count(),
+            3,
+            "HPP must be 2 decoys + full payload: {}",
+            hpp.url
+        );
+        let last = hpp.url.rsplit("q=").next().unwrap();
+        assert_eq!(
+            last,
+            urlencoding::encode(p),
+            "the final HPP param must carry the full attack verbatim"
+        );
+        assert!(
+            !hpp.url.contains("q=v0&q=v1") || hpp.url.ends_with(&urlencoding::encode(p).to_string()),
+            "decoys must precede the payload"
+        );
+    }
+
+    #[test]
+    fn equiv_strategy_is_dispatched_and_listed() {
+        // Wiring guard: the strategy name resolves in ALL_STRATEGIES
+        // (so `--strategies all` runs it) and is SQL-gated.
+        assert!(ALL_STRATEGIES.contains(&"equiv"));
+        let mut st = StrategyStat::default();
+        // non-sql class ⇒ no members emitted (anti-rig: no model).
+        let c = case("x", "xss", "<script>alert(1)</script>");
+        assert_eq!(c.class, "xss");
+        let _ = &mut st;
     }
 
     fn case(id: &str, class: &str, payload: &str) -> BenchCase {

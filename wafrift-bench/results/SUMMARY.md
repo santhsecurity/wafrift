@@ -1,3 +1,36 @@
+> # ⚠️ RETRACTED — THESE NUMBERS WERE RIGGED (correction 2026-05-17)
+>
+> The bench harness counted **every non-403 response as a "bypass"**:
+> the `--oracle-gate` flag was off by default and never read in the hot
+> loop, the per-strategy `oracle_valid` counter was incremented
+> *unconditionally* for mcts/smuggling/content-type, differential
+> *fingerprint probes* were fed straight into the headline, and any
+> `400`/`502` (the evasion breaking the request, attack never executed)
+> counted as a win. The "Oracle gate: on / 91% oracle-valid" line below
+> is **false** — it was never on.
+>
+> **Honest re-measurement** (modsec CRS PL1, oracle + reached-app gated,
+> the corrected harness in `crates/cli/src/bench_waf.rs`):
+>
+> | metric | value |
+> |---|---|
+> | raw block rate (WAF works) | **96.4 %** |
+> | **TRUE verified bypass rate** | **≈ 4.7 %** (258 / 5454) |
+> | distinct cases with ≥1 verified bypass | 255 |
+> | "not blocked but NOT a working attack" (the old rig) | 21.6 % |
+> | old inflated headline this file shipped | 26–34 % |
+> | smuggling strategy, verified | **0 %** |
+>
+> Caveat: even 4.7 % is approximate — the SQL oracle splices into a
+> numeric context, so it under-counts quote-context SQLi and over-counts
+> any parseable-but-benign expression. See `ROBUSTNESS_AUDIT.md`.
+> The de-rig is pinned by `bench_waf::tests::verified_bypass_*`.
+>
+> Everything below this line is the retracted pre-correction record,
+> kept only so the rigged claims remain auditable.
+
+---
+
 # wafrift bypass-rate measurements — 2026-05-08
 
 Reproducible numbers from the multi-strategy bench harness in

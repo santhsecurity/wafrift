@@ -4603,6 +4603,7 @@ dependencies = [
 name = "wafrift-cli"
 version = "0.2.15"
 dependencies = [
+ "base64",
  "clap",
  "clap_complete",
  "clap_mangen",
@@ -4639,6 +4640,7 @@ dependencies = [
 name = "wafrift-content-type"
 version = "0.2.15"
 dependencies = [
+ "proptest",
  "rand 0.8.6",
  "serde_json",
  "thiserror 2.0.18",

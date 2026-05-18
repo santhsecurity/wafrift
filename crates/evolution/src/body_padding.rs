@@ -291,11 +291,13 @@ fn extract_boundary(content_type: &str) -> Option<String> {
             .or_else(|| p.strip_prefix("BOUNDARY="))
             .or_else(|| {
                 // Fallback: case-insensitive prefix match without losing
-                // value casing.
-                if p.len() > 9 && p[..9].eq_ignore_ascii_case("boundary=") {
-                    Some(&p[9..])
-                } else {
-                    None
+                // value casing. `p[..9]` panicked when a multibyte
+                // character (attacker-controlled Content-Type param)
+                // straddled byte 9; `get(..9)` is boundary-safe and
+                // returns None instead of crashing the evasion pass.
+                match p.get(..9) {
+                    Some(h) if h.eq_ignore_ascii_case("boundary=") => p.get(9..),
+                    _ => None,
                 }
             });
         if let Some(rest) = rest {
