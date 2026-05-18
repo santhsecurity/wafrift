@@ -279,62 +279,10 @@ pub fn build_live_request_for_delivery(
     d: &grammar::equiv::DeliveryShape,
     payload: &str,
 ) -> Request {
-    use grammar::equiv::DeliveryShape as D;
-    match d {
-        D::Query { param: p } => Request::get(url_with_pair(target, p, payload)),
-        D::FormBody { param: p } => {
-            let body = format!("{p}={}", urlencoding::encode(payload));
-            let mut r = Request::post(target.to_string(), body.into_bytes());
-            r.add_header("content-type", "application/x-www-form-urlencoded");
-            r
-        }
-        D::JsonBody {
-            param: p,
-            content_type,
-        } => {
-            let body = format!("{{\"{}\":\"{}\"}}", json_escape(p), json_escape(payload));
-            let mut r = Request::post(target.to_string(), body.into_bytes());
-            if let Some(ct) = content_type {
-                r.add_header("content-type", ct.clone());
-            }
-            r
-        }
-        D::MultipartField { name } => {
-            let body = format!(
-                "--{MP_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{payload}\r\n--{MP_BOUNDARY}--\r\n"
-            );
-            let mut r = Request::post(target.to_string(), body.into_bytes());
-            r.add_header(
-                "content-type",
-                format!("multipart/form-data; boundary={MP_BOUNDARY}"),
-            );
-            r
-        }
-        D::MultipartFile {
-            name,
-            filename,
-            part_ct,
-        } => {
-            let body = format!(
-                "--{MP_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {part_ct}\r\n\r\n{payload}\r\n--{MP_BOUNDARY}--\r\n"
-            );
-            let mut r = Request::post(target.to_string(), body.into_bytes());
-            r.add_header(
-                "content-type",
-                format!("multipart/form-data; boundary={MP_BOUNDARY}"),
-            );
-            r
-        }
-        D::PathSegment => Request::get(url_with_path_segment(target, payload)),
-        D::HppSplit { param: p, parts } => {
-            let decoys = (*parts).max(1);
-            let mut u = target.to_string();
-            for k in 0..decoys {
-                u = url_with_pair(&u, p, &format!("v{k}"));
-            }
-            Request::get(url_with_pair(&u, p, payload))
-        }
-    }
+    // Single source of truth: the joint (payload × delivery) algebra
+    // lives on `DeliveryShape` in `wafrift-grammar` so scald, the
+    // proxy and the CLI render delivery identically.
+    d.to_request(target, payload)
 }
 
 /// Fire one `wafrift_types::Request` through the shared reqwest client.
