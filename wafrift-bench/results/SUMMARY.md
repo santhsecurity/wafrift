@@ -31,6 +31,27 @@
 > path segment. The LDAP oracle was rebuilt (see `ROBUSTNESS_AUDIT.md`)
 > so this number is honest, not the prior 0 % rig.
 >
+> **Full honest per-class × per-WAF matrix** (de-rigged oracle,
+> equiv-cegis, live containers; TRUE verified-bypass %, oracle +
+> reached-app gated; raw JSON in `wafrift-bench/results/honest-*-0.2.16.json`):
+>
+> | class | pl1 | pl3 | coraza | naxsi | bunkerweb |
+> |---|---|---|---|---|---|
+> | sql  | 25.6 | 21.3 | 20.9 | 12.6 | 21.1 |
+> | xss  | 18.5 | 18.5 | 12.1 | 12.1 | 12.1 |
+> | cmdi | 26.0 | 17.6 | 24.8 | 14.0 | 22.3 |
+> | path | 23.2 | 23.0 | 12.6 | 12.0 | 12.2 |
+> | ssti | 61.8 | 19.9 | 59.4 | 38.5 | 56.0 |
+> | ldap | 33.3 | 33.3 | 33.3 | 16.7 | 33.3 |
+>
+> The 4.8–9.2 % per-WAF "not-blocked-but-not-an-attack" is **not** a
+> rig: it is honestly EXCLUDED from the bypass % (degraded transport +
+> the documented conservative SQL oracle). A non-zero value is expected
+> and correct — the de-rig's whole job is to separate it out, not to
+> count it. xss is the lone weak lane and is delivery-shape only
+> (payload-string xss = 0 % vs CRS); raising it is tracked in
+> `docs/scald-delivery-integration.md`.
+>
 > Caveat: even 4.7 % is approximate — the SQL oracle splices into a
 > numeric context, so it under-counts quote-context SQLi and over-counts
 > any parseable-but-benign expression. See `ROBUSTNESS_AUDIT.md`.
