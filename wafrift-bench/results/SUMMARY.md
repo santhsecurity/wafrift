@@ -21,6 +21,16 @@
 > | old inflated headline this file shipped | 26–34 % |
 > | smuggling strategy, verified | **0 %** |
 >
+> **LDAP class, de-rigged oracle, equiv-cegis vs live CRS** (the gap
+> that was pinned at 0 %): **25.0 % TRUE verified bypass** — identical
+> on PL1 (88/352) and PL3 (88/352), **0.0 % not-blocked-but-not-an-attack**
+> (zero false bypasses). Raw block rate 100 %. Every verified bypass is
+> the sound delivery-shape axis — `multipart_file` (44) + `path_segment`
+> (44): CRS's LDAP rule is ARGS/body-scoped, so the same RFC-4515-sound
+> filter-break that 403s in the query sails through an upload part or
+> path segment. The LDAP oracle was rebuilt (see `ROBUSTNESS_AUDIT.md`)
+> so this number is honest, not the prior 0 % rig.
+>
 > Caveat: even 4.7 % is approximate — the SQL oracle splices into a
 > numeric context, so it under-counts quote-context SQLi and over-counts
 > any parseable-but-benign expression. See `ROBUSTNESS_AUDIT.md`.

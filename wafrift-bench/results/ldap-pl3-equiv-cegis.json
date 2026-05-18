@@ -1,0 +1,422 @@
+{
+  "base_url": "http://127.0.0.1:18083",
+  "by_class": {
+    "ldap": {
+      "bypass_rate": 0.25,
+      "cases": 11,
+      "evaded_bypassed": 88,
+      "evaded_total": 352,
+      "raw_block_rate": 1.0,
+      "raw_blocked": 11
+    }
+  },
+  "by_strategy": {
+    "equiv-cegis": {
+      "bypass_rate": 0.25,
+      "bypassed": 88,
+      "oracle_valid": 88,
+      "unverified_not_blocked": 0,
+      "variants": 352
+    }
+  },
+  "evade_mode": true,
+  "evaded_summary": {
+    "cases_with_at_least_one_bypass": 11,
+    "cases_with_at_least_one_oracle_valid_bypass": 11,
+    "legacy_inflated_rate_DO_NOT_USE": 0.25,
+    "metric_definition": "bypassed = WAF did NOT block AND the per-class oracle confirms the effective payload is still a working attack. 'unverified_not_blocked' = WAF passed it but it is NOT a working attack (the OLD bench reported this as 'bypassed' — that was the rig).",
+    "oracle_valid_rate": 0.25,
+    "overall_bypass_rate": 0.25,
+    "total_unverified_not_blocked": 0,
+    "total_variants_bypassed": 88,
+    "total_variants_oracle_valid": 88,
+    "total_variants_sent": 352,
+    "unverified_not_blocked_rate": 0.0
+  },
+  "lineage_output": null,
+  "raw_block_rate": 1.0,
+  "raw_blocked": 11,
+  "results": [
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|oid_alias+attr_case",
+          "equiv-cegis:learn:path_segment|oid_alias+attr_case",
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:path_segment|oid_alias",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:path_segment|oid_alias+attr_case",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "tautology_or_uid",
+      "raw_blocked": true,
+      "raw_latency_ms": 9.616095,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|oid_alias",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "tautology_and_obj",
+      "raw_blocked": true,
+      "raw_latency_ms": 3.571604,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|oid_alias+attr_case",
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|oid_alias+attr_case",
+          "equiv-cegis:learn:path_segment|oid_alias+attr_case",
+          "equiv-cegis:learn:path_segment|oid_alias+attr_case",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "wildcard_cn",
+      "raw_blocked": true,
+      "raw_latency_ms": 12.225098000000001,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|rfc4515_hex_escape+attr_case",
+          "equiv-cegis:learn:multipart_file|oid_alias+rfc4515_hex_escape",
+          "equiv-cegis:learn:multipart_file|oid_alias+rfc4515_hex_escape",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|rfc4515_hex_escape",
+          "equiv-cegis:learn:path_segment|rfc4515_hex_escape",
+          "equiv-cegis:learn:path_segment|rfc4515_hex_escape+attr_case",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "boolean_true",
+      "raw_blocked": true,
+      "raw_latency_ms": 8.759473,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|identity",
+          "equiv-cegis:learn:path_segment|oid_alias"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "always_true_filter",
+      "raw_blocked": true,
+      "raw_latency_ms": 5.521095,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|oid_alias+rfc4515_full_hex",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|oid_alias",
+          "equiv-cegis:learn:path_segment|oid_alias+rfc4515_full_hex",
+          "equiv-cegis:learn:path_segment|rfc4515_hex_escape+attr_case",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "blind_substring",
+      "raw_blocked": true,
+      "raw_latency_ms": 3.9284660000000002,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|oid_alias",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "blind_present",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.364532,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|presence_identity_pad+oid_alias",
+          "equiv-cegis:learn:multipart_file|presence_identity_pad+attr_case",
+          "equiv-cegis:learn:multipart_file|presence_identity_pad+oid_alias+attr_case",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "username_admin_anon",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.922562,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|attr_case",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|attr_case",
+          "equiv-cegis:learn:path_segment|oid_alias",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "double_filter_close",
+      "raw_blocked": true,
+      "raw_latency_ms": 6.689635,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:multipart_file|rfc4515_full_hex",
+          "equiv-cegis:learn:multipart_file|oid_alias+rfc4515_full_hex",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|oid_alias+rfc4515_hex_escape",
+          "equiv-cegis:learn:path_segment|oid_alias+rfc4515_hex_escape",
+          "equiv-cegis:learn:path_segment|oid_alias+rfc4515_full_hex",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "with_extensible_match",
+      "raw_blocked": true,
+      "raw_latency_ms": 2.526888,
+      "raw_status": 403
+    },
+    {
+      "class": "ldap",
+      "evaded": {
+        "by_strategy": {
+          "equiv-cegis": {
+            "bypass_rate": 0.25,
+            "bypassed": 8,
+            "oracle_valid": 8,
+            "unverified_not_blocked": 0,
+            "variants": 32
+          }
+        },
+        "bypass_rate": 0.25,
+        "bypass_techniques": [
+          "equiv-cegis:learn:multipart_file|oid_alias+rfc4515_hex_escape",
+          "equiv-cegis:learn:multipart_file|oid_alias",
+          "equiv-cegis:learn:multipart_file|oid_alias+rfc4515_full_hex",
+          "equiv-cegis:learn:multipart_file|identity",
+          "equiv-cegis:learn:path_segment|oid_alias",
+          "equiv-cegis:learn:path_segment|oid_alias+rfc4515_hex_escape",
+          "equiv-cegis:learn:path_segment|rfc4515_hex_escape+attr_case",
+          "equiv-cegis:learn:path_segment|identity"
+        ],
+        "oracle_valid_rate": 0.25,
+        "variants_bypassed": 8,
+        "variants_oracle_valid": 8,
+        "variants_total": 32,
+        "variants_unverified_not_blocked": 0
+      },
+      "id": "negation",
+      "raw_blocked": true,
+      "raw_latency_ms": 6.524785,
+      "raw_status": 403
+    }
+  ],
+  "schema_version": 1,
+  "strategies": [
+    "equiv-cegis"
+  ],
+  "total_cases": 11,
+  "variants_per_case_per_strategy": 64,
+  "wafrift_version": "0.2.15"
+}
