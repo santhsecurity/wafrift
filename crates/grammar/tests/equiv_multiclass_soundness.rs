@@ -314,10 +314,18 @@ fn determinism_and_force_delivery_all_classes() {
 
 #[test]
 fn unsupported_class_returns_empty() {
-    assert!(!equiv::supports_class("xxe"));
-    assert!(!equiv::supports_class("log4shell"));
-    assert!(equiv::equiv_for("xxe", "<!DOCTYPE x>", &cfg(1)).is_empty());
-    for c in ["sql", "xss", "cmdi", "path", "ssti", "ldap"] {
+    // A class with no sound equivalence model must yield nothing —
+    // the generator never guesses (anti-rig).
+    assert!(!equiv::supports_class("smuggling"));
+    assert!(!equiv::supports_class("totally-unknown"));
+    assert!(
+        equiv::equiv_for("totally-unknown", "anything", &cfg(1)).is_empty()
+    );
+    // The 10 classes that DO carry a sound model (ssrf/nosql/log4shell/
+    // xxe were added 2026-05-18, extending the moat 6 → 10).
+    for c in [
+        "sql", "xss", "cmdi", "path", "ssti", "ldap", "ssrf", "nosql", "log4shell", "xxe",
+    ] {
         assert!(equiv::supports_class(c), "{c} should be supported");
     }
 }
