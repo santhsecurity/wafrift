@@ -79,50 +79,33 @@ pub fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
     }
 }
 
-/// `NoSQL` injection structural validity: the variant must still carry
-/// a MongoDB operator marker or an operator-key bracket form.
+/// `NoSQL` validity: the variant must express the SAME MongoDB
+/// operator-injection (operator + operand) as the original. Delegates
+/// to the RFC-8259-grounded equivalence predicate (anti-rig: a marker
+/// match alone — the old behaviour — let a mangled/broken payload
+/// score as a bypass; `still_injects` rejects an operator/operand
+/// swap).
 #[must_use]
-pub fn is_valid_nosql(_original: &str, transformed: &str) -> bool {
-    const MONGO_OPS: &[&str] = &[
-        "$ne", "$gt", "$lt", "$gte", "$lte", "$regex", "$where", "$or", "$and", "$in", "$nin",
-        "$exists", "$type", "$elemMatch", "$all",
-    ];
-    MONGO_OPS.iter().any(|op| transformed.contains(op)) || transformed.contains("[$")
+pub fn is_valid_nosql(original: &str, transformed: &str) -> bool {
+    grammar::equiv::nosql::still_injects(original, transformed)
 }
 
-/// XXE structural validity: must still parse as XML with an
-/// ENTITY / DOCTYPE / `XInclude` marker.
+/// XXE validity: the variant must still make the parser fetch the SAME
+/// external resource(s) as the original (external-id equivalence).
+/// `still_exfils` rejects a target-URI swap — the marker-only check it
+/// replaces did not.
 #[must_use]
-pub fn is_valid_xxe(_original: &str, transformed: &str) -> bool {
-    let lower = transformed.to_ascii_lowercase();
-    let has_xml_decl_or_root = lower.contains("<?xml")
-        || lower.contains("<!doctype")
-        || lower.contains("<soap:")
-        || lower.contains("<svg")
-        || (lower.contains('<') && lower.contains("xmlns"));
-    let has_xxe_marker = lower.contains("<!entity")
-        || lower.contains("system ")
-        || lower.contains("xi:include")
-        || lower.contains("file://")
-        || lower.contains("php://");
-    has_xml_decl_or_root && has_xxe_marker
+pub fn is_valid_xxe(original: &str, transformed: &str) -> bool {
+    grammar::equiv::xxe::still_exfils(original, transformed)
 }
 
-/// `Log4Shell` structural validity: must still resolve to a JNDI lookup.
+/// `Log4Shell` validity: the variant must drive the SAME JNDI fetch
+/// (protocol + authority + path) after Log4j lookup-collapse.
+/// `still_executes` rejects a protocol/host swap — the substring check
+/// it replaces did not.
 #[must_use]
-pub fn is_valid_log4shell(_original: &str, transformed: &str) -> bool {
-    let lower = transformed.to_ascii_lowercase();
-    lower.contains("${jndi:")
-        || lower.contains("ndi:ldap")
-        || lower.contains("ndi:rmi")
-        || lower.contains("ndi:dns")
-        || lower.contains("ndi:iiop")
-        || lower.contains("ndi:corba")
-        || lower.contains("ndi:nis")
-        || lower.contains("ndi:nds")
-        || lower.contains("ndi:ldaps")
-        || lower.contains("%24%7bjndi")
-        || lower.contains("%2524%257bjndi")
+pub fn is_valid_log4shell(original: &str, transformed: &str) -> bool {
+    grammar::equiv::log4shell::still_executes(original, transformed)
 }
 
 /// Attack class string for a grammar [`PayloadType`], or `None` when
