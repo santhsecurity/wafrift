@@ -40,15 +40,22 @@ fn canon_uri(u: &str) -> String {
 
 /// All URIs the DTD would make the parser fetch (SYSTEM literal, or the
 /// 2nd literal of a PUBLIC external id), canonicalised + sorted.
+/// Case-insensitive: does the char slice `b` at `i` start with `kw`?
+/// Char-indexed (NOT byte-sliced) so hostile multibyte input can never
+/// land an index mid-codepoint and panic.
+fn ci_starts(b: &[char], i: usize, kw: &str) -> bool {
+    let k: Vec<char> = kw.chars().collect();
+    i + k.len() <= b.len() && (0..k.len()).all(|n| b[i + n].eq_ignore_ascii_case(&k[n]))
+}
+
 fn fetched_uris(s: &str) -> Vec<String> {
-    let up = s.to_ascii_uppercase();
     let b: Vec<char> = s.chars().collect();
     let mut uris = Vec::new();
     let mut i = 0;
     while i < b.len() {
-        let kind = if up[i..].starts_with("SYSTEM") {
+        let kind = if ci_starts(&b, i, "SYSTEM") {
             Some(1usize)
-        } else if up[i..].starts_with("PUBLIC") {
+        } else if ci_starts(&b, i, "PUBLIC") {
             Some(2usize)
         } else {
             None

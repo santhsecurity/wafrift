@@ -1,86 +1,167 @@
-# scald ← wafrift delivery-shape XSS integration (post-0.2.16)
+# scald ← wafrift delivery-shape XSS integration (apply post-0.2.16)
 
-Apply AFTER `wafrift-types`/`wafrift-grammar` 0.2.16 are on crates.io
-and scald is repinned (`crates/scald-core/Cargo.toml`:
-`wafrift-grammar = "=0.2.16"`, `wafrift-types = "=0.2.16"`;
-`cargo update -p wafrift-grammar -p wafrift-types`).
+Prereq: `wafrift-{types,grammar} = "=0.2.16"` published; scald
+`crates/scald-core/Cargo.toml` repinned to `=0.2.16`;
+`cargo update -p wafrift-grammar -p wafrift-types`.
 
-## Why
-Measured honest fact: payload-string XSS = 0% vs CRS (it normalises
-every encoding). The only lever that beats CRS = delivery shape
-(multipart-file / path-segment / JSON-no-Content-Type) = 18.5%.
-scald's escalation ladder (`reflected.rs` `'escalation: loop`,
-~L383) ends at the double-URL tier — it never tries delivery shapes.
+Honest basis: payload-string XSS = 0 % vs CRS (it normalises every
+encoding); the only lever that beats CRS = delivery shape
+(multipart-file / path-segment / JSON-no-CT) = 18.5 %. scald's
+escalation ladder ends at the double-URL tier and never tries it.
 
-## wafrift API to consume (shipped 0.2.16)
-- `wafrift_grammar::grammar::equiv::xss_delivered(payload: &str, max: usize)
-   -> Vec<EquivPayload>` — sound `(payload × delivery)` XSS class,
-  deterministic; every member still executes the original.
-- `EquivPayload { payload: String, delivery: DeliveryShape, .. }`.
-- `DeliveryShape::to_request(&self, target: &str, payload: &str)
-   -> wafrift_types::Request { method, url, headers:Vec<(String,String)>,
-   body:Option<Vec<u8>> }` — the single-source renderer.
+## 1. New module — `crates/scald-core/src/waf_delivery.rs` (verbatim)
 
-## Adapter (scald has none — add once, mirrors L532-543 json path)
 ```rust
-async fn send_wafrift_request(
+//! Terminal WAF-evasion tier: re-deliver the SAME instrumented payload
+//! via wafrift's sound `(payload × delivery)` equivalence shapes
+//! (multipart-file / path-segment / JSON-without-Content-Type). A
+//! CRS-class WAF normalises every payload-string trick but inspects
+//! these transport shapes differently; the backend still sinks the
+//! value, so the marker still reflects. Each member still executes the
+//! original script (wafrift verifies that by construction).
+
+use wafrift_grammar::grammar::equiv::xss_delivered;
+
+/// One non-blocked, marker-bearing delivery attempt.
+pub struct DeliveryHit {
+    pub url: String,
+    pub method: String,
+    pub status: u16,
+    pub body: String,
+    pub label: &'static str, // delivery shape: multipart_file / …
+}
+
+/// Try every delivered equivalence member of `instrumented` against
+/// `target`. Returns the first that the WAF did not block AND whose
+/// response still carries `marker` (caller then runs the normal
+/// `verify::verify_payload` + finding construction). `None` ⇒ the
+/// delivery tier did not beat the WAF for this payload.
+pub async fn try_delivery_shapes(
     client: &reqwest::Client,
-    r: &wafrift_types::Request,
-) -> reqwest::Result<reqwest::Response> {
-    let m = reqwest::Method::from_bytes(r.method.as_str().as_bytes())
-        .unwrap_or(reqwest::Method::GET);
-    let mut rb = client.request(m, &r.url);
-    for (k, v) in &r.headers { rb = rb.header(k, v); }
-    if let Some(b) = &r.body { rb = rb.body(b.clone()); }
-    rb.send().await
+    target: &str,
+    instrumented: &str,
+    marker: &str,
+    max_members: usize,
+    max_response_bytes: usize,
+    rate_limiter: &crate::rate::RateLimiter,
+) -> Option<DeliveryHit> {
+    for m in xss_delivered(instrumented, max_members) {
+        let req = m.delivery.to_request(target, &m.payload);
+        let method = reqwest::Method::from_bytes(req.method.as_str().as_bytes())
+            .unwrap_or(reqwest::Method::GET);
+        let mut rb = client.request(method.clone(), &req.url);
+        for (k, v) in &req.headers {
+            rb = rb.header(k, v);
+        }
+        if let Some(b) = &req.body {
+            rb = rb.body(b.clone());
+        }
+        let res = match rb.send().await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if let Some(len) = res.content_length() {
+            if len as usize > max_response_bytes {
+                continue;
+            }
+        }
+        let status = res.status().as_u16();
+        rate_limiter.record_status(status);
+        let body = res.text().await.unwrap_or_default();
+        if body.len() > max_response_bytes {
+            continue;
+        }
+        // Same block oracle the query path uses.
+        if crate::waf::classify_response(status, &body, 200).is_blocked() {
+            continue;
+        }
+        if body.contains(marker) {
+            return Some(DeliveryHit {
+                url: req.url,
+                method: method.as_str().to_string(),
+                status,
+                body,
+                label: m.delivery.label(),
+            });
+        }
+    }
+    None
 }
 ```
-(`wafrift_types::Method` — confirm the `as_str()`/uppercase accessor
-name at integration time; request.rs:72 has "method as uppercase
-string slice".)
 
-## Escalation-tier wiring (reflected.rs)
-1. Add `let mut delivery_pass = false;` next to `double_url_pass`
-   (~L381).
-2. New ladder arm BEFORE the final `else { break 'escalation }`
-   (~L734), after the double-URL arm:
+Register it: add `mod waf_delivery;` to `crates/scald-core/src/lib.rs`
+(next to the other `mod` lines).
+
+## 2. Escalation-tier wiring in `reflected.rs`
+
+a. Near `let mut double_url_pass = false;` (~L381) add
+   `let mut delivery_pass = false;`.
+
+b. Ladder: replace the final `} else { … break 'escalation }`
+   (~L734) so the delivery tier runs AFTER double-URL is exhausted
+   (it must NOT be gated on `!is_json && !is_path` — exploring other
+   shapes is the entire point):
    ```rust
    } else if config.waf_evasion && !delivery_pass {
        delivery_pass = true;
        escalation = wafrift_types::EscalationLevel::None;
        current_payloads = base_payloads.clone();
+   } else {
+       break 'escalation;
    }
    ```
-   Note: delivery tier runs for ALL param sources (incl. is_json /
-   is_path) — exploring OTHER shapes is the whole point, so do NOT
-   gate it on `!is_json && !is_path` the way HPP/double-URL are.
-3. In the per-payload build section (~L390), add a FIRST branch:
+
+c. At the TOP of `for base_payload in &current_payloads {` (right
+   after `let xss_payload = instrument_payload(base_payload,&marker);`,
+   ~L386) short-circuit when in the delivery tier:
    ```rust
    if delivery_pass {
-       let members = wafrift_grammar::grammar::equiv::xss_delivered(
-           &xss_payload, 24);
-       for m in &members {
-           let req = m.delivery.to_request(target.as_str(), &m.payload);
-           let res = send_wafrift_request(&client, &req).await;
-           // → existing marker/reflection + verify path, then
-           //   record XssFinding with technique =
-           //   format!("delivery::{}", m.delivery.label()).
-       }
-       continue; // skip the normal query/json/path build for this payload
+       let Some(hit) = crate::waf_delivery::try_delivery_shapes(
+           &client, target.as_str(), &xss_payload, &marker,
+           24, max_response_bytes, &rate_limiter,
+       ).await else { continue };
+       let verify_result = match crate::verify::verify_payload(&hit.body, &marker) {
+           Ok(r) if r.triggered => r,
+           _ => continue,
+       };
+       let mut observations = verify_result.observations;
+       observations.push(format!("waf_escalation_chain: delivery::{}", hit.label));
+       let authed = config.auth.is_some() || config.login.is_some();
+       let sev = crate::severity::score(&crate::severity::SeverityInput::reflected(
+           context, true, crate::severity::source_from_param(param_source),
+           authed, false, /*waf_was_bypassed=*/true,
+       ));
+       for r in &sev.rationale { observations.push(format!("severity_rationale: {r}")); }
+       local_findings.push(XssFinding {
+           rule_id: "scald/reflected-xss".into(),
+           xss_type: XssType::Reflected,
+           severity: sev.band, confidence: sev.confidence,
+           param: param_name.clone(), context,
+           payload: xss_payload.clone(),
+           evidence: Evidence {
+               request_url: hit.url.clone(),
+               request_method: hit.method.clone(),
+               response_status: hit.status,
+               response_snippet: snippet_around_marker(&hit.body, &marker, 80),
+               sandbox_observations: observations,
+           },
+           taint_path: None, cwe: "CWE-79".into(),
+           poc_url: hit.url,
+           waf_bypassed: true,
+           fix_hint: format!(
+               "Input reflected unsafely; the WAF was bypassed by \
+                delivering the payload via the `{}` transport shape — \
+                inspect non-query request bodies/paths too.", hit.label),
+           unverified: false,
+       });
+       break 'escalation;
    }
    ```
-   `DeliveryShape::label()` is `pub` (query/form_body/json_body/
-   multipart_field/multipart_file/path_segment/hpp_split).
-4. Verification: the instrumented marker is unchanged by delivery, so
-   the existing reflection/exec check applies as-is to `res`.
-   A verified hit ⇒ `XssFinding { unverified:false, .. }` exactly like
-   the other tiers (mirror the L600-677 record block).
 
-## Test
-- Unit: `xss_delivered("<svg onload=alert(1)>",8)` non-empty, shapes
-  varied, every member `still_executes_xss`.
-- e2e: scald vs the wafrift-bench modsec-pl1 container — a reflected
-  XSS that 403s in query must verify via a delivery member
-  (multipart_file / path_segment), proving the tier fires end to end.
-- Regression: WAF-less target unchanged (delivery tier only reached
-  after lower tiers exhaust).
+## 3. Tests (add with the change)
+- unit: `xss_delivered("<svg onload=alert(1)>",8)` non-empty, shapes
+  varied, every member `equiv::xss::still_executes_xss`.
+- e2e vs `wafrift-bench` modsec-pl1: a reflected XSS that 403s in the
+  query MUST verify via a delivery member (`multipart_file` /
+  `path_segment`); WAF-less target unchanged (delivery tier only
+  reached after lower tiers exhaust).

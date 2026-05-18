@@ -49,24 +49,26 @@ pub fn normalize(s: &str) -> String {
 }
 
 fn innermost<'a>(s: &'a str, head: &str) -> Option<(usize, usize, &'a str)> {
-    // find a `${<head>...}` with no nested `${` inside (innermost)
+    // find a `${<head>...}` with no nested `${` inside (innermost).
+    // Walk CHAR boundaries only — `s` can carry hostile multibyte
+    // input; a `+= 1` byte walk with `s[i..]` panics mid-codepoint.
     let pat = format!("${{{head}");
     let start = s.find(&pat)?;
-    let mut i = start + 2; // past "${"
+    let body_start = start + 2; // past ASCII "${" — a valid boundary
     let mut depth = 1;
-    let body_start = start + 2;
-    while i < s.len() {
-        if s[i..].starts_with("${") {
-            // not innermost — search from here instead
-            return innermost(&s[start + 2..], head).map(|(a, b, c)| (a + start + 2, b + start + 2, c));
+    for (off, c) in s[body_start..].char_indices() {
+        let idx = body_start + off;
+        if s[idx..].starts_with("${") {
+            // a nested lookup begins here → recurse for the innermost
+            return innermost(&s[body_start..], head)
+                .map(|(a, b, cc)| (a + body_start, b + body_start, cc));
         }
-        if &s[i..i + 1] == "}" {
+        if c == '}' {
             depth -= 1;
             if depth == 0 {
-                return Some((start, i + 1, &s[body_start..i]));
+                return Some((start, idx + 1, &s[body_start..idx]));
             }
         }
-        i += 1;
     }
     None
 }

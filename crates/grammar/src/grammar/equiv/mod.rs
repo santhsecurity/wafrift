@@ -260,10 +260,32 @@ fn json_escape(s: &str) -> String {
     o
 }
 
+/// RFC 7578 §4.1: the multipart boundary MUST NOT occur in any
+/// encapsulated part. A WAF-evasion payload is attacker-controlled and
+/// may echo our constant boundary; return an extended boundary that is
+/// provably absent from every part, so the renderer can never let the
+/// payload forge multipart structure in the request we build.
+fn effective_boundary(parts: &[&str]) -> String {
+    let mut bnd = MP_BOUNDARY.to_string();
+    let mut n: u64 = 0;
+    while parts.iter().any(|p| p.contains(bnd.as_str())) {
+        n = n.wrapping_add(1);
+        bnd = format!("{MP_BOUNDARY}{n:016x}");
+    }
+    bnd
+}
+
 fn url_with_pair(target: &str, param: &str, raw_value: &str) -> String {
     let base = target.trim_end_matches('/');
     let sep = if base.contains('?') { '&' } else { '?' };
-    format!("{base}{sep}{param}={}", urlencoding::encode(raw_value))
+    // BOTH sides are percent-encoded: a param name carrying a space /
+    // `&` / `#` / CTL would otherwise corrupt the query structure (a
+    // renderer must never let a field name break the request it builds).
+    format!(
+        "{base}{sep}{}={}",
+        urlencoding::encode(param),
+        urlencoding::encode(raw_value)
+    )
 }
 
 fn url_with_path_segment(target: &str, raw_seg: &str) -> String {
@@ -288,7 +310,11 @@ impl DeliveryShape {
         match self {
             Self::Query { param } => Request::get(url_with_pair(target, param, payload)),
             Self::FormBody { param } => {
-                let body = format!("{param}={}", urlencoding::encode(payload));
+                let body = format!(
+                    "{}={}",
+                    urlencoding::encode(param),
+                    urlencoding::encode(payload)
+                );
                 let mut r = Request::post(target.to_string(), body.into_bytes());
                 r.add_header("content-type", "application/x-www-form-urlencoded");
                 r
@@ -305,13 +331,14 @@ impl DeliveryShape {
                 r
             }
             Self::MultipartField { name } => {
+                let bnd = effective_boundary(&[payload, name]);
                 let body = format!(
-                    "--{MP_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{payload}\r\n--{MP_BOUNDARY}--\r\n"
+                    "--{bnd}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{payload}\r\n--{bnd}--\r\n"
                 );
                 let mut r = Request::post(target.to_string(), body.into_bytes());
                 r.add_header(
                     "content-type",
-                    format!("multipart/form-data; boundary={MP_BOUNDARY}"),
+                    format!("multipart/form-data; boundary={bnd}"),
                 );
                 r
             }
@@ -320,13 +347,14 @@ impl DeliveryShape {
                 filename,
                 part_ct,
             } => {
+                let bnd = effective_boundary(&[payload, name, filename, part_ct]);
                 let body = format!(
-                    "--{MP_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {part_ct}\r\n\r\n{payload}\r\n--{MP_BOUNDARY}--\r\n"
+                    "--{bnd}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {part_ct}\r\n\r\n{payload}\r\n--{bnd}--\r\n"
                 );
                 let mut r = Request::post(target.to_string(), body.into_bytes());
                 r.add_header(
                     "content-type",
-                    format!("multipart/form-data; boundary={MP_BOUNDARY}"),
+                    format!("multipart/form-data; boundary={bnd}"),
                 );
                 r
             }

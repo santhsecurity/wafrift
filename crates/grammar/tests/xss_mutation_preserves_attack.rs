@@ -19,7 +19,20 @@
 //! legitimate case — that one really is "give me 200 WAF shapes of an
 //! alert PoC").
 
+use wafrift_grammar::grammar::equiv::xss::still_executes_xss;
 use wafrift_grammar::grammar::xss;
+
+// A structured attack's exfil is preserved iff the INDEPENDENT
+// soundness oracle still sees it execute. This is the true contract
+// (and the exact gate the de-rigged bench's `verified_bypass` uses):
+// a sound entity/JS-encoding of `document.cookie` keeps the exfil
+// (browser decodes it) and passes; a canned `alert(1)` PoC has none
+// of the structured markers even after decode and fails. A raw
+// substring check would wrongly reject the encoded-but-equivalent
+// form — that is weaker, not stronger.
+fn still_the_same_attack(original: &str, variant: &str) -> bool {
+    still_executes_xss(original, variant)
+}
 
 /// Canned non-attacks the engine used to substitute wholesale. None of
 /// these carry an operator-chosen exfil target, so none of them is a
@@ -50,22 +63,17 @@ fn cookie_exfil_is_never_replaced_by_a_canned_poc() {
         "engine produced zero variants for a real cookie-exfil XSS"
     );
     for v in &variants {
-        let lc = v.payload.to_ascii_lowercase();
         assert!(
             !CANNED_NON_ATTACKS.contains(&v.payload.as_str()),
             "cookie-exfil attack was REPLACED by canned non-attack {:?} (rules {:?})",
             v.payload,
             v.rules_applied
         );
-        // Every variant must still carry the attack's defining
-        // construct: the operator's exfil host, the cookie read, or
-        // the transport sink. A variant with none of these is a
-        // different, weaker payload — not this attack.
-        let still_the_attack = lc.contains("evil.attacker.tld")
-            || lc.contains("document.cookie")
-            || lc.contains("fetch(");
+        // Every variant must still perform the SAME exfil — verified
+        // on the browser-decoded form, so a sound entity/JS encoding
+        // counts and a canned PoC (no structured markers) does not.
         assert!(
-            still_the_attack,
+            still_the_same_attack(attack, &v.payload),
             "variant {:?} (rules {:?}) no longer carries the cookie exfil",
             v.payload, v.rules_applied
         );
@@ -97,15 +105,18 @@ fn structured_sinks_keep_their_construct() {
     for (attack, must_have_any) in cases {
         let variants = xss::mutate(attack, 64);
         assert!(!variants.is_empty(), "no variants for {attack:?}");
+        let _ = must_have_any;
         for v in &variants {
             assert!(
                 !CANNED_NON_ATTACKS.contains(&v.payload.as_str()),
                 "{attack:?} was replaced by canned {:?}",
                 v.payload
             );
-            let lc = v.payload.to_ascii_lowercase();
+            // Oracle requires ALL of the original's class-defining
+            // markers to survive in the decoded form — strictly
+            // stronger than "any of must_have_any" on the raw bytes.
             assert!(
-                must_have_any.iter().any(|k| lc.contains(k)),
+                still_the_same_attack(attack, &v.payload),
                 "variant {:?} of {attack:?} lost its class construct (need one of {must_have_any:?})",
                 v.payload
             );
@@ -161,11 +172,8 @@ fn evade_path_preserves_exfil() {
             "evade-path replaced jwt exfil with canned {:?}",
             m.payload
         );
-        let lc = m.payload.to_ascii_lowercase();
         assert!(
-            lc.contains("drop.evil.tld")
-                || lc.contains("localstorage")
-                || lc.contains("fetch("),
+            still_the_same_attack(attack, &m.payload),
             "evade-path variant {:?} lost the jwt exfil",
             m.payload
         );

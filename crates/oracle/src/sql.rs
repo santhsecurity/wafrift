@@ -63,6 +63,21 @@ const CONTEXTS: &[(&str, &str, &str)] = &[
     ("SELECT * FROM t WHERE id IN (", ")", "1"),
     ("SELECT * FROM t WHERE name LIKE '%", "%'", "x"),
     ("SELECT * FROM t ORDER BY ", "", "1"),
+    // ORDER BY <col> <DIR> — the injection follows a named column, the
+    // single most common ORDER BY shape (sort-direction params).
+    ("SELECT * FROM t ORDER BY name ", "", "ASC"),
+    // LIMIT / OFFSET — numeric param positions real apps expose.
+    ("SELECT * FROM t WHERE a = 1 LIMIT ", "", "1"),
+    ("SELECT * FROM t WHERE a = 1 LIMIT 1 OFFSET ", "", "0"),
+    // numeric value with a trailing AND clause (extremely common:
+    // `WHERE id = <INJ> AND tenant = 1`) — without this a sound
+    // numeric break here is misjudged "not an attack".
+    ("SELECT * FROM t WHERE id = ", " AND tenant = 1", "1"),
+    // INSERT … VALUES (string + numeric) and UPDATE … SET (string):
+    // write-path injections a query-only context set never models.
+    ("INSERT INTO t (a) VALUES ('", "')", "x"),
+    ("INSERT INTO t (a) VALUES (", ")", "1"),
+    ("UPDATE t SET a = '", "' WHERE id = 1", "x"),
 ];
 
 /// Injection constructs that mark a *structural* change to the query
@@ -295,5 +310,46 @@ mod tests {
     fn is_valid_query_smoke() {
         assert!(is_valid_query("SELECT 1", DatabaseDialect::Generic));
         assert!(!is_valid_query("SELECT FROM", DatabaseDialect::Generic));
+    }
+
+    // ── recall: write-path + clause contexts (added 2026-05-18) ──────
+    #[test]
+    fn write_path_and_clause_context_injections_are_accepted() {
+        // Each is a genuine structural injection that only resolves in
+        // an INSERT/UPDATE/ORDER-BY-dir/LIMIT/trailing-AND host — shapes
+        // a query-only context set misjudged as "not an attack".
+        for atk in [
+            "1) ; DROP TABLE users-- -",                  // INSERT VALUES stacked
+            "x', 'pwned')-- -",                           // INSERT VALUES break+comment
+            "x', role = 'admin'-- -",                     // UPDATE SET extra-column
+            "; DROP TABLE users-- -",                     // ORDER BY <col> stacked
+            "(CASE WHEN (1=1) THEN name ELSE id END)",     // ORDER BY blind CASE
+            "1 OR 1=1",                                    // numeric + trailing AND
+        ] {
+            assert!(
+                is_valid_expression_injection(atk, DatabaseDialect::Generic)
+                    || is_valid_expression_injection(atk, DatabaseDialect::MySql),
+                "recall: real context-specific SQLi {atk:?} wrongly rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn benign_values_in_the_new_contexts_stay_rejected() {
+        // ANTI-RIG: the added contexts must not turn a harmless value
+        // into an "injection". A plain string/number/sort-dir is inert
+        // in INSERT/UPDATE/ORDER-BY/LIMIT just as in WHERE.
+        for benign in ["admin", "ASC", "DESC", "42", "user@example.com", "'x'"] {
+            for d in [
+                DatabaseDialect::Generic,
+                DatabaseDialect::MySql,
+                DatabaseDialect::PostgreSql,
+            ] {
+                assert!(
+                    !is_valid_expression_injection(benign, d),
+                    "RIG: benign {benign:?} accepted via a new context ({d:?})"
+                );
+            }
+        }
     }
 }

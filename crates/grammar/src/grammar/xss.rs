@@ -281,9 +281,15 @@ fn exec_spans(p: &str) -> Vec<(usize, usize)> {
                 continue;
             }
         }
-        // scheme body: javascript: / data:text/html, … (to quote/>/space)
-        for sch in ["javascript:", "data:text/html,", "data:text/html;base64,"] {
-            if lc[i..].starts_with(sch) {
+        // scheme body: javascript: / data:text/html, … (to quote/>/space).
+        // Byte-slice only — `lb[i..]` is always valid; a `&str[i..]`
+        // here panics when hostile multibyte input puts `i` mid-codepoint.
+        for sch in [
+            b"javascript:".as_slice(),
+            b"data:text/html,".as_slice(),
+            b"data:text/html;base64,".as_slice(),
+        ] {
+            if lb[i..].starts_with(sch) {
                 let start = i + sch.len();
                 let mut end = start;
                 while end < b.len() && !matches!(b[end], b'"' | b'\'' | b'`' | b'>' | b'<') {
@@ -295,10 +301,13 @@ fn exec_spans(p: &str) -> Vec<(usize, usize)> {
             }
         }
         // <script> … </script> text
-        if lc[i..].starts_with("<script") {
-            if let Some(gt) = lc[i..].find('>') {
+        if lb[i..].starts_with(b"<script") {
+            if let Some(gt) = lb[i..].iter().position(|&c| c == b'>') {
                 let start = i + gt + 1;
-                if let Some(close) = lc[start..].find("</script") {
+                if let Some(close) = lb[start..]
+                    .windows(8)
+                    .position(|w| w.eq_ignore_ascii_case(b"</script"))
+                {
                     if close > 0 {
                         spans.push((start, start + close));
                     }
@@ -306,7 +315,7 @@ fn exec_spans(p: &str) -> Vec<(usize, usize)> {
             }
         }
         // srcdoc="…"
-        if lc[i..].starts_with("srcdoc") {
+        if lb[i..].starts_with(b"srcdoc") {
             let mut e = i + 6;
             while e < b.len() && (b[e] == b' ' || b[e] == b'=') {
                 e += 1;
@@ -701,12 +710,28 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
     // structured: there the canned tag/event/polyglot arsenal IS the
     // correct, semantically-equivalent product.
     if is_structured_xss(payload) {
-        // Systematic equivalence of the operator's REAL payload (the
-        // bulk — preserves the exfil target by construction + oracle),
-        // then the structured arsenal for added diversity.
-        let mut results = systematic_variants(payload, max_mutations);
+        // Both axes, neither starving the other:
+        //  - systematic equivalence of the operator's REAL payload
+        //    (~60% — entity/JS-encoded depth on the same element), and
+        //  - structured_mutate, which re-templates that SAME exfil JS
+        //    into ALTERNATIVE elements/events/schemes (the cross-WAF
+        //    spread: a WAF blocking `<img onerror>` structurally still
+        //    faces `<svg onload>` / `javascript:` carrying the exfil).
+        // Reserving structured_mutate's slice fixes the regression
+        // where systematic consumed the whole budget and collapsed the
+        // structured attack to one element.
+        let sys_budget = (max_mutations * 6 / 10).max(1);
+        let mut results = systematic_variants(payload, sys_budget);
+        for m in structured_mutate(payload, max_mutations) {
+            if results.len() >= max_mutations {
+                break;
+            }
+            if !results.iter().any(|r: &XssMutation| r.payload == m.payload) {
+                results.push(m);
+            }
+        }
         if results.len() < max_mutations {
-            for m in structured_mutate(payload, max_mutations) {
+            for m in systematic_variants(payload, max_mutations) {
                 if results.len() >= max_mutations {
                     break;
                 }
@@ -715,6 +740,11 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<XssMutation> {
                 }
             }
         }
+        // ANTI-RIG end to end: every shipped variant must still execute
+        // the original structured attack (same oracle scald/the bench
+        // gate on). structured_mutate is marker-preserving by design;
+        // this is defence in depth identical to the non-structured path.
+        results.retain(|m| still_executes_xss(payload, &m.payload));
         results.truncate(max_mutations);
         return results;
     }

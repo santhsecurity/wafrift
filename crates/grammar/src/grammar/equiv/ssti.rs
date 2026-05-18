@@ -164,8 +164,17 @@ fn rw_string_split(payload: &str, rng: &mut Rng) -> Option<String> {
             }
             if j < bytes.len() && j - st >= 2 && rng.chance(1, 1) {
                 let lit = &e[st..j];
-                let cut = 1 + (lit.len() - 1) / 2;
-                let (l, r) = lit.split_at(cut);
+                // Split on a CHAR boundary, never a byte midpoint —
+                // `lit` may hold multibyte content and `split_at(byte)`
+                // panics inside a codepoint (hostile-input crash).
+                let lc: Vec<char> = lit.chars().collect();
+                if lc.len() < 2 {
+                    i = j + 1;
+                    continue;
+                }
+                let cutc = 1 + (lc.len() - 1) / 2;
+                let l: String = lc[..cutc].iter().collect();
+                let r: String = lc[cutc..].iter().collect();
                 let repl = format!("('{l}'+'{r}')");
                 let mut out = String::new();
                 out.push_str(&e[..st - 1]);
