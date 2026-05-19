@@ -289,6 +289,121 @@ fn build_hypothesis<F: FnMut(&[usize]) -> Result<bool>>(
     Ok(Sfa::new(start, accept, delta))
 }
 
+/// A passive learner: build the minimal DFA directly from a **fixed
+/// complete test suite** (every suffix up to `depth`), with no
+/// equivalence queries and no counterexample refinement. This is a
+/// fundamentally different inference strategy from L\* (incremental
+/// table) and KV (discrimination tree) — the RPNI/Trakhtenbrot–Barzdin
+/// exact-recovery regime. It exists for the **triple-learner
+/// differential**: L\* ≡ KV ≡ passive on any oracle, so a bug in any
+/// one strategy is caught by the other two. Exact when `depth` ≥ the
+/// target's Myhill–Nerode distinguishing bound (the truth-suite picks
+/// such a `depth`).
+pub fn passive_learn<B>(
+    oracle: &mut dyn WafOracle,
+    build: &B,
+    alpha: &Alphabet,
+    depth: usize,
+) -> Result<LearnReport>
+where
+    B: Fn(&[u8]) -> Request,
+{
+    let mut mqx = Mq {
+        oracle,
+        build,
+        cache: HashMap::new(),
+        alpha,
+    };
+    // Fixed suffix test-suite E = every word over the alphabet of
+    // length 0..=depth (ε first ⇒ index 0 is the acceptance bit).
+    let mut suffixes: Vec<Vec<usize>> = vec![vec![]];
+    let mut frontier = vec![vec![]];
+    for _ in 0..depth {
+        let mut next = Vec::new();
+        for w in &frontier {
+            for s in 0..alpha.len() {
+                let mut e = w.clone();
+                e.push(s);
+                next.push(e.clone());
+                suffixes.push(e);
+            }
+        }
+        frontier = next;
+    }
+
+    let row = |mqx: &mut Mq<B>, p: &[usize]| -> Result<Vec<bool>> {
+        let mut r = Vec::with_capacity(suffixes.len());
+        for e in &suffixes {
+            let mut w = p.to_vec();
+            w.extend_from_slice(e);
+            r.push(mqx.ask(&w)?);
+        }
+        Ok(r)
+    };
+
+    use std::collections::HashMap as Map;
+    use std::collections::hash_map::Entry;
+    // Bounded RPNI / Trakhtenbrot–Barzdin *truncated* regime. We grow a
+    // prefix-closed REACHABLE automaton by BFS over access strings (so
+    // for a regular target only the true minimal DFA's few states are
+    // ever materialised — O(|DFA|·k·|E|) queries, fast and exact when
+    // `depth` ≥ the Myhill–Nerode distinguishing length). The single
+    // hard rule that makes it terminate for *any* oracle — including a
+    // noisy / non-regular one, where almost every row is novel and the
+    // prior unbounded BFS grew kⁱ states forever (a real engine defect,
+    // now fixed): a new state is created ONLY for an access string of
+    // length ≤ depth. A transition whose extended prefix would exceed
+    // that horizon, or whose row is novel past it, folds by row-equality
+    // to an existing state (else the start) — a bounded, honest
+    // approximation. Total states ≤ Σ_{i=0}^{depth} kⁱ < ∞, so the
+    // construction provably halts with no refinement loop.
+    let mut id_of: Map<Vec<bool>, StateId> = Map::new();
+    let mut access: Vec<Vec<usize>> = Vec::new();
+    let r0 = row(&mut mqx, &[])?;
+    id_of.insert(r0.clone(), 0);
+    access.push(Vec::new());
+    let mut accept = vec![r0[0]];
+    let mut delta: Vec<Vec<(BytePred, StateId)>> = vec![Vec::new()];
+    let mut work = vec![0usize];
+    let mut wi = 0;
+    while wi < work.len() {
+        let s = work[wi];
+        wi += 1;
+        let p = access[s].clone();
+        for a in 0..alpha.len() {
+            let mut pa = p.clone();
+            pa.push(a);
+            let r = row(&mut mqx, &pa)?;
+            let tgt = if pa.len() <= depth {
+                // Within the horizon: a novel row is a genuine new
+                // reachable state (enqueued for expansion).
+                match id_of.entry(r.clone()) {
+                    Entry::Occupied(e) => *e.get(),
+                    Entry::Vacant(e) => {
+                        let id = access.len();
+                        e.insert(id);
+                        access.push(pa.clone());
+                        accept.push(r[0]);
+                        delta.push(Vec::new());
+                        work.push(id);
+                        id
+                    }
+                }
+            } else {
+                // Past the horizon: fold by row-equality to an existing
+                // state (start if none) — never create, never enqueue.
+                id_of.get(&r).copied().unwrap_or(0)
+            };
+            delta[s].push((alpha.guard(a), tgt));
+        }
+    }
+    Ok(LearnReport {
+        sfa: Sfa::new(0, accept, delta),
+        membership_queries: mqx.cache.len() as u64,
+        equivalence_rounds: 0,
+    })
+}
+
 /// Angluin L\* with all-suffixes counterexample handling.
 pub fn l_star<B>(
     oracle: &mut dyn WafOracle,

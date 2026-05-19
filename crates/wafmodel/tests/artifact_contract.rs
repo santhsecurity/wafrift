@@ -159,3 +159,72 @@ fn tampered_artifact_is_rejected_not_trusted() {
             .is_err()
     );
 }
+
+// ── E3/24: capture → toml → parse → sfa() is language-identity for
+// 10k random automata (serialization is provably lossless). ──
+mod identity_props {
+    use proptest::prelude::*;
+    use wafrift_wafmodel::{Alphabet, BytePred, LearnedModel, Provenance, Sfa};
+
+    fn pc() -> u32 {
+        std::env::var("WAFMODEL_PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10_000)
+    }
+
+    fn random_sfa(states: &[(bool, [u8; 4])]) -> Sfa {
+        let n = states.len();
+        let (a, b, c) = (
+            BytePred::byte(b'a'),
+            BytePred::byte(b'b'),
+            BytePred::byte(b'c'),
+        );
+        let other = !(a.or(b).or(c));
+        Sfa::new(
+            0,
+            states.iter().map(|s| s.0).collect(),
+            states
+                .iter()
+                .map(|(_, t)| {
+                    vec![
+                        (a, t[0] as usize % n),
+                        (b, t[1] as usize % n),
+                        (c, t[2] as usize % n),
+                        (other, t[3] as usize % n),
+                    ]
+                })
+                .collect(),
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(pc()))]
+
+        #[test]
+        fn artifact_roundtrip_is_language_identity(
+            states in proptest::collection::vec(
+                (any::<bool>(), proptest::array::uniform4(0u8..5)),
+                1..6usize,
+            )
+        ) {
+            let sfa = random_sfa(&states);
+            let alpha = Alphabet::new(vec![b'a', b'b', b'c'], b'Z');
+            let prov = Provenance {
+                oracle_id: "p".into(),
+                ruleset_fingerprint: Some("fp".into()),
+                membership_queries: 7,
+                equivalence_rounds: 2,
+                pac: None,
+            };
+            let model = LearnedModel::capture(&alpha, &sfa, prov.clone());
+            let back = LearnedModel::from_toml(&model.to_toml().unwrap()).unwrap();
+            let rebuilt = back.sfa().unwrap();
+            prop_assert!(back.provenance == prov, "provenance not preserved");
+            prop_assert!(
+                rebuilt.equivalent(&sfa),
+                "serialize/parse changed the language"
+            );
+        }
+    }
+}

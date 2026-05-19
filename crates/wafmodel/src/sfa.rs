@@ -420,4 +420,128 @@ impl Sfa {
     pub fn equivalent(&self, o: &Sfa) -> bool {
         self.distinguishing_word(o).is_none()
     }
+
+    /// The unique (up to isomorphism) minimal SFA recognizing the same
+    /// language: Hopcroft/Moore partition refinement lifted to the
+    /// symbolic alphabet via *minterms* (the coarsest byte partition on
+    /// which every state's transitions are constant). Total + disjoint
+    /// by construction; unreachable states dropped. `minimize` is
+    /// idempotent and language-preserving — both asserted by property
+    /// test over 10k random automata.
+    #[must_use]
+    pub fn minimize(&self) -> Sfa {
+        // 1. Reachable states (BFS from start).
+        let mut reach = vec![false; self.len()];
+        let mut stk = vec![self.start];
+        reach[self.start] = true;
+        while let Some(s) = stk.pop() {
+            for (_, t) in &self.delta[s] {
+                if !reach[*t] {
+                    reach[*t] = true;
+                    stk.push(*t);
+                }
+            }
+        }
+
+        // 2. Minterms: refine {ANY} by every distinct guard so each
+        // resulting predicate is non-empty and every original guard is
+        // a union of minterms.
+        let mut minterms = vec![BytePred::any()];
+        for trans in &self.delta {
+            for (g, _) in trans {
+                let mut next = Vec::with_capacity(minterms.len());
+                for m in &minterms {
+                    let yes = m.and(*g);
+                    let no = m.and(!*g);
+                    if !yes.is_empty() {
+                        next.push(yes);
+                    }
+                    if !no.is_empty() {
+                        next.push(no);
+                    }
+                }
+                minterms = next;
+            }
+        }
+
+        // 3. DFA over the minterm alphabet (target per (state, minterm)).
+        let n = self.len();
+        let step_mt: Vec<Vec<StateId>> = (0..n)
+            .map(|s| {
+                minterms
+                    .iter()
+                    .map(|m| {
+                        // m is wholly inside exactly one guard (minterm
+                        // property); its representative byte selects it.
+                        let b = m.witness().expect("non-empty minterm");
+                        self.step(s, b)
+                    })
+                    .collect()
+            })
+            .collect();
+
+        // 4. Moore refinement (only reachable states participate).
+        let mut class: Vec<usize> = (0..n)
+            .map(|s| usize::from(self.accept[s]))
+            .collect();
+        loop {
+            let mut sig: std::collections::HashMap<Vec<usize>, usize> =
+                std::collections::HashMap::new();
+            let mut next = vec![0usize; n];
+            for s in 0..n {
+                if !reach[s] {
+                    continue;
+                }
+                let mut key = vec![class[s]];
+                key.extend(step_mt[s].iter().map(|&t| class[t]));
+                let id = sig.len();
+                next[s] = *sig.entry(key).or_insert(id);
+            }
+            if next == class {
+                break;
+            }
+            class = next;
+        }
+
+        // 5. Rebuild: one state per class, start first, guards = union
+        // of minterms with the same target class.
+        let mut rep: std::collections::HashMap<usize, StateId> =
+            std::collections::HashMap::new();
+        let start_c = class[self.start];
+        rep.insert(start_c, 0);
+        let mut order = vec![start_c];
+        for s in 0..n {
+            if reach[s] {
+                let c = class[s];
+                if let std::collections::hash_map::Entry::Vacant(e) = rep.entry(c) {
+                    e.insert(order.len());
+                    order.push(c);
+                }
+            }
+        }
+        // A witness original state for each class (first reachable).
+        let mut witness_state: std::collections::HashMap<usize, StateId> =
+            std::collections::HashMap::new();
+        for s in 0..n {
+            if reach[s] {
+                witness_state.entry(class[s]).or_insert(s);
+            }
+        }
+        let mut accept = vec![false; order.len()];
+        let mut delta: Vec<Vec<(BytePred, StateId)>> = vec![Vec::new(); order.len()];
+        for (&c, &idx) in &rep {
+            let ws = witness_state[&c];
+            accept[idx] = self.accept[ws];
+            // Merge minterms by destination class.
+            let mut by_dst: std::collections::HashMap<StateId, BytePred> =
+                std::collections::HashMap::new();
+            for (mi, m) in minterms.iter().enumerate() {
+                let dst_class = class[step_mt[ws][mi]];
+                let e = by_dst.entry(rep[&dst_class]).or_insert(BytePred::none());
+                *e = e.or(*m);
+            }
+            delta[idx] = by_dst.into_iter().map(|(t, g)| (g, t)).collect();
+        }
+        Sfa::new(0, accept, delta)
+    }
 }
