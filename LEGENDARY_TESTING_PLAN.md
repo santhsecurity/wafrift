@@ -306,6 +306,34 @@ The bar is met only if the process *catches* things. It has:
   (gate proven honest+bounded; `timeout-minutes` raised 40→50 for the
   added file's headroom).
 
+- **E5 ratchet — learn.rs resolved; mutation gating split per the
+  plan (item 37: nightly).** learn.rs baseline (the most-depended-on
+  module): 80 mutants, 12 missed. Genuine gaps fixed with real
+  non-vacuous tests: the `Alphabet` accessors had NO behavioural test
+  (`alphabet_accessors_are_exact` — kills `is_empty -> true`,
+  `raw_symbols -> Vec::leak`), and `LearnReport.equivalence_rounds` (a
+  provenance truthfulness claim) was unasserted so `rounds += 1 -> *= 1`
+  survived in BOTH l_star_impl and kv_learn
+  (`equivalence_rounds_is_truthful_provenance` — ≥1 round when
+  refinement is needed, exactly 0 when the first hypothesis is already
+  exact). Scoping artifact (520 budget-gate `> -> ==`) killed by
+  putting `error_coverage` in scope. Five mutants documented as
+  rigorous item-40 equivalents (`is_empty -> false`; l_star_impl
+  474/496/507 — L* correctness is the complete EQ oracle + all-suffixes
+  CE loop, not the internal heuristics; 520 `> -> >=` — pure
+  off-by-one at the cap boundary, sibling `> -> ==` IS killed),
+  `--list`-confirmed excluded, never chased.
+  *Operational finding:* a per-push `mutants-learn` job under
+  `--jobs 3` exhausted the GitHub runner (exit 143, "runner received a
+  shutdown signal") on learn.rs's memory-heavy suite — heavy mutation
+  belongs OFF the push path, exactly as the plan says. Resolution: the
+  per-push `mutants` gate stays fast+proven (mine+sfa+solve); a
+  dedicated `mutants-nightly.yml` (cron + workflow_dispatch, `--jobs 2`,
+  no per-push time pressure) is the thorough all-four-files regression
+  gate (item 37 satisfied).
+
 - **Cross-cutting law reinforced:** never trust a green CI check —
   read the job log. A gate is only real once its *failure* path has
-  been exercised, *in the shell it actually runs in*.
+  been exercised, *in the shell it actually runs in*. And: a CI gate's
+  resource/time envelope is part of its contract — a gate that blows
+  the runner is not green, it is unproven.
