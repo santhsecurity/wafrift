@@ -4614,6 +4614,7 @@ dependencies = [
  "proptest",
  "rand 0.8.6",
  "ratatui",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4634,6 +4635,7 @@ dependencies = [
  "wafrift-strategy",
  "wafrift-transport",
  "wafrift-types",
+ "wafrift-wafmodel",
 ]
 
 [[package]]
