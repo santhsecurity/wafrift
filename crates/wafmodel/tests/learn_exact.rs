@@ -215,3 +215,82 @@ fn lstar_kv_and_passive_learners_all_agree_with_the_waf() {
         assert!(a.minimize().equivalent(&c));
     }
 }
+
+// ── E5 ratchet (learn.rs): the Alphabet accessors had NO behavioural
+// test — `cargo-mutants` proved `is_empty -> true` and
+// `raw_symbols -> Vec::leak(...)` survived. They are the abstraction
+// every learner reasons over, so pin them exactly. (`is_empty ->
+// false` is a documented provably-equivalent mutant: `Alphabet::new`
+// always pushes the catch-all, so no constructible alphabet is empty.)
+#[test]
+fn alphabet_accessors_are_exact() {
+    // `new` sorts+dedups the distinguished bytes then appends the
+    // catch-all, so the table is deterministic and inspectable.
+    let a = Alphabet::new(vec![b'b', b'a', b'b'], b'Z');
+    assert_eq!(
+        a.raw_symbols(),
+        &[b'a', b'b', b'Z'][..],
+        "raw_symbols must be the exact sorted+dedup table then catch-all"
+    );
+    assert!(!a.is_empty(), "a constructed alphabet is never empty");
+    assert_eq!(a.len(), 3, "2 distinguished + 1 catch-all");
+    assert_eq!(a.catch_all(), 2, "catch-all is the last class");
+    assert_eq!(a.byte_of(0), b'a');
+    assert_eq!(a.byte_of(2), b'Z', "class 2 is the catch-all byte");
+    // concretize maps indices through exactly that table.
+    assert_eq!(a.concretize(&[1, 0, 2]), vec![b'b', b'a', b'Z']);
+    // Round-trips through from_raw_symbols byte-identically.
+    let b = Alphabet::from_raw_symbols(a.raw_symbols().to_vec());
+    assert_eq!(b.raw_symbols(), a.raw_symbols());
+    assert_eq!(b.concretize(&[0, 1, 2]), vec![b'a', b'b', b'Z']);
+}
+
+// ── E5 ratchet (learn.rs): `LearnReport.equivalence_rounds` is a
+// PROVENANCE claim (the artifact records how many counterexample
+// rounds the decompilation cost). It had no truthfulness test, so
+// `rounds += 1 → *= 1` (stuck at 0) survived in BOTH l_star and
+// kv_learn. Pin it: a target that needs refinement reports ≥1 round;
+// a trivially-learnable target reports exactly 0 (non-vacuous — proves
+// the counter both increments and can legitimately be 0).
+#[test]
+fn equivalence_rounds_is_truthful_provenance() {
+    let alpha = Alphabet::new(vec![b'<', b's', b'/'], b'A');
+
+    // `<s/s`: the first L*/KV hypothesis (1 state) is wrong; reaching
+    // the exact 5-state DFA needs ≥1 equivalence/counterexample round.
+    let mut w1 = waf_with_pattern("<s/s");
+    let mut e1 = BoundedExhaustiveEq { max_len: 8 };
+    let la = l_star(&mut w1, &json_body, &alpha, &mut e1).unwrap();
+    assert!(
+        la.equivalence_rounds >= 1,
+        "L* needed refinement for `<s/s` but reported {} rounds \
+         (provenance is lying — rounds counter not incrementing)",
+        la.equivalence_rounds
+    );
+    let mut w2 = waf_with_pattern("<s/s");
+    let mut e2 = BoundedExhaustiveEq { max_len: 8 };
+    let kv = kv_learn(&mut w2, &json_body, &alpha, &mut e2).unwrap();
+    assert!(
+        kv.equivalence_rounds >= 1,
+        "KV needed refinement for `<s/s` but reported {} rounds",
+        kv.equivalence_rounds
+    );
+
+    // A pattern the small alphabet can NEVER spell (`xyz` over
+    // {<,s,/,A}) ⇒ the WAF passes everything ⇒ the very first
+    // 1-state accept-all hypothesis is already exact ⇒ the equivalence
+    // oracle finds no counterexample ⇒ exactly 0 rounds. This proves
+    // the assertions above are non-vacuous (0 is a legitimate value;
+    // the counter is not merely "always ≥1").
+    let mut w3 = waf_with_pattern("xyz");
+    let mut e3 = BoundedExhaustiveEq { max_len: 6 };
+    let triv = l_star(&mut w3, &json_body, &alpha, &mut e3).unwrap();
+    assert_eq!(
+        triv.equivalence_rounds, 0,
+        "an already-exact first hypothesis must report 0 rounds, got {}",
+        triv.equivalence_rounds
+    );
+    // …and it genuinely is the accept-all language (anti-vacuous).
+    assert!(triv.sfa.accepts(b"<s/s"));
+    assert!(triv.sfa.accepts(b""));
+}
