@@ -209,3 +209,70 @@ proptest! {
         prop_assert!(min2.equivalent(&min));
     }
 }
+
+// ── E3/18: the full Boolean-algebra laws hold for the SFA language
+// operators — De Morgan, double-complement/involution, idempotence,
+// and the complement laws — over 10k random *pairs* of automata. The
+// operators are byte-exact (`equivalent` returns a distinguishing word
+// on failure), so this is a truth contract, not a smoke test. ──
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(pc()))]
+
+    #[test]
+    fn sfa_language_operators_form_a_boolean_algebra(
+        sa in proptest::collection::vec(
+            (any::<bool>(), proptest::array::uniform4(0u8..5)), 1..6usize),
+        sb in proptest::collection::vec(
+            (any::<bool>(), proptest::array::uniform4(0u8..5)), 1..6usize),
+    ) {
+        let a = build_random_sfa(&sa);
+        let b = build_random_sfa(&sb);
+
+        // Involution: ¬¬a ≡ a.
+        prop_assert!(
+            a.complement().complement().equivalent(&a),
+            "double-complement changed the language: {:?}",
+            a.complement().complement().distinguishing_word(&a)
+        );
+
+        // De Morgan, both directions, byte-exact.
+        let lhs1 = a.intersect(&b).complement();
+        let rhs1 = a.complement().union(&b.complement());
+        prop_assert!(
+            lhs1.equivalent(&rhs1),
+            "¬(a∩b) ≠ ¬a∪¬b: {:?}", lhs1.distinguishing_word(&rhs1)
+        );
+        let lhs2 = a.union(&b).complement();
+        let rhs2 = a.complement().intersect(&b.complement());
+        prop_assert!(
+            lhs2.equivalent(&rhs2),
+            "¬(a∪b) ≠ ¬a∩¬b: {:?}", lhs2.distinguishing_word(&rhs2)
+        );
+
+        // Idempotence: a∪a ≡ a, a∩a ≡ a.
+        prop_assert!(a.union(&a).equivalent(&a), "a∪a ≠ a");
+        prop_assert!(a.intersect(&a).equivalent(&a), "a∩a ≠ a");
+
+        // Complement laws: a∪¬a is universal, a∩¬a is empty — checked
+        // against the derived universe/empty (no constructor needed),
+        // and `difference` agrees with intersect-with-complement.
+        let universe = a.union(&a.complement());
+        let empty = a.intersect(&a.complement());
+        prop_assert!(
+            b.union(&b.complement()).equivalent(&universe),
+            "law of excluded middle is not universal"
+        );
+        prop_assert!(
+            b.intersect(&b.complement()).equivalent(&empty),
+            "law of non-contradiction is not empty"
+        );
+        prop_assert!(
+            a.difference(&b).equivalent(&a.intersect(&b.complement())),
+            "a\\b ≠ a∩¬b: {:?}",
+            a.difference(&b).distinguishing_word(&a.intersect(&b.complement()))
+        );
+        // Absorption: a∪(a∩b) ≡ a and a∩(a∪b) ≡ a.
+        prop_assert!(a.union(&a.intersect(&b)).equivalent(&a), "absorption ∪ failed");
+        prop_assert!(a.intersect(&a.union(&b)).equivalent(&a), "absorption ∩ failed");
+    }
+}
