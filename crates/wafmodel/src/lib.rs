@@ -27,6 +27,14 @@
 
 #![forbid(unsafe_code)]
 
+/// The shipped Tier-B OWASP-CRS-derived ruleset (XSS 941 + SQLi 942),
+/// embedded so `wafrift audit`/`harden` work zero-config with no files
+/// to fetch. Parse with [`SimRegexWaf::from_toml`].
+#[must_use]
+pub fn default_crs_ruleset() -> &'static str {
+    include_str!("../rules/crs/core.toml")
+}
+
 pub mod artifact;
 pub mod canon;
 pub mod equiv_bridge;

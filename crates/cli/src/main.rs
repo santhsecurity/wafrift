@@ -32,6 +32,7 @@ mod scan;
 mod seed;
 mod target_context;
 mod technique_filter;
+mod wafmodel_cmd;
 
 use explain::ExplainTrace;
 use helpers::{
@@ -125,6 +126,14 @@ enum Commands {
     BypassProbe(bypass_probe::BypassProbeArgs),
     /// Generate a troff man page for `wafrift` (and optionally subcommands).
     Man(ManArgs),
+    /// Decompile a CRS-class ruleset and report the holes an attacker
+    /// can drive through it (the WAF X-ray). Zero-config; `--ruleset`
+    /// audits a custom Tier-B config.
+    Audit(wafmodel_cmd::AuditArgs),
+    /// Synthesize the minimal CRS-grade rules that close the holes
+    /// `audit` finds, prove zero benign false positives, and exit
+    /// non-zero unless closure is proven (usable as a CI gate).
+    Harden(wafmodel_cmd::HardenArgs),
 }
 
 /// Arguments for `wafrift man` — emits a troff(1) man page suitable for
@@ -484,6 +493,8 @@ fn main() -> ExitCode {
             }
         },
         Some(Commands::Man(args)) => run_man(args),
+        Some(Commands::Audit(args)) => wafmodel_cmd::run_audit(args),
+        Some(Commands::Harden(args)) => wafmodel_cmd::run_harden(args),
     }
 }
 
