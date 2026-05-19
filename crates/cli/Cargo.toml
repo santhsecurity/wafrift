@@ -46,6 +46,9 @@ wafrift-smuggling = { workspace = true, features = ["unsafe-probes"] }
 wafrift-content-type = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
+# Retry-After header parsing (RFC 9110 §10.2.3): integer delta-seconds
+# OR IMF-fixdate HTTP-date. Already in the workspace lock via hyper.
+httpdate = "1.0"
 
 # SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
 # instead of panicking.

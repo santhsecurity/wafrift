@@ -9,6 +9,7 @@
 //! - [`state`] — `ScanState` (mutable counters) and `ScanConfig` (immutable args)
 //! - this module (`mod.rs`) — the `run_scan` orchestrator and step functions
 
+pub(crate) mod retry_after;
 pub(crate) mod state;
 
 use colored::Colorize;
@@ -724,27 +725,48 @@ pub(crate) async fn run_scan(
             let confidence = variant.confidence;
             let oracle = oracle.clone();
             tasks.spawn(async move {
-                let verdict = match client.get(&url).send().await {
+                let (verdict, retry_after) = match client.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
+                        // Capture Retry-After BEFORE the body — a polite
+                        // 429/503 names how long to wait in this header
+                        // and obeying it precisely (capped) is the
+                        // single highest-yield rate-limit evasion.
+                        let ra = if status == 429 || status == 503 {
+                            let now = std::time::SystemTime::now();
+                            resp.headers()
+                                .get_all("retry-after")
+                                .iter()
+                                .filter_map(|v| v.to_str().ok())
+                                .filter_map(|s| retry_after::parse(s, now))
+                                .max()
+                        } else {
+                            None
+                        };
                         let body = resp.bytes().await.unwrap_or_default();
                         let ctx = ResponseContext {
                             status,
                             body: body.to_vec(),
                             ..Default::default()
                         };
-                        Some(oracle.classify(&ctx))
+                        (Some(oracle.classify(&ctx)), ra)
                     }
-                    Err(_) => None,
+                    Err(_) => (None, None),
                 };
-                (index, payload, techniques, confidence, verdict)
+                (index, payload, techniques, confidence, verdict, retry_after)
             });
         }
 
         // Collect results (order doesn't matter for counting).
         let mut batch_rate_limited = false;
+        // The strongest Retry-After (largest, capped at MAX_OBEYED) any
+        // RL response in this batch named. None ⇒ no polite hint; fall
+        // back to the existing exponential-backoff curve.
+        let mut batch_retry_after: Option<Duration> = None;
         while let Some(result) = tasks.join_next().await {
-            let Ok((index, payload, techniques, confidence, verdict_opt)) = result else {
+            let Ok((index, payload, techniques, confidence, verdict_opt, retry_after_opt)) =
+                result
+            else {
                 errors += 1;
                 continue;
             };
@@ -760,6 +782,9 @@ pub(crate) async fn run_scan(
             if matches!(verdict, wafrift_types::Verdict::RateLimited { .. }) {
                 _rate_limited += 1;
                 batch_rate_limited = true;
+                if let Some(d) = retry_after_opt {
+                    batch_retry_after = Some(batch_retry_after.map_or(d, |b| b.max(d)));
+                }
                 if args.format == "text" {
                     print!("{}", "R".yellow());
                 }
@@ -846,14 +871,29 @@ pub(crate) async fn run_scan(
             break;
         }
 
-        // Inter-batch delay: escalating backoff when rate-limited
-        // (×2 per consecutive throttled batch, capped) so we ease off
-        // the target instead of hammering a fixed 2× delay.
+        // Inter-batch delay: prefer the server's own Retry-After hint
+        // when any 429/503 named one; else escalating backoff (×2 per
+        // consecutive throttled batch, capped) so we ease off the
+        // target instead of hammering a fixed 2× delay. Add ±20%
+        // jitter so we do not all-clients-at-once re-fire at the same
+        // instant the limiter window opens (some WAFs penalise that).
         if batch_rate_limited {
-            let factor = 2_u32.saturating_pow(batches_done.min(4));
-            let backoff = (delay.max(Duration::from_millis(50)))
-                .saturating_mul(factor)
-                .min(Duration::from_secs(30));
+            let computed = {
+                let factor = 2_u32.saturating_pow(batches_done.min(4));
+                (delay.max(Duration::from_millis(50)))
+                    .saturating_mul(factor)
+                    .min(Duration::from_secs(30))
+            };
+            // Honest hint > our guess. Both are already capped (the
+            // header parser at MAX_OBEYED, the computed at 30 s).
+            let base = batch_retry_after.map_or(computed, |ra| ra.max(computed));
+            let backoff = retry_after::jittered(base, u32::try_from(total_fired).unwrap_or(u32::MAX));
+            if let Some(ra) = batch_retry_after {
+                eprintln!(
+                    "[wafrift scan] obeying Retry-After: {} ms (server-named cooldown)",
+                    ra.as_millis()
+                );
+            }
             tokio::time::sleep(backoff).await;
         } else if !delay.is_zero() {
             tokio::time::sleep(delay).await;
