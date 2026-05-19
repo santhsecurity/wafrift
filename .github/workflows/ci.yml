@@ -229,8 +229,16 @@ jobs:
           WAFMODEL_PROPTEST_CASES: "24"
           WAFMODEL_SCALE_CONFIGS: "8"
           CARGO_TERM_COLOR: "never"
+        # GitHub's default `run:` shell is `bash -e -o pipefail`, which
+        # ABORTS the script on the FIRST non-matching grep inside a
+        # command-substitution — that false-RED'd a genuinely clean run
+        # (0 missed but the summary omits the "missed" token, so the
+        # extraction grep matched nothing → set -e killed the step).
+        # Override to drop `-e`; keep `-u`/pipefail; extract with
+        # `sed -n` which never errors on no-match.
+        shell: bash --noprofile --norc {0}
         run: |
-          set -o pipefail
+          set -uo pipefail
           # cargo-mutants owns the `mutants.out/` dir; tee elsewhere.
           # `--timeout 30`: hard per-mutant cap (the slower CI runner's
           # auto-timeout was 180s ⇒ ~30 timeout-mutants blew the job
@@ -262,7 +270,11 @@ jobs:
             exit 1
           fi
           echo "summary: $summary"
-          missed="$(printf '%s' "$summary" | grep -oE '[0-9]+ missed' | grep -oE '[0-9]+' | head -1)"
+          # cargo-mutants omits the "N missed" token entirely when it is
+          # zero. `sed -n` prints the count iff the token is present and
+          # exits 0 regardless (no failing pipeline under pipefail);
+          # absent ⇒ empty ⇒ 0.
+          missed="$(printf '%s\n' "$summary" | sed -nE 's/.*[^0-9]([0-9]+) missed.*/\1/p')"
           missed="${missed:-0}"
           if [ "$missed" != "0" ]; then
             echo "::error::cargo-mutants reports ${missed} missed mutant(s)"
