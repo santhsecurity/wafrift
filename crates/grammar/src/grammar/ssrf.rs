@@ -206,7 +206,8 @@ pub fn mutate(payload: &str) -> Vec<String> {
         .unwrap_or("")
         .to_string();
     if !cover_host.is_empty() && cover_host.len() <= 253 {
-        let path_suffix = extract_path(payload).map_or_else(|| "/".to_string(), |i| payload[i..].to_string());
+        let path_suffix =
+            extract_path(payload).map_or_else(|| "/".to_string(), |i| payload[i..].to_string());
         for target in [
             "127.0.0.1",
             "localhost",
@@ -239,7 +240,8 @@ pub fn mutate(payload: &str) -> Vec<String> {
         .unwrap_or("")
         .to_string();
     if !host_only.is_empty() {
-        let path = extract_path(payload).map_or_else(|| "/".to_string(), |i| payload[i..].to_string());
+        let path =
+            extract_path(payload).map_or_else(|| "/".to_string(), |i| payload[i..].to_string());
         for variant in [
             format!("http:/{host_only}{path}"),    // single slash
             format!("//{host_only}{path}"),        // protocol-relative
@@ -382,10 +384,9 @@ pub fn detect_type(payload: &str) -> bool {
         && (host_token_starts_with_octet(&lower, "10.")
             || host_token_starts_with_octet(&lower, "192.168.")
             || (16..=31).any(|i| host_token_starts_with_octet(&lower, &format!("172.{i}."))));
-    if looks_like_private_ip
-        && is_private_ip(&lower) {
-            return true;
-        }
+    if looks_like_private_ip && is_private_ip(&lower) {
+        return true;
+    }
 
     false
 }
@@ -413,14 +414,12 @@ fn host_token_present(haystack: &str, needle: &str) -> bool {
     // the LDH chars that live INSIDE a single DNS label. Anything
     // else (`.`, `:`, `/`, whitespace, end-of-string) marks a label
     // or token boundary.
-    let is_label_inner_char =
-        |b: u8| -> bool { b.is_ascii_alphanumeric() || b == b'-' };
+    let is_label_inner_char = |b: u8| -> bool { b.is_ascii_alphanumeric() || b == b'-' };
     let mut i = 0;
     while i + n.len() <= h.len() {
         if &h[i..i + n.len()] == n {
             let left_ok = i == 0 || !is_label_inner_char(h[i - 1]);
-            let right_ok =
-                i + n.len() == h.len() || !is_label_inner_char(h[i + n.len()]);
+            let right_ok = i + n.len() == h.len() || !is_label_inner_char(h[i + n.len()]);
             if left_ok && right_ok {
                 return true;
             }
@@ -441,9 +440,8 @@ fn host_token_starts_with_octet(haystack: &str, needle: &str) -> bool {
     if h.len() < n.len() {
         return false;
     }
-    let is_host_char = |b: u8| -> bool {
-        b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b':'
-    };
+    let is_host_char =
+        |b: u8| -> bool { b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b':' };
     let mut i = 0;
     while i + n.len() <= h.len() {
         if &h[i..i + n.len()] == n {
@@ -451,9 +449,7 @@ fn host_token_starts_with_octet(haystack: &str, needle: &str) -> bool {
             // Right side: needle ends in `.` so we just need a digit
             // to follow (the next octet) — otherwise "10." inside
             // "Java 10. is too old" would still match.
-            let right_ok = h
-                .get(i + n.len())
-                .is_some_and(u8::is_ascii_digit);
+            let right_ok = h.get(i + n.len()).is_some_and(u8::is_ascii_digit);
             if left_ok && right_ok {
                 return true;
             }

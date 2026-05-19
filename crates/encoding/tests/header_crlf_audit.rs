@@ -31,10 +31,7 @@ fn assert_no_smuggling_chars(out: &str, label: &str) {
 
 #[test]
 fn tab_separator_strips_crlf_in_value() {
-    assert_no_smuggling_chars(
-        &tab_separator("X-Custom", CRLF_INJECTION),
-        "tab_separator",
-    );
+    assert_no_smuggling_chars(&tab_separator("X-Custom", CRLF_INJECTION), "tab_separator");
 }
 
 #[test]
@@ -80,7 +77,10 @@ fn duplicate_header_strips_crlf_in_both_values() {
 
 #[test]
 fn trailing_space_strips_crlf_in_value() {
-    assert_no_smuggling_chars(&trailing_space("X-Custom", CRLF_INJECTION), "trailing_space");
+    assert_no_smuggling_chars(
+        &trailing_space("X-Custom", CRLF_INJECTION),
+        "trailing_space",
+    );
 }
 
 #[test]

@@ -341,7 +341,9 @@ mod tests {
         assert!(result.ends_with("&payload"));
         assert!(!result.contains("_wafrift_decoy"));
         // The decoy is a deterministic 8-letter lowercase junk param.
-        let decoy = result.strip_suffix("=1&payload").expect("decoy=1&payload shape");
+        let decoy = result
+            .strip_suffix("=1&payload")
+            .expect("decoy=1&payload shape");
         assert_eq!(decoy.len(), 8, "decoy must be 8 chars: {result}");
         assert!(
             decoy.bytes().all(|b| b.is_ascii_lowercase()),

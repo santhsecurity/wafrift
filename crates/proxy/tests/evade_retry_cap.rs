@@ -5,7 +5,7 @@
 //! would pin the proxy in per-request retry storms.
 
 mod common;
-use common::{pick_free_port, start_proxy_and_wait, stop_proxy, start_proxy_with_output};
+use common::{pick_free_port, start_proxy_and_wait, start_proxy_with_output, stop_proxy};
 
 #[tokio::test]
 async fn max_evade_retries_11_rejected_with_actionable_message() {

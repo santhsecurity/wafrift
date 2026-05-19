@@ -28,8 +28,8 @@ fn deserialize_rejects_short_secret_hex() {
 #[test]
 fn deserialize_rejects_non_hex_chars_in_secret() {
     let bad = format!(r#"{{"secret_hex":"{}"}}"#, "Z".repeat(64));
-    let err = serde_json::from_str::<SigningKey>(&bad)
-        .expect_err("must reject Z-only string (not hex)");
+    let err =
+        serde_json::from_str::<SigningKey>(&bad).expect_err("must reject Z-only string (not hex)");
     let msg = err.to_string();
     assert!(
         msg.to_lowercase().contains("hex") || msg.to_lowercase().contains("invalid"),

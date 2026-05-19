@@ -10,7 +10,9 @@ pub const ONE_MB: usize = 1024 * 1024;
 #[must_use]
 pub fn max_encoded_output_bytes(strategy: Strategy, input_len: usize) -> usize {
     match strategy {
-        Strategy::UrlEncode | Strategy::UrlEncodeLower => input_len.saturating_mul(3).saturating_add(64),
+        Strategy::UrlEncode | Strategy::UrlEncodeLower => {
+            input_len.saturating_mul(3).saturating_add(64)
+        }
         Strategy::DoubleUrlEncode => input_len.saturating_mul(6).saturating_add(64),
         Strategy::TripleUrlEncode => input_len.saturating_mul(9).saturating_add(128),
         Strategy::UnicodeEncode => input_len.saturating_mul(18).saturating_add(512),
@@ -27,19 +29,21 @@ pub fn max_encoded_output_bytes(strategy: Strategy, input_len: usize) -> usize {
         Strategy::OverlongUtf8More => input_len.saturating_mul(18).saturating_add(256),
         Strategy::ChunkedSplit => {
             let chunks = input_len / 1024 + 4;
-            input_len.saturating_add(chunks.saturating_mul(24)).saturating_add(256)
+            input_len
+                .saturating_add(chunks.saturating_mul(24))
+                .saturating_add(256)
         }
         Strategy::ParameterPollution => input_len.saturating_add(64),
-        Strategy::Base64Encode | Strategy::Base64UrlEncode => {
-            input_len
-                .saturating_add(3)
-                .saturating_div(3)
-                .saturating_mul(4)
-                .saturating_add(64)
-        }
+        Strategy::Base64Encode | Strategy::Base64UrlEncode => input_len
+            .saturating_add(3)
+            .saturating_div(3)
+            .saturating_mul(4)
+            .saturating_add(64),
         Strategy::HexEncode => input_len.saturating_mul(2).saturating_add(64),
         Strategy::Utf7Encode => input_len.saturating_mul(16).saturating_add(512),
-        Strategy::GzipEncode | Strategy::DeflateEncode => input_len.saturating_mul(10).saturating_add(65536),
+        Strategy::GzipEncode | Strategy::DeflateEncode => {
+            input_len.saturating_mul(10).saturating_add(65536)
+        }
         Strategy::SpaceToComment => input_len.saturating_mul(6),
         Strategy::SpaceToDash => input_len.saturating_mul(6),
         Strategy::SpaceToHash => input_len.saturating_mul(3),

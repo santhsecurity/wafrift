@@ -6,7 +6,9 @@
 //!   - `client.rs` must back off on 429 instead of escalating evasion
 
 use std::time::Duration;
-use wafrift_transport::{BlockClass, EvasionClient, ResponseProfileDb, is_waf_block, is_waf_block_status};
+use wafrift_transport::{
+    BlockClass, EvasionClient, ResponseProfileDb, is_waf_block, is_waf_block_status,
+};
 use wafrift_types::EvasionConfig;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -96,7 +98,10 @@ fn benign_security_check_not_blocked() {
 #[test]
 fn real_access_denied_still_blocked() {
     assert!(
-        is_waf_block(200, b"<h1>Access Denied</h1><p>Your request was blocked.</p>"),
+        is_waf_block(
+            200,
+            b"<h1>Access Denied</h1><p>Your request was blocked.</p>"
+        ),
         "real block page with 'Access Denied' must still be detected"
     );
 }
@@ -164,7 +169,11 @@ fn signal_double_count_capped() {
 #[test]
 fn signal_rate_limit_429_from_profile() {
     let db = ResponseProfileDb::compiled_in();
-    let sig = db.classify(429, &[("x-amzn-RequestId".into(), "abc".into())], b"Too many requests");
+    let sig = db.classify(
+        429,
+        &[("x-amzn-RequestId".into(), "abc".into())],
+        b"Too many requests",
+    );
     assert_eq!(sig.classification, BlockClass::RateLimit);
     assert!(!sig.classification.is_blocked());
     assert!(sig.classification.should_backoff());
@@ -209,10 +218,7 @@ async fn client_429_backoffs_instead_of_escalating() {
         elapsed >= Duration::from_millis(900),
         "429 must trigger backoff; elapsed was {elapsed:?}"
     );
-    assert!(
-        !result.was_blocked,
-        "429 must NOT be classified as blocked"
-    );
+    assert!(!result.was_blocked, "429 must NOT be classified as blocked");
 }
 
 #[tokio::test]

@@ -1198,9 +1198,7 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
         }
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(trimmed)
-            .or_else(|_| {
-                base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed)
-            })
+            .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed))
             .map_err(|e| format!("--payload-b64 is not valid base64: {e}"))?;
         if bytes.is_empty() {
             return Err("--payload-b64 decoded to zero bytes".to_string());
@@ -1245,15 +1243,13 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
         // No amount of in-process parsing can recover them; the only
         // fix is an out-of-band channel. Say so, with the exact
         // commands.
-        return Err(
-            "--payload is empty. If you passed binary/NUL bytes (e.g. \
+        return Err("--payload is empty. If you passed binary/NUL bytes (e.g. \
              $'\\x00\\x01\\x02'), the shell truncated the argument at the \
              first NUL byte before wafrift could see it — argv cannot \
              carry NULs. Use a binary-safe channel instead:\n  \
              printf '\\x00\\x01\\x02' | wafrift evade --stdin ...\n  \
              wafrift evade --payload-b64 \"$(printf '\\x00\\x01\\x02' | base64)\" ..."
-                .to_string(),
-        );
+            .to_string());
     }
     Ok(raw)
 }
@@ -1303,10 +1299,7 @@ fn fetch_for_detect(
             })
             .collect();
         // Cap the body read: don't let a hostile/huge response OOM the CLI.
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| format!("read body: {e}"))?;
+        let bytes = resp.bytes().await.map_err(|e| format!("read body: {e}"))?;
         let body = bytes[..bytes.len().min(64 * 1024)].to_vec();
         Ok((status, headers, body))
     })
@@ -1409,7 +1402,9 @@ async fn run_scan_from_discovery(
             .map(|a| {
                 a.iter()
                     .filter_map(|p| {
-                        p.get("name").and_then(serde_json::Value::as_str).map(str::to_string)
+                        p.get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
                     })
                     .collect()
             })
@@ -1432,7 +1427,10 @@ async fn run_scan_from_discovery(
     let mut last = ExitCode::SUCCESS;
     for (i, (url, param)) in jobs.iter().enumerate() {
         if cancel.is_cancelled() {
-            eprintln!("[wafrift scan] cancelled — {} job(s) not run", jobs.len() - i);
+            eprintln!(
+                "[wafrift scan] cancelled — {} job(s) not run",
+                jobs.len() - i
+            );
             break;
         }
         eprintln!(
@@ -1495,9 +1493,9 @@ fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 }
             };
             // clap enforces `--status` present in this branch.
-            let status = args.status.unwrap_or_else(|| {
-                unreachable!("clap requires --status unless --url is present")
-            });
+            let status = args
+                .status
+                .unwrap_or_else(|| unreachable!("clap requires --status unless --url is present"));
             (status, headers, args.body.clone().into_bytes())
         };
 

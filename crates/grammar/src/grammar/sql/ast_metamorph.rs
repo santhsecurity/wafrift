@@ -658,10 +658,7 @@ mod tests {
         let variant = v
             .iter()
             .find(|m| m.rules_applied.contains(&"ast_between_identity"));
-        assert!(
-            variant.is_some(),
-            "expected between transform on string eq"
-        );
+        assert!(variant.is_some(), "expected between transform on string eq");
     }
 
     #[test]
@@ -706,7 +703,8 @@ mod tests {
         let v = mutations(original, 15);
         for m in &v {
             assert_ne!(
-                m.payload, original,
+                m.payload,
+                original,
                 "transform {} produced identical text",
                 m.rules_applied.join(",")
             );

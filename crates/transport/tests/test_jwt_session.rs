@@ -116,9 +116,7 @@ fn jwt_manipulate_jwk_embed_valid() {
     let jwk = r#"{"kty":"RSA","n":"abc","e":"AQAB"}"#;
     let result = wafrift_transport::jwt::manipulate(
         token,
-        &wafrift_types::session::JwtManipulation::JwkEmbed {
-            jwk: jwk.into(),
-        },
+        &wafrift_types::session::JwtManipulation::JwkEmbed { jwk: jwk.into() },
         None,
     );
     assert!(result.is_ok());
@@ -239,7 +237,11 @@ fn session_inject_csrf_header() {
         "tok123",
         wafrift_types::session::CsrfInjectionLocation::Header,
     );
-    assert!(req.headers.iter().any(|(k, v)| k == "X-CSRF-Token" && v == "tok123"));
+    assert!(
+        req.headers
+            .iter()
+            .any(|(k, v)| k == "X-CSRF-Token" && v == "tok123")
+    );
 }
 
 #[test]

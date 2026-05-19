@@ -62,8 +62,10 @@ struct CmdOracleRules {
 fn get_rules() -> &'static CmdOracleRules {
     static RULES: OnceLock<CmdOracleRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(CMD_ORACLE_TOML).unwrap_or_else(|_| {
-            CmdOracleRules { cmd_separator: Vec::new(), shell_command: Vec::new(), shell_trick: Vec::new() }
+        toml::from_str(CMD_ORACLE_TOML).unwrap_or_else(|_| CmdOracleRules {
+            cmd_separator: Vec::new(),
+            shell_command: Vec::new(),
+            shell_trick: Vec::new(),
         })
     })
 }
@@ -138,9 +140,8 @@ fn contains_word(text: &str, word: &str) -> bool {
                 | 0
         )
     };
-    let is_word_boundary_after = |b: u8| -> bool {
-        is_separator(b) || matches!(b, b'-' | b'/' | b'(' | b'$')
-    };
+    let is_word_boundary_after =
+        |b: u8| -> bool { is_separator(b) || matches!(b, b'-' | b'/' | b'(' | b'$') };
     let mut i = 0;
     while i < bytes.len() {
         // Skip separators.
@@ -180,7 +181,9 @@ fn has_cmdi_structure(payload: &str) -> bool {
     let payload = payload.trim_end_matches(['\0', '\u{FFFD}']);
 
     // Must have at least one separator (`.contains` is memchr-backed — faster than a naive byte loop).
-    let has_separator = cmd_separators().iter().any(|sep| payload.contains(sep.as_str()));
+    let has_separator = cmd_separators()
+        .iter()
+        .any(|sep| payload.contains(sep.as_str()));
 
     // Must reference at least one command as a whole word
     let has_command = shell_commands()

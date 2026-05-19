@@ -495,10 +495,9 @@ impl RuleEngine {
                             && let Some(m) = re.find(v)
                         {
                             matched = true;
-                            entry.1.push(format!(
-                                "header {k}: {}",
-                                clamped_snippet(v, m.start(), 40)
-                            ));
+                            entry
+                                .1
+                                .push(format!("header {k}: {}", clamped_snippet(v, m.start(), 40)));
                             break;
                         }
                     }
@@ -597,7 +596,9 @@ pub fn with_engine<F, R>(f: F) -> R
 where
     F: FnOnce(&RuleEngine) -> R,
 {
-    let guard = RULE_DB.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = RULE_DB
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     f(&guard)
 }
 
@@ -634,16 +635,17 @@ pub fn supported_wafs() -> Vec<String> {
 #[must_use]
 pub fn suggest_evasion(waf_name: &str) -> Vec<String> {
     with_engine(|engine| {
-        engine
-            .rules
-            .get(waf_name).map_or_else(|| {
+        engine.rules.get(waf_name).map_or_else(
+            || {
                 vec![
                     "CaseAlternation".into(),
                     "SqlCommentInsertion".into(),
                     "DoubleUrlEncode".into(),
                     "ContentTypeSwitch".into(),
                 ]
-            }, |r| r.evasions.clone())
+            },
+            |r| r.evasions.clone(),
+        )
     })
 }
 

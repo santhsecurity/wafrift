@@ -17,12 +17,7 @@ fn eight_threads_two_thousand_distinct_hosts_all_retained() {
             for i in 0..250 {
                 let host = format!("concurrent-host-{t}-{i:03}.stress.test");
                 let cookie = format!("cf_clearance={t}_{i:03}");
-                s.record(
-                    host,
-                    cookie,
-                    ChallengeKind::CloudflareManaged,
-                    None,
-                );
+                s.record(host, cookie, ChallengeKind::CloudflareManaged, None);
             }
         }));
     }

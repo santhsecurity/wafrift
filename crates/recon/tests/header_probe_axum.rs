@@ -1,13 +1,11 @@
 //! Axum mock upstream with canned headers: positive stack fingerprint + negative control.
 
+use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use std::time::Duration;
-use wafrift_recon::active::{
-    probe_http_headers, ActiveProbeConfig, StackTag, TagFamily,
-};
+use wafrift_recon::active::{ActiveProbeConfig, StackTag, TagFamily, probe_http_headers};
 
 fn probe_config() -> ActiveProbeConfig {
     ActiveProbeConfig {

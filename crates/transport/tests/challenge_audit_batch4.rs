@@ -12,7 +12,8 @@
 
 use std::time::Duration;
 use wafrift_transport::challenge::{
-    ChallengeKind, ChallengeStore, CookieScope, classify_with_status, extract_clearance_cookie_scoped,
+    ChallengeKind, ChallengeStore, CookieScope, classify_with_status,
+    extract_clearance_cookie_scoped,
 };
 
 // ── HIGH: AwsWaf cookie-solvable alignment ──────────────────────────

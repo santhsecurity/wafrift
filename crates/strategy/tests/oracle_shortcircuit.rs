@@ -41,9 +41,10 @@ fn last_success_shortcircuits_escalation_chain() {
 
     let result_short = evade(&req, &state_short, &no_fingerprint_config());
     assert!(
-        result_short.techniques.iter().any(|t| {
-            matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation")
-        }),
+        result_short
+            .techniques
+            .iter()
+            .any(|t| { matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation") }),
         "short-circuit must apply last_success technique"
     );
 
@@ -87,15 +88,17 @@ fn proven_winner_takes_precedence_over_last_success() {
 
     // proven_winners is checked BEFORE last_success in evade().
     assert!(
-        result.techniques.iter().any(|t| {
-            matches!(t, Technique::PayloadEncoding(s) if s == "UrlEncode")
-        }),
+        result
+            .techniques
+            .iter()
+            .any(|t| { matches!(t, Technique::PayloadEncoding(s) if s == "UrlEncode") }),
         "proven winner must take precedence over last_success"
     );
     assert!(
-        !result.techniques.iter().any(|t| {
-            matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation")
-        }),
+        !result
+            .techniques
+            .iter()
+            .any(|t| { matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation") }),
         "last_success must not run when proven winner exists"
     );
 }

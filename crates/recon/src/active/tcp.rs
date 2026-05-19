@@ -116,7 +116,10 @@ mod tests {
             classify_line("220 smtp.example.com ESMTP Postfix"),
             TcpServiceClass::Smtp
         );
-        assert_eq!(classify_line("220-multiline greeting"), TcpServiceClass::Smtp);
+        assert_eq!(
+            classify_line("220-multiline greeting"),
+            TcpServiceClass::Smtp
+        );
         assert_eq!(classify_line("+OK POP3 ready"), TcpServiceClass::Unknown);
     }
 
@@ -128,9 +131,9 @@ mod tests {
         let hostile = [
             // two U+FFFD (what `\xff\xff` lossy-decodes to) then "SSH-"
             "\u{FFFD}\u{FFFD}SSH-2.0",
-            "日本語SSH-2.0",        // 3-byte chars straddling index 4/5
-            "→éHTTP/1.1",          // 3-byte + 2-byte prefix
-            "\u{FFFD}",            // shorter than every prefix
+            "日本語SSH-2.0", // 3-byte chars straddling index 4/5
+            "→éHTTP/1.1",    // 3-byte + 2-byte prefix
+            "\u{FFFD}",      // shorter than every prefix
             "ab",
             "",
             "   ",

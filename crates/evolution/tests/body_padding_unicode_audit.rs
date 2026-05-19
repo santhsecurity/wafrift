@@ -16,14 +16,14 @@ fn regression_multibyte_content_type_param_no_panic() {
     // Each of these has a `;`-parameter whose byte 9 lands inside a
     // multibyte codepoint — the exact crash input class.
     for ct in [
-        "multipart/form-data; boundÿ=----x",          // 2-byte at the edge
-        "multipart/form-data;日本語ary=----x",          // 3-byte chars
-        "multipart/form-data; 𝕓𝕠𝕦𝕟𝕕ary=zzz",          // 4-byte chars
-        "multipart/form-data; boundar\u{0301}=x",      // combining mark
-        "x; café=1; boundary=----realone",            // mixed
-        "multipart/form-data;\u{00A0}boundary=----nb",  // NBSP separator
-        "boundary=短",                                  // tiny multibyte value
-        "ÿ",                                            // single 2-byte param
+        "multipart/form-data; boundÿ=----x",      // 2-byte at the edge
+        "multipart/form-data;日本語ary=----x",    // 3-byte chars
+        "multipart/form-data; 𝕓𝕠𝕦𝕟𝕕ary=zzz",      // 4-byte chars
+        "multipart/form-data; boundar\u{0301}=x", // combining mark
+        "x; café=1; boundary=----realone",        // mixed
+        "multipart/form-data;\u{00A0}boundary=----nb", // NBSP separator
+        "boundary=短",                            // tiny multibyte value
+        "ÿ",                                      // single 2-byte param
     ] {
         // Must return, never panic.
         let _ = pad(body, ct, 4096);

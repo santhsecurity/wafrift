@@ -34,14 +34,14 @@ fn hostile_strings() -> Vec<String> {
     vec![
         String::new(),
         "x".into(),
-        "Mozilla/5.0 café日本語𝕏".into(),       // multibyte UA → obs-fold /2
+        "Mozilla/5.0 café日本語𝕏".into(), // multibyte UA → obs-fold /2
         "Mozilla/5.0 ".to_string() + &"😀".repeat(64), // every char 4 bytes
-        "a\u{0}b\u{1}c\u{7f}".into(),            // control bytes
-        "\u{202E}override".into(),               // RTL
-        "e\u{0301}".repeat(40),                  // combining marks
-        "ª²³¼½".repeat(20),                       // No-category unicode
-        "A".repeat(100_000),                      // huge ASCII
-        "あ".repeat(20_000),                      // huge multibyte
+        "a\u{0}b\u{1}c\u{7f}".into(),     // control bytes
+        "\u{202E}override".into(),        // RTL
+        "e\u{0301}".repeat(40),           // combining marks
+        "ª²³¼½".repeat(20),               // No-category unicode
+        "A".repeat(100_000),              // huge ASCII
+        "あ".repeat(20_000),              // huge multibyte
         String::from_utf8_lossy(&[0xFF, 0xFE, b'U', b'A']).into_owned(),
         "tok=\u{0}; path=/".into(),
         "1\u{00A0}OR\u{00A0}1=1".into(),
@@ -52,7 +52,10 @@ fn requests() -> Vec<Request> {
     let mut v = Vec::new();
     for s in hostile_strings() {
         // As body.
-        v.push(Request::post("https://target.example/api", s.clone().into_bytes()));
+        v.push(Request::post(
+            "https://target.example/api",
+            s.clone().into_bytes(),
+        ));
         // As User-Agent (the obs-fold panic site).
         v.push(
             Request::get("https://target.example/p?q=1")
@@ -106,7 +109,6 @@ fn evasion_pipeline_survives_hostile_requests() {
         {
             failures.push(format!("evade_smart PANIC: {label}"));
         }
-
     }
 
     assert!(
@@ -124,13 +126,12 @@ fn regression_obsfold_multibyte_user_agent_no_panic() {
     let config = cfg();
     let state = HostState::default();
     for ua in [
-        "Mozilla/5.0 (X11) café",                 // 'é' straddles len/2 for some lengths
+        "Mozilla/5.0 (X11) café", // 'é' straddles len/2 for some lengths
         "日本語ブラウザ/1.0 とても長いユーザエージェント文字列",
-        &format!("UA-{}", "€".repeat(33)),         // 3-byte chars, odd length
+        &format!("UA-{}", "€".repeat(33)), // 3-byte chars, odd length
         "x😀😀😀😀😀😀😀😀😀😀😀x",
     ] {
-        let req = Request::get("https://t.example/")
-            .header("User-Agent", ua.to_string());
+        let req = Request::get("https://t.example/").header("User-Agent", ua.to_string());
         // Direct call — must return, not panic.
         let _ = evade(&req, &state, &config);
     }

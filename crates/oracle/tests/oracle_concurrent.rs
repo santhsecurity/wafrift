@@ -9,10 +9,7 @@ use wafrift_oracle::traits::PayloadOracle;
 
 const THREADS: usize = 50;
 
-fn spawn_uniform<V>(
-    threads: usize,
-    f: impl Fn() -> V + Send + Sync + 'static,
-) -> Vec<V>
+fn spawn_uniform<V>(threads: usize, f: impl Fn() -> V + Send + Sync + 'static) -> Vec<V>
 where
     V: Send + 'static + Eq + std::fmt::Debug,
 {
@@ -23,7 +20,10 @@ where
             thread::spawn(move || f())
         })
         .collect();
-    handles.into_iter().map(|h| h.join().expect("thread panicked")).collect()
+    handles
+        .into_iter()
+        .map(|h| h.join().expect("thread panicked"))
+        .collect()
 }
 
 #[test]

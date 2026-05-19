@@ -152,6 +152,9 @@ fn loopback_bypass_corpus_covers_all_shapes() {
         valid.len(),
         shapes.len(),
         "every supported loopback-bypass shape must be SSRF-valid; missing: {:?}",
-        shapes.iter().filter(|u| !valid.contains(u)).collect::<Vec<_>>()
+        shapes
+            .iter()
+            .filter(|u| !valid.contains(u))
+            .collect::<Vec<_>>()
     );
 }

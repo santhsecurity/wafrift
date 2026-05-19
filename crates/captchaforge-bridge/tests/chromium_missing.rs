@@ -20,34 +20,31 @@ async fn chromium_missing_returns_err_within_timeout() {
     // Point the bridge at a path that cannot exist.
     // temp_env::async_with_vars restores the variable after the block,
     // even on panic, without requiring unsafe.
-    temp_env::async_with_vars(
-        [("CHROMIUM_PATH", Some("/nonexistent/chromium"))],
-        async {
-            let cfg = BridgeConfig {
-                solve_timeout_ms: BUDGET_MS,
-                headless: true,
-            };
+    temp_env::async_with_vars([("CHROMIUM_PATH", Some("/nonexistent/chromium"))], async {
+        let cfg = BridgeConfig {
+            solve_timeout_ms: BUDGET_MS,
+            headless: true,
+        };
 
-            let wall_start = Instant::now();
-            let result = solve_in_browser(
-                "<html><body>challenge</body></html>",
-                "https://example.com/",
-                &cfg,
-            )
-            .await;
-            let elapsed = wall_start.elapsed();
+        let wall_start = Instant::now();
+        let result = solve_in_browser(
+            "<html><body>challenge</body></html>",
+            "https://example.com/",
+            &cfg,
+        )
+        .await;
+        let elapsed = wall_start.elapsed();
 
-            assert!(
-                result.is_err(),
-                "expected Err when chromium path is /nonexistent, got: {result:?}"
-            );
+        assert!(
+            result.is_err(),
+            "expected Err when chromium path is /nonexistent, got: {result:?}"
+        );
 
-            let max_wall = Duration::from_millis(BUDGET_MS + WALL_SLACK_MS);
-            assert!(
-                elapsed <= max_wall,
-                "solve_in_browser took {elapsed:?}, expected ≤ {max_wall:?}"
-            );
-        },
-    )
+        let max_wall = Duration::from_millis(BUDGET_MS + WALL_SLACK_MS);
+        assert!(
+            elapsed <= max_wall,
+            "solve_in_browser took {elapsed:?}, expected ≤ {max_wall:?}"
+        );
+    })
     .await;
 }

@@ -82,11 +82,10 @@ const MAX_VARIANT_VALUE_BYTES: usize = 8 * 1024;
 /// serialisers that must stay valid). Returns the original slice
 /// untouched in the common small-body case (no allocation).
 fn bound_params(params: &[(String, String)]) -> std::borrow::Cow<'_, [(String, String)]> {
-    let total: usize = params
+    let total: usize = params.iter().map(|(k, v)| k.len() + v.len()).sum();
+    let oversize_value = params
         .iter()
-        .map(|(k, v)| k.len() + v.len())
-        .sum();
-    let oversize_value = params.iter().any(|(_, v)| v.len() > MAX_VARIANT_VALUE_BYTES);
+        .any(|(_, v)| v.len() > MAX_VARIANT_VALUE_BYTES);
     if total <= MAX_VARIANT_INPUT_BYTES && !oversize_value {
         return std::borrow::Cow::Borrowed(params);
     }

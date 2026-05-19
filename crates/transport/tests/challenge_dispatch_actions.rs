@@ -2,9 +2,7 @@
 //! with negative twins (wrong branch) guarded per kind.
 
 use std::time::Duration;
-use wafrift_transport::challenge::{
-    ChallengeKind, ChallengeStore, SolveAction, dispatch,
-};
+use wafrift_transport::challenge::{ChallengeKind, ChallengeStore, SolveAction, dispatch};
 
 fn escalate_reason(kind: ChallengeKind) -> String {
     format!("{} requires interactive solve", kind.label())
@@ -23,9 +21,9 @@ fn dispatch_matrix_without_cookie_cookie_solvable_kinds_wait() {
                     "Fix: jittered Wait must stay within base 2s ±25% (~1–3s); got {ms}ms"
                 );
             }
-            other => panic!(
-                "Fix: {kind:?} without cookie must Wait for external solver — got {other:?}"
-            ),
+            other => {
+                panic!("Fix: {kind:?} without cookie must Wait for external solver — got {other:?}")
+            }
         }
     }
 }
@@ -49,9 +47,7 @@ fn dispatch_matrix_without_cookie_interactive_kinds_escalate() {
                 assert_eq!(*k, kind);
                 assert_eq!(reason, &escalate_reason(kind));
             }
-            other => panic!(
-                "Fix: {kind:?} without cookie must EscalateToOperator — got {other:?}"
-            ),
+            other => panic!("Fix: {kind:?} without cookie must EscalateToOperator — got {other:?}"),
         }
     }
 }
@@ -120,11 +116,7 @@ fn negative_twin_escalate_kind_with_cookie_must_not_escalate() {
         ChallengeKind::Turnstile,
         None,
     );
-    let action = dispatch(
-        "turnstile-seeded.test",
-        ChallengeKind::Turnstile,
-        &store,
-    );
+    let action = dispatch("turnstile-seeded.test", ChallengeKind::Turnstile, &store);
     assert!(
         matches!(action, SolveAction::ReplayWithCookie { .. }),
         "Fix: after manual solve Turnstile must replay cookie, not re-escalate — got {action:?}"

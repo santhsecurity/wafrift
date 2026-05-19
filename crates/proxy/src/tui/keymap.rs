@@ -65,9 +65,7 @@ fn handle_normal(
         // Tab switching
         KeyCode::Tab => state.tab = state.tab.next(),
         KeyCode::Char('1' | 'f' | 'F') => state.tab = Tab::Flow,
-        KeyCode::Char('2' | 'o' | 'O')
-            if !is_flow_outcome_cycle(state, code) =>
-        {
+        KeyCode::Char('2' | 'o' | 'O') if !is_flow_outcome_cycle(state, code) => {
             // 'o' / 'O' is bound to outcome filter on Flow; on other tabs
             // it switches to Overview (kept for backward compat).
             state.tab = Tab::Overview;

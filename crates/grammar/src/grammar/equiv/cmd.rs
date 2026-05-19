@@ -17,7 +17,13 @@ use crate::grammar::cmd::is_structured_cmd;
 // `$IFShttp` (undefined → empty), losing the separator. Only the
 // brace-delimited / quoted forms are unambiguous everywhere.
 const SEP_EQUIV: &[&str] = &[
-    " ", "${IFS}", "\t", "${IFS%??}", "$'\\x20'", "$'\\t'", "${IFS}${IFS}",
+    " ",
+    "${IFS}",
+    "\t",
+    "${IFS%??}",
+    "$'\\x20'",
+    "$'\\t'",
+    "${IFS}${IFS}",
 ];
 
 fn sep_pick(rng: &mut Rng) -> String {
@@ -28,7 +34,14 @@ fn sep_pick(rng: &mut Rng) -> String {
 /// back to what actually executes (mirrors the WAF/shell view).
 fn normalize(s: &str) -> String {
     let mut t = s.to_string();
-    for ifs in ["${IFS%??}", "${IFS}${IFS}", "${IFS}", "$IFS", "$'\\x20'", "$'\\t'"] {
+    for ifs in [
+        "${IFS%??}",
+        "${IFS}${IFS}",
+        "${IFS}",
+        "$IFS",
+        "$'\\x20'",
+        "$'\\t'",
+    ] {
         t = t.replace(ifs, " ");
     }
     // remove '' "" and backslash-before-ordinary (bash quote removal)
@@ -288,7 +301,11 @@ mod tests {
         let v = generate(atk, &cfg(5));
         assert!(!v.is_empty());
         for m in &v {
-            assert!(still_executes_cmd(atk, &m.payload), "unsound {:?}", m.payload);
+            assert!(
+                still_executes_cmd(atk, &m.payload),
+                "unsound {:?}",
+                m.payload
+            );
             let nc = normalize(&m.payload);
             assert!(
                 nc.contains("curl") && nc.contains("evil.tld"),

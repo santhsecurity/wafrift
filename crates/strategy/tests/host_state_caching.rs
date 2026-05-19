@@ -23,9 +23,10 @@ fn evade_smart_uses_cached_prioritized_technique() {
     let state_no_recon = HostState::default();
     let result1 = evade_smart(&req, &state_no_recon, &no_fingerprint_config());
     assert!(
-        !result1.techniques.iter().any(|t| {
-            matches!(t, Technique::PayloadEncoding(s) if s == "DoubleUrlEncode")
-        }),
+        !result1
+            .techniques
+            .iter()
+            .any(|t| { matches!(t, Technique::PayloadEncoding(s) if s == "DoubleUrlEncode") }),
         "without recon cache must not pick DoubleUrlEncode"
     );
 
@@ -39,9 +40,10 @@ fn evade_smart_uses_cached_prioritized_technique() {
 
     let result2 = evade_smart(&req, &state_with_recon, &no_fingerprint_config());
     assert!(
-        result2.techniques.iter().any(|t| {
-            matches!(t, Technique::PayloadEncoding(s) if s == "DoubleUrlEncode")
-        }),
+        result2
+            .techniques
+            .iter()
+            .any(|t| { matches!(t, Technique::PayloadEncoding(s) if s == "DoubleUrlEncode") }),
         "second call must use cached recon (prioritized technique), got {:?}",
         result2.techniques
     );
@@ -55,14 +57,17 @@ fn evade_smart_uses_cached_proven_winner() {
         .header("Content-Type", "application/x-www-form-urlencoded");
 
     let mut state = HostState::default();
-    state.proven_winners.push("encoding:CaseAlternation".to_string());
+    state
+        .proven_winners
+        .push("encoding:CaseAlternation".to_string());
     state.discovery_complete = true;
 
     let result = evade_smart(&req, &state, &no_fingerprint_config());
     assert!(
-        result.techniques.iter().any(|t| {
-            matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation")
-        }),
+        result
+            .techniques
+            .iter()
+            .any(|t| { matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation") }),
         "must use cached proven winner, got {:?}",
         result.techniques
     );
@@ -85,9 +90,10 @@ fn evade_smart_skips_avoided_technique_from_cache() {
 
     let result = evade_smart(&req, &state, &no_fingerprint_config());
     assert!(
-        !result.techniques.iter().any(|t| {
-            matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation")
-        }),
+        !result
+            .techniques
+            .iter()
+            .any(|t| { matches!(t, Technique::PayloadEncoding(s) if s == "CaseAlternation") }),
         "avoided technique must be skipped even when prioritized"
     );
 }

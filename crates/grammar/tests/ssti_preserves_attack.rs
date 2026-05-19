@@ -112,7 +112,14 @@ fn evade_path_preserves_rce_expression() {
     // probe (a legitimate additive probe, like the SQL+XSS polyglot in
     // the SQL arm) — so forbid only the *arithmetic* detection probes
     // that would mean the RCE itself was discarded.
-    const ARITH_PROBES: &[&str] = &["{{7*7}}", "${7*7}", "#{7*7}", "<%= 7*7 %>", "{{7*'7'}}", "49"];
+    const ARITH_PROBES: &[&str] = &[
+        "{{7*7}}",
+        "${7*7}",
+        "#{7*7}",
+        "<%= 7*7 %>",
+        "{{7*'7'}}",
+        "49",
+    ];
     for m in &out {
         assert!(
             !ARITH_PROBES.contains(&m.payload.as_str()),

@@ -553,7 +553,11 @@ fn apply_body_padding(req: &mut Request, techniques: &mut Vec<Technique>, config
     let ct = req
         .headers
         .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-type")).map_or_else(|| "application/octet-stream".to_string(), |(_, v)| v.clone());
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map_or_else(
+            || "application/octet-stream".to_string(),
+            |(_, v)| v.clone(),
+        );
     let original = req.body.clone().unwrap_or_default();
     if let PadOutcome::Padded { bytes, added } = pad(&original, &ct, config.body_padding_bytes) {
         req.body = Some(bytes);

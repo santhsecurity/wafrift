@@ -374,11 +374,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
 /// run WAF detection on the live response. This is the natural first
 /// step when you paste a Burp request and just want to know what's in
 /// front of the endpoint before crafting payloads.
-async fn detect_parsed_target(
-    target: &str,
-    parsed: &ParsedCurl,
-    insecure: bool,
-) -> ExitCode {
+async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool) -> ExitCode {
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none());
@@ -396,8 +392,8 @@ async fn detect_parsed_target(
         .method
         .as_deref()
         .unwrap_or(if parsed.body.is_some() { "POST" } else { "GET" });
-    let reqwest_method = reqwest::Method::from_bytes(method.as_bytes())
-        .unwrap_or(reqwest::Method::GET);
+    let reqwest_method =
+        reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET);
     let mut req = client.request(reqwest_method, target);
     for (k, v) in &parsed.headers {
         req = req.header(k, v);
@@ -422,14 +418,26 @@ async fn detect_parsed_target(
     let headers: Vec<(String, String)> = resp
         .headers()
         .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("<binary>").to_string()))
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                v.to_str().unwrap_or("<binary>").to_string(),
+            )
+        })
         .collect();
     let body = resp.bytes().await.unwrap_or_default();
     let body = &body[..body.len().min(64 * 1024)];
-    eprintln!("probe: {method} {target} → HTTP {status} ({} headers)", headers.len());
+    eprintln!(
+        "probe: {method} {target} → HTTP {status} ({} headers)",
+        headers.len()
+    );
     let detected = wafrift_detect::waf_detect::detect(status, &headers, body);
     if let Some(top) = detected.first() {
-        println!("Detected WAF: {} ({:.0}% confidence)", top.name, top.confidence * 100.0);
+        println!(
+            "Detected WAF: {} ({:.0}% confidence)",
+            top.name,
+            top.confidence * 100.0
+        );
         for ind in &top.indicators {
             println!("  - {ind}");
         }

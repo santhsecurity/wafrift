@@ -4,11 +4,10 @@ mod common;
 
 use proptest::prelude::*;
 use wafrift_encoding::{
-    encode,
+    Strategy as S, encode,
     encoding::strategy::all_strategies,
     tamper::{all_tamper_names, tamper},
     url_mutate::{UrlMutateConfig, UrlStrategy, mutate_url},
-    Strategy as S,
 };
 
 /// Encoders where `encode(encode(x)) == encode(x)` for valid UTF-8 payloads (fixed-point).
@@ -54,7 +53,9 @@ fn tamper_second_pass_cap(name: &str, once_len: usize) -> usize {
         "unicode_escape" => common::max_encoded_output_bytes(S::UnicodeEncode, once_len),
         "html_entity" => common::max_encoded_output_bytes(S::HtmlEntityEncode, once_len),
         "case_alternation" => common::max_encoded_output_bytes(S::CaseAlternation, once_len),
-        "whitespace_insertion" => common::max_encoded_output_bytes(S::WhitespaceInsertion, once_len),
+        "whitespace_insertion" => {
+            common::max_encoded_output_bytes(S::WhitespaceInsertion, once_len)
+        }
         "sql_comment" => common::max_encoded_output_bytes(S::SqlCommentInsertion, once_len),
         "null_byte" => common::max_encoded_output_bytes(S::NullByte, once_len),
         "overlong_utf8" => common::max_encoded_output_bytes(S::OverlongUtf8, once_len),

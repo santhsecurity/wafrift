@@ -16,7 +16,10 @@ fn pct_decode(s: &str) -> String {
     let mut o = String::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == '%' && i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit()
+        if b[i] == '%'
+            && i + 2 < b.len()
+            && b[i + 1].is_ascii_hexdigit()
+            && b[i + 2].is_ascii_hexdigit()
         {
             let h: String = b[i + 1..i + 3].iter().collect();
             if let Some(c) = u8::from_str_radix(&h, 16).ok().map(|x| x as char) {

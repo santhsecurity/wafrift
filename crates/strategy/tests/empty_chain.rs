@@ -92,8 +92,7 @@ fn non_empty_plan_mutates_even_when_config_disabled() {
     let result = evade_adaptive(&req, &config, &plan, &state);
 
     assert_ne!(
-        result.request.body,
-        req.body,
+        result.request.body, req.body,
         "plan with explicit encoder must mutate body even when config.encoding_enabled is false"
     );
     assert_eq!(result.techniques.len(), 1);

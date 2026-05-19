@@ -152,9 +152,7 @@ impl WafRiftConfig {
         use clap::parser::ValueSource;
         // True when the operator did NOT explicitly set this arg.
         let from_default = |name: &str| {
-            m.is_none_or(|m| {
-                !matches!(m.value_source(name), Some(ValueSource::CommandLine))
-            })
+            m.is_none_or(|m| !matches!(m.value_source(name), Some(ValueSource::CommandLine)))
         };
         if from_default("delay_ms") {
             args.delay_ms = self.scan.delay_ms;

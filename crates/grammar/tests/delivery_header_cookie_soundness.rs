@@ -10,7 +10,7 @@
 //! are exact) or if `to_request` leaked a control byte.
 
 use proptest::prelude::*;
-use wafrift_grammar::grammar::equiv::{xss_delivered, DeliveryShape};
+use wafrift_grammar::grammar::equiv::{DeliveryShape, xss_delivered};
 
 fn header_val<'a>(r: &'a wafrift_types::Request, name: &str) -> Vec<&'a str> {
     r.headers
@@ -75,8 +75,7 @@ fn smuggling_payloads_cannot_forge_structure() {
             }
             // No injected Set-Cookie / Location / smuggled request line.
             assert!(
-                header_val(&r, "set-cookie").is_empty()
-                    && header_val(&r, "location").is_empty(),
+                header_val(&r, "set-cookie").is_empty() && header_val(&r, "location").is_empty(),
                 "{} forged an extra header from {atk:?}",
                 d.label()
             );
@@ -176,7 +175,9 @@ fn scald_consumption_pattern_yields_sound_raw_carriers() {
             "marker lost in rewrite: {:?}",
             m.payload
         );
-        let req = m.delivery.to_request("http://target.tld/reflect", &m.payload);
+        let req = m
+            .delivery
+            .to_request("http://target.tld/reflect", &m.payload);
         match m.delivery.label() {
             "header_value" => {
                 saw_header = true;

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use axum::{
+    Router,
     body::Bytes,
     extract::State,
     http::{Method, StatusCode, Uri},
     response::IntoResponse,
     routing::any,
-    Router,
 };
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -22,9 +22,9 @@ struct SeenRequest {
 }
 
 fn has_header(headers: &[(String, String)], name: &str, value: &str) -> bool {
-    headers.iter().any(|(k, v)| {
-        k.eq_ignore_ascii_case(name) && v.eq_ignore_ascii_case(value)
-    })
+    headers
+        .iter()
+        .any(|(k, v)| k.eq_ignore_ascii_case(name) && v.eq_ignore_ascii_case(value))
 }
 
 fn has_header_prefix(headers: &[(String, String)], name: &str, value: &str) -> bool {
@@ -33,13 +33,15 @@ fn has_header_prefix(headers: &[(String, String)], name: &str, value: &str) -> b
     })
 }
 
-async fn start_upstream_server() -> (u16, Arc<Mutex<Vec<SeenRequest>>>, tokio::task::JoinHandle<()>) {
+async fn start_upstream_server() -> (
+    u16,
+    Arc<Mutex<Vec<SeenRequest>>>,
+    tokio::task::JoinHandle<()>,
+) {
     let captured = Arc::new(Mutex::new(Vec::<SeenRequest>::new()));
-    let app = Router::new().route(
-        "/*path",
-        any(capture_request),
-    )
-    .with_state(captured.clone());
+    let app = Router::new()
+        .route("/*path", any(capture_request))
+        .with_state(captured.clone());
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind upstream");
@@ -65,14 +67,25 @@ async fn capture_request(
     let headers = headers
         .iter()
         .filter_map(|(name, value)| {
-            value.to_str().ok().map(|value| (name.to_string(), value.to_string()))
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.to_string(), value.to_string()))
         })
         .collect();
     let query = uri.query().unwrap_or_default().to_string();
     let body = String::from_utf8_lossy(&body).to_string();
     let mut buf = state.lock().await;
-    buf.push(SeenRequest { headers, query, body });
-    (StatusCode::OK, [("content-type", "text/plain")], "upstream-response")
+    buf.push(SeenRequest {
+        headers,
+        query,
+        body,
+    });
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain")],
+        "upstream-response",
+    )
 }
 
 #[tokio::test]
@@ -111,7 +124,11 @@ async fn forward_path_e2e_must_apply_evasion_and_return_response_unchanged() {
         "query was forwarded to upstream"
     );
     assert!(
-        !has_header(&request.headers, "content-type", "application/x-www-form-urlencoded"),
+        !has_header(
+            &request.headers,
+            "content-type",
+            "application/x-www-form-urlencoded"
+        ),
         "content-type must be mutated by proxy"
     );
     upstream_handle.abort();
@@ -145,7 +162,10 @@ async fn forward_path_e2e_must_not_apply_evasion_when_off() {
         .await
         .expect("send through proxy");
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.expect("read response body"), "upstream-response");
+    assert_eq!(
+        response.text().await.expect("read response body"),
+        "upstream-response"
+    );
 
     let requests = captured.lock().await;
     let request = requests.last().expect("one request");

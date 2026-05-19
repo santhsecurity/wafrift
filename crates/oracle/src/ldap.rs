@@ -68,7 +68,10 @@ fn is_attr_char(c: char) -> bool {
 /// If `b[i..]` starts with a `\HH` (backslash + 2 hex) escape, return
 /// the index past it.
 fn escape_at(b: &[char], i: usize) -> Option<usize> {
-    if i + 2 < b.len() && b[i] == '\\' && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit()
+    if i + 2 < b.len()
+        && b[i] == '\\'
+        && b[i + 1].is_ascii_hexdigit()
+        && b[i + 2].is_ascii_hexdigit()
     {
         Some(i + 3)
     } else {

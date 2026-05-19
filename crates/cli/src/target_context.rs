@@ -48,9 +48,9 @@ pub fn context_applicability(s: Strategy, ctx: TargetContext) -> Result<(), &'st
         (GzipEncode | DeflateEncode, Header | Cookie | QueryParam) => Err(
             "compression produces binary output; HTTP text contexts can't carry it directly (use Content-Encoding on a body)",
         ),
-        (NullByte, Header | Cookie | QueryParam) => Err(
-            "NUL bytes are stripped or rejected by HTTP header / URL parsers",
-        ),
+        (NullByte, Header | Cookie | QueryParam) => {
+            Err("NUL bytes are stripped or rejected by HTTP header / URL parsers")
+        }
         // Body intentionally NOT included: parameter-pollution output (`a=1&b=2`)
         // is valid in `application/x-www-form-urlencoded` bodies. Whether it's
         // useful in a given body subtype (JSON, multipart, raw) is the user's
@@ -58,9 +58,9 @@ pub fn context_applicability(s: Strategy, ctx: TargetContext) -> Result<(), &'st
         (ParameterPollution, Header | Cookie) => Err(
             "parameter pollution operates on `key=val&key=val` syntax — headers/cookies don't parse that way",
         ),
-        (ChunkedSplit, Header | Cookie | QueryParam) => Err(
-            "chunked-split is a body transfer encoding — N/A in this context",
-        ),
+        (ChunkedSplit, Header | Cookie | QueryParam) => {
+            Err("chunked-split is a body transfer encoding — N/A in this context")
+        }
         _ => Ok(()),
     }
 }

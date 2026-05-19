@@ -1,6 +1,6 @@
 use std::io;
-use std::process::Stdio;
 use std::process::Output;
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use tokio::net::TcpStream;
@@ -39,11 +39,7 @@ pub async fn start_proxy_and_wait(port: u16, args: &[&str]) -> io::Result<Child>
     Ok(child)
 }
 
-pub async fn wait_for_listen(
-    child: &mut Child,
-    port: u16,
-    timeout: Duration,
-) -> io::Result<()> {
+pub async fn wait_for_listen(child: &mut Child, port: u16, timeout: Duration) -> io::Result<()> {
     let deadline = Instant::now() + timeout;
     loop {
         if child.try_wait()?.is_some() {
@@ -67,7 +63,9 @@ pub async fn wait_for_listen(
 #[allow(dead_code)]
 pub fn proxy_client(port: u16) -> Result<reqwest::Client, reqwest::Error> {
     let proxy = format!("http://127.0.0.1:{port}");
-    reqwest::Client::builder().proxy(reqwest::Proxy::all(proxy)?).build()
+    reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(proxy)?)
+        .build()
 }
 
 pub async fn stop_proxy(child: &mut Child) {

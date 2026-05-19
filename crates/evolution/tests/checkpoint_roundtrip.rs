@@ -55,7 +55,10 @@ fn checkpoint_preserves_corpus() {
     let entry = BypassEntry::from_chromosome(&baseline, Some("smoke-target".to_string()));
     engine.corpus.add(entry.clone());
     let pre_count = engine.corpus.entries.len();
-    assert!(pre_count > 0, "corpus should have at least the injected entry");
+    assert!(
+        pre_count > 0,
+        "corpus should have at least the injected entry"
+    );
 
     engine.save_checkpoint(&path).expect("save");
 
@@ -89,7 +92,8 @@ fn checkpoint_preserves_next_id() {
     assert_eq!(restored.next_id(), 0);
     restored.load_checkpoint(&path).expect("load");
     assert_eq!(
-        restored.next_id(), pre_next_id,
+        restored.next_id(),
+        pre_next_id,
         "next_id must survive checkpoint roundtrip; pre-fix it reset to 0 \
          and could collide with an in-flight eval that survived the crash"
     );
@@ -138,10 +142,7 @@ fn v1_checkpoint_loads_into_v2_engine_with_default_corpus() {
         obj.remove("corpus");
         obj.remove("next_id");
         obj.remove("generation_evals");
-        obj.insert(
-            "schema_version".into(),
-            serde_json::Value::from(1u32),
-        );
+        obj.insert("schema_version".into(), serde_json::Value::from(1u32));
     }
     let v1_bytes = serde_json::to_vec(&value).expect("reserialize");
     std::fs::write(&path, v1_bytes).expect("write v1");

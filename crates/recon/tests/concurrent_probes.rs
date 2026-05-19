@@ -1,19 +1,22 @@
 //! Fifty concurrent HTTP probes against one axum upstream: no panic, all complete.
 
+use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use wafrift_recon::active::{probe_http_headers, ActiveProbeConfig};
+use wafrift_recon::active::{ActiveProbeConfig, probe_http_headers};
 
 static HITS: AtomicUsize = AtomicUsize::new(0);
 
 async fn counted_response() -> impl IntoResponse {
     HITS.fetch_add(1, Ordering::SeqCst);
     let mut h = HeaderMap::new();
-    h.insert(axum::http::header::SERVER, "concurrent-test".parse().unwrap());
+    h.insert(
+        axum::http::header::SERVER,
+        "concurrent-test".parse().unwrap(),
+    );
     (StatusCode::OK, h)
 }
 

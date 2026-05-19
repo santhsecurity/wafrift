@@ -81,9 +81,10 @@ fn last_content_length(headers: &[(String, String)]) -> Option<usize> {
     let mut last = None;
     for (k, v) in headers {
         if k.eq_ignore_ascii_case("content-length")
-            && let Ok(n) = v.trim().parse::<usize>() {
-                last = Some(n);
-            }
+            && let Ok(n) = v.trim().parse::<usize>()
+        {
+            last = Some(n);
+        }
     }
     last
 }
@@ -261,7 +262,6 @@ pub fn tcp_capture_one_payload(payload: &[u8]) -> Result<Vec<u8>, std::io::Error
     client.write_all(payload)?;
     client.shutdown(Shutdown::Write)?;
 
-    
     handle
         .join()
         .map_err(|_| std::io::Error::other("server thread panicked"))?

@@ -93,7 +93,11 @@ fn cookie_with_trailing_slash_scope_replays_correctly() {
             ..Default::default()
         },
     );
-    assert!(store.get_for_request("example.com", "/api/", true).is_some());
+    assert!(
+        store
+            .get_for_request("example.com", "/api/", true)
+            .is_some()
+    );
     assert!(
         store
             .get_for_request("example.com", "/api/users", true)

@@ -288,7 +288,10 @@ impl WafModel {
         s.push_str(&format!("n = {}\n", self.n));
         s.push_str(&format!("bias = {:?}\n", self.bias));
         for (i, name) in FEATURES.iter().enumerate() {
-            s.push_str(&format!("w.{name} = {:?}\n", self.w.get(i).copied().unwrap_or(0.0)));
+            s.push_str(&format!(
+                "w.{name} = {:?}\n",
+                self.w.get(i).copied().unwrap_or(0.0)
+            ));
         }
         s
     }
@@ -426,7 +429,7 @@ mod tests {
 
     #[test]
     fn feature_space_is_stable_and_sized() {
-        use crate::grammar::equiv::sql::{delivery_kind_label, DELIVERY_ARMS};
+        use crate::grammar::equiv::sql::{DELIVERY_ARMS, delivery_kind_label};
         assert_eq!(feature_count(), FEATURES.len());
         // The one-hot delivery block is exactly the LAST `DELIVERY_ARMS`
         // entries and is `dlv_<delivery_kind_label(i)>` for every arm —
@@ -444,7 +447,8 @@ mod tests {
             // And `featurize` must actually set THAT slot for arm `i`.
             let v = featurize("x", i);
             assert_eq!(
-                v[base + i], 1.0,
+                v[base + i],
+                1.0,
                 "featurize(arm={i}) did not set its own one-hot slot"
             );
             assert_eq!(
@@ -577,9 +581,12 @@ mod tests {
     #[test]
     fn model_toml_round_trips_exactly() {
         let m = trained_model();
-        let restored = WafModel::from_model_toml(&m.to_model_toml())
-            .expect("schema-matched model must load");
-        assert_eq!(restored.w, m.w, "weights not bit-identical after round-trip");
+        let restored =
+            WafModel::from_model_toml(&m.to_model_toml()).expect("schema-matched model must load");
+        assert_eq!(
+            restored.w, m.w,
+            "weights not bit-identical after round-trip"
+        );
         assert_eq!(restored.bias, m.bias, "bias drift after round-trip");
         assert_eq!(restored.n, m.n);
         // Behavioural identity over the whole feature corner space.
@@ -637,10 +644,7 @@ mod tests {
 
     #[test]
     fn save_then_load_is_a_compounding_warm_start() {
-        let dir = std::env::temp_dir().join(format!(
-            "wafrift-model-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("wafrift-model-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let fp = waf_fingerprint("unit-test-waf");
         let path = model_path(&dir, &fp);

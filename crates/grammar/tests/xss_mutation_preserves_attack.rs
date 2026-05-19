@@ -75,7 +75,8 @@ fn cookie_exfil_is_never_replaced_by_a_canned_poc() {
         assert!(
             still_the_same_attack(attack, &v.payload),
             "variant {:?} (rules {:?}) no longer carries the cookie exfil",
-            v.payload, v.rules_applied
+            v.payload,
+            v.rules_applied
         );
     }
 }
@@ -196,9 +197,9 @@ fn structured_still_produces_multiple_real_evasions() {
     // and a different element than the original must appear (proves a
     // genuine tag/event swap around the real JS, not just echo).
     assert!(
-        variants
-            .iter()
-            .any(|v| v.payload.contains("<svg") || v.payload.contains("onload=") || v.payload.starts_with("javascript:")),
+        variants.iter().any(|v| v.payload.contains("<svg")
+            || v.payload.contains("onload=")
+            || v.payload.starts_with("javascript:")),
         "no alternative-element evasion carrying the real exfil was produced"
     );
 }

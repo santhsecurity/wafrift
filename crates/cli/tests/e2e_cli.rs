@@ -167,9 +167,7 @@ fn evade_stdin_reads_payload() {
     use std::io::Write;
     use std::process::{Command, Stdio};
     let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args([
-            "evade", "--stdin", "--only", "encoding/base64/standard",
-        ])
+        .args(["evade", "--stdin", "--only", "encoding/base64/standard"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -192,9 +190,7 @@ fn evade_stdin_reads_payload() {
 
 #[test]
 fn evade_stdin_and_payload_conflict() {
-    let (code, _stdout, stderr) = wafrift(&[
-        "evade", "--payload", "x", "--stdin",
-    ]);
+    let (code, _stdout, stderr) = wafrift(&["evade", "--payload", "x", "--stdin"]);
     assert_ne!(code, 0, "must reject --payload + --stdin together");
     assert!(
         stderr.to_lowercase().contains("conflict") || stderr.to_lowercase().contains("cannot"),
@@ -207,8 +203,7 @@ fn evade_neither_payload_nor_stdin_errors() {
     let (code, _stdout, stderr) = wafrift(&["evade"]);
     assert_ne!(code, 0, "must require one of --payload / --stdin");
     assert!(
-        stderr.to_lowercase().contains("required")
-            || stderr.to_lowercase().contains("missing"),
+        stderr.to_lowercase().contains("required") || stderr.to_lowercase().contains("missing"),
         "expected required-arg message: {stderr}"
     );
 }
@@ -233,7 +228,13 @@ fn evade_explain_shows_per_technique_lines() {
 #[test]
 fn evade_explain_quiet_emits_trailing_json_object() {
     let (code, stdout, stderr) = wafrift(&[
-        "--quiet", "evade", "--payload", "X", "--only", "encoding/base64/standard", "--explain",
+        "--quiet",
+        "evade",
+        "--payload",
+        "X",
+        "--only",
+        "encoding/base64/standard",
+        "--explain",
     ]);
     assert_eq!(code, 0, "exit 0; stderr={stderr}");
     // Last non-empty line should be an explain object.
@@ -290,7 +291,10 @@ fn evade_parameter_pollution_rejected_in_header_context() {
         "header",
         "--explain",
     ]);
-    assert_ne!(code, 0, "should fail when only inapplicable strategy is selected");
+    assert_ne!(
+        code, 0,
+        "should fail when only inapplicable strategy is selected"
+    );
     let combined = format!("{stdout}{stderr}");
     assert!(
         combined.contains("parameter pollution") || combined.contains("headers/cookies"),
@@ -310,7 +314,10 @@ fn evade_parameter_pollution_works_in_body_context() {
         "--target-context",
         "body",
     ]);
-    assert_eq!(code, 0, "parameter pollution must be applicable in body: stderr={stderr}");
+    assert_eq!(
+        code, 0,
+        "parameter pollution must be applicable in body: stderr={stderr}"
+    );
     assert!(
         stdout.contains("ParameterPollute") || stdout.contains("=1&X"),
         "should produce a polluted variant: {stdout}"
@@ -330,8 +337,12 @@ fn evade_rejects_empty_payload() {
 #[test]
 fn evade_stdin_rejects_interactive_terminal() {
     // No stdin pipe → reading would hang. Must detect and error.
-    let (code, _stdout, stderr) = wafrift(&["evade", "--stdin", "--only", "encoding/base64/standard"]);
-    assert_ne!(code, 0, "--stdin on a TTY-less non-pipe must error, not hang");
+    let (code, _stdout, stderr) =
+        wafrift(&["evade", "--stdin", "--only", "encoding/base64/standard"]);
+    assert_ne!(
+        code, 0,
+        "--stdin on a TTY-less non-pipe must error, not hang"
+    );
     // In CI / our test harness stdin is closed (no TTY, no pipe), so the
     // is_terminal check is false and the read_to_string returns empty —
     // either path must produce a clear error, not hang.
@@ -360,7 +371,8 @@ fn evade_empty_variants_writes_error_to_output_file() {
         tmp.to_str().unwrap(),
     ]);
     assert_ne!(code, 0, "no-variants path should exit non-zero");
-    let body = fs::read_to_string(&tmp).expect("output file should be written even on empty-variants");
+    let body =
+        fs::read_to_string(&tmp).expect("output file should be written even on empty-variants");
     assert!(
         body.contains("no variants generated") && body.contains("explain"),
         "output should contain the JSON error blob with explain: {body}"

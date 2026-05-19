@@ -82,11 +82,7 @@ fn is_bogon_ip(ip: std::net::IpAddr) -> bool {
             if segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020 {
                 return true; // ORCHIDv2
             }
-            if segs[0] == 0x0100
-                && segs[1] == 0
-                && segs[2] == 0
-                && segs[3] == 0
-            {
+            if segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 {
                 return true; // 100::/64 discard
             }
             v.is_loopback()
@@ -148,7 +144,9 @@ impl EvasionClient {
 
         let mut builder = reqwest::Client::builder()
             .danger_accept_invalid_certs(config.insecure_tls)
-            .redirect(reqwest::redirect::Policy::limited(wafrift_types::DEFAULT_MAX_REDIRECTS))
+            .redirect(reqwest::redirect::Policy::limited(
+                wafrift_types::DEFAULT_MAX_REDIRECTS,
+            ))
             .timeout(std::time::Duration::from_secs(
                 wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             ));
@@ -299,29 +297,28 @@ impl EvasionClient {
             // Send and get response with body (CRITICAL FIX #1)
             // We need to read the body for WAF fingerprinting, but also preserve it
             // for the caller. We use a bounded read to avoid memory issues.
-            let (status, body_preview, signal) =
-                match self.send_and_check(req_builder, &host).await {
-                    Ok(result) => result,
-                    Err(EvasionError::Transport(ref e)) if attempt + 1 < max_attempts => {
-                        tracing::warn!(
-                            host = %host,
-                            error = %e,
-                            attempt = attempt + 1,
-                            max = max_attempts,
-                            "transient transport error — will retry"
-                        );
-                        continue;
-                    }
-                    Err(e) => return Err(e),
-                };
+            let (status, body_preview, signal) = match self.send_and_check(req_builder, &host).await
+            {
+                Ok(result) => result,
+                Err(EvasionError::Transport(ref e)) if attempt + 1 < max_attempts => {
+                    tracing::warn!(
+                        host = %host,
+                        error = %e,
+                        attempt = attempt + 1,
+                        max = max_attempts,
+                        "transient transport error — will retry"
+                    );
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
 
             let classification = signal.classification;
             let matched_waf = signal.matched_waf;
             let prioritize = signal.prioritize;
             let avoid = signal.avoid;
             let inspection_model = signal.inspection_model;
-            let technique_keys: Vec<String> =
-                techniques.iter().map(ToString::to_string).collect();
+            let technique_keys: Vec<String> = techniques.iter().map(ToString::to_string).collect();
 
             // Audit (2026-05-10): rich classification replaces binary is_waf_block.
             // RateLimit / Challenge → back off (don't penalize technique).
@@ -342,7 +339,10 @@ impl EvasionClient {
                     {
                         let mut states = self.lock_states();
                         if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut fifo = self
+                                .host_fifo
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             while let Some(key_to_remove) = fifo.pop_front() {
                                 if states.remove(&key_to_remove).is_some() {
                                     break;
@@ -352,7 +352,10 @@ impl EvasionClient {
                         let is_new = !states.contains_key(&host);
                         let state = states.entry(host.clone()).or_default();
                         if is_new {
-                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut fifo = self
+                                .host_fifo
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             fifo.push_back(host.clone());
                         }
                         state.record_signal(
@@ -381,7 +384,10 @@ impl EvasionClient {
                     {
                         let mut states = self.lock_states();
                         if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut fifo = self
+                                .host_fifo
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             while let Some(key_to_remove) = fifo.pop_front() {
                                 if states.remove(&key_to_remove).is_some() {
                                     break;
@@ -391,7 +397,10 @@ impl EvasionClient {
                         let is_new = !states.contains_key(&host);
                         let state = states.entry(host.clone()).or_default();
                         if is_new {
-                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut fifo = self
+                                .host_fifo
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             fifo.push_back(host.clone());
                         }
                         state.record_signal(
@@ -416,7 +425,10 @@ impl EvasionClient {
                     if !classification.is_blocked() {
                         let mut states = self.lock_states();
                         if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut fifo = self
+                                .host_fifo
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             while let Some(key_to_remove) = fifo.pop_front() {
                                 if states.remove(&key_to_remove).is_some() {
                                     break;
@@ -426,14 +438,19 @@ impl EvasionClient {
                         let is_new = !states.contains_key(&host);
                         let state = states.entry(host.clone()).or_default();
                         if is_new {
-                            let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut fifo = self
+                                .host_fifo
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             fifo.push_back(host.clone());
                         }
                         if !techniques.is_empty() {
                             state.record_success_for_many(&techniques);
                         }
                         // Ingest WAF profile hints even on Pass (first-contact profiling).
-                        if let Some(ref waf) = matched_waf && state.waf_name.is_none() {
+                        if let Some(ref waf) = matched_waf
+                            && state.waf_name.is_none()
+                        {
                             state.waf_name = Some(waf.clone());
                             state.waf_confirmed = true;
                         }
@@ -447,7 +464,9 @@ impl EvasionClient {
                                 state.avoided_techniques.push(tech.clone());
                             }
                         }
-                        if let Some(ref model) = inspection_model && state.inspection_model.is_none() {
+                        if let Some(ref model) = inspection_model
+                            && state.inspection_model.is_none()
+                        {
                             state.inspection_model = Some(model.clone());
                         }
                     }
@@ -494,7 +513,10 @@ impl EvasionClient {
     /// Reset evasion state for all hosts.
     pub fn reset(&self) {
         self.lock_states().clear();
-        let mut fifo = self.host_fifo.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut fifo = self
+            .host_fifo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         fifo.clear();
     }
 

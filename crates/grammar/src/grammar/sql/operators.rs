@@ -104,7 +104,12 @@ pub(crate) fn replace_equality(payload: &str, replacement: &str) -> Option<Strin
         }
         let previous = if i > 0 { bytes[i - 1] } else { b' ' };
         let next = bytes.get(i + 1).copied().unwrap_or(b' ');
-        if previous != b'!' && previous != b'<' && previous != b'>' && previous != b'=' && next != b'=' {
+        if previous != b'!'
+            && previous != b'<'
+            && previous != b'>'
+            && previous != b'='
+            && next != b'='
+        {
             let before = &payload[..i];
             let after = &payload[i + 1..];
             return Some(format!("{before}{replacement}{after}"));
@@ -175,7 +180,10 @@ mod tests {
         let result = replace_logical_operator("'hello or world' or 1", &alts, "or");
         assert!(result.is_some());
         let result = result.unwrap();
-        assert!(result.contains("'hello or world'"), "quoted OR preserved: {result}");
+        assert!(
+            result.contains("'hello or world'"),
+            "quoted OR preserved: {result}"
+        );
         assert!(result.contains("||"), "unquoted OR replaced: {result}");
     }
 
@@ -185,7 +193,10 @@ mod tests {
         let result = replace_logical_operator("\"foo and bar\" and 1", &alts, "and");
         assert!(result.is_some());
         let result = result.unwrap();
-        assert!(result.contains("\"foo and bar\""), "quoted AND preserved: {result}");
+        assert!(
+            result.contains("\"foo and bar\""),
+            "quoted AND preserved: {result}"
+        );
     }
 
     #[test]

@@ -1,9 +1,9 @@
 //! Slow HTTP upstream: recon must return within `http_timeout` (+ slack), not hang for 60s.
 
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 use std::time::{Duration, Instant};
-use wafrift_recon::active::{probe_http_headers, ActiveProbeConfig, ReconProbeError};
+use wafrift_recon::active::{ActiveProbeConfig, ReconProbeError, probe_http_headers};
 
 async fn sixty_second_sleep() {
     tokio::time::sleep(Duration::from_secs(60)).await;

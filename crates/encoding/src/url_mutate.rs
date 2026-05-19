@@ -116,10 +116,9 @@ impl UrlStrategy {
     #[must_use]
     pub fn apply_bytes_with_label(self, value: &[u8]) -> (String, &'static str) {
         match self {
-            Self::PercentEncodeAggressive => (
-                percent_encode_aggressive_bytes(value),
-                "url:percent_encode",
-            ),
+            Self::PercentEncodeAggressive => {
+                (percent_encode_aggressive_bytes(value), "url:percent_encode")
+            }
             Self::DoublePercentEncode => {
                 // Two passes of aggressive percent-encoding can blow
                 // up to roughly 9× the input size on worst-case
@@ -322,9 +321,7 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, Option<&'
                 // different labels (one downgraded, others not),
                 // PREFER the downgraded one — operators care most
                 // about the worst case.
-                if last_label
-                    .is_none_or(|l| !l.contains("downgraded"))
-                {
+                if last_label.is_none_or(|l| !l.contains("downgraded")) {
                     last_label = Some(label);
                 }
             }

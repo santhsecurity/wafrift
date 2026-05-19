@@ -311,10 +311,7 @@ impl ChallengeStore {
         // Slow path: either missing OR expired. Take the write lock,
         // re-check, and remove if expired.
         let mut inner = poison_recover_write(&self.inner, "ChallengeStore::get");
-        let expired = inner
-            .by_host
-            .get(&key)
-            .is_some_and(|e| now >= e.expires_at);
+        let expired = inner.by_host.get(&key).is_some_and(|e| now >= e.expires_at);
         if expired {
             inner.by_host.remove(&key);
         }
@@ -395,8 +392,7 @@ impl ChallengeStore {
         // subdomain of it.
         if let Some(domain) = entry.scope_domain.as_deref() {
             let req_host = key.as_str();
-            let domain_matches = req_host == domain
-                || req_host.ends_with(&format!(".{domain}"));
+            let domain_matches = req_host == domain || req_host.ends_with(&format!(".{domain}"));
             if !domain_matches {
                 return None;
             }
@@ -814,10 +810,9 @@ pub fn extract_clearance_cookie_scoped(
                     if psl_ok {
                         scope.domain = Some(v.to_string());
                     }
-                } else if k.trim().eq_ignore_ascii_case("Path")
-                    && !v.is_empty() {
-                        scope.path = Some(v.to_string());
-                    }
+                } else if k.trim().eq_ignore_ascii_case("Path") && !v.is_empty() {
+                    scope.path = Some(v.to_string());
+                }
             }
         }
         return Some((format!("{name_trim}={value_trim}"), kind, scope));
@@ -909,8 +904,7 @@ fn jittered_wait(base: Duration) -> Duration {
         .map_or(0, |d| d.subsec_nanos() as u64);
     // jitter ∈ [-25%, +25%]
     let quarter_range = base.as_millis() as u64 / 4; // 25% of base in ms
-    let offset =
-        (nanos % (quarter_range.saturating_mul(2).max(1))) as i64 - quarter_range as i64;
+    let offset = (nanos % (quarter_range.saturating_mul(2).max(1))) as i64 - quarter_range as i64;
     let new_ms = (base.as_millis() as i64 + offset).max(1) as u64;
     Duration::from_millis(new_ms)
 }

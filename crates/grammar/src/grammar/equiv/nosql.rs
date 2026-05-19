@@ -19,8 +19,21 @@
 use super::{DeliveryShape, Dialect, EquivConfig, EquivPayload, Rng};
 
 const MONGO_OPS: &[&str] = &[
-    "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$regex", "$where", "$exists", "$or",
-    "$and", "$not", "$expr", "$elemMatch",
+    "$ne",
+    "$gt",
+    "$gte",
+    "$lt",
+    "$lte",
+    "$in",
+    "$nin",
+    "$regex",
+    "$where",
+    "$exists",
+    "$or",
+    "$and",
+    "$not",
+    "$expr",
+    "$elemMatch",
 ];
 
 /// Decode JSON `\uXXXX` escapes (so `$ne` → `$ne`), then strip
@@ -314,7 +327,10 @@ mod tests {
     fn operator_or_operand_swap_is_rejected() {
         assert!(!still_injects(r#"{"$ne":"x"}"#, r#"{"$gt":"x"}"#)); // diff op
         assert!(!still_injects(r#"{"$ne":"x"}"#, r#"{"$ne":"y"}"#)); // diff operand
-        assert!(!still_injects(r#"{"$where":"sleep(1)"}"#, r#"{"$where":"sleep(9)"}"#));
+        assert!(!still_injects(
+            r#"{"$where":"sleep(1)"}"#,
+            r#"{"$where":"sleep(9)"}"#
+        ));
     }
 
     #[test]
@@ -327,8 +343,14 @@ mod tests {
     #[test]
     fn deterministic_diverse_and_all_sound() {
         let atk = r#"{"username":{"$ne":null},"pw":{"$regex":".*"}}"#;
-        let a: Vec<_> = generate(atk, &cfg(5)).into_iter().map(|m| m.payload).collect();
-        let b: Vec<_> = generate(atk, &cfg(5)).into_iter().map(|m| m.payload).collect();
+        let a: Vec<_> = generate(atk, &cfg(5))
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
+        let b: Vec<_> = generate(atk, &cfg(5))
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
         assert_eq!(a, b);
         assert!(a.iter().collect::<std::collections::HashSet<_>>().len() >= 5);
         for seed in 0..30u64 {

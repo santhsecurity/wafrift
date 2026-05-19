@@ -5,7 +5,7 @@
 mod common;
 
 use common::{
-    invalid_utf8_fixtures, max_encoded_output_bytes, mb_del, mb_zeros, unicode_stress, ONE_MB,
+    ONE_MB, invalid_utf8_fixtures, max_encoded_output_bytes, mb_del, mb_zeros, unicode_stress,
 };
 use wafrift_encoding::{
     EncodeError, Strategy,
@@ -13,17 +13,18 @@ use wafrift_encoding::{
     contextual::{encode_in_context, escape_for_context},
     encode,
     encoding::{
+        keyword::{
+            alternating_case, between_obfuscate, case_alternate, lowercase,
+            mysql_versioned_comment, percentage_prefix, random_case_alternate, space_to_comment,
+            space_to_dash, space_to_hash, space_to_plus, space_to_random_blank, sql_comment_insert,
+            unmagic_quotes, uppercase, whitespace_insert,
+        },
         layered::{MAX_LAYERED_OUTPUT_SIZE, encode_layered},
         strategy::{MAX_PAYLOAD_SIZE, all_strategies},
-        keyword::{
-            alternating_case, between_obfuscate, case_alternate, lowercase, mysql_versioned_comment,
-            percentage_prefix, random_case_alternate, space_to_comment, space_to_dash, space_to_hash,
-            space_to_plus, space_to_random_blank, sql_comment_insert, unmagic_quotes, uppercase,
-            whitespace_insert,
-        },
         structural::{
-            base64_encode, base64_url_encode, chunked_split, deflate_encode, gzip_encode, hex_encode,
-            null_byte_inject, overlong_utf8, overlong_utf8_more, parameter_pollute, utf7_encode,
+            base64_encode, base64_url_encode, chunked_split, deflate_encode, gzip_encode,
+            hex_encode, null_byte_inject, overlong_utf8, overlong_utf8_more, parameter_pollute,
+            utf7_encode,
         },
         unicode::{
             fullwidth_encode, homoglyph_encode, html_entity_decimal_encode, html_entity_encode,
@@ -37,7 +38,7 @@ use wafrift_encoding::{
         tab_separator, trailing_space, underscore_substitute, whitespace_pad,
     },
     tamper::{all_tamper_names, tamper},
-    url_mutate::{UrlMutateConfig, UrlStrategy, MAX_DOUBLE_ENCODE_INPUT, mutate_url},
+    url_mutate::{MAX_DOUBLE_ENCODE_INPUT, UrlMutateConfig, UrlStrategy, mutate_url},
 };
 use wafrift_types::injection_context::InjectionContext;
 
@@ -150,7 +151,9 @@ fn encode_recursive_depth_eight_bounded() {
                 }
                 Err(EncodeError::InvalidUtf8) => break,
                 Err(EncodeError::PayloadTooLarge { .. }) => break,
-                Err(e) => panic!("Fix: unexpected error at depth {depth} strategy {strategy:?}: {e:?}"),
+                Err(e) => {
+                    panic!("Fix: unexpected error at depth {depth} strategy {strategy:?}: {e:?}")
+                }
             }
         }
     }
@@ -192,8 +195,12 @@ fn encode_layered_negative_output_cap_enforced() {
 
 #[test]
 fn url_strategy_apply_and_apply_bytes_bounded() {
-    let mut fixtures: Vec<Vec<u8>> =
-        vec![vec![], vec![0, 0x7F, 0xFF], mb_zeros(), unicode_stress().into_bytes()];
+    let mut fixtures: Vec<Vec<u8>> = vec![
+        vec![],
+        vec![0, 0x7F, 0xFF],
+        mb_zeros(),
+        unicode_stress().into_bytes(),
+    ];
     fixtures.extend(invalid_utf8_fixtures());
 
     for strategy in [
@@ -294,7 +301,10 @@ fn header_suite(name: &str, value: &str) {
     let _ = comma_join(name, value, "b");
     for (_t, line) in all_obfuscations(name, value) {
         assert!(
-            line.len() <= (name.len() + value.len()).saturating_mul(8).saturating_add(256),
+            line.len()
+                <= (name.len() + value.len())
+                    .saturating_mul(8)
+                    .saturating_add(256),
             "header obfuscation bounded"
         );
     }
@@ -335,12 +345,14 @@ fn contextual_escape_and_encode_bounded() {
 
 #[test]
 fn contextual_negative_json_number_rejects_alpha() {
-    assert!(encode_in_context(
-        b"not-a-number",
-        Strategy::UrlEncode,
-        InjectionContext::JsonNumber
-    )
-    .is_err());
+    assert!(
+        encode_in_context(
+            b"not-a-number",
+            Strategy::UrlEncode,
+            InjectionContext::JsonNumber
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -400,10 +412,7 @@ fn auth_bypass_probes_bounded() {
     let paths: [&str; 4] = ["", "/", stress.as_str(), long.as_str()];
     for p in paths {
         let v = auth_bypass_probes(p);
-        assert!(
-            v.len() < 10_000,
-            "probe count bounded"
-        );
+        assert!(v.len() < 10_000, "probe count bounded");
         for probe in &v {
             assert!(
                 probe.header.len() < 256 && probe.value.len() < 8192,

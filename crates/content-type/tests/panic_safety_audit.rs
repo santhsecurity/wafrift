@@ -40,9 +40,16 @@ fn adversarial_bytes() -> Vec<(&'static str, Vec<u8>)> {
         ("truncated_mb", vec![b'a', b'=', 0xE2, 0x82]), // half a €
         ("crlf_inject", b"a=b\r\nSet-Cookie: x=y\r\n\r\n".to_vec()),
         ("pct_storm", b"%2525%00%ff%".repeat(1024)),
-        ("multipart_ish", b"------WebKitFormBoundary\r\nContent-Disposition: form-data; name=\"f\"\r\n\r\nv\r\n".to_vec()),
+        (
+            "multipart_ish",
+            b"------WebKitFormBoundary\r\nContent-Disposition: form-data; name=\"f\"\r\n\r\nv\r\n"
+                .to_vec(),
+        ),
         ("json_ish", b"{\"a\":[1,2,{\"b\":\"\xff\"}]}".to_vec()),
-        ("xml_ish", b"<?xml version=\"1.0\"?><r>&ent;<![CDATA[\xff]]></r>".to_vec()),
+        (
+            "xml_ish",
+            b"<?xml version=\"1.0\"?><r>&ent;<![CDATA[\xff]]></r>".to_vec(),
+        ),
         ("huge_value", {
             let mut v = b"k=".to_vec();
             v.extend(std::iter::repeat_n(b'A', 300_000));
@@ -64,16 +71,16 @@ fn adversarial_strings() -> Vec<String> {
         " ",
         "\u{0}",
         "\u{0}\u{1}\u{2}",
-        "1abc",          // digit start — invalid XML NameStartChar
-        "-bad",          // hyphen start
-        ".bad",          // dot start
-        "xml-reserved",  // "xml" prefix is reserved
-        "a b\tc\n",      // whitespace
+        "1abc",         // digit start — invalid XML NameStartChar
+        "-bad",         // hyphen start
+        ".bad",         // dot start
+        "xml-reserved", // "xml" prefix is reserved
+        "a b\tc\n",     // whitespace
         "café",
         "日本語",
         "𝕏𝕐𝕑",
-        "a\u{301}",      // combining
-        "\u{200B}",      // zero-width only
+        "a\u{301}", // combining
+        "\u{200B}", // zero-width only
         "<script>",
         "a&b=c\"d'e",
         "\u{FFFD}",
@@ -92,9 +99,7 @@ fn adversarial_strings() -> Vec<String> {
 /// (which renders a `Vec<u8>` body as `[72, 84, ...]`, ~5× inflated and
 /// a meaningless metric for a DoS-ceiling assertion).
 fn variant_bytes(v: &[wafrift_content_type::ContentTypeVariant]) -> usize {
-    v.iter()
-        .map(|x| x.content_type.len() + x.body.len())
-        .sum()
+    v.iter().map(|x| x.content_type.len() + x.body.len()).sum()
 }
 
 /// `generate_variants` re-emits the full param set per variant but the
@@ -121,15 +126,18 @@ fn content_type_transforms_survive_adversarial_corpus() {
         });
 
         let b = bytes.clone();
-        guard(&format!("generate_variants_from_body[{label}]"), &mut || {
-            let out = generate_variants_from_body(&b);
-            let got = variant_bytes(&out);
-            assert!(
-                got <= ABSOLUTE_VARIANT_CEILING,
-                "generate_variants_from_body[{label}] expanded to {got} bytes > absolute ceiling {ABSOLUTE_VARIANT_CEILING} (input was {} bytes — output must NOT scale with input)",
-                b.len()
-            );
-        });
+        guard(
+            &format!("generate_variants_from_body[{label}]"),
+            &mut || {
+                let out = generate_variants_from_body(&b);
+                let got = variant_bytes(&out);
+                assert!(
+                    got <= ABSOLUTE_VARIANT_CEILING,
+                    "generate_variants_from_body[{label}] expanded to {got} bytes > absolute ceiling {ABSOLUTE_VARIANT_CEILING} (input was {} bytes — output must NOT scale with input)",
+                    b.len()
+                );
+            },
+        );
 
         // Round-trip: parsed params back through generate_variants.
         let parsed = std::panic::catch_unwind(AssertUnwindSafe(|| parse_form_body(&bytes)))

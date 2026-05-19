@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use axum::{
+    Router,
     body::Bytes,
     extract::State,
     http::{Method, StatusCode, Uri},
     response::IntoResponse,
     routing::any,
-    Router,
 };
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -19,7 +19,11 @@ struct SeenRequest {
     query: String,
 }
 
-async fn start_upstream_server() -> (u16, Arc<Mutex<Vec<SeenRequest>>>, tokio::task::JoinHandle<()>) {
+async fn start_upstream_server() -> (
+    u16,
+    Arc<Mutex<Vec<SeenRequest>>>,
+    tokio::task::JoinHandle<()>,
+) {
     let captured = Arc::new(Mutex::new(Vec::<SeenRequest>::new()));
     let app = Router::new()
         .route("/*path", any(capture_request))
@@ -27,7 +31,10 @@ async fn start_upstream_server() -> (u16, Arc<Mutex<Vec<SeenRequest>>>, tokio::t
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind upstream");
-    let port = listener.local_addr().expect("upstream listener local addr").port();
+    let port = listener
+        .local_addr()
+        .expect("upstream listener local addr")
+        .port();
     let handle = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
@@ -46,7 +53,11 @@ async fn capture_request(
     let query = uri.query().unwrap_or_default().to_string();
     let mut captured = state.lock().await;
     captured.push(SeenRequest { query });
-    (StatusCode::OK, [("content-type", "text/plain")], "upstream-response")
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain")],
+        "upstream-response",
+    )
 }
 
 #[tokio::test]
@@ -61,7 +72,10 @@ async fn mutate_url_pipeline_must_percent_encode_query_values() {
     let target = format!("http://127.0.0.1:{upstream_port}/search?q=1'+OR+'1");
     let response = client.get(target).send().await.expect("send through proxy");
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.expect("read upstream response"), "upstream-response");
+    assert_eq!(
+        response.text().await.expect("read upstream response"),
+        "upstream-response"
+    );
 
     let request = captured.lock().await;
     let request = request.last().expect("one upstream request");
@@ -90,13 +104,18 @@ async fn mutate_url_pipeline_must_percent_encode_query_values() {
 async fn mutate_url_pipeline_must_not_encode_query_when_off() {
     let (upstream_port, captured, upstream_handle) = start_upstream_server().await;
     let proxy_port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(proxy_port, &["--allow-private-upstream"]).await.expect("start proxy");
+    let mut proxy = start_proxy_and_wait(proxy_port, &["--allow-private-upstream"])
+        .await
+        .expect("start proxy");
     let client = proxy_client(proxy_port).expect("proxy client");
 
     let target = format!("http://127.0.0.1:{upstream_port}/search?q=1'+OR+'1");
     let response = client.get(target).send().await.expect("send through proxy");
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.expect("read upstream response"), "upstream-response");
+    assert_eq!(
+        response.text().await.expect("read upstream response"),
+        "upstream-response"
+    );
 
     let request = captured.lock().await;
     let request = request.last().expect("one upstream request");

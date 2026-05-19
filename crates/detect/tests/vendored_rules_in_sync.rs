@@ -18,8 +18,8 @@ fn read_tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
     let mut map = BTreeMap::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(&dir)
-            .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
+        for entry in
+            fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
         {
             let entry = entry.expect("dir entry");
             let path = entry.path();
@@ -31,8 +31,8 @@ fn read_tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
                     .expect("strip_prefix")
                     .to_string_lossy()
                     .into_owned();
-                let bytes = fs::read(&path)
-                    .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+                let bytes =
+                    fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
                 map.insert(rel, bytes);
             }
         }
@@ -65,16 +65,22 @@ fn vendored_detect_rules_match_workspace_canonical() {
     let mut problems = Vec::new();
     for name in canonical.keys() {
         match vendored.get(name) {
-            None => problems.push(format!("  - {name}: present in workspace, MISSING from vendored")),
+            None => problems.push(format!(
+                "  - {name}: present in workspace, MISSING from vendored"
+            )),
             Some(v) if v != &canonical[name] => {
-                problems.push(format!("  - {name}: CONTENT DIFFERS between workspace and vendored"));
+                problems.push(format!(
+                    "  - {name}: CONTENT DIFFERS between workspace and vendored"
+                ));
             }
             Some(_) => {}
         }
     }
     for name in vendored.keys() {
         if !canonical.contains_key(name) {
-            problems.push(format!("  - {name}: present in vendored, MISSING from workspace"));
+            problems.push(format!(
+                "  - {name}: present in vendored, MISSING from workspace"
+            ));
         }
     }
 

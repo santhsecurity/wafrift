@@ -25,7 +25,9 @@ fn run(percent_encoded_value: &str) -> String {
     };
     let url = format!("/?k={percent_encoded_value}");
     let (out, _techs) = mutate_url(&url, &cfg);
-    out.trim_start_matches('/').trim_start_matches('?').to_string()
+    out.trim_start_matches('/')
+        .trim_start_matches('?')
+        .to_string()
 }
 
 fn assert_no_structural_byte(qs: &str, byte: char) {
@@ -121,5 +123,8 @@ fn safe_chars_still_pass_through_cosmetically() {
     // After decode: "hello world/path". After non_canonical_spaces:
     // "hello+world%2Fpath".
     assert!(qs.contains('+'), "space must still become +, got: {qs:?}");
-    assert!(qs.contains("%2F"), "slash must still be encoded as %2F, got: {qs:?}");
+    assert!(
+        qs.contains("%2F"),
+        "slash must still be encoded as %2F, got: {qs:?}"
+    );
 }

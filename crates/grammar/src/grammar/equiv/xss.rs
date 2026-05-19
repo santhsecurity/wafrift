@@ -106,8 +106,7 @@ fn markers(payload: &str) -> Vec<String> {
     while i + 1 < bs.len() {
         if bs[i] == b'/' && bs[i + 1] == b'/' {
             let mut j = i + 2;
-            while j < bs.len()
-                && (bs[j].is_ascii_alphanumeric() || bs[j] == b'.' || bs[j] == b'-')
+            while j < bs.len() && (bs[j].is_ascii_alphanumeric() || bs[j] == b'.' || bs[j] == b'-')
             {
                 j += 1;
             }
@@ -551,9 +550,7 @@ mod tests {
             );
             let lc = normalize(&m.payload);
             assert!(
-                lc.contains("document.cookie")
-                    && lc.contains("fetch(")
-                    && lc.contains("evil.tld"),
+                lc.contains("document.cookie") && lc.contains("fetch(") && lc.contains("evil.tld"),
                 "exfil construct lost: {:?}",
                 m.payload
             );
@@ -564,8 +561,7 @@ mod tests {
     fn rewrites_are_browser_equivalent_and_diverse() {
         let atk = "<svg onload=alert(1)>";
         let v = generate(atk, &cfg(3));
-        let distinct: std::collections::HashSet<_> =
-            v.iter().map(|m| &m.payload).collect();
+        let distinct: std::collections::HashSet<_> = v.iter().map(|m| &m.payload).collect();
         assert!(distinct.len() >= 6, "too few distinct equivalents");
         for m in &v {
             assert!(still_executes_xss(atk, &m.payload));

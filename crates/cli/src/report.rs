@@ -140,17 +140,10 @@ fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
 
 /// Reduce a target URL to a bare host (the gene-bank/report key).
 fn host_from_target(target: &str) -> String {
-    let no_scheme = target
-        .split_once("://")
-        .map_or(target, |(_, rest)| rest);
-    let host_port = no_scheme
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or(no_scheme);
+    let no_scheme = target.split_once("://").map_or(target, |(_, rest)| rest);
+    let host_port = no_scheme.split(['/', '?', '#']).next().unwrap_or(no_scheme);
     // Strip userinfo and port.
-    let host = host_port
-        .rsplit_once('@')
-        .map_or(host_port, |(_, h)| h);
+    let host = host_port.rsplit_once('@').map_or(host_port, |(_, h)| h);
     let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
     if host.is_empty() {
         "unknown-host".to_string()
@@ -177,7 +170,10 @@ fn ingest_scan_json(raw: &str, src: &str) -> Result<PersistedGeneBank, String> {
     let host = host_from_target(target);
 
     let mut techniques: Vec<String> = Vec::new();
-    if let Some(arr) = scan.get("bypass_variants").and_then(serde_json::Value::as_array) {
+    if let Some(arr) = scan
+        .get("bypass_variants")
+        .and_then(serde_json::Value::as_array)
+    {
         for bv in arr {
             if let Some(ts) = bv.get("techniques").and_then(serde_json::Value::as_array) {
                 for t in ts {

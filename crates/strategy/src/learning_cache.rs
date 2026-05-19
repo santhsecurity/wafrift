@@ -206,17 +206,14 @@ impl LearningCache {
 
         // Sibling tmp file in the same directory so `rename` is atomic
         // (cross-FS rename on /tmp would silently fall back to copy).
-        let tmp = path.with_extension(format!(
-            "tmp.{}.{}",
-            std::process::id(),
-            current_epoch()
-        ));
+        let tmp = path.with_extension(format!("tmp.{}.{}", std::process::id(), current_epoch()));
         // Scope the file handle so the OS releases its descriptor before
         // we rename — Windows would otherwise refuse the rename.
         {
             use std::io::Write;
             let mut f = fs::File::create(&tmp).map_err(LearningCacheError::Io)?;
-            f.write_all(json.as_bytes()).map_err(LearningCacheError::Io)?;
+            f.write_all(json.as_bytes())
+                .map_err(LearningCacheError::Io)?;
             f.sync_all().map_err(LearningCacheError::Io)?;
         }
         if let Err(e) = fs::rename(&tmp, path) {
