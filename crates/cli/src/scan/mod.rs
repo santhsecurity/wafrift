@@ -692,6 +692,11 @@ pub(crate) async fn run_scan(
     // already polls `cancel.is_cancelled()`), and report it truthfully
     // with an exit code distinct from "scan completed, no bypass".
     let mut aborted_rate_limited = false;
+    // Scan-wide rate-limit telemetry, surfaced in `--format json` so a
+    // dashboard / CI consumer can tell "obeyed server cooldown" apart
+    // from "fell back to computed exponential backoff".
+    let mut retry_after_responses: u32 = 0;
+    let mut max_retry_after_obeyed: Option<Duration> = None;
     let mut batches_done = 0_u32;
     let mut last_heartbeat = std::time::Instant::now();
     let mut variant_idx = 0_usize;
@@ -784,6 +789,9 @@ pub(crate) async fn run_scan(
                 batch_rate_limited = true;
                 if let Some(d) = retry_after_opt {
                     batch_retry_after = Some(batch_retry_after.map_or(d, |b| b.max(d)));
+                    retry_after_responses += 1;
+                    max_retry_after_obeyed =
+                        Some(max_retry_after_obeyed.map_or(d, |b| b.max(d)));
                 }
                 if args.format == "text" {
                     print!("{}", "R".yellow());
@@ -1903,6 +1911,14 @@ pub(crate) async fn run_scan(
             "errors": errors,
             "rate_limited": _rate_limited,
             "aborted_rate_limited": aborted_rate_limited,
+            // How many of the RL responses came with a parseable
+            // Retry-After header — distinguishes a polite WAF
+            // (positive count) from a bare 429 limiter (zero).
+            "retry_after_responses": retry_after_responses,
+            // Max wait we obeyed (capped by retry_after::MAX_OBEYED).
+            // Null when no RL response named one.
+            "max_retry_after_obeyed_ms":
+                max_retry_after_obeyed.map(|d| d.as_millis() as u64),
             "bypass_rate_pct": bypass_rate,
             "elapsed_ms": elapsed.as_secs_f64() * 1000.0,
             "bypass_variants": bypass_variants.iter().map(|(idx, payload, techniques, conf)| {
