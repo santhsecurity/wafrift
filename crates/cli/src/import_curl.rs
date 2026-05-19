@@ -347,6 +347,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     };
 
     let scan_args = ScanArgs {
+        target_positional: None,
         target: Some(target),
         from_discovery: None,
         payload,

@@ -56,12 +56,14 @@ pub(crate) async fn run_scan(
     cancel: tokio_util::sync::CancellationToken,
 ) -> ExitCode {
     // `--from-discovery` expansion (handled in main.rs) always sets a
-    // concrete target; the direct path is clap-guaranteed to have one.
-    let target_owned = args.target.clone().unwrap_or_default();
+    // concrete target; the direct path is clap-guaranteed to have one
+    // via the `target_positional` OR `--target` arms of `ScanArgs`.
+    let target_owned = args.resolved_target().unwrap_or("").to_string();
     let target = target_owned.trim_end_matches('/');
     if target.is_empty() {
         eprintln!(
-            "{} --target must be a valid URL (e.g. https://example.com/search), \
+            "{} target URL must be valid (e.g. https://example.com/search) — \
+             pass it as the first positional arg or via --target, \
              or use --from-discovery <report.json|->",
             "Input error:".red().bold()
         );

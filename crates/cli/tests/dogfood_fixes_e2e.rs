@@ -387,3 +387,148 @@ fn report_rejects_non_scan_json_adversarial() {
         "a non-scan JSON blob must produce a clear error: {e}"
     );
 }
+
+// ───────────────────────── CLI: positional target ergonomics ─────────────
+//
+// Named-open in ROBUSTNESS_AUDIT: `scan` and `origin-hints` required
+// `--target` / `--host` flags while `bypass-probe` already took a
+// positional URL — users had to consult `--help` for every subcommand.
+// These tests pin the both-forms-accepted contract end-to-end.
+
+#[test]
+fn scan_accepts_positional_target_url() {
+    // The user-facing win: `wafrift scan <URL>` parses cleanly. We
+    // hit a closed port so the network step fails fast — the assertion
+    // is that the failure is the *network* path, NOT clap "unexpected
+    // argument" / "required argument".
+    let (_code, _o, e) = wafrift(&[
+        "scan",
+        "http://127.0.0.1:1/",
+        "--payload",
+        "<script>alert(1)</script>",
+        "--delay-ms",
+        "1",
+    ]);
+    assert!(
+        !e.contains("unexpected argument") && !e.contains("required"),
+        "positional target URL must parse — clap should not reject it: {e}"
+    );
+    // The audit's earlier work made scan emit a startup banner the
+    // instant clap accepts the args; that banner OR a connect error
+    // both prove we are past parse and into the run.
+    assert!(
+        e.to_lowercase().contains("scan")
+            || e.to_lowercase().contains("connect")
+            || e.to_lowercase().contains("target"),
+        "scan should proceed past arg parsing on positional URL: {e}"
+    );
+}
+
+#[test]
+fn scan_still_accepts_legacy_target_flag() {
+    // LAW 2 — the long-form `--target <URL>` must keep working for
+    // every existing script and CI pipeline that uses it.
+    let (_code, _o, e) = wafrift(&[
+        "scan",
+        "--target",
+        "http://127.0.0.1:1/",
+        "--payload",
+        "<script>alert(1)</script>",
+        "--delay-ms",
+        "1",
+    ]);
+    assert!(
+        !e.contains("unexpected argument") && !e.contains("required"),
+        "--target flag must still parse — backwards-compat: {e}"
+    );
+}
+
+#[test]
+fn scan_rejects_both_positional_and_target_flag_adversarial() {
+    // Anti-rig: if a user gives BOTH forms, clap's conflicts_with must
+    // refuse — silently picking one would be invisible and surprising.
+    let (code, _o, e) = wafrift(&[
+        "scan",
+        "http://127.0.0.1:1/a",
+        "--target",
+        "http://127.0.0.1:1/b",
+        "--payload",
+        "<x>",
+        "--delay-ms",
+        "1",
+    ]);
+    assert_ne!(
+        code, 0,
+        "scan with BOTH positional and --target must be rejected, not silently merged"
+    );
+    assert!(
+        e.contains("cannot be used with") || e.contains("conflict"),
+        "the rejection must name the conflict: {e}"
+    );
+}
+
+#[test]
+fn scan_rejects_neither_target_nor_discovery_adversarial() {
+    // The required_unless_present_any constraint must still fire when
+    // neither the positional, --target, nor --from-discovery is given.
+    let (code, _o, e) = wafrift(&["scan", "--payload", "<x>"]);
+    assert_ne!(code, 0, "scan with no target source must fail");
+    assert!(
+        e.to_lowercase().contains("required")
+            || e.to_lowercase().contains("missing")
+            || e.to_lowercase().contains("the following"),
+        "missing-target error must surface a clap required-arg message: {e}"
+    );
+}
+
+#[test]
+fn origin_hints_accepts_positional_host() {
+    // `wafrift origin-hints discourse.org` — the exact form todos.md
+    // flagged as broken. Using `localhost` so DNS resolves locally and
+    // we exercise the full happy path.
+    let (code, out, err) = wafrift(&["origin-hints", "localhost", "--format", "json"]);
+    assert_eq!(
+        code, 0,
+        "positional host must produce a successful resolution: {err}"
+    );
+    assert!(
+        out.contains("localhost") || out.contains("127.0.0.1") || out.contains("::1"),
+        "json output must name the resolved host: {out}"
+    );
+}
+
+#[test]
+fn origin_hints_still_accepts_legacy_host_flag() {
+    let (code, out, err) = wafrift(&[
+        "origin-hints",
+        "--host",
+        "localhost",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code, 0, "--host flag must still work: {err}");
+    assert!(
+        out.contains("localhost") || out.contains("127.0.0.1") || out.contains("::1"),
+        "json output must name the resolved host: {out}"
+    );
+}
+
+#[test]
+fn origin_hints_rejects_both_positional_and_host_flag_adversarial() {
+    let (code, _o, e) = wafrift(&[
+        "origin-hints",
+        "localhost",
+        "--host",
+        "example.com",
+        "--format",
+        "json",
+    ]);
+    assert_ne!(
+        code, 0,
+        "origin-hints with BOTH forms must be rejected"
+    );
+    assert!(
+        e.contains("cannot be used with") || e.contains("conflict"),
+        "rejection must name the conflict: {e}"
+    );
+}

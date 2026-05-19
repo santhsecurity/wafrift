@@ -142,9 +142,13 @@ on hostile input — these are what found the panics above:
 
 ## Known-open (named, not deferred)
 
-- CLI positional-target ergonomics (`scan <URL>` vs `--target`): the
-  subcommand arg styles are still inconsistent. Not started — flagged
-  open, lower severity than the correctness/panic work above.
+- ~~CLI positional-target ergonomics (`scan <URL>` vs `--target`)~~ —
+  closed 2026-05-19. `scan` and `origin-hints` now accept the URL /
+  hostname as the first positional argument *and* the original
+  `--target` / `--host` long flags (LAW 2 backwards-compat). clap's
+  `conflicts_with` rejects "both forms at once"; `required_unless_present_any`
+  preserves the `--from-discovery` escape hatch. Pinned by
+  `dogfood_fixes_e2e::{scan_accepts_positional_target_url, scan_still_accepts_legacy_target_flag, scan_rejects_both_positional_and_target_flag_adversarial, scan_rejects_neither_target_nor_discovery_adversarial, origin_hints_accepts_positional_host, origin_hints_still_accepts_legacy_host_flag, origin_hints_rejects_both_positional_and_host_flag_adversarial}` (7/7).
 - Per-crate sweep status: **oracle** rebuilt (LDAP de-rig above);
   **recon** swept — one HIGH panic fixed (tcp.rs), discovery parsers
   use serde/Result, no further attacker-reachable defects found;

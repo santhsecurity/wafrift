@@ -8,13 +8,40 @@ use std::process::ExitCode;
 
 #[derive(Debug, clap::Args)]
 pub struct OriginHintsArgs {
-    /// Hostname only (e.g. `api.example.com`), not a full URL.
-    #[arg(long)]
-    pub host: String,
+    /// Hostname only (e.g. `api.example.com`), not a full URL. Accepted
+    /// as the first positional argument (`wafrift origin-hints
+    /// api.example.com`); on equal footing with `--host` (kept for
+    /// backwards compatibility).
+    #[arg(value_name = "HOST")]
+    pub host_positional: Option<String>,
+
+    /// Long-form alias for the positional hostname — kept so every
+    /// pre-existing `wafrift origin-hints --host <HOST>` invocation
+    /// continues to parse. Mutually exclusive with the positional form.
+    #[arg(
+        long = "host",
+        value_name = "HOST",
+        conflicts_with = "host_positional",
+        required_unless_present = "host_positional",
+    )]
+    pub host: Option<String>,
 
     /// `text` or `json`.
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
+}
+
+impl OriginHintsArgs {
+    /// Resolved hostname — positional form first, then the
+    /// long-form `--host` flag. clap's `required_unless_present`
+    /// guarantees at least one is set.
+    #[must_use]
+    pub fn resolved_host(&self) -> &str {
+        self.host_positional
+            .as_deref()
+            .or(self.host.as_deref())
+            .unwrap_or("")
+    }
 }
 
 /// Strip `http(s)://`, path, and port from user input; returns hostname for DNS.
@@ -94,7 +121,7 @@ pub fn run_origin_hints(args: OriginHintsArgs) -> ExitCode {
 }
 
 async fn run_async(args: &OriginHintsArgs) -> Result<(), String> {
-    let host = normalize_host(&args.host)?;
+    let host = normalize_host(args.resolved_host())?;
     let ips = resolve_ips(&host).await?;
 
     if ips.is_empty() {

@@ -285,9 +285,23 @@ struct ProbeArgs {
 #[derive(clap::Args, Debug)]
 pub struct ScanArgs {
     /// Target URL to test evasion variants against (e.g.,
-    /// <http://localhost:8080>). Required unless `--from-discovery` is
-    /// given (then targets come from the discovery report).
-    #[arg(long, required_unless_present = "from_discovery")]
+    /// <http://localhost:8080>). Accepted as the first positional
+    /// argument (`wafrift scan <URL> --payload ...`); kept on equal
+    /// footing with the long-form `--target <URL>` below for
+    /// backwards-compatibility. Required unless `--from-discovery`
+    /// is given (then targets come from the discovery report).
+    #[arg(value_name = "URL")]
+    pub target_positional: Option<String>,
+
+    /// Long-form alias for the positional target URL — kept so every
+    /// pre-existing `wafrift scan --target <URL>` invocation continues
+    /// to parse. Mutually exclusive with the positional form.
+    #[arg(
+        long = "target",
+        value_name = "URL",
+        conflicts_with = "target_positional",
+        required_unless_present_any = ["target_positional", "from_discovery"],
+    )]
     pub target: Option<String>,
 
     /// Ingest a `wafrift discover` JSON report (file, or `-` for
@@ -346,6 +360,20 @@ pub struct ScanArgs {
     /// Write JSON output to a file instead of stdout.
     #[arg(long, short)]
     pub output: Option<PathBuf>,
+}
+
+impl ScanArgs {
+    /// Resolved target URL — the positional form if supplied, else the
+    /// long-form `--target` flag, else `None` (only possible when
+    /// `--from-discovery` is in play; clap's
+    /// `required_unless_present_any` guarantees the user-facing
+    /// invariant).
+    #[must_use]
+    pub fn resolved_target(&self) -> Option<&str> {
+        self.target_positional
+            .as_deref()
+            .or(self.target.as_deref())
+    }
 }
 
 #[derive(clap::Args, Debug)]
@@ -1451,6 +1479,7 @@ async fn run_scan_from_discovery(
             jobs.len()
         );
         let job_args = ScanArgs {
+            target_positional: None,
             target: Some(url.clone()),
             from_discovery: None,
             payload: args.payload.clone(),
