@@ -1205,29 +1205,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_state = shared_state.clone();
     let shutdown_path = gene_bank_path.clone();
     tokio::spawn(async move {
-        use tokio::signal::unix::{SignalKind, signal};
-        // Surface signal-handler-setup failure instead of silently
-        // dropping the shutdown task — the previous `Err(_) => return`
-        // meant a setup failure left the proxy with NO graceful
-        // shutdown path and no log line explaining why.
-        let mut sigterm = match signal(SignalKind::terminate()) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(error = %e, "SIGTERM handler setup failed; graceful shutdown disabled");
+        // Wait for a shutdown signal, then flush gene bank and exit.
+        // Surface handler-setup failure instead of silently dropping the
+        // shutdown task — a setup failure must leave a log line.
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(error = %e, "SIGTERM handler setup failed; graceful shutdown disabled");
+                    return;
+                }
+            };
+            let mut sigint = match signal(SignalKind::interrupt()) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(error = %e, "SIGINT handler setup failed; graceful shutdown disabled");
+                    return;
+                }
+            };
+            tokio::select! {
+                _ = sigterm.recv() => info!("received SIGTERM"),
+                _ = sigint.recv() => info!("received SIGINT"),
+            };
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows has no SIGTERM; tokio::signal::ctrl_c handles
+            // Ctrl-C, Ctrl-Break, and process-close (SetConsoleCtrlHandler).
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                warn!(error = %e, "Ctrl-C handler setup failed; graceful shutdown disabled");
                 return;
             }
-        };
-        let mut sigint = match signal(SignalKind::interrupt()) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(error = %e, "SIGINT handler setup failed; graceful shutdown disabled");
-                return;
-            }
-        };
-        tokio::select! {
-            _ = sigterm.recv() => info!("received SIGTERM"),
-            _ = sigint.recv() => info!("received SIGINT"),
-        };
+            info!("received Ctrl-C");
+        }
         if let Some(path) = &shutdown_path {
             let st = shutdown_state.lock().await;
             match save_gene_bank(&st, path) {
