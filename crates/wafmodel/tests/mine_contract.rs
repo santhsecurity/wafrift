@@ -34,6 +34,37 @@ fn passes(w: &mut SimRegexWaf, bytes: &[u8]) -> bool {
 }
 
 #[test]
+fn mining_issues_zero_live_queries() {
+    // README/lib claim: "Mine bypasses offline … no further live
+    // traffic." `mine_bypasses` takes no oracle by type, but assert the
+    // behavioural contract end-to-end: after learning, the live-query
+    // counter must NOT advance by a single query across mining — and
+    // the step is non-vacuous (learning really queried; a real hole was
+    // really mined).
+    let alpha = Alphabet::new(vec![b'a', b'b', b'A'], b'Z');
+    let mut w = waf("ab");
+    let mut eq = WMethodEq { extra_states: 3 };
+    let learned = l_star(&mut w, &json_body, &alpha, &mut eq).unwrap().sfa;
+
+    let after_learn = w.queries();
+    assert!(after_learn > 0, "learning must have issued live queries");
+
+    let attack = attack_grammar(&alpha, &[b"ab".as_ref(), b"Ab".as_ref()]);
+    let mined = mine_bypasses(&learned, &attack, 12, 8);
+    assert!(
+        !mined.is_empty(),
+        "a real hole exists ⇒ mining is non-vacuous"
+    );
+
+    assert_eq!(
+        w.queries(),
+        after_learn,
+        "mining issued live queries — the 'offline / no further live \
+         traffic' claim is false"
+    );
+}
+
+#[test]
 fn mined_bypasses_are_real_against_the_same_oracle() {
     // WAF blocks the lowercase token `ab`. The attack class also
     // includes the case-variant `Ab` (still an attack); the WAF does
