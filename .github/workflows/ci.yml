@@ -192,3 +192,40 @@ jobs:
       # lane and it GATES (no continue-on-error). --release: the heavy
       # numeric/learning loops dominate, so release runtime ≪ debug.
       - run: cargo test -p wafrift-wafmodel --release
+
+  mutants:
+    name: mutants (E5 — anti-rig core, mine.rs; 0 missed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      # Mutation testing is the ground truth that the suite is not
+      # decoration. Scoped to the *baselined & hardened* anti-rig core
+      # (mine.rs); the scope ratchets to more engine files as each is
+      # baselined in subsequent slices — we never claim a file is
+      # mutation-gated before it provably is. The one provably-
+      # equivalent mutant is excluded WITH a written justification in
+      # mutants.toml (item 40). The gate is: ZERO `MISSED` mutants.
+      # TIMEOUT mutants (arithmetic corruptions that infinite-loop the
+      # KMP build) are a real detection signal — a hung test fails CI —
+      # so they are acceptable, only silent survivors are not.
+      - name: cargo-mutants on the anti-rig core (mine.rs)
+        env:
+          WAFMODEL_PROPTEST_CASES: "24"
+          WAFMODEL_SCALE_CONFIGS: "8"
+        run: |
+          set -o pipefail
+          cargo mutants --manifest-path crates/wafmodel/Cargo.toml \
+            -f crates/wafmodel/src/mine.rs --no-shuffle \
+            -- --test mine_contract --test mine_solve_props --test scale_corpus \
+            | tee mutants.out || true
+          if grep -q '^MISSED' mutants.out; then
+            echo "::error::surviving (MISSED) mutant in the anti-rig core"
+            grep '^MISSED' mutants.out
+            exit 1
+          fi
+          echo "0 missed — every non-equivalent mutant in mine.rs is detected"

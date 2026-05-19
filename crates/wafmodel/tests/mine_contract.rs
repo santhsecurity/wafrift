@@ -34,6 +34,85 @@ fn passes(w: &mut SimRegexWaf, bytes: &[u8]) -> bool {
 }
 
 #[test]
+fn attack_grammar_kmp_equals_naive_substring_for_self_overlapping_needles() {
+    // `attack_grammar` is soundness-critical: every "this word is in the
+    // attack class" assertion elsewhere rests on its KMP construction.
+    // Borderless needles (`ab`, `a`) leave the KMP failure function all
+    // zeros, so they cannot exercise the border arithmetic — a mutation
+    // there survives. Here we use needles with NON-TRIVIAL borders and
+    // assert the built SFA recognises EXACTLY "contains needle" against
+    // an independent naive substring oracle, over every word up to
+    // 2·|needle|+1 — any off-by-one in the failure function or the
+    // transition follow diverges on a self-overlapping input.
+    fn naive_contains(hay: &[u8], needle: &[u8]) -> bool {
+        needle.len() <= hay.len() && hay.windows(needle.len()).any(|w| w == needle)
+    }
+    // Two-symbol needles ONLY (distinct ≤ {a,b} ⇒ alphabet size 3 with
+    // the catch-all), each with a non-trivial KMP border so the
+    // failure-function `!=` comparison is load-bearing — `ababa` /
+    // `aabab` are the canonical stressors. Enumerating every word up to
+    // 2·|needle| over a 3-symbol alphabet is exhaustive enough to make
+    // ANY failure-function arithmetic error change the language, while
+    // staying ≤ 3^10 words (fast — no timeouts).
+    for needle in [
+        b"aba".as_ref(),
+        b"abab",
+        b"ababa",
+        b"aaaa",
+        b"aabaa",
+        b"aabab",
+        b"abaab",
+        b"baba",
+    ] {
+        let mut distinct: Vec<u8> = needle.to_vec();
+        distinct.sort_unstable();
+        distinct.dedup();
+        // A catch-all byte that is NOT in the needle.
+        let catch = (b'a'..=b'z').find(|c| !distinct.contains(c)).unwrap();
+        let alpha = Alphabet::new(distinct.clone(), catch);
+        let g = attack_grammar(&alpha, &[needle]);
+
+        let k = alpha.len();
+        let max = 2 * needle.len();
+        let mut frontier = vec![Vec::<usize>::new()];
+        let (mut acc, mut rej, mut checked) = (0u64, 0u64, 0u64);
+        for _ in 0..=max {
+            let mut next = Vec::new();
+            for w in &frontier {
+                let bytes = alpha.concretize(w);
+                let want = naive_contains(&bytes, needle);
+                assert_eq!(
+                    g.accepts(&bytes),
+                    want,
+                    "needle {:?}: grammar≠naive on {:?}",
+                    String::from_utf8_lossy(needle),
+                    String::from_utf8_lossy(&bytes)
+                );
+                if want {
+                    acc += 1;
+                } else {
+                    rej += 1;
+                }
+                checked += 1;
+                for s in 0..k {
+                    let mut e = w.clone();
+                    e.push(s);
+                    next.push(e);
+                }
+            }
+            frontier = next;
+        }
+        // Non-vacuous: the grammar both accepts and rejects within the
+        // enumerated set (else the equivalence above is trivial).
+        assert!(
+            acc > 0 && rej > 0,
+            "needle {:?}: degenerate corpus (acc={acc} rej={rej} checked={checked})",
+            String::from_utf8_lossy(needle)
+        );
+    }
+}
+
+#[test]
 fn mining_issues_zero_live_queries() {
     // README/lib claim: "Mine bypasses offline … no further live
     // traffic." `mine_bypasses` takes no oracle by type, but assert the

@@ -1,0 +1,45 @@
+# E5 — cargo-mutants configuration for wafrift-wafmodel.
+#
+# Mutation testing is the ground truth that the suite is not
+# decoration: a test that would still pass if a function returned
+# `Ok(())` / `Vec::new()` / `true` is *caught* here as a survived
+# mutant. The legendary bar is a caught-mutant ratio that only ratchets
+# up, with every anti-rig / soundness mutant CAUGHT (item 38) and any
+# residual survivor justified as a provably-equivalent mutant (item 40).
+#
+# `lib.rs` is only module declarations + re-exports + crate docs (no
+# branching logic), so mutating it yields equivalent/no-op mutants;
+# excluded to keep the score honest. Everything else in the engine is
+# in scope. Test timeouts are generous because the contract suite runs
+# real learners and proptests; CI scales the proptest case count down
+# via WAFMODEL_PROPTEST_CASES so each mutant's run stays bounded.
+
+# Glob bases are the WORKSPACE root, not the package — keep them
+# fully-qualified or cargo-mutants silently filters everything out.
+# No `examine_globs`: the default already examines exactly this
+# package's source; we only carve out the no-logic re-export shim.
+timeout_multiplier = 6.0
+minimum_test_timeout = 180
+exclude_globs = ["crates/wafmodel/src/lib.rs"]
+additional_cargo_test_args = ["--no-fail-fast"]
+
+# ── Documented PROVABLY-EQUIVALENT mutants (item 40). ──
+# These are NOT silent survivors: each is excluded WITH a written
+# justification, and only after an exhaustive differential failed to
+# distinguish it (so a test that "killed" it would be asserting an
+# implementation detail, not the contract — an anti-rig violation).
+#
+# `mine.rs:34:34  replace != with ==  in kmp_sfa`
+#   `kmp_sfa` only promises the *membership* language "contains
+#   needle". `kmp_next` (NOT mutated) re-validates every byte via
+#   `c != needle[j]` and the automaton accepts ONLY after m sequential
+#   exact matches. A KMP failure function that under-estimates (which
+#   `!=`→`==` produces) makes the matcher do redundant restarts but can
+#   never skip a real occurrence nor manufacture a false one — the
+#   accepted language is invariant (the all-zeros failure function is
+#   exactly naive search, still correct). Confirmed empirically by
+#   `attack_grammar_kmp_equals_naive_substring_for_self_overlapping_needles`
+#   (exhaustive vs an independent oracle over bordered needles ×
+#   every word ≤ 2·|needle|): zero divergence. Efficiency-only ⇒
+#   equivalent ⇒ excluded, not chased.
+exclude_re = ["mine\\.rs:34:34: replace != with == in kmp_sfa"]

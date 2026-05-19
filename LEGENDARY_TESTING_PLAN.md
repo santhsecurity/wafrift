@@ -227,3 +227,28 @@ The bar is met only if the process *catches* things. It has:
   Display + anti-vacuous control: the same target learns under an
   unbounded budget) and a rustc-enforced exhaustiveness guard so a
   future variant cannot be added without a producing test.
+
+- **F4 — mutation testing exposed a hollow KMP coverage gap (fixed).**
+  E5 baseline (`cargo-mutants` on the anti-rig core `mine.rs`, scoped +
+  scaled): 38 mutants → 8 *missed*, all inside `kmp_sfa`'s failure-
+  function arithmetic. The existing mining tests used borderless
+  needles (`ab`, `a`) whose KMP failure function is all-zeros, so the
+  border arithmetic was never exercised — proof the suite was
+  decoration *there*. Fixed with
+  `attack_grammar_kmp_equals_naive_substring_for_self_overlapping_needles`:
+  an exhaustive differential vs an independent naive-substring oracle
+  over bordered needles (`ababa`, `aabab`, `abaab`, …) × every word ≤
+  2·|needle|. Re-baseline: **35/35 viable non-equivalent mutants
+  detected (100%)** — 32 by assertion, 3 by timeout (arithmetic
+  corruptions that infinite-loop the KMP build: a hung test fails CI,
+  a real detection signal, not a silent survivor), 2 unviable. The
+  single residual `!=`→`==` is a **provably language-equivalent
+  mutant**: substring membership is invariant to a non-optimal failure
+  function (an under-estimating `fail` only adds redundant restarts;
+  `kmp_next` re-validates every byte and accepts only at a full match),
+  empirically confirmed by zero divergence in the exhaustive
+  differential. Excluded WITH that written justification in
+  `mutants.toml` (item 40), never silently. Wired the always-on
+  gating `mutants` CI job (zero `MISSED`; scope ratchets file-by-file
+  as each engine module is baselined+hardened — we never claim a file
+  is mutation-gated before it provably is).
