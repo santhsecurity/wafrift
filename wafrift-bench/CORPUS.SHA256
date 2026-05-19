@@ -7,4 +7,15 @@
 # corpus drift cannot silently invalidate a published bypass-rate
 # number. Update both this file AND any benchmark JSON in the same
 # commit.
-aaba7e256ceeca0ab5a8d4b5b95ae34a704e53db716ba4b9d12c5c7fe11367bc
+#
+# Re-pinned 2026-05-19: the previous pin (aaba7e25…) was generated at
+# commit 8d987a9 (which introduced this gate). Commit b8d6e96 ("tsai:
+# SSRF parser-confusion authority + auth-bypass headers + path-routing")
+# legitimately expanded the corpus afterwards but did NOT re-pin in the
+# same commit; the gate could not catch it because CI was red further
+# upstream (fmt / mold-linker), so this is the first run that reached
+# this step. The corpus addition is intentional; this re-pins to the
+# current legitimate tree. NOTE for maintainers: bench results JSON
+# produced before b8d6e96 reflect the pre-SSRF-expansion corpus and
+# should be re-validated against this tree when next republished.
+af5f5b2ae7304d65102c841c625441db2bdc3d68ed6ac086e3a649925d012660
