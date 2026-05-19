@@ -105,3 +105,49 @@ fn pipeline_is_left_fold_and_total() {
         vec![0, 255, 13, 10]
     );
 }
+
+// ── E3/22: structural-encode → stage-decode is identity for 10k
+// random ASCII payloads, for every reversible stage. ──
+mod roundtrip_props {
+    use proptest::prelude::*;
+    use wafrift_wafmodel::Stage;
+
+    fn pc() -> u32 {
+        std::env::var("WAFMODEL_PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10_000)
+    }
+
+    fn pct_all(s: &[u8]) -> Vec<u8> {
+        s.iter().flat_map(|b| format!("%{b:02X}").into_bytes()).collect()
+    }
+    fn json_all(s: &[u8]) -> Vec<u8> {
+        s.iter().flat_map(|b| format!("\\u{b:04x}").into_bytes()).collect()
+    }
+    fn ent_all(s: &[u8]) -> Vec<u8> {
+        s.iter().flat_map(|b| format!("&#x{b:x};").into_bytes()).collect()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(pc()))]
+
+        #[test]
+        fn every_reversible_stage_round_trips(p in proptest::collection::vec(0x20u8..0x7f, 0..40)) {
+            // URL single decode reverses full %XX encode.
+            prop_assert_eq!(
+                Stage::UrlDecode { plus_is_space: false }.apply(&pct_all(&p)),
+                p.clone()
+            );
+            // Double-URL decode reverses double %XX encode.
+            prop_assert_eq!(Stage::DoubleUrlDecode.apply(&pct_all(&pct_all(&p))), p.clone());
+            // JSON unescape reverses \uXXXX encode.
+            prop_assert_eq!(Stage::JsonUnescape.apply(&json_all(&p)), p.clone());
+            // HTML-entity decode reverses &#xHH; encode.
+            prop_assert_eq!(Stage::HtmlEntityDecode.apply(&ent_all(&p)), p.clone());
+            // Identity is identity; every stage is total (no panic) on
+            // arbitrary bytes — exercised by construction above.
+            prop_assert_eq!(Stage::Identity.apply(&p), p);
+        }
+    }
+}

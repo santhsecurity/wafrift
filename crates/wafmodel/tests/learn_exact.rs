@@ -19,7 +19,7 @@ use wafrift_types::Request;
 use wafrift_wafmodel::canon::Channel;
 use wafrift_wafmodel::{
     Alphabet, BoundedExhaustiveEq, ChannelSet, Outcome, Rule, SimRegexWaf, WafOracle, kv_learn,
-    l_star,
+    l_star, passive_learn,
 };
 
 /// Body-channel JSON skeleton ⇒ canonicalization yields exactly one
@@ -157,4 +157,61 @@ fn learned_model_is_not_equivalent_to_a_different_waf() {
     let ws = vec![0usize, 1usize]; // `<`, `s`
     assert!(!learned.accepts(&alpha.concretize(&ws)));
     assert!(waf_passes("<t", &alpha, &ws));
+}
+
+/// E1/5 — triple-learner differential. Three independent inference
+/// strategies (L* incremental table, KV discrimination tree, passive
+/// fixed-suite) must recover the EXACT same language as the WAF, for a
+/// battery of ground-truth rulesets. A bug in any one strategy is
+/// caught by disagreement with the other two.
+#[test]
+fn lstar_kv_and_passive_learners_all_agree_with_the_waf() {
+    let alpha = Alphabet::new(vec![b'<', b's', b'/'], b'A');
+    for pat in ["<s", "<s[^>]*/", "s/<", "<s/s"] {
+        let mut w1 = waf_with_pattern(pat);
+        let mut w2 = waf_with_pattern(pat);
+        let mut w3 = waf_with_pattern(pat);
+        // A *sound* equivalence oracle is mandatory for an EXACTNESS
+        // claim. `WMethodEq{extra_states:k}` only guarantees fault
+        // discovery when (true_states − hyp_states) ≤ k; for `<s/s`
+        // the very first hypothesis has 1 state, the target has 5, and
+        // the shortest counterexample is `<s/s` itself (length 4) —
+        // outside W-method{2}'s ≤3 horizon, so it silently certifies
+        // the trivial 1-state "accept-all" automaton. That is not a
+        // passive_learn bug (passive recovers the exact 5-state DFA);
+        // it is the differential feeding L*/KV an oracle too weak to
+        // prove the property it asserts. `BoundedExhaustiveEq` is
+        // complete for every fault whose shortest witness ≤ max_len,
+        // and max_len here covers the length-8 verification corpus
+        // below — so all three learners are now genuinely exact.
+        let mut eq1 = BoundedExhaustiveEq { max_len: 8 };
+        let mut eq2 = BoundedExhaustiveEq { max_len: 8 };
+        let a = l_star(&mut w1, &json_body, &alpha, &mut eq1).unwrap().sfa;
+        let b = kv_learn(&mut w2, &json_body, &alpha, &mut eq2).unwrap().sfa;
+        let c = passive_learn(&mut w3, &json_body, &alpha, 7).unwrap().sfa;
+
+        assert!(
+            a.equivalent(&b),
+            "L*≠KV on {pat:?}: {:?}",
+            a.distinguishing_word(&b)
+        );
+        assert!(
+            a.equivalent(&c),
+            "L*≠passive on {pat:?}: {:?}",
+            a.distinguishing_word(&c)
+        );
+        // …and all three match the real WAF exactly on a corpus far
+        // past the Myhill–Nerode bound.
+        for word in all_words(alpha.len(), 8) {
+            let truth = waf_passes(pat, &alpha, &word);
+            let conc = alpha.concretize(&word);
+            assert_eq!(a.accepts(&conc), truth, "L* {pat:?} {word:?}");
+            assert_eq!(b.accepts(&conc), truth, "KV {pat:?} {word:?}");
+            assert_eq!(c.accepts(&conc), truth, "passive {pat:?} {word:?}");
+        }
+        // The passive learner returns the *minimal* DFA; minimizing
+        // the active hypotheses must agree with it state-for-state in
+        // language (sanity that minimize ∘ L* ≡ passive).
+        assert!(a.minimize().equivalent(&c));
+    }
 }

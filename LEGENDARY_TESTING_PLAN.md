@@ -169,3 +169,44 @@ Gated on wafrift CI staying green (push only when green).
      (differential + CVE + property10k + fuzz-smoke + mutants +
      coverage + perf + scale + secbench) and emits a single
      green/red legendary scorecard; CI gates on it.
+
+---
+
+## Findings log (real defects this process surfaced)
+
+The bar is met only if the process *catches* things. It has:
+
+- **F1 — `passive_learn` non-termination (engine defect, fixed).**
+  The RPNI/passive learner built its state set with an *unbounded*
+  prefix BFS: a new state per novel observation-row, no length or
+  state cap. Regular oracles converge so it halted; against the E7
+  noisy/adversarial oracle every fresh prefix yields a fresh noisy
+  row, so states grew kⁱ forever — an infinite hang, not a slow test.
+  Fix: the genuine bounded RPNI / Trakhtenbrot–Barzdin *truncated*
+  regime — reachable BFS (fast & exact for regular targets) with a
+  hard `access_len ≤ depth` state-creation cap and row-equality fold
+  past the horizon. |states| ≤ Σ kⁱ < ∞ ⇒ provably halts for *any*
+  oracle. Pinned by `adversarial_oracle::noisy_oracle_*` and the
+  constructive pumping witness in `non_regular_*`.
+
+- **F2 — false green from an unsound equivalence oracle (test defect,
+  fixed; the real catch).** The triple-learner differential asserted
+  L\* ≡ KV ≡ passive *exact* while driving L\*/KV with
+  `WMethodEq{extra_states:2}`. W-method conformance is only
+  *conditionally* complete (`true_states − hyp_states ≤ extra_states`).
+  For the self-overlap pattern `<s/s` the first hypothesis is 1 state,
+  the target is 5, and the shortest counterexample is `<s/s` (len 4) —
+  outside W-method{2}'s ≤3 horizon — so it *silently certified the
+  trivial 1-state "accept-all" automaton as exact*. `passive_learn`
+  (depth 7) was the only correct learner there. Resolution: every
+  exactness-vs-ground-truth claim now uses the provably-complete
+  `BoundedExhaustiveEq` (was already the convention in `learn_exact`;
+  the one deviating test was the bug). Audited *all* `WMethodEq`
+  call-sites: only `learn_exact`'s differential and `differential_waf`
+  made unguarded exactness claims (both fixed); `equiv_query_contract`
+  is self-guarding (cross-checks vs `BoundedExhaustiveEq`);
+  `mine_/scale_/determinism_/artifact_/perf_` claims are
+  soundness-revalidated-against-the-real-WAF or determinism/perf, for
+  which W-method is adequate. Pinned permanently by
+  `wmethod_soundness.rs` (asserts the limitation is *real* and
+  non-vacuous, and that the sound oracle + passive both recover exact).

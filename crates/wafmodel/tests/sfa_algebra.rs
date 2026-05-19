@@ -9,6 +9,17 @@
 use proptest::prelude::*;
 use wafrift_wafmodel::sfa::{BytePred, Sfa};
 
+/// Proptest case count: full (10k) by default — the legendary lane —
+/// scaled down per-push via `WAFMODEL_PROPTEST_CASES` so the CI gate
+/// stays fast while the nightly `legendary` job runs the full count.
+/// The *property* is identical at any count; only confidence scales.
+fn pc() -> u32 {
+    std::env::var("WAFMODEL_PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000)
+}
+
 // ── Reference automata (hand-built, language known exactly) ─────────
 
 /// L = { w : w contains byte `<` (0x3C) }.
@@ -131,7 +142,7 @@ proptest! {
     // The product construction is exact: ∩ ∪ \ ¬ on automata equal the
     // matching Boolean combination of the brute language oracles, for
     // thousands of random byte words.
-    #![proptest_config(ProptestConfig::with_cases(4000))]
+    #![proptest_config(ProptestConfig::with_cases(pc()))]
 
     #[test]
     fn boolean_ops_agree_with_brute_oracle(word in proptest::collection::vec(any::<u8>(), 0..24)) {
@@ -145,5 +156,56 @@ proptest! {
         prop_assert_eq!(a.union(&b).accepts(w), brute_contains_lt(w) || brute_ends_with_a(w));
         prop_assert_eq!(a.difference(&b).accepts(w), brute_contains_lt(w) && !brute_ends_with_a(w));
         prop_assert_eq!(a.complement().accepts(w), !brute_contains_lt(w));
+    }
+}
+
+// ── E3/19 + E13/91: minimization is language-preserving, monotone,
+// and idempotent — 10k random automata over a 3-byte alphabet. ──
+fn build_random_sfa(states: &[(bool, [u8; 4])]) -> Sfa {
+    let n = states.len();
+    let a = BytePred::byte(b'a');
+    let b = BytePred::byte(b'b');
+    let c = BytePred::byte(b'c');
+    let other = !(a.or(b).or(c));
+    let accept: Vec<bool> = states.iter().map(|s| s.0).collect();
+    let delta: Vec<Vec<(BytePred, usize)>> = states
+        .iter()
+        .map(|(_, t)| {
+            vec![
+                (a, t[0] as usize % n),
+                (b, t[1] as usize % n),
+                (c, t[2] as usize % n),
+                (other, t[3] as usize % n),
+            ]
+        })
+        .collect();
+    Sfa::new(0, accept, delta)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(pc()))]
+
+    #[test]
+    fn minimize_is_language_preserving_monotone_and_idempotent(
+        states in proptest::collection::vec(
+            (any::<bool>(), proptest::array::uniform4(0u8..5)),
+            1..6usize,
+        )
+    ) {
+        let sfa = build_random_sfa(&states);
+        let min = sfa.minimize();
+        // Language preserved (EXACT — distinguishing_word over bytes).
+        prop_assert!(
+            min.equivalent(&sfa),
+            "minimize changed the language: {:?}",
+            min.distinguishing_word(&sfa)
+        );
+        // Never larger than the input.
+        prop_assert!(min.len() <= sfa.len());
+        // Idempotent: re-minimizing a minimal machine neither shrinks
+        // it nor changes its language.
+        let min2 = min.minimize();
+        prop_assert_eq!(min2.len(), min.len());
+        prop_assert!(min2.equivalent(&min));
     }
 }

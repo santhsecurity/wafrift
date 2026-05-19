@@ -19,6 +19,22 @@ use wafrift_wafmodel::{
     mine_bypasses, synthesize_closure,
 };
 
+/// Deterministic-config count: full 1000 by default (legendary lane);
+/// `WAFMODEL_SCALE_CONFIGS` scales it down for the fast CI gate. The
+/// anti-rig invariant is identical at any count.
+fn scn() -> u64 {
+    std::env::var("WAFMODEL_SCALE_CONFIGS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000)
+}
+fn pc() -> u32 {
+    std::env::var("WAFMODEL_PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1200)
+}
+
 fn body(b: &[u8]) -> Request {
     Request::post("https://h/p", b.to_vec()).header("Content-Type", "application/json")
 }
@@ -65,7 +81,7 @@ fn waf_from(seed: u64) -> (SimRegexWaf, Vec<&'static [u8]>, Alphabet) {
 
 #[test]
 fn one_thousand_configs_no_fake_bypass_no_dishonest_closure() {
-    for seed in 0u64..1000 {
+    for seed in 0u64..scn() {
         let (waf, needles, alpha) = waf_from(seed);
         let grammar = attack_grammar(&alpha, &needles);
 
@@ -116,7 +132,7 @@ fn one_thousand_configs_no_fake_bypass_no_dishonest_closure() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1200))]
+    #![proptest_config(ProptestConfig::with_cases(pc()))]
 
     /// Randomized configs: the mining anti-rig invariant must hold for
     /// every one (no learning here — pure scale of the soundness check).

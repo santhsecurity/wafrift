@@ -1,0 +1,53 @@
+# Tier-B CVE / published-bypass replay corpus.
+#
+# Each entry is a REAL, attributed WAF-bypass class. `vuln_transforms`
+# is the CRS `t:` chain the vulnerable config applied (the gap is what
+# it OMITS); `patched_transforms` is the documented fix. The replay
+# test asserts: the payload bypasses the vuln config, the engine
+# rediscovers an equivalent bypass from the decompiled model, and the
+# patched config closes it with no benign false positive.
+#
+# Sources are class-level citations (the bypass *technique*), not a
+# claim that a specific CVE id maps 1:1 to this minimized fixture.
+
+schema = 1
+
+[[entry]]
+id = "double_url_encode_norm_mismatch"
+source = "CRS normalization-mismatch (urlDecode single-pass vs origin double-decode); OWASP CRS issue class, Tsai/portswigger research"
+class = "xss"
+token = "<script"
+payload = "%253Cscript%253E"
+vuln_transforms = ["UrlDecodeUni", "Lowercase"]
+patched_transforms = ["UrlDecodeUni", "UrlDecodeUni", "Lowercase"]
+benign_twin = "double the fun%25"
+
+[[entry]]
+id = "case_variant_case_sensitive_rule"
+source = "Custom case-sensitive SecRule misconfig (no t:lowercase) — common CRS tuning error"
+class = "xss"
+token = "<script"
+payload = "<ScRiPt"
+vuln_transforms = []
+patched_transforms = ["Lowercase"]
+benign_twin = "describe the script"
+
+[[entry]]
+id = "html_entity_unescaped"
+source = "Rule lacking t:htmlEntityDecode; entity-encoded payload reaches HTML sink decoded"
+class = "xss"
+token = "<script"
+payload = "&#x3c;script"
+vuln_transforms = ["Lowercase"]
+patched_transforms = ["HtmlEntityDecode", "Lowercase"]
+benign_twin = "AT&T scripting guide"
+
+[[entry]]
+id = "nul_byte_token_split"
+source = "Rule lacking t:removeNulls; embedded NUL splits the matched token"
+class = "xss"
+token = "<script"
+payload = "<scri\u0000pt"
+vuln_transforms = ["Lowercase"]
+patched_transforms = ["RemoveNulls", "Lowercase"]
+benign_twin = "no script here"

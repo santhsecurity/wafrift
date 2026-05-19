@@ -63,7 +63,16 @@ jobs:
       # the default lane fast + portable.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo build --workspace
-      - run: cargo test --workspace
+      # Fast per-push gate: the wafrift-wafmodel property + scale suites
+      # run with a *reduced* case/config count so the push gate stays
+      # quick. The IDENTICAL properties run at full 10k/1000 in the
+      # parallel `legendary` job below, which also gates — coverage is
+      # not reduced, only split into a fast lane + a thorough lane.
+      - name: test (fast gate — scaled property/scale suites)
+        run: cargo test --workspace
+        env:
+          WAFMODEL_PROPTEST_CASES: "256"
+          WAFMODEL_SCALE_CONFIGS: "60"
       - name: bench corpus integrity
         run: cargo run --release -p wafrift-cli -- bench-waf --validate-only --corpus wafrift-bench/corpus
       - name: bench corpus pinned hash matches wafrift-bench/CORPUS.SHA256
@@ -168,3 +177,18 @@ jobs:
       - run: "cargo test  -p wafrift-transport stealth:: --features tls-impersonate"
       - run: cargo build -p wafrift-proxy --features tls-impersonate
       - run: cargo test  -p wafrift-proxy   --features tls-impersonate
+
+  legendary:
+    name: legendary (full wafmodel matrix — 10k props / 1000 configs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The IDENTICAL property + scale suites the fast `ci` lane runs
+      # scaled-down, here at full strength (10k proptest cases, 1000
+      # deterministic configs). Runs in PARALLEL with `ci`, so it does
+      # not lengthen the fast push gate; it is the always-on thorough
+      # lane and it GATES (no continue-on-error). --release: the heavy
+      # numeric/learning loops dominate, so release runtime ≪ debug.
+      - run: cargo test -p wafrift-wafmodel --release
