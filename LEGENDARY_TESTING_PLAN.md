@@ -354,8 +354,23 @@ The bar is met only if the process *catches* things. It has:
   internal pre-narrow `cp` — testing the implementation, not the
   contract. normalize.rs added to the nightly mutation scope.
 
+- **F6 — a single runner cannot hold the comprehensive mutation run
+  (fixed by a per-file matrix).** The all-files nightly job was
+  resource-killed mid-run (exit 143, blank step conclusion, Post-steps
+  incomplete) at ~82 min on a GitHub-hosted runner — at BOTH `--jobs 3`
+  and `--jobs 2` — because memory accumulates across ~256 mutants ×
+  learn.rs's heavy suite. A gate that cannot complete is decoration.
+  Fixed with the "small isolated runs" pattern: `mutants-nightly` is
+  now a `strategy: matrix` with ONE fresh runner PER FILE
+  (mine/sfa/solve/normalize at the proven `--jobs 3 --timeout 30`;
+  learn.rs alone at `--jobs 1 --timeout 150` — serial, minimal
+  predictable memory, no concurrent rustc). `fail-fast: false` so
+  every file's verdict is independent and a failure localises to one
+  file. No runner ever accumulates another file's memory.
+
 - **Cross-cutting law reinforced:** never trust a green CI check —
   read the job log. A gate is only real once its *failure* path has
   been exercised, *in the shell it actually runs in*. And: a CI gate's
   resource/time envelope is part of its contract — a gate that blows
-  the runner is not green, it is unproven.
+  the runner is not green, it is unproven; heavy work must be split
+  into small isolated runs, never one accumulating mega-run.

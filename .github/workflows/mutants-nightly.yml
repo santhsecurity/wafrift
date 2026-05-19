@@ -1,35 +1,66 @@
-# E5 item 37 — the THOROUGH mutation regression gate, run NIGHTLY (not
-# per-push). The per-push `mutants` job in ci.yml stays fast and
-# proven (mine.rs + sfa.rs + solve.rs, ~30s-timeout, ~32 min). learn.rs
-# is the most-depended-on module but its exercising suite
-# (random_learner_differential's oracle fan-out + learn_exact's
-# BoundedExhaustiveEq) is memory- and time-heavy: under `--jobs 3` on a
-# GitHub-hosted runner it exhausted resources and the runner was
-# shut down (exit 143) mid-run. Mutation-gating it belongs OFF the push
-# path — exactly what the plan says ("nightly"). Here there is no
-# per-push time pressure, so it runs all four anti-rig-core files at
-# full strength with the memory-safer `--jobs 2`.
+# E5 item 37 — the THOROUGH mutation regression gate, run NIGHTLY.
 #
-# The gate logic is the SAME one proven across the 3-layer F5 saga:
-# `--config` explicit, `CARGO_TERM_COLOR=never`, the step shell
-# overridden off `bash -e` so a no-match grep cannot abort it, and
-# BOTH a colour-stripped `^MISSED` scan AND a `sed -n` summary parse
-# (no summary ⇒ run broke ⇒ fail; "N missed" N>0 ⇒ fail; clean ⇒ pass).
+# Hard-won lesson (the F5 saga + two runner OOMs): a SINGLE
+# GitHub-hosted runner cannot run the comprehensive learn.rs-inclusive
+# mutation suite to completion — memory accumulates across ~256 mutants
+# × learn.rs's heavy suite (random_learner_differential's oracle
+# fan-out + learn_exact's BoundedExhaustiveEq) and the runner is
+# resource-killed mid-run (exit 143) at BOTH --jobs 3 and --jobs 2.
+# A gate that cannot complete is decoration. The robust fix is the
+# "small isolated runs" pattern: a MATRIX with one fresh runner PER
+# FILE, so no runner ever accumulates another file's memory. learn.rs
+# gets `--jobs 1` (serial — minimal, predictable memory, no concurrent
+# rustc) on its own runner; the light files keep the proven
+# `--jobs 3 --timeout 30`. Each leg is independently bounded and a
+# failure localises to one file.
+#
+# The per-push `mutants` job in ci.yml is unchanged and proven green
+# (mine+sfa+solve). The gate logic here is the SAME one proven across
+# the 3-layer F5 saga: explicit `--config`, `CARGO_TERM_COLOR=never`,
+# step shell overridden off `bash -e` so a no-match grep cannot abort
+# it, and BOTH a colour-stripped `^MISSED` scan AND a `sed -n` summary
+# parse (no summary ⇒ run broke ⇒ fail; "N missed" N>0 ⇒ fail).
 name: mutants-nightly
 
 on:
   schedule:
-    # 04:17 UTC daily — off-peak, never blocks a push.
     - cron: "17 4 * * *"
   workflow_dispatch: {}
 
 jobs:
   mutants-nightly:
-    name: mutants-nightly (E5 — mine+sfa+solve+learn+normalize; 0 missed)
+    name: "mutants-nightly ${{ matrix.id }} (0 missed)"
     runs-on: ubuntu-latest
-    # Generous: nightly has the full 6h GitHub job budget. This only
-    # guards against a hung/runaway run, not normal duration.
-    timeout-minutes: 330
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: mine
+            files: "-f crates/wafmodel/src/mine.rs"
+            tests: "--test mine_contract --test mine_solve_props --test scale_corpus"
+            jobs: 3
+            tmo: 30
+          - id: sfa
+            files: "-f crates/wafmodel/src/sfa.rs"
+            tests: "--test sfa_algebra --test artifact_contract"
+            jobs: 3
+            tmo: 30
+          - id: solve
+            files: "-f crates/wafmodel/src/solve.rs"
+            tests: "--test solve_contract --test mine_solve_props --test cve_replay --test equiv_bridge_contract"
+            jobs: 3
+            tmo: 30
+          - id: normalize
+            files: "-f crates/wafmodel/src/normalize.rs"
+            tests: "--test normalize_laws --test transduce_contract --test cve_replay"
+            jobs: 3
+            tmo: 30
+          - id: learn
+            files: "-f crates/wafmodel/src/learn.rs"
+            tests: "--test learn_exact --test wmethod_soundness --test random_learner_differential --test determinism_contract --test error_coverage"
+            jobs: 1
+            tmo: 150
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -37,7 +68,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants
-      - name: cargo-mutants over the full anti-rig core
+      - name: "cargo-mutants — ${{ matrix.id }}"
         env:
           WAFMODEL_PROPTEST_CASES: "12"
           WAFMODEL_SCALE_CONFIGS: "5"
@@ -45,41 +76,27 @@ jobs:
         shell: bash --noprofile --norc {0}
         run: |
           set -uo pipefail
-          # `--jobs 2` (not 3): learn.rs's suite is memory-heavy and 3×
-          # concurrent rustc+test shut the runner down. `--timeout 150`
-          # fits learn.rs's ~96s CI baseline with headroom; a hung
-          # mutant is still detected (TIMEOUT), just slower.
           cargo mutants --config mutants.toml \
             --manifest-path crates/wafmodel/Cargo.toml --no-shuffle \
-            --timeout 150 --jobs 2 \
-            -f crates/wafmodel/src/mine.rs \
-            -f crates/wafmodel/src/sfa.rs \
-            -f crates/wafmodel/src/solve.rs \
-            -f crates/wafmodel/src/learn.rs \
-            -f crates/wafmodel/src/normalize.rs \
-            -- --test mine_contract --test mine_solve_props \
-               --test scale_corpus --test sfa_algebra --test artifact_contract \
-               --test solve_contract --test equiv_bridge_contract --test cve_replay \
-               --test learn_exact --test wmethod_soundness \
-               --test random_learner_differential --test determinism_contract \
-               --test error_coverage \
-               --test normalize_laws --test transduce_contract \
+            --timeout ${{ matrix.tmo }} --jobs ${{ matrix.jobs }} \
+            ${{ matrix.files }} \
+            -- ${{ matrix.tests }} \
             2>&1 | tee mutants_run.log || true
           if grep -qE '^MISSED' mutants_run.log; then
-            echo "::error::surviving (MISSED) mutant in the anti-rig core"
+            echo "::error::surviving (MISSED) mutant in ${{ matrix.id }}"
             grep -E '^MISSED' mutants_run.log
             exit 1
           fi
           summary="$(grep -E '[0-9]+ mutants tested' mutants_run.log | tail -1)"
           if [ -z "$summary" ]; then
-            echo "::error::no cargo-mutants summary — the run did not complete"
+            echo "::error::no cargo-mutants summary — ${{ matrix.id }} run did not complete"
             exit 1
           fi
           echo "summary: $summary"
           missed="$(printf '%s\n' "$summary" | sed -nE 's/.*[^0-9]([0-9]+) missed.*/\1/p')"
           missed="${missed:-0}"
           if [ "$missed" != "0" ]; then
-            echo "::error::cargo-mutants reports ${missed} missed mutant(s)"
+            echo "::error::${{ matrix.id }} reports ${missed} missed mutant(s)"
             exit 1
           fi
-          echo "0 missed — every non-equivalent mutant in mine+sfa+solve+learn+normalize is detected"
+          echo "0 missed — every non-equivalent mutant in ${{ matrix.id }} is detected"
