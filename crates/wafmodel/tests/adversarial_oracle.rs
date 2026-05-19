@@ -27,7 +27,11 @@ impl WafOracle for BalancedWaf {
         let b = req.body_bytes().unwrap_or(&[]);
         let lt = b.iter().filter(|&&c| c == b'<').count();
         let gt = b.iter().filter(|&&c| c == b'>').count();
-        Ok(if lt == gt { Outcome::Pass } else { Outcome::Block })
+        Ok(if lt == gt {
+            Outcome::Pass
+        } else {
+            Outcome::Block
+        })
     }
     fn queries(&self) -> u64 {
         self.q
@@ -99,8 +103,7 @@ fn non_regular_waf_is_not_falsely_certified_exact() {
         }
         seen.insert(st, k);
     }
-    let (i, j) =
-        pump.expect("a finite automaton MUST repeat a state on <^k (pigeonhole)");
+    let (i, j) = pump.expect("a finite automaton MUST repeat a state on <^k (pigeonhole)");
 
     // <^i>^i is balanced (truth = pass); <^j>^i has j>i more `<` than
     // `>` (truth = block). The automaton is in the identical state
@@ -161,19 +164,15 @@ fn noisy_oracle_terminates_and_never_panics() {
         flip_in: 16,
     };
     let rep_a = passive_learn(&mut noisy_a, &body, &alpha, 5).unwrap();
-    assert!(rep_a.membership_queries > 0, "the learner must have queried");
+    assert!(
+        rep_a.membership_queries > 0,
+        "the learner must have queried"
+    );
     assert!(!rep_a.sfa.is_empty(), "a hypothesis is still produced");
     // The hypothesis is a well-formed, total, *deterministic* automaton
     // even under noise: classifying the same input twice is identical
     // and it never panics on arbitrary bytes (incl. NUL / 0xFF).
-    for w in [
-        b"".as_ref(),
-        b"<",
-        b"s",
-        b"<s",
-        b"<<ss",
-        b"\x00\xff<s\x00",
-    ] {
+    for w in [b"".as_ref(), b"<", b"s", b"<s", b"<<ss", b"\x00\xff<s\x00"] {
         assert_eq!(
             rep_a.sfa.accepts(w),
             rep_a.sfa.accepts(w),

@@ -481,9 +481,7 @@ impl Sfa {
             .collect();
 
         // 4. Moore refinement (only reachable states participate).
-        let mut class: Vec<usize> = (0..n)
-            .map(|s| usize::from(self.accept[s]))
-            .collect();
+        let mut class: Vec<usize> = (0..n).map(|s| usize::from(self.accept[s])).collect();
         loop {
             let mut sig: std::collections::HashMap<Vec<usize>, usize> =
                 std::collections::HashMap::new();
@@ -505,8 +503,7 @@ impl Sfa {
 
         // 5. Rebuild: one state per class, start first, guards = union
         // of minterms with the same target class.
-        let mut rep: std::collections::HashMap<usize, StateId> =
-            std::collections::HashMap::new();
+        let mut rep: std::collections::HashMap<usize, StateId> = std::collections::HashMap::new();
         let start_c = class[self.start];
         rep.insert(start_c, 0);
         let mut order = vec![start_c];

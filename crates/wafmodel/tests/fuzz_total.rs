@@ -8,7 +8,9 @@
 use proptest::prelude::*;
 use wafrift_types::Request;
 use wafrift_wafmodel::normalize::{Transform, apply_chain};
-use wafrift_wafmodel::{LearnedModel, SimRegexWaf, Stage, canonicalize, json_unescape, url_decode_once};
+use wafrift_wafmodel::{
+    LearnedModel, SimRegexWaf, Stage, canonicalize, json_unescape, url_decode_once,
+};
 
 /// Per-push-scaled proptest count (full 10k by default; the legendary
 /// nightly lane runs the full count, the fast CI gate scales down).

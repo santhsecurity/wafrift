@@ -120,13 +120,19 @@ mod roundtrip_props {
     }
 
     fn pct_all(s: &[u8]) -> Vec<u8> {
-        s.iter().flat_map(|b| format!("%{b:02X}").into_bytes()).collect()
+        s.iter()
+            .flat_map(|b| format!("%{b:02X}").into_bytes())
+            .collect()
     }
     fn json_all(s: &[u8]) -> Vec<u8> {
-        s.iter().flat_map(|b| format!("\\u{b:04x}").into_bytes()).collect()
+        s.iter()
+            .flat_map(|b| format!("\\u{b:04x}").into_bytes())
+            .collect()
     }
     fn ent_all(s: &[u8]) -> Vec<u8> {
-        s.iter().flat_map(|b| format!("&#x{b:x};").into_bytes()).collect()
+        s.iter()
+            .flat_map(|b| format!("&#x{b:x};").into_bytes())
+            .collect()
     }
 
     proptest! {

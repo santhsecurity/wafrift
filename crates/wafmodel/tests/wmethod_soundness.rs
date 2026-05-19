@@ -141,5 +141,8 @@ fn sound_oracle_and_passive_both_recover_the_exact_language() {
     }
     let w4 = vec![1usize, 2, 0, 2]; // `<s/s` (sorted-alphabet indices)
     assert_eq!(alpha.concretize(&w4), b"<s/s");
-    assert!(!pv.accepts(&alpha.concretize(&w4)), "`<s/s` must be blocked");
+    assert!(
+        !pv.accepts(&alpha.concretize(&w4)),
+        "`<s/s` must be blocked"
+    );
 }

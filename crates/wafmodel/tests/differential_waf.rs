@@ -103,11 +103,7 @@ fn dual_evaluation_of_a_richer_ruleset_is_self_consistent() {
     // to length 9 for a multi-rule config — 4^0..9 ≈ 350k checks.
     let alpha = Alphabet::new(vec![b'<', b's', b'/'], b'A');
     let mut waf = SimRegexWaf::new(
-        vec![
-            rule("r1", "<s"),
-            rule("r2", "s/"),
-            rule("r3", "/<s"),
-        ],
+        vec![rule("r1", "<s"), rule("r2", "s/"), rule("r3", "/<s")],
         5,
     );
     // Exactness over the full length-≤9 corpus ⇒ the learner must be

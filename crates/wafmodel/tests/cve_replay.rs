@@ -58,8 +58,8 @@ fn passes(w: &mut SimRegexWaf, b: &[u8]) -> bool {
 
 #[test]
 fn every_pinned_bypass_replays_and_its_patch_closes_it() {
-    let doc: Doc = toml::from_str(include_str!("../rules/cve/replay.toml"))
-        .expect("CVE replay corpus parses");
+    let doc: Doc =
+        toml::from_str(include_str!("../rules/cve/replay.toml")).expect("CVE replay corpus parses");
     assert!(doc.entry.len() >= 4, "thin replay corpus");
 
     for e in &doc.entry {
@@ -129,13 +129,18 @@ fn solver_rediscovers_the_double_url_cve_from_first_principles() {
         .expect("solver must rediscover the double-encode bypass");
     // It reconstructs the attack at the sink and is not the raw token.
     assert_ne!(sol.input, e.token.as_bytes());
-    assert!(sol.sink_view.windows(e.token.len()).any(|w| w == e.token.as_bytes()));
+    assert!(
+        sol.sink_view
+            .windows(e.token.len())
+            .any(|w| w == e.token.as_bytes())
+    );
     // And the patched config defeats the solver (regression closed).
     let mut patched = waf(&e.patched_transforms, &e.token);
     assert!(
         solve_bypass(e.token.as_bytes(), &sink, &mut patched, &body)
             .unwrap()
             .is_none(),
-        "[{}] patched config must defeat the solver too", e.id
+        "[{}] patched config must defeat the solver too",
+        e.id
     );
 }
