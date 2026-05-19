@@ -91,6 +91,12 @@ Differential bypass scanner against a single protected URL. Fires 136 auth\-bypa
 wafrift\-man(1)
 Generate a troff man page for `wafrift` (and optionally subcommands)
 .TP
+wafrift\-audit(1)
+Decompile a CRS\-class ruleset and report the holes an attacker can drive through it (the WAF X\-ray). Zero\-config; `\-\-ruleset` audits a custom Tier\-B config
+.TP
+wafrift\-harden(1)
+Synthesize the minimal CRS\-grade rules that close the holes `audit` finds, prove zero benign false positives, and exit non\-zero unless closure is proven (usable as a CI gate)
+.TP
 wafrift\-help(1)
 Print this message or the help of the given subcommand(s)
 .SH VERSION
