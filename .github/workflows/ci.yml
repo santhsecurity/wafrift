@@ -219,13 +219,15 @@ jobs:
           WAFMODEL_SCALE_CONFIGS: "8"
         run: |
           set -o pipefail
+          # NB: cargo-mutants owns the `mutants.out/` directory; tee to
+          # a distinct log file to avoid a file/dir name collision.
           cargo mutants --manifest-path crates/wafmodel/Cargo.toml \
             -f crates/wafmodel/src/mine.rs --no-shuffle \
             -- --test mine_contract --test mine_solve_props --test scale_corpus \
-            | tee mutants.out || true
-          if grep -q '^MISSED' mutants.out; then
+            2>&1 | tee mutants_run.log || true
+          if grep -q '^MISSED' mutants_run.log; then
             echo "::error::surviving (MISSED) mutant in the anti-rig core"
-            grep '^MISSED' mutants.out
+            grep '^MISSED' mutants_run.log
             exit 1
           fi
           echo "0 missed — every non-equivalent mutant in mine.rs is detected"

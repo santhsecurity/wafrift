@@ -19,3 +19,8 @@ GEMINI.md
 .windsurfrules
 .aider*
 build_features.py
+
+# cargo-mutants run artifacts
+mutants.out/
+mutants.out.old/
+mutants_run.log
