@@ -4,10 +4,9 @@
 //! boundary as an executable symbolic automaton**, then turn evasion
 //! from search into deduction:
 //!
-//! - **P1 — Decompile.** Active-learn the WAF
-//!   ([`learn`](mod@learn)) over a [`WafOracle`](oracle::WafOracle)
-//!   into a [`Sfa`](sfa::Sfa), spending the minimum membership-query
-//!   budget. Emit it as a provenance-stamped artifact.
+//! - **P1 — Decompile.** Active-learn the WAF (the [`learn`] module)
+//!   over a [`WafOracle`] into an [`Sfa`], spending the minimum
+//!   membership-query budget. Emit it as a provenance-stamped artifact.
 //! - **P1 — Mine.** Intersect the learned pass-language with an attack
 //!   grammar *offline* to harvest minimal-edit bypasses with no further
 //!   live queries.
