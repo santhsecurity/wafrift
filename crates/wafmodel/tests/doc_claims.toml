@@ -1,0 +1,86 @@
+# E10/75 — doc-claim ledger. Every load-bearing claim the crate's
+# public docs (lib.rs crate doc + README.md) make is registered here
+# and bound to a REAL test that fails if the claim becomes false.
+#
+# `claim` MUST be a verbatim substring of `source` (so a claim cannot
+# be invented here, and deleting it from the docs fails the audit).
+# `proven_by` MUST be the name of a real `fn` in tests/ (so the proof
+# cannot be a phantom). `status` is "proven" or "open"; the auditor
+# ratchets open→0 and forbids silent shrinkage of the ledger.
+
+[[claim]]
+id = "p1-decompile-into-sfa"
+claim = "Active-learn the WAF"
+source = "src/lib.rs"
+proven_by = "lstar_recovers_the_exact_language"
+status = "proven"
+
+[[claim]]
+id = "min-query-budget"
+claim = "membership-query budget"
+source = "src/lib.rs"
+proven_by = "kv_and_lstar_agree_exactly_and_kv_is_no_costlier"
+status = "proven"
+
+[[claim]]
+id = "mine-offline-no-live-traffic"
+claim = "no further live"
+source = "README.md"
+proven_by = "mining_issues_zero_live_queries"
+status = "proven"
+
+[[claim]]
+id = "double-decode-not-hardcoded"
+claim = "fall out of the solver"
+source = "README.md"
+proven_by = "double_url_encode_bypass_is_discovered_not_hardcoded"
+status = "proven"
+
+[[claim]]
+id = "provable-hole-closure"
+claim = "provable\n  hole-closure"
+source = "README.md"
+proven_by = "closure_is_proven_minimal_and_fp_free"
+status = "proven"
+
+[[claim]]
+id = "ml-waf-domination-honest"
+claim = "constrained\n  adversarial evasion against ML-WAFs"
+source = "README.md"
+proven_by = "an_ml_waf_covering_the_whole_manifold_yields_none_not_a_fabrication"
+status = "proven"
+
+[[claim]]
+id = "solved-becomes-canonical-member"
+claim = "the double-decode trick, rediscovered"
+source = "src/lib.rs"
+proven_by = "solver_solution_becomes_a_canonical_member"
+status = "proven"
+
+[[claim]]
+id = "no-stubs"
+claim = "each module is landed complete (no\n//! stubs)"
+source = "src/lib.rs"
+proven_by = "no_stub_markers_in_engine_src"
+status = "proven"
+
+[[claim]]
+id = "forbid-unsafe"
+claim = "#![forbid(unsafe_code)]"
+source = "src/lib.rs"
+proven_by = "forbid_unsafe_is_declared"
+status = "proven"
+
+[[claim]]
+id = "zero-config-embedded-crs"
+claim = "embedded so `wafrift audit`/`harden` work zero-config"
+source = "src/lib.rs"
+proven_by = "default_crs_ruleset_parses_zero_config"
+status = "proven"
+
+[[claim]]
+id = "readme-library-example"
+claim = "let view = canonicalize(&request);"
+source = "README.md"
+proven_by = "readme_library_example_runs"
+status = "proven"
