@@ -17,6 +17,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
+      # `--all-features` pulls `tls-impersonate` → rquest → boring-sys,
+      # which compiles a forked BoringSSL from C. ubuntu-latest ships
+      # clang/gcc/cmake/golang; `ninja-build` is the only missing tool
+      # (same as the dedicated `tls-impersonate` job). Without it
+      # `cargo check --workspace --all-features` fails building
+      # boring-sys — the actual cause of this job's prior red, not a
+      # code/MSRV regression.
+      - name: Install boring-sys C build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build
       - run: cargo check --workspace --all-features
 
   ci:

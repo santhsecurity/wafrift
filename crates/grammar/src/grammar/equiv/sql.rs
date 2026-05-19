@@ -280,11 +280,9 @@ fn normalize(s: &str) -> String {
                 i += 2;
                 out.push(' ');
             }
-        } else if bytes[i] == '-' && i + 1 < bytes.len() && bytes[i + 1] == '-' {
-            while i < bytes.len() && bytes[i] != '\n' {
-                i += 1;
-            }
-        } else if bytes[i] == '#' {
+        } else if (bytes[i] == '-' && i + 1 < bytes.len() && bytes[i + 1] == '-') || bytes[i] == '#'
+        {
+            // line comment (`-- …` or `# …`) — skip to newline.
             while i < bytes.len() && bytes[i] != '\n' {
                 i += 1;
             }
@@ -443,32 +441,34 @@ fn rw_whitespace(toks: &mut [Tok], rng: &mut Rng) -> bool {
 fn rw_keyword(toks: &mut [Tok], rng: &mut Rng, dialect: &mut Dialect) -> bool {
     let mut hit = false;
     for t in toks.iter_mut() {
-        if let Tok::Word(w) = t {
-            if is_kw(w) && w.len() >= 2 && rng.chance(1, 2) {
-                let chosen = match rng.below(3) {
-                    0 => w
-                        .chars()
-                        .enumerate()
-                        .map(|(k, c)| {
-                            if k % 2 == 0 {
-                                c.to_ascii_uppercase()
-                            } else {
-                                c.to_ascii_lowercase()
-                            }
-                        })
-                        .collect(),
-                    1 => {
-                        *dialect = promote(*dialect, Dialect::MySql);
-                        format!("/*!{w}*/")
-                    }
-                    _ => {
-                        *dialect = promote(*dialect, Dialect::MySql);
-                        format!("/*!50000{w}*/")
-                    }
-                };
-                *t = Tok::Word(chosen);
-                hit = true;
-            }
+        if let Tok::Word(w) = t
+            && is_kw(w)
+            && w.len() >= 2
+            && rng.chance(1, 2)
+        {
+            let chosen = match rng.below(3) {
+                0 => w
+                    .chars()
+                    .enumerate()
+                    .map(|(k, c)| {
+                        if k % 2 == 0 {
+                            c.to_ascii_uppercase()
+                        } else {
+                            c.to_ascii_lowercase()
+                        }
+                    })
+                    .collect(),
+                1 => {
+                    *dialect = promote(*dialect, Dialect::MySql);
+                    format!("/*!{w}*/")
+                }
+                _ => {
+                    *dialect = promote(*dialect, Dialect::MySql);
+                    format!("/*!50000{w}*/")
+                }
+            };
+            *t = Tok::Word(chosen);
+            hit = true;
         }
     }
     hit
@@ -478,20 +478,20 @@ fn rw_keyword(toks: &mut [Tok], rng: &mut Rng, dialect: &mut Dialect) -> bool {
 fn rw_literal(toks: &mut [Tok], rng: &mut Rng, dialect: &mut Dialect) -> bool {
     let mut hit = false;
     for t in toks.iter_mut() {
-        if let Tok::Num(n) = t {
-            if let Ok(v) = n.parse::<i64>() {
-                if v >= 0 && rng.chance(1, 2) {
-                    *t = match rng.below(3) {
-                        0 => {
-                            *dialect = promote(*dialect, Dialect::MySql);
-                            Tok::Num(format!("0x{v:x}"))
-                        }
-                        1 => Tok::Num(format!("{v}e0")),
-                        _ => Tok::Num(format!("({v})")),
-                    };
-                    hit = true;
+        if let Tok::Num(n) = t
+            && let Ok(v) = n.parse::<i64>()
+            && v >= 0
+            && rng.chance(1, 2)
+        {
+            *t = match rng.below(3) {
+                0 => {
+                    *dialect = promote(*dialect, Dialect::MySql);
+                    Tok::Num(format!("0x{v:x}"))
                 }
-            }
+                1 => Tok::Num(format!("{v}e0")),
+                _ => Tok::Num(format!("({v})")),
+            };
+            hit = true;
         }
     }
     hit
@@ -567,30 +567,31 @@ fn rw_paren(toks: &mut Vec<Tok>, rng: &mut Rng) -> bool {
     // bury it inside the comment, leaving the `(` unmatched and the
     // query a syntax error (an unsound emission).
     for i in 0..toks.len() {
-        if let Tok::Word(w) = &toks[i] {
-            if matches!(w.to_ascii_lowercase().as_str(), "or" | "and") && i + 2 < toks.len() {
-                let open = i + 1;
-                // first terminator at/after `open`: `#` or `--`.
-                let mut close = toks.len();
-                let mut j = open;
-                while j < toks.len() {
-                    let term = matches!(toks[j], Tok::Sym('#'))
-                        || (matches!(toks[j], Tok::Sym('-'))
-                            && j + 1 < toks.len()
-                            && matches!(toks[j + 1], Tok::Sym('-')));
-                    if term {
-                        close = j;
-                        break;
-                    }
-                    j += 1;
+        if let Tok::Word(w) = &toks[i]
+            && matches!(w.to_ascii_lowercase().as_str(), "or" | "and")
+            && i + 2 < toks.len()
+        {
+            let open = i + 1;
+            // first terminator at/after `open`: `#` or `--`.
+            let mut close = toks.len();
+            let mut j = open;
+            while j < toks.len() {
+                let term = matches!(toks[j], Tok::Sym('#'))
+                    || (matches!(toks[j], Tok::Sym('-'))
+                        && j + 1 < toks.len()
+                        && matches!(toks[j + 1], Tok::Sym('-')));
+                if term {
+                    close = j;
+                    break;
                 }
-                if close <= open {
-                    return false;
-                }
-                toks.insert(close, Tok::Sym(')'));
-                toks.insert(open, Tok::Sym('('));
-                return true;
+                j += 1;
             }
+            if close <= open {
+                return false;
+            }
+            toks.insert(close, Tok::Sym(')'));
+            toks.insert(open, Tok::Sym('('));
+            return true;
         }
     }
     false
@@ -607,10 +608,8 @@ fn rw_terminator(s: &str, rng: &mut Rng) -> Option<String> {
         b
     } else if let Some(b) = trimmed.strip_suffix("--") {
         b
-    } else if let Some(b) = trimmed.strip_suffix('#') {
-        b
     } else {
-        return None;
+        trimmed.strip_suffix('#')?
     };
     let tail = rand_ident(rng);
     let repl = match rng.below(6) {
@@ -798,17 +797,17 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
             rules.push("sep_inject");
         }
         let mut rendered = render(&toks);
-        if rng.chance(2, 5) {
-            if let Some(t) = rw_tautology(payload, &rendered, &mut rng) {
-                rendered = t;
-                rules.push("tautology_gen");
-            }
+        if rng.chance(2, 5)
+            && let Some(t) = rw_tautology(payload, &rendered, &mut rng)
+        {
+            rendered = t;
+            rules.push("tautology_gen");
         }
-        if rng.chance(1, 2) {
-            if let Some(t) = rw_terminator(&rendered, &mut rng) {
-                rendered = t;
-                rules.push("terminator_equiv");
-            }
+        if rng.chance(1, 2)
+            && let Some(t) = rw_terminator(&rendered, &mut rng)
+        {
+            rendered = t;
+            rules.push("terminator_equiv");
         }
         if rules.is_empty() {
             continue;

@@ -1256,14 +1256,15 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
 
 /// Fetch a URL for passive WAF detection: one GET, redirects NOT
 /// followed (a 301/302/403 may itself be the WAF/CDN response we want
+/// `(status, response headers, body)` from a detect fetch, or an error
+/// string. Aliased so the nested generic isn't a `type_complexity`
+/// lint at every use site.
+type DetectFetch = Result<(u16, Vec<(String, String)>, Vec<u8>), String>;
+
 /// to fingerprint), realistic browser UA so the edge behaves normally.
 /// Returns `(status, headers, body)` with the body capped at 64 KiB —
 /// WAF/CDN banners and block pages are always in the head.
-fn fetch_for_detect(
-    url: &str,
-    timeout_secs: u64,
-    insecure: bool,
-) -> Result<(u16, Vec<(String, String)>, Vec<u8>), String> {
+fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> DetectFetch {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs.clamp(1, 120)))
         .redirect(reqwest::redirect::Policy::none())

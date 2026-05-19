@@ -241,30 +241,83 @@ fn json_encode_is_a_valid_json_string_round_trip() {
     }
 }
 
-/// 5. HTML-entity encoders neutralise the dangerous characters and a
-///    naive entity-decode recovers them exactly.
+/// 5. HTML-entity encoders neutralise the dangerous characters AND a
+///    spec-correct entity decode recovers them exactly (the encoding is
+///    lossless / faithfully reversible — proven, not assumed).
+///
+/// Note: `HtmlEntityEncode` is a *full hex-entity* encoder — it emits
+/// `&#xNN;` for every byte, not just `<>"'&`. So the recovery oracle
+/// must be a GENERAL HTML entity decoder (numeric hex `&#xH;`, numeric
+/// decimal `&#D;`, and the named set), not a fixed-string substitutor.
+/// A naive fixed substitutor silently fails to recover `&#x73;` (`s`),
+/// which is exactly the lossy-recovery bug this now catches.
 #[test]
 fn html_entity_encoders_neutralise_and_recover_markup() {
+    /// Spec-correct HTML entity decoder: `&#xHEX;`, `&#DEC;`, and the
+    /// five predefined named entities. Returns the decoded string.
     fn html_decode(s: &str) -> String {
-        s.replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&#x27;", "'")
-            .replace("&#x2F;", "/")
-            .replace("&#47;", "/")
-            .replace("&amp;", "&")
+        let b = s.as_bytes();
+        let mut out = String::with_capacity(s.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'&'
+                && let Some(semi_rel) = s[i..].find(';')
+            {
+                let semi = i + semi_rel;
+                let body = &s[i + 1..semi];
+                let decoded: Option<char> = if let Some(hex) =
+                    body.strip_prefix("#x").or_else(|| body.strip_prefix("#X"))
+                {
+                    u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+                } else if let Some(dec) = body.strip_prefix('#') {
+                    dec.parse::<u32>().ok().and_then(char::from_u32)
+                } else {
+                    match body {
+                        "lt" => Some('<'),
+                        "gt" => Some('>'),
+                        "quot" => Some('"'),
+                        "amp" => Some('&'),
+                        "apos" => Some('\''),
+                        _ => None,
+                    }
+                };
+                if let Some(c) = decoded {
+                    out.push(c);
+                    i = semi + 1;
+                    continue;
+                }
+            }
+            // Not a recognised entity — copy the byte through.
+            let ch_len = s[i..].chars().next().map_or(1, char::len_utf8);
+            out.push_str(&s[i..i + ch_len]);
+            i += ch_len;
+        }
+        out
     }
+
     for inp in ["<script>", "a<b>c", "\"'&<>", "<svg/onload=alert(1)>"] {
         let hex = encode(inp, Strategy::HtmlEntityEncode).unwrap();
         assert!(
             !hex.contains('<') && !hex.contains('>'),
             "HtmlEntityEncode left raw angle brackets for {inp:?}: {hex:?}"
         );
+        assert_eq!(
+            html_decode(&hex),
+            inp,
+            "HtmlEntityEncode({inp:?}) = {hex:?} is not losslessly \
+             entity-decodable back to the original"
+        );
+
         let dec = encode(inp, Strategy::HtmlEntityDecimalEncode).unwrap();
         assert!(
             !dec.contains('<') && !dec.contains('>'),
             "HtmlEntityDecimalEncode left raw angle brackets for {inp:?}: {dec:?}"
+        );
+        assert_eq!(
+            html_decode(&dec),
+            inp,
+            "HtmlEntityDecimalEncode({inp:?}) = {dec:?} is not losslessly \
+             entity-decodable back to the original"
         );
     }
 }

@@ -208,7 +208,11 @@ fn delivery_labels_are_stable() {
                 "multipart_field",
                 "multipart_file",
                 "path_segment",
-                "hpp_split"
+                "hpp_split",
+                // 0.2.17 raw reflected channels (shared delivery_set);
+                // valid for SQL too where transport-legal.
+                "header_value",
+                "cookie"
             ]
             .contains(&l),
             "unknown delivery label {l:?}"
@@ -537,6 +541,8 @@ fn end_to_end_public_api_shape() {
                 | DeliveryShape::MultipartFile { .. }
                 | DeliveryShape::PathSegment
                 | DeliveryShape::HppSplit { .. }
+                | DeliveryShape::HeaderValue { .. }
+                | DeliveryShape::Cookie { .. }
         ));
     }
 }

@@ -239,17 +239,17 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
                 rules.push("ifs_sep");
             }
         }
-        if rng.chance(3, 5) {
-            if let Some(n) = rw_cmd_obf(&s, &mut rng) {
-                s = n;
-                rules.push("cmd_obfuscate");
-            }
+        if rng.chance(3, 5)
+            && let Some(n) = rw_cmd_obf(&s, &mut rng)
+        {
+            s = n;
+            rules.push("cmd_obfuscate");
         }
-        if rng.chance(1, 3) {
-            if let Some(n) = rw_separator(&s, &mut rng) {
-                s = n;
-                rules.push("separator_equiv");
-            }
+        if rng.chance(1, 3)
+            && let Some(n) = rw_separator(&s, &mut rng)
+        {
+            s = n;
+            rules.push("separator_equiv");
         }
         if rules.is_empty() {
             continue;

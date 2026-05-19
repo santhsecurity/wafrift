@@ -104,12 +104,23 @@ mod tests {
 
     #[test]
     fn random_case_not_idempotent() {
-        let a = random_case_alternate("SELECT");
-        let b = random_case_alternate(&a);
-        // Statistically almost certain to differ.
-        assert_ne!(
-            a, b,
-            "random_case should re-randomise on second application"
+        // A single `a != b` pair is FLAKY: for an n-letter word the two
+        // independent random casings collide with probability 1/2^n
+        // (~1.6% for "SELECT") — a ~1-in-64 spurious CI failure. The
+        // real contract is that `random_case_alternate` re-randomises,
+        // i.e. its output is not constant. Assert ≥2 distinct outputs
+        // across many trials: P(all identical) = (1/2^6)^(N-1) → nil
+        // for N=64, so this is deterministic in practice.
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..64 {
+            seen.insert(random_case_alternate("SELECT"));
+            if seen.len() >= 2 {
+                return;
+            }
+        }
+        panic!(
+            "random_case_alternate produced only one distinct casing of \
+             \"SELECT\" across 64 trials — it is not re-randomising"
         );
     }
 }

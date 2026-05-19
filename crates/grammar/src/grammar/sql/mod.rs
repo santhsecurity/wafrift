@@ -467,11 +467,8 @@ fn strip_sql_comments_ws(s: &str) -> String {
                 i += 1;
             }
             i += 2;
-        } else if b[i] == b'-' && i + 1 < b.len() && b[i + 1] == b'-' {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
-            }
-        } else if b[i] == b'#' {
+        } else if (b[i] == b'-' && i + 1 < b.len() && b[i + 1] == b'-') || b[i] == b'#' {
+            // line comment (`-- …` or `# …`) — skip to newline.
             while i < b.len() && b[i] != b'\n' {
                 i += 1;
             }

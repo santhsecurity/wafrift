@@ -316,7 +316,7 @@ pub fn build_variants_explained(
         );
     }
 
-    if let Some(t) = trace.as_deref_mut() {
+    if let Some(t) = trace {
         t.finalize();
     }
 

@@ -73,7 +73,7 @@ impl Bandit {
         best
     }
 
-    /// Record `reward` (clamped to [0,1]) for `arm`.
+    /// Record `reward` (clamped to `[0,1]`) for `arm`.
     pub fn update(&mut self, arm: usize, reward: f64) {
         let r = reward.clamp(0.0, 1.0);
         self.counts[arm] += 1;
@@ -165,11 +165,9 @@ mod tests {
             };
             (base + jit).clamp(0.0_f64, 1.0_f64)
         };
-        let mut k = 0u32;
-        for _ in 0..800 {
+        for k in 0..800u32 {
             let a = b.select();
             b.update(a, payoff(a, k));
-            k += 1;
         }
         assert_eq!(b.best(), 1, "noisy bandit picked the wrong best arm");
         assert!(

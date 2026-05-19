@@ -146,7 +146,7 @@ pub fn json_escape(s: &str) -> String {
 
 const MP_BOUNDARY: &str = "----wafriftEQUIVb0undary";
 
-/// Translate an equivalence [`DeliveryShape`] into a concrete request
+/// Translate an equivalence `DeliveryShape` into a concrete request
 /// against the **httpbin-backed WAF testbed** (`/get`, `/post`,
 /// `/anything/…`). Used by the corpus bench. Behaviour is pinned by
 /// `bench_waf::tests::delivery_shapes_build_correct_requests` — do not
@@ -228,55 +228,14 @@ pub fn build_request_for_delivery(
     }
 }
 
-/// Append a query pair to a (possibly already-query'd) absolute URL,
-/// preserving the existing path + query. Takes the **raw** value and
-/// percent-encodes it exactly once (the `url` crate's
-/// `query_pairs_mut` applies the correct `application/x-www-form-
-/// urlencoded` encoding for the query context — pre-encoding the value
-/// would double-encode it, e.g. `'` → `%2527`).
-fn url_with_pair(target: &str, param: &str, raw_value: &str) -> String {
-    let base = target.trim_end_matches('/');
-    match reqwest::Url::parse(base) {
-        Ok(mut url) => {
-            url.query_pairs_mut().append_pair(param, raw_value);
-            url.to_string()
-        }
-        Err(_) => {
-            let sep = if base.contains('?') { '&' } else { '?' };
-            format!("{base}{sep}{param}={}", urlencoding::encode(raw_value))
-        }
-    }
-}
+// `url_with_pair` / `url_with_path_segment` were removed: the joint
+// `(payload × delivery)` URL rendering is now single-sourced in
+// `wafrift_grammar::grammar::equiv::DeliveryShape::to_request` (the
+// live path delegates to it). These cli-local copies were pre-refactor
+// duplicates with no remaining callers — the capability lives in
+// grammar, so this is dead-duplicate cleanup, not a capability drop.
 
-/// Append a path segment to the URL's path, before any query string.
-/// Takes the **raw** segment; `path_segments_mut().push` applies the
-/// correct path-context percent-encoding exactly once.
-fn url_with_path_segment(target: &str, raw_seg: &str) -> String {
-    match reqwest::Url::parse(target) {
-        Ok(mut url) => {
-            {
-                let mut ps = url
-                    .path_segments_mut()
-                    .expect("absolute http url has a path");
-                ps.pop_if_empty();
-                ps.push(raw_seg);
-            }
-            url.to_string()
-        }
-        Err(_) => {
-            let (path, query) = target.split_once('?').map_or((target, ""), |(p, q)| (p, q));
-            let p = path.trim_end_matches('/');
-            let seg = urlencoding::encode(raw_seg);
-            if query.is_empty() {
-                format!("{p}/{seg}")
-            } else {
-                format!("{p}/{seg}?{query}")
-            }
-        }
-    }
-}
-
-/// Translate an equivalence [`DeliveryShape`] into a concrete request
+/// Translate an equivalence `DeliveryShape` into a concrete request
 /// against the **live operator-supplied target** (a real URL) — the
 /// shipped `wafrift scan` path. Same joint algebra as the testbed
 /// builder, but every shape hits the *actual* endpoint instead of

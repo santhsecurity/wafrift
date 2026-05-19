@@ -240,8 +240,7 @@ fn evade_explain_quiet_emits_trailing_json_object() {
     // Last non-empty line should be an explain object.
     let last = stdout
         .lines()
-        .filter(|l| !l.trim().is_empty())
-        .last()
+        .rfind(|l| !l.trim().is_empty())
         .expect("at least one line");
     assert!(
         last.contains("\"explain\""),

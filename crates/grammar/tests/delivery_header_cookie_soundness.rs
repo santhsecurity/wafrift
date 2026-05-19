@@ -93,10 +93,10 @@ fn smuggling_payloads_cannot_forge_structure() {
     }
 }
 
-/// PROPERTY (4000 cases): for ARBITRARY payloads, every member the
-/// XSS generator yields for a raw channel is transport-legal, still
-/// executes the original script, and renders with NO control byte on
-/// the wire — and the output stays bounded (no amplification DoS).
+// PROPERTY (4000 cases): for ARBITRARY payloads, every member the
+// XSS generator yields for a raw channel is transport-legal, still
+// executes the original script, and renders with NO control byte on
+// the wire — and the output stays bounded (no amplification DoS).
 proptest! {
     #![proptest_config(ProptestConfig { cases: 4000, max_shrink_iters: 256, ..ProptestConfig::default() })]
 

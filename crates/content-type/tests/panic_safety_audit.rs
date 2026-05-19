@@ -114,7 +114,7 @@ fn content_type_transforms_survive_adversarial_corpus() {
     let mut failures: Vec<String> = Vec::new();
 
     let mut guard = |name: &str, f: &mut dyn FnMut()| {
-        if catch_unwind(AssertUnwindSafe(|| f())).is_err() {
+        if catch_unwind(AssertUnwindSafe(f)).is_err() {
             failures.push(format!("PANIC: {name}"));
         }
     };

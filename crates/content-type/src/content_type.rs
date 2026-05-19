@@ -131,7 +131,7 @@ fn bound_params(params: &[(String, String)]) -> std::borrow::Cow<'_, [(String, S
 /// byte. The lie was caught reading code-vs-docs in batch 6 of the
 /// credibility audit.)
 ///
-/// **Size guarding.** Bodies larger than [`MAX_FORM_BODY_SIZE`] are
+/// **Size guarding.** Bodies larger than `MAX_FORM_BODY_SIZE` (8 MiB) are
 /// rejected (empty vector returned) to prevent memory exhaustion on
 /// adversarial inputs.
 #[must_use]

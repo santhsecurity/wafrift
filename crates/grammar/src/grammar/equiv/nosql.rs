@@ -242,13 +242,12 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::new();
-        if rng.chance(1, 2) {
-            if let Some(b) = rw_to_bracket(&s) {
-                if b != s {
-                    s = b;
-                    rules.push("json_to_bracket");
-                }
-            }
+        if rng.chance(1, 2)
+            && let Some(b) = rw_to_bracket(&s)
+            && b != s
+        {
+            s = b;
+            rules.push("json_to_bracket");
         }
         if !rules.contains(&"json_to_bracket") && rng.chance(1, 2) {
             let n = rw_json_ws(&s, &mut rng);

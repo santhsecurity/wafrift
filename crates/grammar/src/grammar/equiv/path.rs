@@ -98,10 +98,14 @@ pub fn still_resolves(original: &str, cand: &str) -> bool {
 
 // ── encodings (resolver-transparent, WAF-opaque) ───────────────────
 fn enc_slash(rng: &mut Rng) -> &'static str {
-    *rng.pick(&["/", "%2f", "%252f", "%c0%af", "%5c", "/"])
+    // Index (not `*rng.pick`) so there is no explicit deref for clippy
+    // to flag; identical RNG draw (`pick` is `below(len)` internally).
+    const OPTS: [&str; 6] = ["/", "%2f", "%252f", "%c0%af", "%5c", "/"];
+    OPTS[rng.below(OPTS.len())]
 }
 fn enc_dot(rng: &mut Rng) -> &'static str {
-    *rng.pick(&[".", "%2e", "%252e", "."])
+    const OPTS: [&str; 4] = [".", "%2e", "%252e", "."];
+    OPTS[rng.below(OPTS.len())]
 }
 fn enc_dotdot(rng: &mut Rng) -> String {
     match rng.below(7) {

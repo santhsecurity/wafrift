@@ -1,7 +1,7 @@
 //! Managed-challenge solver scaffolding (Cloudflare-class, AWS WAF
 //! Captcha, Akamai Bot Manager).
 //!
-//! Closes blocker #115. Previously the [`Verdict::ChallengeRequired`]
+//! Closes blocker #115. Previously the `Verdict::ChallengeRequired`
 //! verdict was DETECTED but not ACTED ON — the evade loop stalled.
 //! This module provides the dispatch primitives so the proxy can:
 //!
@@ -338,7 +338,7 @@ impl ChallengeStore {
     }
 
     /// Record a clearance cookie with the original `Set-Cookie`
-    /// scoping attributes (Domain / Path / Secure). [`get_for_request`]
+    /// scoping attributes (Domain / Path / Secure). `get_for_request`
     /// uses the scope to decide whether to replay the cookie.
     pub fn record_scoped(
         &self,
@@ -504,7 +504,7 @@ impl ChallengeStore {
     /// solver doesn't permanently lock out retries.
     ///
     /// Long-running solvers (chromium-based captcha solvers, Turnstile
-    /// flows that wait for a human) MUST call [`refresh_solver_pending`]
+    /// flows that wait for a human) MUST call `refresh_solver_pending`
     /// before the TTL elapses or a concurrent caller will claim the
     /// slot and spawn a duplicate solver. Audit (2026-05-10) caught
     /// the silent-eviction case as CRITICAL.
@@ -737,7 +737,7 @@ pub fn extract_clearance_cookie(set_cookie_headers: &[&str]) -> Option<(String, 
 }
 
 /// Attribute-aware variant: returns the cookie header AND the
-/// scoping attributes ([Domain] / [Path] / [Secure]) parsed from
+/// scoping attributes (`Domain` / `Path` / `Secure`) parsed from
 /// the original `Set-Cookie`. Pair with
 /// [`ChallengeStore::record_scoped`] to enforce scope on replay.
 #[must_use]

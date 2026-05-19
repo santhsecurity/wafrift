@@ -68,7 +68,7 @@ pub struct UpstreamResponse {
 
 /// Either the default reqwest client or a stealth (rquest) client,
 /// optionally wearing a different browser fingerprint per request via
-/// the [`UpstreamClient::StealthPool`] variant.
+/// the `UpstreamClient::StealthPool` variant.
 #[derive(Clone)]
 pub enum UpstreamClient {
     /// Default rustls-backed reqwest client. Carries SSRF resolver,

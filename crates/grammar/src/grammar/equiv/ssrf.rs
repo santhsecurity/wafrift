@@ -211,7 +211,7 @@ pub fn still_targets(original: &str, cand: &str) -> bool {
     };
     // exact same connect target (anti-rig: never a different host) and
     // still internal (mechanism preserved).
-    vo == vc && is_internal(vc) && uo.rest.to_ascii_lowercase() == uc.rest.to_ascii_lowercase()
+    vo == vc && is_internal(vc) && uo.rest.eq_ignore_ascii_case(&uc.rest)
 }
 
 // ── rewrites (resolver-transparent, WAF-opaque) ────────────────────

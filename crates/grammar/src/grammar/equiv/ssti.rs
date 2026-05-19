@@ -227,29 +227,29 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::new();
-        if rng.chance(4, 5) {
-            if let Some(n) = rw_inner_ws(&s, &mut rng) {
-                s = n;
-                rules.push("inner_ws");
-            }
+        if rng.chance(4, 5)
+            && let Some(n) = rw_inner_ws(&s, &mut rng)
+        {
+            s = n;
+            rules.push("inner_ws");
         }
-        if rng.chance(2, 5) {
-            if let Some(n) = rw_attr_subscript(&s, &mut rng) {
-                s = n;
-                rules.push("attr_subscript");
-            }
+        if rng.chance(2, 5)
+            && let Some(n) = rw_attr_subscript(&s, &mut rng)
+        {
+            s = n;
+            rules.push("attr_subscript");
         }
-        if rng.chance(2, 5) {
-            if let Some(n) = rw_string_split(&s, &mut rng) {
-                s = n;
-                rules.push("string_split");
-            }
+        if rng.chance(2, 5)
+            && let Some(n) = rw_string_split(&s, &mut rng)
+        {
+            s = n;
+            rules.push("string_split");
         }
-        if rng.chance(1, 3) {
-            if let Some(n) = rw_delim_swap(&s, &mut rng) {
-                s = n;
-                rules.push("delim_swap");
-            }
+        if rng.chance(1, 3)
+            && let Some(n) = rw_delim_swap(&s, &mut rng)
+        {
+            s = n;
+            rules.push("delim_swap");
         }
         if rules.is_empty() {
             continue;

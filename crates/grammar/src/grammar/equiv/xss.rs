@@ -234,22 +234,20 @@ fn extract_js_body(payload: &str) -> Option<String> {
     let lc = payload.to_ascii_lowercase();
     if let Some(pos) = lc.find("javascript:") {
         let rest = &payload[pos + "javascript:".len()..];
-        let end = rest
-            .find(|c| c == '"' || c == '\'' || c == '>')
-            .unwrap_or(rest.len());
+        let end = rest.find(['"', '\'', '>']).unwrap_or(rest.len());
         let v = rest[..end].trim();
         if !v.is_empty() {
             return Some(v.to_string());
         }
     }
-    if let Some(o) = lc.find("<script") {
-        if let Some(gt) = lc[o..].find('>') {
-            let s = o + gt + 1;
-            let e = lc[s..].find("</script").map_or(lc.len(), |x| s + x);
-            let v = payload[s..e].trim();
-            if !v.is_empty() {
-                return Some(v.to_string());
-            }
+    if let Some(o) = lc.find("<script")
+        && let Some(gt) = lc[o..].find('>')
+    {
+        let s = o + gt + 1;
+        let e = lc[s..].find("</script").map_or(lc.len(), |x| s + x);
+        let v = payload[s..e].trim();
+        if !v.is_empty() {
+            return Some(v.to_string());
         }
     }
     None
@@ -458,11 +456,11 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::new();
 
-        if rng.chance(3, 5) {
-            if let Some(h) = rw_handler_synonym(&s, &mut rng) {
-                s = h;
-                rules.push("handler_synonym");
-            }
+        if rng.chance(3, 5)
+            && let Some(h) = rw_handler_synonym(&s, &mut rng)
+        {
+            s = h;
+            rules.push("handler_synonym");
         }
         if rng.chance(4, 5) {
             let c = rw_case(&s, &mut rng);
@@ -478,11 +476,11 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
                 rules.push("intratag_ws");
             }
         }
-        if rng.chance(2, 5) {
-            if let Some(u) = rw_js_unicode(&s, &mut rng) {
-                s = u;
-                rules.push("js_unicode_escape");
-            }
+        if rng.chance(2, 5)
+            && let Some(u) = rw_js_unicode(&s, &mut rng)
+        {
+            s = u;
+            rules.push("js_unicode_escape");
         }
         if rules.is_empty() {
             continue;

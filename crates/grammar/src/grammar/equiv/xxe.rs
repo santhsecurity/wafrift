@@ -240,35 +240,35 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::new();
-        if rng.chance(3, 5) {
-            if let Some(n) = rw_rename_entity(&s, &mut rng) {
-                s = n;
-                rules.push("entity_rename");
-            }
+        if rng.chance(3, 5)
+            && let Some(n) = rw_rename_entity(&s, &mut rng)
+        {
+            s = n;
+            rules.push("entity_rename");
         }
-        if rng.chance(1, 2) {
-            if let Some(n) = rw_system_to_public(&s) {
-                s = n;
-                rules.push("system_to_public");
-            }
+        if rng.chance(1, 2)
+            && let Some(n) = rw_system_to_public(&s)
+        {
+            s = n;
+            rules.push("system_to_public");
         }
-        if rng.chance(2, 5) {
-            if let Some(n) = rw_file_spelling(&s, &mut rng) {
-                s = n;
-                rules.push("file_spelling");
-            }
+        if rng.chance(2, 5)
+            && let Some(n) = rw_file_spelling(&s, &mut rng)
+        {
+            s = n;
+            rules.push("file_spelling");
         }
-        if rng.chance(1, 3) {
-            if let Some(n) = rw_quote_swap(&s) {
-                s = n;
-                rules.push("quote_swap");
-            }
+        if rng.chance(1, 3)
+            && let Some(n) = rw_quote_swap(&s)
+        {
+            s = n;
+            rules.push("quote_swap");
         }
-        if rng.chance(1, 3) {
-            if let Some(n) = rw_dtd_ws(&s, &mut rng) {
-                s = n;
-                rules.push("dtd_whitespace");
-            }
+        if rng.chance(1, 3)
+            && let Some(n) = rw_dtd_ws(&s, &mut rng)
+        {
+            s = n;
+            rules.push("dtd_whitespace");
         }
         if rules.is_empty() {
             continue;

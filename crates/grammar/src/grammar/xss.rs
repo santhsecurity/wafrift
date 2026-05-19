@@ -304,17 +304,16 @@ fn exec_spans(p: &str) -> Vec<(usize, usize)> {
             }
         }
         // <script> … </script> text
-        if lb[i..].starts_with(b"<script") {
-            if let Some(gt) = lb[i..].iter().position(|&c| c == b'>') {
-                let start = i + gt + 1;
-                if let Some(close) = lb[start..]
-                    .windows(8)
-                    .position(|w| w.eq_ignore_ascii_case(b"</script"))
-                {
-                    if close > 0 {
-                        spans.push((start, start + close));
-                    }
-                }
+        if lb[i..].starts_with(b"<script")
+            && let Some(gt) = lb[i..].iter().position(|&c| c == b'>')
+        {
+            let start = i + gt + 1;
+            if let Some(close) = lb[start..]
+                .windows(8)
+                .position(|w| w.eq_ignore_ascii_case(b"</script"))
+                && close > 0
+            {
+                spans.push((start, start + close));
             }
         }
         // srcdoc="…"
@@ -561,16 +560,16 @@ fn rw_js_call_equiv(p: &str, rng: &mut Rng) -> String {
 /// Parser-irrelevant noise the HTML tokeniser discards: whitespace
 /// around `=`, an extra boolean attribute, a trailing `/`.
 fn rw_attr_noise(p: &str, rng: &mut Rng) -> String {
-    if let Some(pos) = p.find('=') {
-        if p[..pos].contains('<') {
-            let ws = *rng.pick(&[" ", "\t", "\n", "/**/", "\x0c"]);
-            let (pad_l, pad_r) = match rng.below(3) {
-                0 => (ws, ""),
-                1 => ("", ws),
-                _ => (ws, ws),
-            };
-            return format!("{}{pad_l}={pad_r}{}", &p[..pos], &p[pos + 1..]);
-        }
+    if let Some(pos) = p.find('=')
+        && p[..pos].contains('<')
+    {
+        let ws = *rng.pick(&[" ", "\t", "\n", "/**/", "\x0c"]);
+        let (pad_l, pad_r) = match rng.below(3) {
+            0 => (ws, ""),
+            1 => ("", ws),
+            _ => (ws, ws),
+        };
+        return format!("{}{pad_l}={pad_r}{}", &p[..pos], &p[pos + 1..]);
     }
     p.to_string()
 }
@@ -1285,9 +1284,7 @@ fn extract_exec_body(payload: &str) -> Option<String> {
     if let Some(pos) = lc.find("javascript:") {
         let start = pos + "javascript:".len();
         let rest = &payload[start..];
-        let end = rest
-            .find(|c| c == '"' || c == '\'' || c == '>')
-            .unwrap_or(rest.len());
+        let end = rest.find(['"', '\'', '>']).unwrap_or(rest.len());
         let v = rest[..end].trim();
         if !v.is_empty() {
             return Some(v.to_string());
@@ -1295,14 +1292,14 @@ fn extract_exec_body(payload: &str) -> Option<String> {
     }
 
     // 3. <script> … </script> inner text
-    if let Some(open) = lc.find("<script") {
-        if let Some(gt) = lc[open..].find('>') {
-            let s = open + gt + 1;
-            let end = lc[s..].find("</script").map(|x| s + x).unwrap_or(lc.len());
-            let v = payload[s..end].trim();
-            if !v.is_empty() {
-                return Some(v.to_string());
-            }
+    if let Some(open) = lc.find("<script")
+        && let Some(gt) = lc[open..].find('>')
+    {
+        let s = open + gt + 1;
+        let end = lc[s..].find("</script").map_or(lc.len(), |x| s + x);
+        let v = payload[s..end].trim();
+        if !v.is_empty() {
+            return Some(v.to_string());
         }
     }
 

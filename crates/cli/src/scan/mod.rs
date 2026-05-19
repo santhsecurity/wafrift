@@ -7,7 +7,7 @@
 //! # Module structure
 //!
 //! - [`state`] — `ScanState` (mutable counters) and `ScanConfig` (immutable args)
-//! - [`mod`] — The `run_scan` orchestrator and step functions
+//! - this module (`mod.rs`) — the `run_scan` orchestrator and step functions
 
 pub(crate) mod state;
 

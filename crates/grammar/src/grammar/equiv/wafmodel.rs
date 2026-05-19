@@ -250,8 +250,8 @@ impl WafModel {
             for (x, blocked) in samples {
                 let y = if *blocked { 1.0 } else { -1.0 };
                 let mut s = bias;
-                for k in 0..d {
-                    s += w[k] * x.get(k).copied().unwrap_or(0.0);
+                for (k, wk) in w.iter().enumerate() {
+                    s += wk * x.get(k).copied().unwrap_or(0.0);
                 }
                 if y * s <= 0.0 {
                     for k in 0..d {
@@ -296,7 +296,7 @@ impl WafModel {
         s
     }
 
-    /// Parse [`to_model_toml`]. Returns `None` if the file's
+    /// Parse [`Self::to_model_toml`]. Returns `None` if the file's
     /// `feature_sig` does not match the current feature space — a
     /// schema change invalidates old models (safe default: never load
     /// a misaligned weight vector).
@@ -592,9 +592,9 @@ mod tests {
         // Behavioural identity over the whole feature corner space.
         for k in 0..(1u32 << 6) {
             let mut x = vec![0.0; FEATURES.len()];
-            for b in 0..6 {
+            for (b, xb) in x.iter_mut().enumerate().take(6) {
                 if k & (1 << b) != 0 {
-                    x[b] = 1.0;
+                    *xb = 1.0;
                 }
             }
             assert_eq!(

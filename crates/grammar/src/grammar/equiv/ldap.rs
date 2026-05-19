@@ -264,10 +264,10 @@ fn child_clauses(b: &[char], open: usize) -> Option<(Vec<(usize, usize)>, usize)
             }
             ')' => {
                 depth -= 1;
-                if depth == 1 {
-                    if let Some(cs) = cur_start.take() {
-                        children.push((cs, k + 1));
-                    }
+                if depth == 1
+                    && let Some(cs) = cur_start.take()
+                {
+                    children.push((cs, k + 1));
                 }
                 if depth == 0 {
                     return Some((children, k + 1));

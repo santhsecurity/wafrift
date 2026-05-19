@@ -4,7 +4,7 @@
 //! tokio task, draws via ratatui + crossterm. The module is split:
 //!
 //! - [`state`]            — counters, request ring, filter state, toast queue
-//! - [`format`]           — palette + truncation helpers
+//! - [`format`](mod@format) — palette + truncation helpers
 //! - [`keymap`]           — keystroke dispatch (Normal + `FilterEdit` modes)
 //! - [`yank`]             — render selected request as `curl` + clipboard set
 //! - [`render_chrome`]    — header bar, tab strip, footer key-help

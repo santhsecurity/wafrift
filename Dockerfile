@@ -38,8 +38,12 @@ COPY . .
 
 # Build only the two binaries practitioners need. Skipping `--all-targets`
 # means tests / benches / fuzz crates don't compile in the release image.
-RUN cargo build --release -p wafrift-cli -p wafrift-proxy \
-    && strip /src/target/release/wafrift /src/target/release/wafrift-proxy || true
+# The build MUST fail loudly: `... || true` previously masked a failed
+# `cargo build`, so the builder stage "succeeded" with no binary and
+# the only symptom was a cryptic `COPY --from=builder … not found`.
+# Only `strip` (cosmetic) is best-effort.
+RUN cargo build --release -p wafrift-cli -p wafrift-proxy
+RUN strip /src/target/release/wafrift /src/target/release/wafrift-proxy || true
 
 # ── Runtime image — Debian slim is the smallest base that ships full
 # libstdc++ + ca-certificates without Alpine's musl C-library quirks.
