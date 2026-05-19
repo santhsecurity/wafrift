@@ -252,3 +252,28 @@ The bar is met only if the process *catches* things. It has:
   gating `mutants` CI job (zero `MISSED`; scope ratchets file-by-file
   as each engine module is baselined+hardened — we never claim a file
   is mutation-gated before it provably is).
+
+- **F5 — the mutation CI gate was itself a false green (fixed).**
+  Reading the *actual* `mutants` job log (never trusting a green
+  check) showed it printed “0 missed” and SUCCEEDED while cargo-mutants
+  had reported `1 missed`. Two compounding defects: (a) `mutants.toml`
+  sat in the package dir but cargo-mutants only auto-reads
+  `.cargo/mutants.toml`, so `exclude_re` never loaded and the
+  documented-equivalent mutant was counted; (b) cargo-mutants emits
+  ANSI colour, so the line was `\e[31m\e[1mMISSED…` and the gate’s
+  `grep -q '^MISSED'` anchored on the ESC byte — it could *never*
+  fire. A gate that cannot fail is precisely the decoration the laws
+  forbid. Fix: pass `--config mutants.toml` explicitly, force
+  `CARGO_TERM_COLOR=never`, and gate on BOTH a colour-stripped
+  `^MISSED` scan AND the machine summary line reporting exactly
+  `0 missed`. The gate’s failure path is now itself tested (synthetic
+  logs: a `MISSED` line ⇒ exit 1; an ANSI-stripped `1 missed` summary
+  ⇒ exit 1; `0 missed` ⇒ exit 0). Scope also extended to `sfa.rs`
+  (E5 ratchet: 15 missed → 0, 12 genuine survivors killed by an
+  exhaustive `[bool;256]` BytePred oracle + soundness-primitive pins;
+  2 documented provably-equivalent — `is_empty -> false` is
+  unkillable because no constructible `Sfa` has an empty `accept`).
+
+- **Cross-cutting law reinforced:** never trust a green CI check —
+  read the job log. A gate is only real once its *failure* path has
+  been exercised.
