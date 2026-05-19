@@ -25,7 +25,7 @@ on:
 
 jobs:
   mutants-nightly:
-    name: mutants-nightly (E5 — mine+sfa+solve+learn; 0 missed)
+    name: mutants-nightly (E5 — mine+sfa+solve+learn+normalize; 0 missed)
     runs-on: ubuntu-latest
     # Generous: nightly has the full 6h GitHub job budget. This only
     # guards against a hung/runaway run, not normal duration.
@@ -56,12 +56,14 @@ jobs:
             -f crates/wafmodel/src/sfa.rs \
             -f crates/wafmodel/src/solve.rs \
             -f crates/wafmodel/src/learn.rs \
+            -f crates/wafmodel/src/normalize.rs \
             -- --test mine_contract --test mine_solve_props \
                --test scale_corpus --test sfa_algebra --test artifact_contract \
                --test solve_contract --test equiv_bridge_contract --test cve_replay \
                --test learn_exact --test wmethod_soundness \
                --test random_learner_differential --test determinism_contract \
                --test error_coverage \
+               --test normalize_laws --test transduce_contract \
             2>&1 | tee mutants_run.log || true
           if grep -qE '^MISSED' mutants_run.log; then
             echo "::error::surviving (MISSED) mutant in the anti-rig core"
@@ -80,4 +82,4 @@ jobs:
             echo "::error::cargo-mutants reports ${missed} missed mutant(s)"
             exit 1
           fi
-          echo "0 missed — every non-equivalent mutant in mine+sfa+solve+learn is detected"
+          echo "0 missed — every non-equivalent mutant in mine+sfa+solve+learn+normalize is detected"

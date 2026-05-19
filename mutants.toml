@@ -97,7 +97,33 @@ exclude_re = [
     "learn\\.rs:496:35: replace != with == in l_star_impl",
     "learn\\.rs:507:20: delete ! in l_star_impl",
     "learn\\.rs:520:35: replace > with >= in l_star_impl",
+    "normalize\\.rs:89:35: replace << with >> in url_decode_uni",
+    "normalize\\.rs:89:42: replace \\| with & in url_decode_uni",
+    "normalize\\.rs:89:42: replace \\| with \\^ in url_decode_uni",
+    "normalize\\.rs:89:58: replace << with >> in url_decode_uni",
+    "normalize\\.rs:89:64: replace \\| with \\^ in url_decode_uni",
+    "normalize\\.rs:89:86: replace \\| with \\^ in url_decode_uni",
+    "normalize\\.rs:101:35: replace \\| with \\^ in url_decode_uni",
 ]
+# ── normalize.rs `%uXXXX`/`%XX` assembly mutants that are PROVABLY
+# EQUIVALENT w.r.t. the byte-output contract (item 40). url_decode_uni
+# builds `cp = (a<<12)|(b<<8)|(c<<4)|d` then ModSecurity-narrows it to
+# `cp & 0xff` (the documented single-byte-variable behaviour). Two
+# independent bit facts make these unkillable by ANY byte-output test:
+#  1. `& 0xff` PROVABLY discards bits 8..=15, so any perturbation of
+#     the `a<<12` (89:35 `<<`, 89:42 `|`) or `b<<8` (89:58 `<<`,
+#     89:64 `|`) terms cannot change the emitted byte — the bits they
+#     touch are thrown away before output.
+#  2. each `nibble << k` lands in a 4-bit field DISJOINT from the next
+#     (a:12-15, b:8-11, c:4-7, d:0-3; and `(h<<4)|l` for %XX), so on
+#     bit-disjoint operands `|`, `^` and `+` are mathematically
+#     IDENTICAL — 89:86 and 101:35 `| -> ^` change nothing.
+# Distinguishing them would require asserting the internal pre-narrow
+# `cp`, i.e. testing the implementation, not the contract — anti-rig.
+# (The c<<4 / d terms and the literal-fallthrough/bounds DO affect the
+# byte and ARE killed by the exhaustive %XX + %uXXXX + edge oracle;
+# the genuine `< -> <=` OOB-boundary mutants 79:22 / 145:21 are NOT
+# here — they are killed by the `%uABC` / `&#12` end-of-input edges.)
 # `learn.rs:520:35  replace > with >=` (the F3 budget gate
 # `cache.len() > budget`). Its sibling `> -> ==` IS killed (by
 # `error_coverage`'s small-budget l_star_budgeted run — it changes

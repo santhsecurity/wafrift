@@ -332,6 +332,28 @@ The bar is met only if the process *catches* things. It has:
   no per-push time pressure) is the thorough all-four-files regression
   gate (item 37 satisfied).
 
+- **E5 ratchet — normalize.rs (the biggest gap): 132 mutants, 36
+  missed.** The byte-exact decoding of `url_decode_uni` /
+  `html_entity_decode` / `compress_ws` — *the WAF's actual
+  normalization*, the foundation every mismatch-bypass conclusion
+  rests on — had NO test (the prior laws only checked
+  length/idempotence/membership). Fixed with independent
+  spec-reference reimplementations (in the test, never mutated) as the
+  oracle: exhaustive all-256-byte `%XX`, a `%uXXXX` low-byte-narrowing
+  table, an edge corpus, and an engine-vs-reference proptest. 36 → 9.
+  The 2 genuine residuals were real OOB-boundary bugs the mutation
+  exposed (`< -> <=` on the `%uXXXX`/entity end-of-input bound — `<=`
+  indexes `== len`, a panic) — killed by adding the exact-boundary
+  inputs (`%uABC`, `&#12`, `&#x1f`) the correct code handles but `<=`
+  panics on. The 7 remaining are PROVABLY equivalent (item 40,
+  `--list`-confirmed excluded, never chased): ModSecurity narrows
+  `cp & 0xff`, which provably DISCARDS bits 8-15, so perturbing the
+  `a<<12`/`b<<8` terms cannot change the emitted byte; and each
+  `nibble<<k` is bit-disjoint from the next, so `|`≡`^`≡`+` on those
+  operands are mathematically identical. Distinguishing them needs the
+  internal pre-narrow `cp` — testing the implementation, not the
+  contract. normalize.rs added to the nightly mutation scope.
+
 - **Cross-cutting law reinforced:** never trust a green CI check —
   read the job log. A gate is only real once its *failure* path has
   been exercised, *in the shell it actually runs in*. And: a CI gate's
