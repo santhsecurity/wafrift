@@ -196,6 +196,9 @@ jobs:
   mutants:
     name: mutants (E5 — anti-rig core mine.rs + sfa.rs; 0 missed)
     runs-on: ubuntu-latest
+    # Hard wall-clock cap: a mis-scoped or runtime-blown job must fail
+    # FAST, never burn the runner for 85 min then die at exit 143.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -229,8 +232,14 @@ jobs:
         run: |
           set -o pipefail
           # cargo-mutants owns the `mutants.out/` dir; tee elsewhere.
+          # `--timeout 30`: hard per-mutant cap (the slower CI runner's
+          # auto-timeout was 180s ⇒ ~30 timeout-mutants blew the job
+          # budget). `--jobs 3`: parallelise across the runner's cores.
+          # A hung mutant is still DETECTED (TIMEOUT, not MISSED) — just
+          # in 30s instead of 180s.
           cargo mutants --config mutants.toml \
             --manifest-path crates/wafmodel/Cargo.toml --no-shuffle \
+            --timeout 30 --jobs 3 \
             -f crates/wafmodel/src/mine.rs -f crates/wafmodel/src/sfa.rs \
             -- --test mine_contract --test mine_solve_props \
                --test scale_corpus --test sfa_algebra --test artifact_contract \

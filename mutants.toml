@@ -18,8 +18,16 @@
 # fully-qualified or cargo-mutants silently filters everything out.
 # No `examine_globs`: the default already examines exactly this
 # package's source; we only carve out the no-logic re-export shim.
-timeout_multiplier = 6.0
-minimum_test_timeout = 180
+# A hung mutant is DETECTED by its timeout (a real signal), so the
+# cap must be tight: the scoped suite at the scaled env (CI sets
+# WAFMODEL_PROPTEST_CASES=24) finishes in a few seconds, so 25s is far
+# above any honest run yet kills a hang fast. The earlier 180s minimum
+# × ~30 timeout-mutants on the (much slower) CI runner blew the job's
+# wall-clock budget (killed at exit 143) — that was a CI-runtime
+# defect, not a survivor. CI also passes `--timeout`/`--jobs`
+# explicitly and caps the job with `timeout-minutes`.
+timeout_multiplier = 3.0
+minimum_test_timeout = 25
 exclude_globs = ["crates/wafmodel/src/lib.rs"]
 additional_cargo_test_args = ["--no-fail-fast"]
 
