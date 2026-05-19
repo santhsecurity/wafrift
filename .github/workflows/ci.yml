@@ -194,11 +194,13 @@ jobs:
       - run: cargo test -p wafrift-wafmodel --release
 
   mutants:
-    name: mutants (E5 — anti-rig core mine.rs + sfa.rs; 0 missed)
+    name: mutants (E5 — anti-rig core mine.rs + sfa.rs + solve.rs; 0 missed)
     runs-on: ubuntu-latest
     # Hard wall-clock cap: a mis-scoped or runtime-blown job must fail
     # FAST, never burn the runner for 85 min then die at exit 143.
-    timeout-minutes: 40
+    # mine+sfa was ~27 min on the slow runner; +solve.rs (24 mutants,
+    # ~1 min local) leaves comfortable headroom under 50.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -249,8 +251,10 @@ jobs:
             --manifest-path crates/wafmodel/Cargo.toml --no-shuffle \
             --timeout 30 --jobs 3 \
             -f crates/wafmodel/src/mine.rs -f crates/wafmodel/src/sfa.rs \
+            -f crates/wafmodel/src/solve.rs \
             -- --test mine_contract --test mine_solve_props \
                --test scale_corpus --test sfa_algebra --test artifact_contract \
+               --test solve_contract --test equiv_bridge_contract --test cve_replay \
             2>&1 | tee mutants_run.log || true
           # Belt: no MISSED line at all (colour stripped ⇒ real anchor).
           if grep -qE '^MISSED' mutants_run.log; then
