@@ -91,11 +91,7 @@ pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
             if segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020 {
                 return true; // ORCHIDv2 2001:20::/28
             }
-            if segs[0] == 0x0100
-                && segs[1] == 0
-                && segs[2] == 0
-                && segs[3] == 0
-            {
+            if segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 {
                 return true; // 100::/64 discard
             }
             v.is_loopback()

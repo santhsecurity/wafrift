@@ -112,10 +112,7 @@ fn single_byte_payload_all_contexts() {
             b"x"
         };
         let result = encode_in_context(payload, Strategy::CaseAlternation, ctx);
-        assert!(
-            result.is_ok(),
-            "single byte failed for {ctx:?}: {result:?}"
-        );
+        assert!(result.is_ok(), "single byte failed for {ctx:?}: {result:?}");
     }
 }
 

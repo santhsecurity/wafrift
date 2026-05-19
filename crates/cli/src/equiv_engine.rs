@@ -173,7 +173,11 @@ pub fn build_request_for_delivery(
             param,
             content_type,
         } => {
-            let body = format!("{{\"{}\":\"{}\"}}", json_escape(param), json_escape(payload));
+            let body = format!(
+                "{{\"{}\":\"{}\"}}",
+                json_escape(param),
+                json_escape(payload)
+            );
             let mut r = Request::post(format!("{b}/post"), body.into_bytes());
             if let Some(ct) = content_type {
                 r.add_header("content-type", ct.clone());
@@ -251,7 +255,9 @@ fn url_with_path_segment(target: &str, raw_seg: &str) -> String {
     match reqwest::Url::parse(target) {
         Ok(mut url) => {
             {
-                let mut ps = url.path_segments_mut().expect("absolute http url has a path");
+                let mut ps = url
+                    .path_segments_mut()
+                    .expect("absolute http url has a path");
                 ps.pop_if_empty();
                 ps.push(raw_seg);
             }
@@ -558,7 +564,10 @@ mod tests {
             class_for_payload_type(PayloadType::CommandInjection),
             Some("cmdi")
         );
-        assert_eq!(class_for_payload_type(PayloadType::PathTraversal), Some("path"));
+        assert_eq!(
+            class_for_payload_type(PayloadType::PathTraversal),
+            Some("path")
+        );
         assert_eq!(
             class_for_payload_type(PayloadType::TemplateInjection),
             Some("ssti")
@@ -578,8 +587,15 @@ mod tests {
         assert_eq!(r.method, Method::Get);
         assert!(r.url.starts_with("https://t.example/search?"), "{}", r.url);
         assert!(r.url.contains("lang=en"), "lost existing query: {}", r.url);
-        assert!(r.url.contains("q=1%27"), "payload not appended/encoded: {}", r.url);
-        assert!(!r.url.contains("/get?"), "live path must hit the real URL, not httpbin");
+        assert!(
+            r.url.contains("q=1%27"),
+            "payload not appended/encoded: {}",
+            r.url
+        );
+        assert!(
+            !r.url.contains("/get?"),
+            "live path must hit the real URL, not httpbin"
+        );
     }
 
     #[test]
@@ -590,15 +606,24 @@ mod tests {
             "../../etc/passwd",
         );
         assert!(r.url.starts_with("https://t.example/api/"), "{}", r.url);
-        assert!(r.url.ends_with("?v=2"), "query must survive after the segment: {}", r.url);
-        assert!(!r.url.contains("/anything/"), "live path must not use httpbin route");
+        assert!(
+            r.url.ends_with("?v=2"),
+            "query must survive after the segment: {}",
+            r.url
+        );
+        assert!(
+            !r.url.contains("/anything/"),
+            "live path must not use httpbin route"
+        );
     }
 
     #[test]
     fn live_form_and_json_post_to_the_real_target() {
         let f = build_live_request_for_delivery(
             "https://t.example/login",
-            &D::FormBody { param: "user".into() },
+            &D::FormBody {
+                param: "user".into(),
+            },
             "a' OR 1=1-- -",
         );
         assert_eq!(f.method, Method::Post);
@@ -644,7 +669,11 @@ mod tests {
         let occurrences = r.url.matches("q=").count();
         assert_eq!(occurrences, 3, "2 decoys + full payload: {}", r.url);
         let last = r.url.rsplit("q=").next().unwrap();
-        assert!(last.contains("UNION"), "payload must be the last q=: {}", r.url);
+        assert!(
+            last.contains("UNION"),
+            "payload must be the last q=: {}",
+            r.url
+        );
     }
 
     #[test]

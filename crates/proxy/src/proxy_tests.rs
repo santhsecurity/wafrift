@@ -1186,10 +1186,7 @@ fn challenge_capture_round_trip_via_extract_and_store() {
 
 #[test]
 fn load_gene_bank_v0_1_flat_hashmap_migrates() {
-    let tmp = std::env::temp_dir().join(format!(
-        "wafrift_test_gb_v01_{}.json",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("wafrift_test_gb_v01_{}.json", std::process::id()));
     // v0.1 format: no schema wrapper, just a flat object.
     let json = r#"{"api.example.com":{"proven_winners":["UrlEncode"],"blocklisted":[],"waf_name":"Cloudflare"}}"#;
     std::fs::write(&tmp, json).unwrap();
@@ -1219,10 +1216,7 @@ fn load_gene_bank_v0_1_empty_object_migrates() {
 fn load_gene_bank_truly_malformed_returns_default() {
     // Negative twin: garbage that matches neither format must still
     // degrade gracefully to an empty bank.
-    let tmp = std::env::temp_dir().join(format!(
-        "wafrift_test_gb_bad_{}.json",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("wafrift_test_gb_bad_{}.json", std::process::id()));
     std::fs::write(&tmp, "not json at all").unwrap();
     let bank = load_gene_bank(&tmp);
     assert_eq!(bank.schema, 0);
@@ -1287,10 +1281,7 @@ fn restore_gene_bank_under_cap_keeps_all() {
 
 #[test]
 fn save_gene_bank_cleans_up_tempfile_on_error() {
-    let dir = std::env::temp_dir().join(format!(
-        "wafrift_gb_ro_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("wafrift_gb_ro_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("gene-bank.json");
@@ -1328,16 +1319,15 @@ fn save_gene_bank_cleans_up_tempfile_on_error() {
 
 #[test]
 fn save_gene_bank_leaves_no_tempfile_on_success() {
-    let dir = std::env::temp_dir().join(format!(
-        "wafrift_gb_ok_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("wafrift_gb_ok_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("gene-bank.json");
 
     let mut state = ProxyState::default();
-    state.hosts.insert("example.com".into(), HostState::default());
+    state
+        .hosts
+        .insert("example.com".into(), HostState::default());
     save_gene_bank(&state, &path).unwrap();
 
     let entries: Vec<_> = std::fs::read_dir(&dir)

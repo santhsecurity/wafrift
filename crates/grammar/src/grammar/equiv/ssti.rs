@@ -86,8 +86,10 @@ fn rw_inner_ws(payload: &str, rng: &mut Rng) -> Option<String> {
     let (pre, e, post) = inner_expr(payload)?;
     let mut spaced = String::with_capacity(e.len() * 2);
     for ch in e.chars() {
-        if matches!(ch, '+' | '*' | '/' | '|' | '(' | ')' | ',' | '.' | '[' | ']')
-            && rng.chance(1, 2)
+        if matches!(
+            ch,
+            '+' | '*' | '/' | '|' | '(' | ')' | ',' | '.' | '[' | ']'
+        ) && rng.chance(1, 2)
         {
             spaced.push(' ');
             spaced.push(ch);

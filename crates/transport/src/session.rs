@@ -207,7 +207,10 @@ mod tests {
     fn inject_csrf_into_header() {
         let mut req = Request::get("https://example.com/");
         inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Header);
-        assert!(req.headers.contains(&("X-CSRF-Token".to_string(), "tok123".to_string())));
+        assert!(
+            req.headers
+                .contains(&("X-CSRF-Token".to_string(), "tok123".to_string()))
+        );
     }
 
     #[test]

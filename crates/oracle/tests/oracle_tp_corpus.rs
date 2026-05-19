@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{split_corpus, CANON_CMDI, CANON_PATH, CANON_SSRF};
+use common::{CANON_CMDI, CANON_PATH, CANON_SSRF, split_corpus};
 use wafrift_oracle::cmdi::CmdiOracle;
 use wafrift_oracle::path::PathOracle;
 use wafrift_oracle::ssrf::SsrfOracle;

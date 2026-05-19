@@ -113,7 +113,12 @@ fn ipv4_dotted(v: u32) -> String {
 /// or `0.0.0.0/8`)? Used to keep the *mechanism* present (anti-rig:
 /// don't accept a rewrite that escaped to a public host).
 fn is_internal(v: u32) -> bool {
-    let o = [(v >> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff];
+    let o = [
+        (v >> 24) & 0xff,
+        (v >> 16) & 0xff,
+        (v >> 8) & 0xff,
+        v & 0xff,
+    ];
     o[0] == 127
         || o[0] == 0
         || o[0] == 10
@@ -147,10 +152,7 @@ fn split_url(s: &str) -> Option<Url> {
     // separate :port
     let (host, port) = if host_part.starts_with('[') {
         match host_part.find(']') {
-            Some(b) => (
-                host_part[..=b].to_string(),
-                host_part[b + 1..].to_string(),
-            ),
+            Some(b) => (host_part[..=b].to_string(), host_part[b + 1..].to_string()),
             None => (host_part.to_string(), String::new()),
         }
     } else if let Some(c) = host_part.rfind(':') {
@@ -223,8 +225,8 @@ fn rw_ip_form(v: u32, rng: &mut Rng) -> String {
         v & 0xff,
     ];
     match rng.below(8) {
-        0 => format!("{v}"),                                  // 32-bit decimal
-        1 => format!("0x{v:08x}"),                            // 32-bit hex
+        0 => format!("{v}"),       // 32-bit decimal
+        1 => format!("0x{v:08x}"), // 32-bit hex
         2 => format!("0x{:x}.0x{:x}.0x{:x}.0x{:x}", o[0], o[1], o[2], o[3]),
         3 => format!("0{:o}.0{:o}.0{:o}.0{:o}", o[0], o[1], o[2], o[3]),
         4 => format!("{}.{}", o[0], (o[1] << 16) | (o[2] << 8) | o[3]), // a.b(24)
@@ -252,10 +254,20 @@ fn rw_userinfo(u: &Url, host: &str, rng: &mut Rng) -> String {
 }
 
 fn rw_scheme_case(u: &Url, host: &str, rng: &mut Rng) -> String {
-    let sc = if u.scheme.is_empty() { "http" } else { &u.scheme };
+    let sc = if u.scheme.is_empty() {
+        "http"
+    } else {
+        &u.scheme
+    };
     let cased: String = sc
         .chars()
-        .map(|c| if rng.chance(1, 2) { c.to_ascii_uppercase() } else { c })
+        .map(|c| {
+            if rng.chance(1, 2) {
+                c.to_ascii_uppercase()
+            } else {
+                c
+            }
+        })
         .collect();
     format!("{cased}://{host}{}", u.rest)
 }
@@ -379,7 +391,12 @@ mod tests {
         }
         // metadata IP equivalents
         let md = 0xa9fe_a9fe;
-        for f in ["169.254.169.254", "0xa9fea9fe", "2852039166", "169.254.43518"] {
+        for f in [
+            "169.254.169.254",
+            "0xa9fea9fe",
+            "2852039166",
+            "169.254.43518",
+        ] {
             assert_eq!(inet_aton(f), Some(md), "metadata form {f:?}");
         }
     }
@@ -402,17 +419,18 @@ mod tests {
                 "metadata path lost: {:?}",
                 m.payload
             );
-            assert!(!n.contains("8.8.8.8"), "escaped to public host: {:?}", m.payload);
+            assert!(
+                !n.contains("8.8.8.8"),
+                "escaped to public host: {:?}",
+                m.payload
+            );
         }
     }
 
     #[test]
     fn wrong_host_substitution_is_rejected() {
         // 8.8.8.8 is public — a rewrite to it is NOT equivalent.
-        assert!(!still_targets(
-            "http://127.0.0.1/x",
-            "http://8.8.8.8/x"
-        ));
+        assert!(!still_targets("http://127.0.0.1/x", "http://8.8.8.8/x"));
         // different internal host is still a different target.
         assert!(!still_targets(
             "http://169.254.169.254/a",

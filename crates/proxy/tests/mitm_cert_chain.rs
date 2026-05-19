@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use rustls::{client::ClientConfig, RootCertStore, ServerConfig};
-use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName};
+use rustls::{RootCertStore, ServerConfig, client::ClientConfig};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject};
 use tokio::net::TcpListener;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use wafrift_proxy::mitm::CertificateAuthority;
@@ -54,9 +54,7 @@ async fn mitm_cert_chain_must_generate_and_validate_chain() {
 
     let ca_cert = CertificateDer::from_pem_slice(&ca.cert_pem()).expect("parse ca cert");
     let mut roots = RootCertStore::empty();
-    roots
-        .add(ca_cert)
-        .expect("add ca cert to root store");
+    roots.add(ca_cert).expect("add ca cert to root store");
     let config = ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();
@@ -84,9 +82,7 @@ async fn mitm_cert_chain_must_not_validate_with_wrong_root() {
 
     let wrong_root = CertificateDer::from_pem_slice(&wrong.cert_pem()).expect("parse wrong ca");
     let mut roots = RootCertStore::empty();
-    roots
-        .add(wrong_root)
-        .expect("add wrong ca to root store");
+    roots.add(wrong_root).expect("add wrong ca to root store");
     let config = ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();

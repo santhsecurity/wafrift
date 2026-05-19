@@ -300,14 +300,13 @@ pub fn validate_in_context(
         InjectionContext::PlainBody => {
             // Plain body accepts any byte sequence; nothing to validate.
         }
-        InjectionContext::XmlCdata
-            if payload.contains("]]>") => {
-                return Err(ContextualEncodeError::ContextIncompatible {
-                    strategy: "validate".into(),
-                    context,
-                    reason: "CDATA payload contains `]]>` (unterminated section)".into(),
-                });
-            }
+        InjectionContext::XmlCdata if payload.contains("]]>") => {
+            return Err(ContextualEncodeError::ContextIncompatible {
+                strategy: "validate".into(),
+                context,
+                reason: "CDATA payload contains `]]>` (unterminated section)".into(),
+            });
+        }
         InjectionContext::XmlText => {
             if payload.contains('<') {
                 return Err(ContextualEncodeError::ContextIncompatible {
@@ -417,7 +416,11 @@ fn reject_unescaped_ampersand(
                     j += 1;
                     break;
                 }
-                let ok = if hex { b.is_ascii_hexdigit() } else { b.is_ascii_digit() };
+                let ok = if hex {
+                    b.is_ascii_hexdigit()
+                } else {
+                    b.is_ascii_digit()
+                };
                 if !ok {
                     valid_shape = false;
                     break;

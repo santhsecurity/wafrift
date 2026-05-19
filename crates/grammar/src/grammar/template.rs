@@ -392,18 +392,18 @@ fn structured_ssti_mutate(payload: &str) -> Vec<String> {
 
     if let Some(e) = extract_template_expr(payload) {
         for v in [
-            format!("{{{{{e}}}}}"),        // {{ EXPR }}
-            format!("{{{{ {e} }}}}"),      // spaced
-            format!("{{{{\t{e}}}}}"),      // tab evasion
-            format!("{{{{{e}|safe}}}}"),   // jinja |safe
-            format!("{{%print({e})%}}"),   // jinja statement form
-            format!("${{{e}}}"),           // freemarker / mako
-            format!("#{{{e}}}"),           // velocity / pug
-            format!("<%= {e} %>"),         // erb / ejs
-            format!("<%={e}%>"),           // erb tight
-            format!("{{{e}}}"),            // smarty single-brace
-            format!("${{{{{e}}}}}"),       // ${{ EXPR }}
-            format!("#set($x={e})$x"),     // velocity assign-exec
+            format!("{{{{{e}}}}}"),         // {{ EXPR }}
+            format!("{{{{ {e} }}}}"),       // spaced
+            format!("{{{{\t{e}}}}}"),       // tab evasion
+            format!("{{{{{e}|safe}}}}"),    // jinja |safe
+            format!("{{%print({e})%}}"),    // jinja statement form
+            format!("${{{e}}}"),            // freemarker / mako
+            format!("#{{{e}}}"),            // velocity / pug
+            format!("<%= {e} %>"),          // erb / ejs
+            format!("<%={e}%>"),            // erb tight
+            format!("{{{e}}}"),             // smarty single-brace
+            format!("${{{{{e}}}}}"),        // ${{ EXPR }}
+            format!("#set($x={e})$x"),      // velocity assign-exec
             format!("{{{{{e}}}}}\u{200b}"), // zero-width suffix
         ] {
             out.insert(v);

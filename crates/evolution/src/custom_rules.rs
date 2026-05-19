@@ -391,7 +391,10 @@ evasion_strategies = ["tautology_swap", "comment_swap"]
         let result = load_rules(&huge);
         assert!(result.is_err(), "should reject >1 MiB input");
         let msg = result.unwrap_err();
-        assert!(msg.contains("exceeds maximum"), "error should mention size limit: {msg}");
+        assert!(
+            msg.contains("exceeds maximum"),
+            "error should mention size limit: {msg}"
+        );
     }
 
     #[test]
@@ -462,7 +465,10 @@ evasion_strategies = ["DefinitelyNotRealStrategy123"]
         let result = load_rules(toml);
         assert!(result.is_err(), "should reject unknown evasion strategy");
         let msg = result.unwrap_err();
-        assert!(msg.contains("unknown evasion_strategy"), "error should name the strategy: {msg}");
+        assert!(
+            msg.contains("unknown evasion_strategy"),
+            "error should name the strategy: {msg}"
+        );
     }
 
     #[test]
@@ -474,7 +480,10 @@ name = "Test"
 pattern = "   "
 "#;
         let result = load_rules(toml);
-        assert!(result.is_err(), "should reject empty/whitespace body pattern");
+        assert!(
+            result.is_err(),
+            "should reject empty/whitespace body pattern"
+        );
     }
 
     #[test]
@@ -486,6 +495,9 @@ name = "Test"
 name = "   "
 "#;
         let result = load_rules(toml);
-        assert!(result.is_err(), "should reject empty/whitespace header name");
+        assert!(
+            result.is_err(),
+            "should reject empty/whitespace header name"
+        );
     }
 }

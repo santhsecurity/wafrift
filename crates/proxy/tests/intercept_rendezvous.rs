@@ -1,5 +1,5 @@
-use std::time::Duration;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use wafrift_proxy::intercept::{self, InterceptDecision};
 
@@ -57,7 +57,10 @@ async fn intercept_rendezvous_must_not_drain_without_mode_toggle() {
     assert_eq!(store.pending_count(), baseline + 1);
 
     let timed_out = tokio::time::timeout(Duration::from_millis(100), pending).await;
-    assert!(timed_out.is_err(), "request should stay held while intercept mode remains on");
+    assert!(
+        timed_out.is_err(),
+        "request should stay held while intercept mode remains on"
+    );
     assert_eq!(store.pending_count(), baseline + 1);
 
     intercept::set_intercept_mode(false);

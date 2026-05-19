@@ -210,7 +210,12 @@ pub async fn solve_and_record(
 /// Split out from `solve_and_record` so the store-recording path can
 /// be tested independently of the browser-launch path.
 pub fn record_into_store(store: &ChallengeStore, host: &str, outcome: &BridgeOutcome) {
-    store.record(host.to_string(), outcome.cookie_header.clone(), outcome.kind, None);
+    store.record(
+        host.to_string(),
+        outcome.cookie_header.clone(),
+        outcome.kind,
+        None,
+    );
     tracing::info!(
         host = %host,
         kind = %outcome.kind.label(),

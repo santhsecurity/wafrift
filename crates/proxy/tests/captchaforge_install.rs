@@ -1,7 +1,7 @@
 mod common;
-use common::{pick_free_port, start_proxy_and_wait, stop_proxy};
 #[cfg(not(feature = "captchaforge"))]
 use common::start_proxy_with_output;
+use common::{pick_free_port, start_proxy_and_wait, stop_proxy};
 #[cfg(not(feature = "captchaforge"))]
 use std::process::Output;
 
@@ -26,10 +26,15 @@ async fn captchaforge_install_must_fail_with_actionable_hint() {
         .await
         .expect("collect proxy output");
 
-    assert!(!output.status.success(), "captchaforge without feature should fail");
+    assert!(
+        !output.status.success(),
+        "captchaforge without feature should fail"
+    );
     let output = combined_output(&output);
     assert!(
-        output.contains("--captchaforge requires the binary to be built with `--features captchaforge`"),
+        output.contains(
+            "--captchaforge requires the binary to be built with `--features captchaforge`"
+        ),
         "output must include actionable hint: {output}"
     );
 }
@@ -42,7 +47,10 @@ async fn captchaforge_install_must_not_fail_without_flag() {
         .expect("start proxy");
 
     let running = proxy.try_wait().expect("check proxy status");
-    assert!(running.is_none(), "proxy should be running without --captchaforge");
+    assert!(
+        running.is_none(),
+        "proxy should be running without --captchaforge"
+    );
 
     stop_proxy(&mut proxy).await;
 }

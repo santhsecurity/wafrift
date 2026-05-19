@@ -4,11 +4,8 @@
 use wafrift_transport::challenge::{ChallengeKind, extract_clearance_cookie};
 
 fn assert_cf_pair_only(raw: &str, expected_pair: &str) {
-    let got = extract_clearance_cookie(&[raw]).unwrap_or_else(|| {
-        panic!(
-            "Fix: must capture clearance from Set-Cookie — input: {raw:?}"
-        )
-    });
+    let got = extract_clearance_cookie(&[raw])
+        .unwrap_or_else(|| panic!("Fix: must capture clearance from Set-Cookie — input: {raw:?}"));
     assert_eq!(got.0, expected_pair, "Fix: replay string must be pair only");
     assert_eq!(got.1, ChallengeKind::CloudflareManaged);
     assert!(
@@ -45,10 +42,7 @@ fn assert_cf_pair_only(raw: &str, expected_pair: &str) {
 
 #[test]
 fn cf_clearance_path_only_attribute() {
-    assert_cf_pair_only(
-        "cf_clearance=tokenPath; Path=/",
-        "cf_clearance=tokenPath",
-    );
+    assert_cf_pair_only("cf_clearance=tokenPath; Path=/", "cf_clearance=tokenPath");
 }
 
 #[test]
@@ -95,12 +89,16 @@ fn akamai_abck_strips_attributes_identically() {
     let got = extract_clearance_cookie(&[raw]).expect("Fix: _abck must extract");
     assert_eq!(got.0, "_abck=AK~-1~Y");
     assert_eq!(got.1, ChallengeKind::AkamaiBmp);
-    assert!(!got.0.contains(';'), "Fix: captured pair must be single name=value");
+    assert!(
+        !got.0.contains(';'),
+        "Fix: captured pair must be single name=value"
+    );
 }
 
 #[test]
 fn aws_waf_token_strips_attributes() {
-    let raw = "aws-waf-token=WAF99; Path=/; Secure; HttpOnly; Expires=Tue, 10 May 2026 12:00:00 GMT";
+    let raw =
+        "aws-waf-token=WAF99; Path=/; Secure; HttpOnly; Expires=Tue, 10 May 2026 12:00:00 GMT";
     let got = extract_clearance_cookie(&[raw]).expect("Fix: aws-waf-token must extract");
     assert_eq!(got.0, "aws-waf-token=WAF99");
     assert_eq!(got.1, ChallengeKind::AwsWaf);

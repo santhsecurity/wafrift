@@ -301,9 +301,18 @@ mod tests {
     fn benign_literal_in_string_context_is_not_an_injection() {
         // `'+0+'` spliced into a string ctx is arithmetic on literals,
         // not injected logic — must stay rejected.
-        assert!(!is_valid_expression_injection("'+0+'", DatabaseDialect::Generic));
-        assert!(!is_valid_expression_injection("0+1", DatabaseDialect::Generic));
-        assert!(!is_valid_expression_injection("1*1", DatabaseDialect::MySql));
+        assert!(!is_valid_expression_injection(
+            "'+0+'",
+            DatabaseDialect::Generic
+        ));
+        assert!(!is_valid_expression_injection(
+            "0+1",
+            DatabaseDialect::Generic
+        ));
+        assert!(!is_valid_expression_injection(
+            "1*1",
+            DatabaseDialect::MySql
+        ));
     }
 
     #[test]
@@ -319,12 +328,12 @@ mod tests {
         // an INSERT/UPDATE/ORDER-BY-dir/LIMIT/trailing-AND host — shapes
         // a query-only context set misjudged as "not an attack".
         for atk in [
-            "1) ; DROP TABLE users-- -",                  // INSERT VALUES stacked
-            "x', 'pwned')-- -",                           // INSERT VALUES break+comment
-            "x', role = 'admin'-- -",                     // UPDATE SET extra-column
-            "; DROP TABLE users-- -",                     // ORDER BY <col> stacked
-            "(CASE WHEN (1=1) THEN name ELSE id END)",     // ORDER BY blind CASE
-            "1 OR 1=1",                                    // numeric + trailing AND
+            "1) ; DROP TABLE users-- -",               // INSERT VALUES stacked
+            "x', 'pwned')-- -",                        // INSERT VALUES break+comment
+            "x', role = 'admin'-- -",                  // UPDATE SET extra-column
+            "; DROP TABLE users-- -",                  // ORDER BY <col> stacked
+            "(CASE WHEN (1=1) THEN name ELSE id END)", // ORDER BY blind CASE
+            "1 OR 1=1",                                // numeric + trailing AND
         ] {
             assert!(
                 is_valid_expression_injection(atk, DatabaseDialect::Generic)

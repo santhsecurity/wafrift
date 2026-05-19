@@ -72,9 +72,7 @@ fn has_xss_structure(payload: &str) -> bool {
     let has_tag = xss_tags().iter().any(|t| lower.contains(&t.prefix));
     let has_event = xss_events().iter().any(|e| lower.contains(&e.name));
     let has_exec = xss_exec_sinks().iter().any(|s| lower.contains(&s.name));
-    let has_uri = js_uri_schemes()
-        .iter()
-        .any(|s| lower.contains(&s.prefix));
+    let has_uri = js_uri_schemes().iter().any(|s| lower.contains(&s.prefix));
 
     // Check for a dangerous sink to avoid false positives on benign HTML
     let has_dangerous_sink = dangerous_sinks().iter().any(|s| lower.contains(&s.name));

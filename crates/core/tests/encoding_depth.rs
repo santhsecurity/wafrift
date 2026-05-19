@@ -39,7 +39,10 @@ fn sql_union_select_url_encode() {
     // miss every one of these assertions.
     assert!(result.contains("%20"), "space must be %-encoded: {result}");
     assert!(result.contains("%2C"), "comma must be %-encoded: {result}");
-    assert!(result.contains("UNION"), "alphanumerics pass through: {result}");
+    assert!(
+        result.contains("UNION"),
+        "alphanumerics pass through: {result}"
+    );
     assert!(result.len() >= payload.len(), "URL encoding never shortens");
 }
 
@@ -175,7 +178,10 @@ fn sql_order_by_union_whitespace() {
 fn sql_limit_offset_url_encode() {
     let payload = "LIMIT 1 OFFSET 0";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
-    assert!(result.contains("%20"), "spaces between LIMIT/1/OFFSET/0: {result}");
+    assert!(
+        result.contains("%20"),
+        "spaces between LIMIT/1/OFFSET/0: {result}"
+    );
     assert!(result.contains("LIMIT"), "keyword passes through: {result}");
     assert_eq!(
         result.matches("%20").count(),
@@ -270,7 +276,10 @@ fn sql_between_operator_url_encode() {
     let payload = "id BETWEEN 1 AND 100";
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
     assert!(result.contains("%20"), "spaces: {result}");
-    assert!(result.contains("BETWEEN"), "keyword passes through: {result}");
+    assert!(
+        result.contains("BETWEEN"),
+        "keyword passes through: {result}"
+    );
     assert_eq!(
         result.matches("%20").count(),
         4,
@@ -298,7 +307,10 @@ fn sql_join_variants_url_encode() {
     let result = encoding::encode(payload, Strategy::UrlEncode).unwrap();
     assert!(result.contains("%20"), "spaces between tokens: {result}");
     assert!(result.contains("%3D"), "equals sign: {result}");
-    assert!(result.contains("LEFT") && result.contains("JOIN"), "keywords pass through: {result}");
+    assert!(
+        result.contains("LEFT") && result.contains("JOIN"),
+        "keywords pass through: {result}"
+    );
     assert_eq!(
         result.matches("%20").count(),
         6,
@@ -719,9 +731,18 @@ fn layered_unicode_then_url_sql() {
         encoding::encode_layered(payload, &[Strategy::UnicodeEncode, Strategy::UrlEncode]).unwrap();
     // Unicode escapes get URL-encoded - backslash becomes %5C, the "u" stays.
     assert!(result.contains("%5C"), "backslash url-encoded: {result}");
-    assert!(result.contains("u0027"), "single quote unicode-escaped: {result}");
-    assert!(result.contains("u003D"), "equals sign unicode-escaped: {result}");
-    assert!(!result.contains('\''), "raw quote must not survive: {result}");
+    assert!(
+        result.contains("u0027"),
+        "single quote unicode-escaped: {result}"
+    );
+    assert!(
+        result.contains("u003D"),
+        "equals sign unicode-escaped: {result}"
+    );
+    assert!(
+        !result.contains('\''),
+        "raw quote must not survive: {result}"
+    );
 }
 
 #[test]

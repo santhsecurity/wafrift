@@ -17,8 +17,19 @@ use wafrift_grammar::grammar::sql;
 
 /// The canned fragments the engine used to substitute wholesale.
 const CANNED_NON_ATTACKS: &[&str] = &[
-    "'+0+'", "'-0-'", "'*1*'", "'/1/'", "'%2b0%2b'", "1-0", "1*1", "0+1", "1/1", "1%1",
-    "1-false", "1-true", "1%2b0",
+    "'+0+'",
+    "'-0-'",
+    "'*1*'",
+    "'/1/'",
+    "'%2b0%2b'",
+    "1-0",
+    "1*1",
+    "0+1",
+    "1/1",
+    "1%1",
+    "1-false",
+    "1-true",
+    "1%2b0",
 ];
 
 #[test]
@@ -68,10 +79,7 @@ fn union_and_stacked_and_blind_keep_their_construct() {
             "1 AND (SELECT 1 FROM (SELECT SLEEP(5))x)",
             &["sleep", "select"],
         ),
-        (
-            "1 AND IF(1=1,SLEEP(5),0)",
-            &["sleep", "if("],
-        ),
+        ("1 AND IF(1=1,SLEEP(5),0)", &["sleep", "if("]),
     ];
     for (attack, must_have_any) in cases {
         let variants = sql::mutate(attack, 48);
@@ -101,9 +109,9 @@ fn adversarial_twin_genuine_tautology_still_gets_keyword_free_rewrites() {
         let variants = sql::mutate(taut, 64);
         assert!(!variants.is_empty(), "no variants for tautology {taut:?}");
         let has_keyword_free = variants.iter().any(|v| {
-            v.rules_applied
-                .iter()
-                .any(|r| r.contains("keywordless") || r.contains("quote_free") || r.contains("arithmetic"))
+            v.rules_applied.iter().any(|r| {
+                r.contains("keywordless") || r.contains("quote_free") || r.contains("arithmetic")
+            })
         });
         assert!(
             has_keyword_free,

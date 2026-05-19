@@ -20,8 +20,7 @@ fn waf_goaway_reasons() -> &'static [String] {
     static CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| {
         let raw = include_str!("../rules/h2/goaway.toml");
-        let parsed: GoawayRules =
-            toml::from_str(raw).expect("rules/h2/goaway.toml must parse");
+        let parsed: GoawayRules = toml::from_str(raw).expect("rules/h2/goaway.toml must parse");
         parsed.reason.into_iter().map(|r| r.phrase).collect()
     })
 }

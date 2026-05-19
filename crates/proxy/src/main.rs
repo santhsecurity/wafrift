@@ -32,8 +32,7 @@ use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::rate_limit::RateLimiter;
 use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
-    BogonFilteringResolver, UpstreamPolicy,
-    assert_forward_url_allowed,
+    BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed,
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
@@ -498,12 +497,17 @@ fn load_gene_bank(path: &std::path::Path) -> PersistedGeneBank {
                     // Backward-compat: v0.1 gene-bank was a flat HashMap without
                     // the schema wrapper. Don't discard a practitioner's saved
                     // discovery just because they upgraded from an older build.
-                    if let Ok(flat) = serde_json::from_str::<HashMap<String, PersistedHostState>>(&s) {
+                    if let Ok(flat) =
+                        serde_json::from_str::<HashMap<String, PersistedHostState>>(&s)
+                    {
                         warn!(
                             path = %path.display(),
                             "loaded v0.1 gene-bank (flat HashMap); migrating to schema 1"
                         );
-                        return PersistedGeneBank { schema: 1, hosts: flat };
+                        return PersistedGeneBank {
+                            schema: 1,
+                            hosts: flat,
+                        };
                     }
                     warn!(
                         path = %path.display(),
@@ -1649,7 +1653,11 @@ async fn forward_wafrift_request(
             .request
             .headers
             .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("content-type")).map_or_else(|| "application/octet-stream".to_string(), |(_, v)| v.clone());
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .map_or_else(
+                || "application/octet-stream".to_string(),
+                |(_, v)| v.clone(),
+            );
         let original = evasion_result.request.body.clone().unwrap_or_default();
         match wafrift_evolution::body_padding::pad(&original, &ct, pad_target) {
             wafrift_evolution::body_padding::PadOutcome::Padded { bytes, added } => {
@@ -1682,7 +1690,8 @@ async fn forward_wafrift_request(
             .request
             .url
             .splitn(4, '/')
-            .nth(3).map_or_else(|| "/".into(), |s| format!("/{s}"));
+            .nth(3)
+            .map_or_else(|| "/".into(), |s| format!("/{s}"));
         let (id, rx) = store.register(
             host.clone(),
             evasion_result.request.method.as_str(),
@@ -2219,7 +2228,8 @@ async fn mitm_plaintext_request(
 
     let path_for_scope = req
         .uri()
-        .path_and_query().map_or_else(|| "/".to_string(), |p| p.path().to_string());
+        .path_and_query()
+        .map_or_else(|| "/".to_string(), |p| p.path().to_string());
     if !scope.allows(&host, &path_for_scope, &wafrift_req.method) {
         return forward_passthrough(wafrift_req, host, &client, policy, limits).await;
     }
@@ -2409,9 +2419,7 @@ async fn proxy(
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(req).await {
                         Ok(upgraded) => {
-                            if let Err(e) =
-                                tunnel(upgraded, resolved_for_tunnel).await
-                            {
+                            if let Err(e) = tunnel(upgraded, resolved_for_tunnel).await {
                                 warn!("server io error: {}", e);
                             };
                         }
@@ -2558,7 +2566,8 @@ async fn proxy(
 
     let path_for_scope = req
         .uri()
-        .path_and_query().map_or_else(|| "/".to_string(), |p| p.path().to_string());
+        .path_and_query()
+        .map_or_else(|| "/".to_string(), |p| p.path().to_string());
 
     // X-WafRift-Evade: off  → skip evasion entirely for this request
     let skip_evasion = evade_override.as_deref() == Some("off");
@@ -2869,10 +2878,7 @@ const MAX_TUNNEL_BYTES_PER_DIRECTION: u64 = 2 * 1024 * 1024 * 1024;
 /// caller had already validated the upstream as public. We now pass
 /// the validated `SocketAddrs` straight in and connect to whichever
 /// answers first.
-async fn tunnel(
-    upgraded: Upgraded,
-    addrs: Vec<std::net::SocketAddr>,
-) -> std::io::Result<()> {
+async fn tunnel(upgraded: Upgraded, addrs: Vec<std::net::SocketAddr>) -> std::io::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut server = TcpStream::connect(addrs.as_slice()).await?;
     let mut upgraded = TokioIo::new(upgraded);

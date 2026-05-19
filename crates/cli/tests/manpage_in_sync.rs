@@ -36,9 +36,8 @@ fn shipped_manpage_matches_binary_emission() {
         .and_then(|p| p.parent())
         .expect("workspace root is two levels above crates/cli");
     let shipped_path = workspace_root.join("docs/man/wafrift.1");
-    let shipped = std::fs::read_to_string(&shipped_path).unwrap_or_else(|e| {
-        panic!("read {}: {e}", shipped_path.display())
-    });
+    let shipped = std::fs::read_to_string(&shipped_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", shipped_path.display()));
 
     if emitted != shipped {
         // Find the first differing line so the message points at the
@@ -53,9 +52,9 @@ fn shipped_manpage_matches_binary_emission() {
             }
         }
         let detail = match first_diff {
-            Some((line, e, s)) => format!(
-                "first divergence at line {line}:\n  binary:  {e}\n  shipped: {s}"
-            ),
+            Some((line, e, s)) => {
+                format!("first divergence at line {line}:\n  binary:  {e}\n  shipped: {s}")
+            }
             None => format!(
                 "length mismatch: binary={} lines, shipped={} lines",
                 emitted_lines.len(),

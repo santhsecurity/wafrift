@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use wafrift_recon::active::{
-    probe_tcp_banner, ActiveProbeConfig, ReconProbeError, TcpServiceClass,
+    ActiveProbeConfig, ReconProbeError, TcpServiceClass, probe_tcp_banner,
 };
 
 fn tcp_config() -> ActiveProbeConfig {

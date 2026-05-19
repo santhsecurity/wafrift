@@ -67,8 +67,8 @@ impl OracleVerdict {
                 (self.triggered_rules as f64 * RULE_PENALTY_PER_RULE).min(MAX_RULE_PENALTY);
             let latency_penalty =
                 (self.latency_ms as f64 / LATENCY_REFERENCE_MS).min(MAX_LATENCY_PENALTY);
-            let body_penalty = (self.body_delta.abs() as f64 / BODY_DELTA_REFERENCE)
-                .min(MAX_BODY_PENALTY);
+            let body_penalty =
+                (self.body_delta.abs() as f64 / BODY_DELTA_REFERENCE).min(MAX_BODY_PENALTY);
             MAX_PARTIAL_CREDIT - rule_penalty - latency_penalty - body_penalty
         };
         let confidence_bonus = self.confidence * CONFIDENCE_BONUS_MULTIPLIER;

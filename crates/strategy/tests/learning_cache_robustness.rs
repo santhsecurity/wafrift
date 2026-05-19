@@ -109,7 +109,9 @@ fn open_after_corrupt_file_can_save_again() {
 
     let mut cache = LearningCache::open(&path).expect("must recover from binary garbage");
     cache.record_success(CacheKey::new("modsec", "xss"), pipeline("p1"));
-    cache.save().expect("save after corruption recovery must succeed");
+    cache
+        .save()
+        .expect("save after corruption recovery must succeed");
 
     // Reopen and verify the new entry stuck.
     let cache2 = LearningCache::open(&path).unwrap();
@@ -182,7 +184,10 @@ fn save_does_not_leave_partial_file_visible() {
     // Verify the surviving file is valid JSON we can reopen.
     let cache2 = LearningCache::open(&path).expect("post-save file must reopen cleanly");
     assert_eq!(
-        cache2.get(&CacheKey::new("waf-a", "sql")).unwrap().successes,
+        cache2
+            .get(&CacheKey::new("waf-a", "sql"))
+            .unwrap()
+            .successes,
         2
     );
 

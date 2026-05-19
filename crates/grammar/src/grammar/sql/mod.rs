@@ -357,11 +357,11 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         if !markers.is_empty() {
             results.retain(|m| {
                 let norm = strip_sql_comments_ws(&m.payload);
-                let var_tokens: std::collections::HashSet<String> =
-                    norm.split(|c: char| !c.is_ascii_alphanumeric())
-                        .filter(|t| t.len() >= 4)
-                        .map(str::to_ascii_lowercase)
-                        .collect();
+                let var_tokens: std::collections::HashSet<String> = norm
+                    .split(|c: char| !c.is_ascii_alphanumeric())
+                    .filter(|t| t.len() >= 4)
+                    .map(str::to_ascii_lowercase)
+                    .collect();
                 markers.iter().any(|mk| var_tokens.contains(mk))
             });
         }
@@ -395,12 +395,47 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
 pub(crate) fn is_structured_attack(payload: &str) -> bool {
     let s = strip_sql_comments_ws(payload);
     const STRUCTURED: &[&str] = &[
-        "union", "select", "sleep(", "benchmark(", "waitfor", "extractvalue",
-        "updatexml", "load_file", "into outfile", "into dumpfile", ";", "insert ",
-        "update ", "delete ", "drop ", "exec ", "xp_", "sp_", "pg_sleep", "dbms_",
-        "utl_", "case when", "regexp ", "rlike ", "@@", "0x", "char(", "chr(",
-        "concat", "ascii(", "substring", "substr(", "hex(", "unhex(", "if(",
-        "floor(", "rand(", "count(", "group by", "having ", "procedure ",
+        "union",
+        "select",
+        "sleep(",
+        "benchmark(",
+        "waitfor",
+        "extractvalue",
+        "updatexml",
+        "load_file",
+        "into outfile",
+        "into dumpfile",
+        ";",
+        "insert ",
+        "update ",
+        "delete ",
+        "drop ",
+        "exec ",
+        "xp_",
+        "sp_",
+        "pg_sleep",
+        "dbms_",
+        "utl_",
+        "case when",
+        "regexp ",
+        "rlike ",
+        "@@",
+        "0x",
+        "char(",
+        "chr(",
+        "concat",
+        "ascii(",
+        "substring",
+        "substr(",
+        "hex(",
+        "unhex(",
+        "if(",
+        "floor(",
+        "rand(",
+        "count(",
+        "group by",
+        "having ",
+        "procedure ",
     ];
     STRUCTURED.iter().any(|m| s.contains(m))
 }

@@ -99,11 +99,9 @@ fn adversarial_twin_bare_probe_still_gets_equivalent_set() {
         let variants = cmd::mutate(probe, 40);
         assert!(!variants.is_empty(), "no variants for bare probe {probe:?}");
         assert!(
-            variants
-                .iter()
-                .any(|v| v.payload == "id"
-                    || v.payload == "hostname"
-                    || v.payload.contains("uname")),
+            variants.iter().any(|v| v.payload == "id"
+                || v.payload == "hostname"
+                || v.payload.contains("uname")),
             "bare probe {probe:?} lost its equivalent canned-probe set — gate too aggressive"
         );
     }

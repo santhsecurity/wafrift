@@ -323,10 +323,7 @@ mod tests {
         for payload in payloads {
             let body = format!("user=admin&pass={payload}");
             let variants = generate_variants_from_body(body.as_bytes());
-            assert!(
-                !variants.is_empty(),
-                "no variants for payload: {payload:?}"
-            );
+            assert!(!variants.is_empty(), "no variants for payload: {payload:?}");
 
             for v in &variants {
                 let ct = &v.content_type;
@@ -363,10 +360,10 @@ mod tests {
                         .filter(|line| !line.trim_start().starts_with("//"))
                         .collect::<Vec<&str>>()
                         .join("\n");
-                    let parsed: serde_json::Value = serde_json::from_str(&stripped)
-                        .unwrap_or_else(|e| panic!(
-                            "JSON variant failed to parse: {e} ; body={body_str:?}"
-                        ));
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(&stripped).unwrap_or_else(|e| {
+                            panic!("JSON variant failed to parse: {e} ; body={body_str:?}")
+                        });
                     assert!(
                         parsed.get("user").is_some() || parsed.get("pass").is_some(),
                         "JSON variant missing expected fields: {body_str:?}"

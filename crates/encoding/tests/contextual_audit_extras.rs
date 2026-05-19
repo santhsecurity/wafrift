@@ -29,8 +29,7 @@ fn xml_attribute_escapes_apostrophe() {
 fn xml_attribute_still_escapes_other_metas() {
     // Negative twin — make sure adding apos didn't regress the original
     // four escapes.
-    let escaped =
-        escape_for_context("a&b\"c<d>e", InjectionContext::XmlAttribute).unwrap();
+    let escaped = escape_for_context("a&b\"c<d>e", InjectionContext::XmlAttribute).unwrap();
     assert!(escaped.contains("&amp;"));
     assert!(escaped.contains("&quot;"));
     assert!(escaped.contains("&lt;"));
@@ -89,16 +88,17 @@ fn cookie_value_encodes_space() {
 
 #[test]
 fn cookie_value_encodes_comma() {
-    let escaped =
-        escape_for_context("a,b,c", InjectionContext::CookieValue).unwrap();
-    assert!(!escaped.contains(','), "comma must be encoded, got: {escaped}");
+    let escaped = escape_for_context("a,b,c", InjectionContext::CookieValue).unwrap();
+    assert!(
+        !escaped.contains(','),
+        "comma must be encoded, got: {escaped}"
+    );
     assert!(escaped.contains("%2C"));
 }
 
 #[test]
 fn cookie_value_encodes_double_quote_and_backslash() {
-    let escaped =
-        escape_for_context("a\"b\\c", InjectionContext::CookieValue).unwrap();
+    let escaped = escape_for_context("a\"b\\c", InjectionContext::CookieValue).unwrap();
     assert!(
         !escaped.contains('"'),
         "double-quote must be encoded, got: {escaped}"
@@ -114,8 +114,7 @@ fn cookie_value_encodes_double_quote_and_backslash() {
 #[test]
 fn cookie_value_still_encodes_pre_existing_set() {
     // Negative twin — make sure adding new chars didn't drop old ones.
-    let escaped =
-        escape_for_context("a;b=c\r\n\0d", InjectionContext::CookieValue).unwrap();
+    let escaped = escape_for_context("a;b=c\r\n\0d", InjectionContext::CookieValue).unwrap();
     assert!(escaped.contains("%3B"));
     assert!(escaped.contains("%3D"));
     assert!(escaped.contains("%0D"));

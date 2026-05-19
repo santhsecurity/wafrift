@@ -35,8 +35,7 @@ fn one_chatty_host_cannot_starve_other_hosts() {
             others_allowed += 1;
         }
     }
-    let global_remaining =
-        OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN - chatty_allowed;
+    let global_remaining = OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN - chatty_allowed;
     assert!(
         others_allowed > 0,
         "other hosts must not be starved by the chatty one (chatty took {chatty_allowed}, \

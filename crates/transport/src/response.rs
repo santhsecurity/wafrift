@@ -264,7 +264,10 @@ mod tests {
         // Uses "access denied" — an explicit block-page marker retained
         // after the 2026-05-10 audit that removed high-FP terms like
         // "security check" and "firewall".
-        assert!(is_waf_block(200, b"Access denied - your request was rejected"));
+        assert!(is_waf_block(
+            200,
+            b"Access denied - your request was rejected"
+        ));
     }
 
     #[test]

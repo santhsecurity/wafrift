@@ -66,12 +66,14 @@ fn get_for_request_enforces_path_scope() {
         },
     );
     assert_eq!(
-        s.get_for_request("example.com", "/admin/users", false).as_deref(),
+        s.get_for_request("example.com", "/admin/users", false)
+            .as_deref(),
         Some("cf_clearance=t"),
         "request under /admin must replay"
     );
     assert!(
-        s.get_for_request("example.com", "/api/login", false).is_none(),
+        s.get_for_request("example.com", "/api/login", false)
+            .is_none(),
         "request to /api must NOT replay an /admin-scoped cookie"
     );
 }

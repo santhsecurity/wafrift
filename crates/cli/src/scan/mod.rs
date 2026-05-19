@@ -825,9 +825,7 @@ pub(crate) async fn run_scan(
         // every additional request just deepens the ban and tells us
         // nothing. Stop, explain, and hand the operator the actual
         // remedies instead of silently grinding for minutes.
-        if total_fired >= 12
-            && f64::from(_rate_limited) / total_fired.max(1) as f64 >= 0.80
-        {
+        if total_fired >= 12 && f64::from(_rate_limited) / total_fired.max(1) as f64 >= 0.80 {
             aborted_rate_limited = true;
             eprintln!(
                 "\n[wafrift scan] {} {}/{} probes were rate-limited (HTTP 429/slow-down). \

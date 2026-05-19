@@ -52,7 +52,10 @@ fn detect_rejects_out_of_range_status() {
     // (these reach our value-parser).
     for bad in ["999", "0", "99", "1000", "notanum"] {
         let (code, _o, e) = wafrift(&["detect", "--status", bad, "--headers", "server: nginx"]);
-        assert_ne!(code, 0, "detect --status {bad} must be rejected, not scored");
+        assert_ne!(
+            code, 0,
+            "detect --status {bad} must be rejected, not scored"
+        );
         assert!(
             e.contains("100") && (e.to_lowercase().contains("range") || e.contains("not a number")),
             "status {bad}: error should explain the 100-599 rule, got: {e}"
@@ -107,8 +110,15 @@ fn detect_cloudfront_each_marker_independently() {
         "x-amz-cf-id: opaqueid",
         "x-amz-cf-pop: SFO5-C1",
     ] {
-        let (code, out, _e) =
-            wafrift(&["detect", "--status", "200", "--headers", hdr, "--headers", "server: nginx"]);
+        let (code, out, _e) = wafrift(&[
+            "detect",
+            "--status",
+            "200",
+            "--headers",
+            hdr,
+            "--headers",
+            "server: nginx",
+        ]);
         assert_eq!(code, 0);
         assert!(
             out.to_lowercase().contains("cloudfront"),
@@ -154,7 +164,9 @@ fn detect_url_flag_is_accepted_and_probes() {
         "--url must be a real flag, not an arg-parse error: {e}"
     );
     assert!(
-        e.to_lowercase().contains("probe") || e.to_lowercase().contains("request") || e.to_lowercase().contains("failed"),
+        e.to_lowercase().contains("probe")
+            || e.to_lowercase().contains("request")
+            || e.to_lowercase().contains("failed"),
         "should fail at the network probe, not parsing: {e}"
     );
 }
@@ -182,11 +194,17 @@ fn detect_url_conflicts_with_manual_status_headers() {
 #[test]
 fn evade_format_json_emits_ndjson() {
     let (code, out, _e) = wafrift(&["evade", "--payload", "' OR 1=1 -- ", "--format", "json"]);
-    assert_eq!(code, 0, "evade --format json must be accepted (was rejected)");
+    assert_eq!(
+        code, 0,
+        "evade --format json must be accepted (was rejected)"
+    );
     let first = out.lines().next().unwrap_or("");
     let v: serde_json::Value =
         serde_json::from_str(first).expect("--format json must emit parseable JSON per line");
-    assert!(v.get("payload").is_some(), "json variant needs a payload field: {first}");
+    assert!(
+        v.get("payload").is_some(),
+        "json variant needs a payload field: {first}"
+    );
 }
 
 #[test]
@@ -204,7 +222,10 @@ fn evade_payload_b64_carries_binary_safely() {
     // base64 of bytes 0x00 0x01 'A' — impossible to pass via argv.
     let (code, out, _e) = wafrift(&["evade", "--payload-b64", "AAFB", "--format", "json"]);
     assert_eq!(code, 0, "--payload-b64 must decode and run");
-    assert!(!out.is_empty(), "should still produce variants for a control-byte payload");
+    assert!(
+        !out.is_empty(),
+        "should still produce variants for a control-byte payload"
+    );
 }
 
 #[test]
@@ -220,8 +241,14 @@ fn evade_empty_payload_explains_nul_truncation() {
 
 #[test]
 fn evade_stdin_is_binary_safe() {
-    let (code, out, _e) = wafrift_stdin(&["evade", "--stdin", "--format", "json"], &[0x00, 0x01, b'<', b's', b'>']);
-    assert_eq!(code, 0, "stdin must accept non-UTF8/binary bytes (lossy), not hard-error");
+    let (code, out, _e) = wafrift_stdin(
+        &["evade", "--stdin", "--format", "json"],
+        &[0x00, 0x01, b'<', b's', b'>'],
+    );
+    assert_eq!(
+        code, 0,
+        "stdin must accept non-UTF8/binary bytes (lossy), not hard-error"
+    );
     assert!(!out.is_empty());
 }
 
@@ -256,7 +283,12 @@ fn seed_technique_is_required_and_marked() {
 #[test]
 fn seed_with_technique_dry_run_twin() {
     let (code, out, err) = wafrift(&[
-        "seed", "--waf", "cloudflare", "--technique", "EncodingDoubleUrl", "--dry-run",
+        "seed",
+        "--waf",
+        "cloudflare",
+        "--technique",
+        "EncodingDoubleUrl",
+        "--dry-run",
     ]);
     assert_eq!(code, 0, "valid seed --dry-run should succeed: {err}");
     assert!(
@@ -330,8 +362,7 @@ fn report_ingests_scan_json_via_stdin() {
             {"variant": 2, "payload": "y", "techniques": ["grammar::tautology"], "confidence": 0.8}
         ]
     }"#;
-    let (code, out, err) =
-        wafrift_stdin(&["report", "--scan-stdin"], scan_json.as_bytes());
+    let (code, out, err) = wafrift_stdin(&["report", "--scan-stdin"], scan_json.as_bytes());
     assert_eq!(code, 0, "report --scan-stdin must succeed: {err}");
     assert!(
         out.contains("api.example.com"),

@@ -206,8 +206,7 @@ impl TamperStrategy for OverlongUtf8Tamper {
     }
 
     fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
-        crate::encoding::structural::overlong_utf8(payload)
-            .unwrap_or_else(|_| payload.to_string())
+        crate::encoding::structural::overlong_utf8(payload).unwrap_or_else(|_| payload.to_string())
     }
 
     fn aggressiveness(&self) -> f64 {

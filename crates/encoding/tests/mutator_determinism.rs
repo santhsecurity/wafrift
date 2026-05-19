@@ -3,12 +3,11 @@
 mod common;
 
 use wafrift_encoding::{
-    encode,
+    Strategy as S, encode,
     encoding::strategy::all_strategies,
     header::{case_mix, tab_separator, whitespace_pad},
     tamper::{all_tamper_names, tamper},
     url_mutate::{UrlMutateConfig, UrlStrategy, mutate_url},
-    Strategy as S,
 };
 
 #[test]
@@ -29,9 +28,7 @@ fn encode_pure_strategies_twice_are_byte_identical() {
         };
 
         let a = encode(bytes_in, strategy).unwrap_or_else(|e| {
-            panic!(
-                "Fix: encode must succeed for deterministic audit ({strategy:?}): {e:?}"
-            )
+            panic!("Fix: encode must succeed for deterministic audit ({strategy:?}): {e:?}")
         });
         let b = encode(bytes_in, strategy).unwrap();
         assert_eq!(

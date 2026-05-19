@@ -501,7 +501,8 @@ fn print_report_text(r: &UrlReport) {
         );
     }
     if r.divergences.is_empty() {
-        let why = if r.baseline_was_throttled || r.rate_limited_probes * 2 >= r.probes_fired as u32 {
+        let why = if r.baseline_was_throttled || r.rate_limited_probes * 2 >= r.probes_fired as u32
+        {
             "no divergences — but the run was dominated by rate-limiting, so this is \
              INCONCLUSIVE, not a clean bill of health. Re-run slower / off the limiter."
         } else {

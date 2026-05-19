@@ -66,10 +66,7 @@ fn inputs() -> Vec<&'static str> {
 
 /// Encoders whose output is non-deterministic by design.
 fn non_deterministic(s: Strategy) -> bool {
-    matches!(
-        s,
-        Strategy::RandomCase | Strategy::SpaceToRandomBlank
-    )
+    matches!(s, Strategy::RandomCase | Strategy::SpaceToRandomBlank)
 }
 
 /// 1. UNIVERSAL CONTRACT — every strategy, every input:
@@ -79,8 +76,8 @@ fn every_strategy_every_input_is_total_and_bounded() {
     let mut checks = 0u64;
     for &s in all_strategies() {
         for inp in inputs() {
-            let out = encode(inp, s)
-                .unwrap_or_else(|e| panic!("encode({inp:?}, {s:?}) errored: {e:?}"));
+            let out =
+                encode(inp, s).unwrap_or_else(|e| panic!("encode({inp:?}, {s:?}) errored: {e:?}"));
 
             let ceiling = max_encoded_output_bytes(s, inp.len());
             assert!(
@@ -149,7 +146,10 @@ fn url_encoders_round_trip_exactly() {
         let d2 = encode(inp, Strategy::DoubleUrlEncode).unwrap();
         let once = urlencoding::decode(&d2).unwrap().into_owned();
         let twice = urlencoding::decode(&once).unwrap().into_owned();
-        assert_eq!(twice, inp, "DoubleUrlEncode not 2-layer reversible for {inp:?}");
+        assert_eq!(
+            twice, inp,
+            "DoubleUrlEncode not 2-layer reversible for {inp:?}"
+        );
 
         let d3 = encode(inp, Strategy::TripleUrlEncode).unwrap();
         let a = urlencoding::decode(&d3).unwrap().into_owned();
@@ -188,7 +188,11 @@ fn base64_and_hex_round_trip_to_exact_bytes() {
             .decode(b64u.trim())
             .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(b64u.trim()))
             .unwrap_or_else(|e| panic!("Base64UrlEncode not decodable for {inp:?}: {e}"));
-        assert_eq!(rawu, inp.as_bytes(), "Base64UrlEncode round-trip lost {inp:?}");
+        assert_eq!(
+            rawu,
+            inp.as_bytes(),
+            "Base64UrlEncode round-trip lost {inp:?}"
+        );
 
         let h = encode(inp, Strategy::HexEncode).unwrap();
         // HexEncode may carry a prefix/wrapper; extract the longest hex run.
@@ -298,8 +302,7 @@ fn space_substitution_keeps_nonspace_payload_in_order() {
 #[test]
 fn empty_input_is_handled_by_every_strategy() {
     for &s in all_strategies() {
-        let out = encode("", s)
-            .unwrap_or_else(|e| panic!("encode(\"\", {s:?}) errored: {e:?}"));
+        let out = encode("", s).unwrap_or_else(|e| panic!("encode(\"\", {s:?}) errored: {e:?}"));
         assert!(
             out.len() <= max_encoded_output_bytes(s, 0),
             "{s:?} on empty input exceeded its zero-length ceiling: {out:?}"

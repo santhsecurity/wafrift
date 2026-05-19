@@ -24,8 +24,7 @@ fn cl_te_rfc7230_upstream_two_requests() {
 #[test]
 fn cl_te_content_length_only_front_single_logical_body() {
     let p = cl_te(HOST, smuggled_inner()).expect("cl_te");
-    let err =
-        parse_http_requests(&p.raw_bytes, BodyFraming::ContentLengthOnly).expect_err("parse");
+    let err = parse_http_requests(&p.raw_bytes, BodyFraming::ContentLengthOnly).expect_err("parse");
     assert!(
         matches!(err, WireParseError::Httparse(_)),
         "Fix: CL-only framing consumes zero octets; leftover chunked bytes must not parse as a second HTTP message — got {err}"

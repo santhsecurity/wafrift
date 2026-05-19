@@ -8,9 +8,9 @@
 use std::sync::Arc;
 
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
-use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject};
 use tokio::net::TcpListener;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use wafrift_proxy::mitm::CertificateAuthority;
@@ -42,7 +42,10 @@ async fn start_leaf_server(
 
     let handle = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("accept tls stream");
-        let _tls = acceptor.accept(stream).await.expect("complete tls handshake");
+        let _tls = acceptor
+            .accept(stream)
+            .await
+            .expect("complete tls handshake");
     });
     (port, handle)
 }

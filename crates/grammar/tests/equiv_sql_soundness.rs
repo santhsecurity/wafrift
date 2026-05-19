@@ -6,8 +6,8 @@
 //! at scale — including a real boolean evaluator that proves the
 //! generated tautologies are *actually true* (truth, not shape).
 
-use wafrift_grammar::grammar::equiv::{self, Dialect, DeliveryShape, EquivConfig};
 use wafrift_grammar::grammar::equiv::sql as esql;
+use wafrift_grammar::grammar::equiv::{self, DeliveryShape, Dialect, EquivConfig};
 
 const STRUCTURED: &[&str] = &[
     "1 UNION SELECT username,password FROM users-- -",
@@ -86,7 +86,16 @@ fn generation_is_deterministic_per_seed() {
 
 // ──────────────── soundness invariant at scale ─────────────────────
 const CANNED_NON_ATTACKS: &[&str] = &[
-    "'+0+'", "'-0-'", "1-0", "1*1", "0+1", "1/1", "", " ", "1", "1=1-- -only",
+    "'+0+'",
+    "'-0-'",
+    "1-0",
+    "1*1",
+    "0+1",
+    "1/1",
+    "",
+    " ",
+    "1",
+    "1=1-- -only",
 ];
 
 #[test]
@@ -116,10 +125,19 @@ fn every_emitted_member_still_executes_the_exploit() {
 #[test]
 fn structured_attacks_keep_every_structural_marker_and_are_never_tautology_swapped() {
     let markers: &[(&str, &[&str])] = &[
-        ("1 UNION SELECT username,password FROM users-- -", &["union", "select", "from", "users"]),
-        ("1 AND extractvalue(1,concat(0x7e,(SELECT version())))", &["extractvalue", "concat", "select", "version"]),
+        (
+            "1 UNION SELECT username,password FROM users-- -",
+            &["union", "select", "from", "users"],
+        ),
+        (
+            "1 AND extractvalue(1,concat(0x7e,(SELECT version())))",
+            &["extractvalue", "concat", "select", "version"],
+        ),
         ("1; DROP TABLE users-- -", &["drop", "table", "users"]),
-        ("1 AND (SELECT 1 FROM (SELECT SLEEP(5))x)", &["select", "sleep", "from"]),
+        (
+            "1 AND (SELECT 1 FROM (SELECT SLEEP(5))x)",
+            &["select", "sleep", "from"],
+        ),
     ];
     for (attack, must) in markers {
         for seed in 0..40u64 {
@@ -176,14 +194,23 @@ fn vary_delivery_false_is_query_only() {
 fn delivery_labels_are_stable() {
     let p = "1' OR '1'='1";
     let got = equiv::equiv_sql(p, &cfg(99));
-    let labels: std::collections::HashSet<_> =
-        got.iter().map(|m| m.delivery.label()).collect();
-    assert!(labels.len() >= 4, "delivery algebra not exercised: {labels:?}");
+    let labels: std::collections::HashSet<_> = got.iter().map(|m| m.delivery.label()).collect();
+    assert!(
+        labels.len() >= 4,
+        "delivery algebra not exercised: {labels:?}"
+    );
     for l in labels {
         assert!(
-            ["query", "form_body", "json_body", "multipart_field", "multipart_file",
-             "path_segment", "hpp_split"]
-                .contains(&l),
+            [
+                "query",
+                "form_body",
+                "json_body",
+                "multipart_field",
+                "multipart_file",
+                "path_segment",
+                "hpp_split"
+            ]
+            .contains(&l),
             "unknown delivery label {l:?}"
         );
     }
@@ -208,7 +235,10 @@ fn hex_literal_encoding_marks_mysql_dialect() {
             }
         }
     }
-    assert!(saw_hex, "literal_encode never produced a hex form in 50 seeds");
+    assert!(
+        saw_hex,
+        "literal_encode never produced a hex form in 50 seeds"
+    );
 }
 
 // ─────────── THE truth test: generated tautologies are TRUE ─────────
@@ -464,7 +494,15 @@ fn tautology_swap_keeps_non_structured_payload_a_valid_attack() {
 // ─────────── negatives / robustness ────────────────────────────────
 #[test]
 fn junk_and_empty_never_panic_and_never_emit_non_attacks() {
-    for j in ["", " ", "hello world", "????", "{}", "\u{1f600}\u{1f600}", "SELECT"] {
+    for j in [
+        "",
+        " ",
+        "hello world",
+        "????",
+        "{}",
+        "\u{1f600}\u{1f600}",
+        "SELECT",
+    ] {
         let v = equiv::equiv_sql(j, &cfg(3));
         for m in &v {
             assert!(

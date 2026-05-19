@@ -37,8 +37,7 @@ fn url_schemes() -> &'static [String] {
     static CACHE: OnceLock<Vec<String>> = OnceLock::new();
     CACHE.get_or_init(|| {
         let raw = include_str!("../rules/ssrf/schemes.toml");
-        let parsed: SchemeRules =
-            toml::from_str(raw).expect("rules/ssrf/schemes.toml must parse");
+        let parsed: SchemeRules = toml::from_str(raw).expect("rules/ssrf/schemes.toml must parse");
         parsed.scheme.into_iter().map(|s| s.prefix).collect()
     })
 }
@@ -89,8 +88,10 @@ struct SsrfIndicatorRules {
 fn get_rules() -> &'static SsrfIndicatorRules {
     static RULES: OnceLock<SsrfIndicatorRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(SSRF_INDICATORS_TOML).unwrap_or_else(|_| {
-            SsrfIndicatorRules { indicator_host: Vec::new(), private_ip_prefix: Vec::new(), internal_path: Vec::new() }
+        toml::from_str(SSRF_INDICATORS_TOML).unwrap_or_else(|_| SsrfIndicatorRules {
+            indicator_host: Vec::new(),
+            private_ip_prefix: Vec::new(),
+            internal_path: Vec::new(),
         })
     })
 }
@@ -158,12 +159,11 @@ fn host_is_complete_token(payload: &str, host: &str) -> bool {
             .all(|(a, b)| a.eq_ignore_ascii_case(b));
         if prefix_match {
             // Left boundary: start-of-string OR after `//` OR after a boundary char.
-            let left_ok = i == 0
-                || is_boundary(bytes[i - 1])
-                || (i >= 2 && &bytes[i - 2..i] == b"//");
+            let left_ok =
+                i == 0 || is_boundary(bytes[i - 1]) || (i >= 2 && &bytes[i - 2..i] == b"//");
             // Right boundary: end-of-string OR boundary char.
-            let right_ok = i + host_bytes.len() == bytes.len()
-                || is_boundary(bytes[i + host_bytes.len()]);
+            let right_ok =
+                i + host_bytes.len() == bytes.len() || is_boundary(bytes[i + host_bytes.len()]);
             if left_ok && right_ok {
                 return true;
             }

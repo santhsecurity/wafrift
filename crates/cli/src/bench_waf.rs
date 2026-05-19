@@ -550,7 +550,10 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // type one keyword instead of remembering the 11-element list. Keeps
     // user-supplied order otherwise (output ordering matters for diffs).
     if args.strategies.iter().any(|s| s == "all") {
-        args.strategies = ALL_STRATEGIES.iter().map(std::string::ToString::to_string).collect();
+        args.strategies = ALL_STRATEGIES
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
     }
 
     let base_url = resolve_base_url(&args);
@@ -578,7 +581,8 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
 
     // Pick a randomized real-browser User-Agent (vs. the obvious
     // wafrift-bench/0.1 marker) so the WAF doesn't have a free signal.
-    let ua = wafrift_fingerprint::fingerprint::random_profile().map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string());
+    let ua = wafrift_fingerprint::fingerprint::random_profile()
+        .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string());
 
     let mut client_builder = Client::builder()
         .timeout(std::time::Duration::from_secs(args.timeout_secs))
@@ -877,10 +881,7 @@ async fn run_evade(
     } else {
         0.0
     };
-    let unverified_total: usize = by_strategy
-        .values()
-        .map(|s| s.unverified_not_blocked)
-        .sum();
+    let unverified_total: usize = by_strategy.values().map(|s| s.unverified_not_blocked).sum();
     // Compute per-strategy bypass+oracle rates (was missing on stats produced
     // by some branches; redundant when already set, idempotent).
     for s in by_strategy.values_mut() {
@@ -949,8 +950,7 @@ async fn run_payload_strategy(
                     stat.bypassed += 1;
                     stat.oracle_valid += 1;
                     *bypassed += 1;
-                    bypass_techs
-                        .push(format!("{}:{}", strat, variant.techniques.join("+")));
+                    bypass_techs.push(format!("{}:{}", strat, variant.techniques.join("+")));
                 } else if !blocked {
                     // Not blocked, but either the mutation destroyed the
                     // attack OR the request was malformed (400/etc) and
@@ -2045,14 +2045,18 @@ mod tests {
         assert_eq!(f.method, Method::Post);
         assert!(f.url.ends_with("/post"));
         assert!(
-            f.headers.iter().any(|(k, v)| k == "content-type"
-                && v == "application/x-www-form-urlencoded")
+            f.headers
+                .iter()
+                .any(|(k, v)| k == "content-type" && v == "application/x-www-form-urlencoded")
         );
         assert!(String::from_utf8_lossy(f.body.as_ref().unwrap()).starts_with("q="));
 
         let j = build_request_for_delivery(
             "http://h",
-            &D::JsonBody { param: "q".into(), content_type: None },
+            &D::JsonBody {
+                param: "q".into(),
+                content_type: None,
+            },
             p,
         );
         assert!(
@@ -2066,11 +2070,16 @@ mod tests {
 
         let jc = build_request_for_delivery(
             "http://h",
-            &D::JsonBody { param: "q".into(), content_type: Some("application/json".into()) },
+            &D::JsonBody {
+                param: "q".into(),
+                content_type: Some("application/json".into()),
+            },
             p,
         );
         assert!(
-            jc.headers.iter().any(|(k, v)| k == "content-type" && v == "application/json")
+            jc.headers
+                .iter()
+                .any(|(k, v)| k == "content-type" && v == "application/json")
         );
 
         let mf = build_request_for_delivery(
@@ -2087,9 +2096,9 @@ mod tests {
         assert!(mb.contains("Content-Type: application/octet-stream"));
         assert!(mb.contains(p), "file part must carry the exploit verbatim");
         assert!(
-            mf.headers
-                .iter()
-                .any(|(k, v)| k == "content-type" && v.starts_with("multipart/form-data; boundary="))
+            mf.headers.iter().any(
+                |(k, v)| k == "content-type" && v.starts_with("multipart/form-data; boundary=")
+            )
         );
 
         let ps = build_request_for_delivery("http://h", &D::PathSegment, p);
@@ -2097,13 +2106,18 @@ mod tests {
         assert!(ps.url.starts_with("http://h/anything/"));
         assert!(!ps.url.contains('\''), "path seg not encoded: {}", ps.url);
         assert!(
-            !ps.url.trim_start_matches("http://h/anything/").contains('?'),
+            !ps.url
+                .trim_start_matches("http://h/anything/")
+                .contains('?'),
             "payload must stay one path segment"
         );
 
         let hpp = build_request_for_delivery(
             "http://h",
-            &D::HppSplit { param: "q".into(), parts: 2 },
+            &D::HppSplit {
+                param: "q".into(),
+                parts: 2,
+            },
             p,
         );
         // parts = decoy count; total = decoys + 1 (the FULL payload),
@@ -2122,7 +2136,8 @@ mod tests {
             "the final HPP param must carry the full attack verbatim"
         );
         assert!(
-            !hpp.url.contains("q=v0&q=v1") || hpp.url.ends_with(&urlencoding::encode(p).to_string()),
+            !hpp.url.contains("q=v0&q=v1")
+                || hpp.url.ends_with(&urlencoding::encode(p).to_string()),
             "decoys must precede the payload"
         );
 
@@ -2130,7 +2145,9 @@ mod tests {
         // through the single-source `to_request` (smuggle-guarded).
         let hv = build_request_for_delivery(
             "http://h",
-            &D::HeaderValue { name: "X-Forwarded-Host".into() },
+            &D::HeaderValue {
+                name: "X-Forwarded-Host".into(),
+            },
             p,
         );
         assert_eq!(hv.method, Method::Get);
@@ -2141,11 +2158,7 @@ mod tests {
             "header carries the exact payload bytes"
         );
 
-        let ck = build_request_for_delivery(
-            "http://h",
-            &D::Cookie { name: "q".into() },
-            p,
-        );
+        let ck = build_request_for_delivery("http://h", &D::Cookie { name: "q".into() }, p);
         assert_eq!(ck.method, Method::Get);
         assert_eq!(ck.url, "http://h/cookies", "cookie shape hits /cookies");
         assert_eq!(

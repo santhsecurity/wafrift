@@ -138,8 +138,21 @@ fn render(toks: &[Tok]) -> String {
 // sound separators that defeat regex that doesn't strip MySQL
 // conditional comments.
 const WS_EQUIV: &[&str] = &[
-    " ", "  ", "\t", "\n", "\r\n", "\x0c", "\x0b", "/**/", "/**//**/", " /**/ ", "\t/**/\t",
-    "/*!*/", "/*!50000*/", "\n\t", "/*x*/",
+    " ",
+    "  ",
+    "\t",
+    "\n",
+    "\r\n",
+    "\x0c",
+    "\x0b",
+    "/**/",
+    "/**//**/",
+    " /**/ ",
+    "\t/**/\t",
+    "/*!*/",
+    "/*!50000*/",
+    "\n\t",
+    "/*x*/",
 ];
 
 fn ws_pick(rng: &mut Rng) -> String {
@@ -182,8 +195,16 @@ fn gen_true(rng: &mut Rng, depth: u8) -> String {
         }
     } else {
         match rng.below(4) {
-            0 => format!("({}) OR ({})", gen_true(rng, depth + 1), gen_false(rng, depth + 1)),
-            1 => format!("({}) AND ({})", gen_true(rng, depth + 1), gen_true(rng, depth + 1)),
+            0 => format!(
+                "({}) OR ({})",
+                gen_true(rng, depth + 1),
+                gen_false(rng, depth + 1)
+            ),
+            1 => format!(
+                "({}) AND ({})",
+                gen_true(rng, depth + 1),
+                gen_true(rng, depth + 1)
+            ),
             2 => format!("NOT ({})", gen_false(rng, depth + 1)),
             _ => format!("({})", gen_true(rng, depth + 1)),
         }
@@ -209,7 +230,11 @@ fn gen_false(rng: &mut Rng, depth: u8) -> String {
         }
     } else {
         match rng.below(3) {
-            0 => format!("({}) AND ({})", gen_true(rng, depth + 1), gen_false(rng, depth + 1)),
+            0 => format!(
+                "({}) AND ({})",
+                gen_true(rng, depth + 1),
+                gen_false(rng, depth + 1)
+            ),
             1 => format!("NOT ({})", gen_true(rng, depth + 1)),
             _ => format!("({})", gen_false(rng, depth + 1)),
         }
@@ -319,8 +344,7 @@ pub fn still_executes(original: &str, cand: &str) -> bool {
             || nc.contains(" between ")
             || nc.contains(" in ")
             || nc.contains(" is ");
-        let has_terminator =
-            cand.contains("--") || cand.contains('#') || cand.contains("/*");
+        let has_terminator = cand.contains("--") || cand.contains('#') || cand.contains("/*");
         // The original's mechanism must be preserved, not weakened:
         // if the original had a boolean, the candidate must keep one;
         // if it was comment-only, a terminator must remain.
@@ -341,11 +365,50 @@ pub fn still_executes(original: &str, cand: &str) -> bool {
 
 // ── Rewrites ───────────────────────────────────────────────────────
 const SQL_KEYWORDS: &[&str] = &[
-    "union", "select", "from", "where", "and", "or", "not", "order", "by", "group", "having",
-    "limit", "into", "outfile", "dumpfile", "load_file", "extractvalue", "updatexml", "concat",
-    "version", "user", "database", "sleep", "benchmark", "case", "when", "then", "else", "end",
-    "like", "between", "exists", "all", "any", "distinct", "drop", "insert", "update", "delete",
-    "table", "values", "set", "procedure", "if",
+    "union",
+    "select",
+    "from",
+    "where",
+    "and",
+    "or",
+    "not",
+    "order",
+    "by",
+    "group",
+    "having",
+    "limit",
+    "into",
+    "outfile",
+    "dumpfile",
+    "load_file",
+    "extractvalue",
+    "updatexml",
+    "concat",
+    "version",
+    "user",
+    "database",
+    "sleep",
+    "benchmark",
+    "case",
+    "when",
+    "then",
+    "else",
+    "end",
+    "like",
+    "between",
+    "exists",
+    "all",
+    "any",
+    "distinct",
+    "drop",
+    "insert",
+    "update",
+    "delete",
+    "table",
+    "values",
+    "set",
+    "procedure",
+    "if",
 ];
 
 fn is_kw(w: &str) -> bool {
@@ -451,8 +514,22 @@ fn rw_tautology(payload: &str, s: &str, rng: &mut Rng) -> Option<String> {
     }
     // Recognised tautology atoms, longest/most-specific first.
     const ATOMS: &[&str] = &[
-        "'1'='1'", "'1' = '1'", "'a'='a'", "'x'='x'", "'1'='1", "\"1\"=\"1\"", "1=1", "1 = 1",
-        "2=2", "0=0", "1=1#", "1=1-- ", " OR TRUE", "=true", "1 like 1", "1 LIKE 1",
+        "'1'='1'",
+        "'1' = '1'",
+        "'a'='a'",
+        "'x'='x'",
+        "'1'='1",
+        "\"1\"=\"1\"",
+        "1=1",
+        "1 = 1",
+        "2=2",
+        "0=0",
+        "1=1#",
+        "1=1-- ",
+        " OR TRUE",
+        "=true",
+        "1 like 1",
+        "1 LIKE 1",
     ];
     let lower = s.to_ascii_lowercase();
     let mut best: Option<(usize, &str)> = None;
@@ -553,7 +630,12 @@ fn rw_terminator(s: &str, rng: &mut Rng) -> Option<String> {
 /// quote — that would change the injected literal's value. Sound by
 /// the boundary predicate.
 fn rw_insert_sep(toks: &mut Vec<Tok>, rng: &mut Rng) -> bool {
-    let op = |t: &Tok| matches!(t, Tok::Sym('=' | '<' | '>' | '(' | ')' | ',' | '|' | '^' | '!'));
+    let op = |t: &Tok| {
+        matches!(
+            t,
+            Tok::Sym('=' | '<' | '>' | '(' | ')' | ',' | '|' | '^' | '!')
+        )
+    };
     let mut inserts: Vec<usize> = Vec::new();
     for i in 0..toks.len().saturating_sub(1) {
         let a = &toks[i];

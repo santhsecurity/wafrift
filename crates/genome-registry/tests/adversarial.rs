@@ -13,10 +13,7 @@ fn fixture_signed() -> (SigningKey, SignedBundle) {
     let key = SigningKey::generate();
     let bundle = GenomeBundle::new(
         "p",
-        vec![
-            Genome::new("akamai-1", "raw"),
-            Genome::new("cf-2", "more"),
-        ],
+        vec![Genome::new("akamai-1", "raw"), Genome::new("cf-2", "more")],
     );
     let signed = bundle.sign(&key).expect("sign");
     (key, signed)
@@ -71,16 +68,19 @@ fn validate_limits_rejects_oversize_payload() {
 
 #[test]
 fn validate_limits_rejects_oversize_genome_name() {
-    let mut bundle = GenomeBundle::new(
-        "p",
-        vec![Genome::new("n".repeat(257), "tiny payload")],
-    );
+    let mut bundle = GenomeBundle::new("p", vec![Genome::new("n".repeat(257), "tiny payload")]);
     bundle.created_unix = 0;
     let key = SigningKey::generate();
     let signed = bundle.sign(&key).unwrap();
     let err = signed.validate_limits().unwrap_err();
     assert!(
-        matches!(err, RegistryError::FieldTooLong { field: "genome.name", .. }),
+        matches!(
+            err,
+            RegistryError::FieldTooLong {
+                field: "genome.name",
+                ..
+            }
+        ),
         "expected FieldTooLong on genome.name, got {err:?}"
     );
 }
@@ -93,7 +93,13 @@ fn validate_limits_rejects_oversize_bundle_name() {
     let signed = bundle.sign(&key).unwrap();
     let err = signed.validate_limits().unwrap_err();
     assert!(
-        matches!(err, RegistryError::FieldTooLong { field: "bundle_name", .. }),
+        matches!(
+            err,
+            RegistryError::FieldTooLong {
+                field: "bundle_name",
+                ..
+            }
+        ),
         "expected FieldTooLong on bundle_name, got {err:?}"
     );
 }
@@ -108,7 +114,13 @@ fn validate_limits_rejects_oversize_description() {
     let signed = bundle.sign(&key).unwrap();
     let err = signed.validate_limits().unwrap_err();
     assert!(
-        matches!(err, RegistryError::FieldTooLong { field: "genome.description", .. }),
+        matches!(
+            err,
+            RegistryError::FieldTooLong {
+                field: "genome.description",
+                ..
+            }
+        ),
         "expected FieldTooLong on genome.description, got {err:?}"
     );
 }
@@ -154,7 +166,13 @@ fn validate_limits_rejects_oversize_target_tag() {
     let signed = bundle.sign(&key).unwrap();
     let err = signed.validate_limits().unwrap_err();
     assert!(
-        matches!(err, RegistryError::FieldTooLong { field: "genome.targets[]", .. }),
+        matches!(
+            err,
+            RegistryError::FieldTooLong {
+                field: "genome.targets[]",
+                ..
+            }
+        ),
         "expected FieldTooLong on targets[], got {err:?}"
     );
 }
@@ -244,8 +262,7 @@ fn from_json_then_verify_rejects_one_bit_payload_flip() {
 
     // Now flip one byte in the canonical payload via parse-mutate-reserialize.
     let mut mutated = signed.clone();
-    mutated.bundle.genomes[0].payload =
-        format!("{}!", mutated.bundle.genomes[0].payload);
+    mutated.bundle.genomes[0].payload = format!("{}!", mutated.bundle.genomes[0].payload);
     let mut trust2 = TrustList::default();
     trust2.allow_hex(&key.verifying_key_hex(), "alice");
     assert!(

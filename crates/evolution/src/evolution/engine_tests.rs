@@ -17,10 +17,11 @@ fn new_seeded_determinism() {
 
     for _ in 0..5 {
         if let Some((idx_a, _)) = engine_a.next_candidate()
-            && let Some((idx_b, _)) = engine_b.next_candidate() {
-                engine_a.record_feedback(idx_a, true).unwrap();
-                engine_b.record_feedback(idx_b, true).unwrap();
-            }
+            && let Some((idx_b, _)) = engine_b.next_candidate()
+        {
+            engine_a.record_feedback(idx_a, true).unwrap();
+            engine_b.record_feedback(idx_b, true).unwrap();
+        }
         engine_a.evolve();
         engine_b.evolve();
     }
@@ -56,7 +57,9 @@ fn record_feedback_tracks_gene_stats() {
 fn next_candidate_prefers_unevaluated() {
     let mut engine = EvolutionEngine::new(5);
     let candidates = engine.batch_candidates(5);
-    engine.submit_batch(vec![(candidates[0].0, OracleVerdict::from_bool(true))]).unwrap();
+    engine
+        .submit_batch(vec![(candidates[0].0, OracleVerdict::from_bool(true))])
+        .unwrap();
     let next = engine.next_candidate();
     assert!(next.is_some());
 }
@@ -93,7 +96,11 @@ fn gene_success_rates_require_min_attempts() {
         let _ = engine.submit_batch(vec![(idx, OracleVerdict::from_bool(true))]);
     }
     let rates = engine.gene_success_rates();
-    assert!(rates.iter().all(|(_, value, _)| *value != "CaseAlternation"));
+    assert!(
+        rates
+            .iter()
+            .all(|(_, value, _)| *value != "CaseAlternation")
+    );
 
     let candidates = engine.batch_candidates(5);
     for (idx, mut chrom) in candidates {
@@ -159,7 +166,10 @@ fn single_chromosome_does_not_panic() {
 fn out_of_bounds_feedback_errors() {
     let mut engine = EvolutionEngine::new(5);
     let result = engine.record_feedback(999, true);
-    assert!(result.is_err(), "out-of-bounds feedback must return an error");
+    assert!(
+        result.is_err(),
+        "out-of-bounds feedback must return an error"
+    );
 }
 
 #[test]
@@ -338,7 +348,10 @@ fn checkpoint_load_rejects_oversized_file() {
     std::fs::write(&tmp, junk).unwrap();
     let mut engine = EvolutionEngine::new(10);
     let result = engine.load_checkpoint(&tmp);
-    assert!(result.is_err(), "should reject checkpoint > MAX_CHECKPOINT_BYTES");
+    assert!(
+        result.is_err(),
+        "should reject checkpoint > MAX_CHECKPOINT_BYTES"
+    );
     let _ = std::fs::remove_file(&tmp);
 }
 
@@ -372,5 +385,8 @@ fn lineage_no_cycles() {
         Lineage::Crossover { generation, .. } => *generation,
         Lineage::Mutation { generation, .. } => *generation,
     };
-    assert!(current_gen < u32::MAX, "generation should be a realistic value");
+    assert!(
+        current_gen < u32::MAX,
+        "generation should be a realistic value"
+    );
 }

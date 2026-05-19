@@ -425,7 +425,10 @@ mod tests {
         let path = "/admin/日本語";
         let p = te_cl("example.com", path).unwrap();
         let s = String::from_utf8_lossy(&p.raw_bytes);
-        assert!(s.contains(path), "multibyte path must round-trip into the payload");
+        assert!(
+            s.contains(path),
+            "multibyte path must round-trip into the payload"
+        );
         // Sanity: the request line carries the path.
         assert!(
             s.contains(&format!("GET {path}")) || s.contains(path),

@@ -20,8 +20,10 @@ fn boundary_does_not_appear_inside_param_value() {
     // self-frame against the value.
     let evil = "----WafriftBoundaryAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string();
     for _ in 0..16 {
-        let variants =
-            generate_variants(&[("user".to_string(), "alice".to_string()), ("data".to_string(), evil.clone())]);
+        let variants = generate_variants(&[
+            ("user".to_string(), "alice".to_string()),
+            ("data".to_string(), evil.clone()),
+        ]);
         for v in &variants {
             // For each multipart-family variant, verify the boundary
             // token used in the body framing is NOT a substring of any
@@ -89,7 +91,10 @@ fn empty_params_does_not_panic() {
     // "--<boundary>--\r\n". With unique_boundary against an empty value
     // list, the boundary is always fresh and the body is well-formed.
     let variants = generate_variants(&[]);
-    assert!(!variants.is_empty(), "must still emit variants on empty params");
+    assert!(
+        !variants.is_empty(),
+        "must still emit variants on empty params"
+    );
     for v in &variants {
         // Just ensure no panic during body construction.
         let _ = std::str::from_utf8(&v.body);

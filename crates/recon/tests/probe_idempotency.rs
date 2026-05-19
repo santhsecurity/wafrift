@@ -1,11 +1,11 @@
 //! Two back-to-back probes against the same mock must yield identical canonical JSON bytes.
 
+use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use std::time::Duration;
-use wafrift_recon::active::{probe_http_headers, ActiveProbeConfig};
+use wafrift_recon::active::{ActiveProbeConfig, probe_http_headers};
 
 async fn stable_stack() -> impl IntoResponse {
     let mut h = HeaderMap::new();
@@ -39,7 +39,8 @@ async fn two_probes_byte_equal_canonical_json() {
     let ja = a.to_canonical_json().unwrap();
     let jb = b.to_canonical_json().unwrap();
     assert_eq!(
-        ja, jb,
+        ja,
+        jb,
         "expected byte-identical JSON snapshots; left={} right={}",
         String::from_utf8_lossy(&ja),
         String::from_utf8_lossy(&jb)

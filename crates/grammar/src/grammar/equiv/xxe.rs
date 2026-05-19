@@ -94,7 +94,9 @@ fn fetched_uris(s: &str) -> Vec<String> {
 
 fn is_xxe(s: &str) -> bool {
     let up = s.to_ascii_uppercase();
-    up.contains("<!ENTITY") && (up.contains("SYSTEM") || up.contains("PUBLIC")) && !fetched_uris(s).is_empty()
+    up.contains("<!ENTITY")
+        && (up.contains("SYSTEM") || up.contains("PUBLIC"))
+        && !fetched_uris(s).is_empty()
 }
 
 /// True iff `cand` still makes the parser fetch exactly the same
@@ -122,7 +124,10 @@ fn rw_rename_entity(s: &str, rng: &mut Rng) -> Option<String> {
     let after = after.trim_start();
     let pct = after.starts_with('%');
     let a2 = after.trim_start_matches('%').trim_start();
-    let name: String = a2.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    let name: String = a2
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
     if name.is_empty() {
         return None;
     }
@@ -309,8 +314,7 @@ mod tests {
         }
     }
 
-    const ATK: &str =
-        r#"<?xml version="1.0"?><!DOCTYPE r [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><r>&xxe;</r>"#;
+    const ATK: &str = r#"<?xml version="1.0"?><!DOCTYPE r [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><r>&xxe;</r>"#;
 
     #[test]
     fn fetched_uri_is_invariant_under_sound_rewrites() {
@@ -347,8 +351,14 @@ mod tests {
 
     #[test]
     fn deterministic_diverse_and_all_sound() {
-        let a: Vec<_> = generate(ATK, &cfg(8)).into_iter().map(|m| m.payload).collect();
-        let b: Vec<_> = generate(ATK, &cfg(8)).into_iter().map(|m| m.payload).collect();
+        let a: Vec<_> = generate(ATK, &cfg(8))
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
+        let b: Vec<_> = generate(ATK, &cfg(8))
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
         assert_eq!(a, b);
         assert!(a.iter().collect::<std::collections::HashSet<_>>().len() >= 5);
         for seed in 0..30u64 {

@@ -429,8 +429,13 @@ mod tests {
 
     #[test]
     fn build_variants_unchanged_signature_still_works() {
-        let variants =
-            build_variants("hello", PayloadType::Unknown, true, &[Strategy::Base64Encode], 4);
+        let variants = build_variants(
+            "hello",
+            PayloadType::Unknown,
+            true,
+            &[Strategy::Base64Encode],
+            4,
+        );
         assert!(
             variants.iter().any(|v| v.payload == "aGVsbG8="),
             "base64 of 'hello' should appear"

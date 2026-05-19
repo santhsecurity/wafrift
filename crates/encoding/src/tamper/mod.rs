@@ -125,14 +125,20 @@ impl TamperRegistry {
     /// Returns all registered strategy names.
     #[must_use]
     pub fn names(&self) -> Vec<&str> {
-        self.strategies.keys().map(std::string::String::as_str).collect()
+        self.strategies
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 
     /// Returns all strategies sorted by aggressiveness (least to most).
     #[must_use]
     pub fn by_aggressiveness(&self) -> Vec<&dyn TamperStrategy> {
-        let mut strategies: Vec<&dyn TamperStrategy> =
-            self.strategies.values().map(std::convert::AsRef::as_ref).collect();
+        let mut strategies: Vec<&dyn TamperStrategy> = self
+            .strategies
+            .values()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
         strategies.sort_by(|a, b| {
             let a_score = if a.aggressiveness().is_nan() {
                 1.0

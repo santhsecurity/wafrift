@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{parse_http_requests_no_tail, BodyFraming};
+use common::{BodyFraming, parse_http_requests_no_tail};
 use proptest::prelude::*;
 use wafrift_smuggling::smuggling::te_cl;
 

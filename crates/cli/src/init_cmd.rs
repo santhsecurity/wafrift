@@ -67,9 +67,7 @@ pub fn run_init(args: InitArgs) -> ExitCode {
             eprintln!(
                 "       (or `cargo build -p wafrift-proxy` and run target/.../wafrift-proxy)"
             );
-            eprintln!(
-                "     then: wafrift-proxy --listen 127.0.0.1:8080 --mitm"
-            );
+            eprintln!("     then: wafrift-proxy --listen 127.0.0.1:8080 --mitm");
         }
     }
     eprintln!("  3. Run `wafrift report` after you have findings.");

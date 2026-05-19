@@ -171,10 +171,7 @@ fn order_by_probes_generated() {
 
 #[test]
 fn extract_quoted_string_basic() {
-    assert_eq!(
-        extract_quoted_string("'admin'"),
-        Some("admin".to_string())
-    );
+    assert_eq!(extract_quoted_string("'admin'"), Some("admin".to_string()));
 }
 
 #[test]
@@ -262,26 +259,34 @@ fn no_space_wrap_no_select_returns_none() {
 #[test]
 fn split_string_concat_short_input() {
     let r = split_string_concat("ab");
-    assert!(r.iter().any(|s| s.contains("'a'||'b'")),
-        "should include concatenation variant: {r:?}");
-    assert!(r.iter().any(|s| s.starts_with("0x")),
-        "should include hex variant: {r:?}");
+    assert!(
+        r.iter().any(|s| s.contains("'a'||'b'")),
+        "should include concatenation variant: {r:?}"
+    );
+    assert!(
+        r.iter().any(|s| s.starts_with("0x")),
+        "should include hex variant: {r:?}"
+    );
 }
 
 #[test]
 fn split_string_concat_decimal_for_short() {
     // Values <= 8 chars get a CONV(base36) variant.
     let r = split_string_concat("test");
-    assert!(r.iter().any(|s| s.contains("CONV(")),
-        "should include CONV variant for short string: {r:?}");
+    assert!(
+        r.iter().any(|s| s.contains("CONV(")),
+        "should include CONV variant for short string: {r:?}"
+    );
 }
 
 #[test]
 fn split_string_concat_no_decimal_for_long() {
     // Values > 8 chars do NOT get a CONV variant.
     let r = split_string_concat("verylongstringindeed");
-    assert!(!r.iter().any(|s| s.contains("CONV(")),
-        "should NOT include CONV variant for long string: {r:?}");
+    assert!(
+        !r.iter().any(|s| s.contains("CONV(")),
+        "should NOT include CONV variant for long string: {r:?}"
+    );
 }
 
 // ── operators.rs direct tests ──

@@ -228,8 +228,15 @@ fn overlong_utf8_skips_null() {
     // bytes can vary; what cannot is the fact that the output differs from
     // the input AND that any output we emit is non-empty (encoding NUL must
     // not silently drop it).
-    assert_ne!(result.as_bytes(), b"\x00", "overlong encoding must transform NUL, not pass it through");
-    assert!(!result.is_empty(), "NUL must produce some encoding, not be dropped");
+    assert_ne!(
+        result.as_bytes(),
+        b"\x00",
+        "overlong encoding must transform NUL, not pass it through"
+    );
+    assert!(
+        !result.is_empty(),
+        "NUL must produce some encoding, not be dropped"
+    );
 }
 
 #[test]
@@ -495,7 +502,10 @@ fn encode_layered_all_strategies() {
     // pipeline break.
     assert!(!result.is_empty(), "must produce output");
     assert_ne!(result, input, "layered pipeline must transform input");
-    assert!(strategies.len() >= 2, "layered_combinations must drive >1 step");
+    assert!(
+        strategies.len() >= 2,
+        "layered_combinations must drive >1 step"
+    );
 }
 
 #[test]
@@ -526,7 +536,11 @@ fn layered_combinations_not_empty() {
     // The strategy enum has at least 5 base strategies; pairs (without
     // self-pair) over 5 is 5*4 = 20. Whatever the exact count, expect
     // a non-trivial fan-out, not just 1 or 0.
-    assert!(combos.len() >= 6, "expected multiple layered pairs, got {}", combos.len());
+    assert!(
+        combos.len() >= 6,
+        "expected multiple layered pairs, got {}",
+        combos.len()
+    );
     // Each entry must itself be a 2-strategy slice.
     for combo in &combos {
         assert_eq!(combo.len(), 2, "len-2 combinations: {combo:?}");
@@ -546,10 +560,7 @@ fn layered_combinations_valid_pairs() {
         // also require the result to be non-empty (any empty output for a
         // non-empty input is a contract bug).
         assert!(!layered.is_empty(), "{s1:?} -> {s2:?} produced empty");
-        assert_ne!(
-            layered, input,
-            "{s1:?} -> {s2:?} passed through unchanged"
-        );
+        assert_ne!(layered, input, "{s1:?} -> {s2:?} passed through unchanged");
     }
 }
 

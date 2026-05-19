@@ -189,8 +189,7 @@ impl DeliveryShape {
                 let bytes = payload.as_bytes();
                 let edge_ows = matches!(bytes.first(), Some(b' ' | b'\t'))
                     || matches!(bytes.last(), Some(b' ' | b'\t'));
-                !edge_ows
-                    && !payload.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0)
+                !edge_ows && !payload.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0)
             }
             Self::Cookie { .. } => {
                 // RFC 6265 cookie-octet: %x21 / %x23-2B / %x2D-3A /
@@ -413,7 +412,11 @@ impl DeliveryShape {
                 param,
                 content_type,
             } => {
-                let body = format!("{{\"{}\":\"{}\"}}", json_escape(param), json_escape(payload));
+                let body = format!(
+                    "{{\"{}\":\"{}\"}}",
+                    json_escape(param),
+                    json_escape(payload)
+                );
                 let mut r = Request::post(target.to_string(), body.into_bytes());
                 if let Some(ct) = content_type {
                     r.add_header("content-type", ct.clone());
@@ -526,12 +529,8 @@ mod delivery_api_tests {
             );
         }
         // the delivery axis is actually exercised (not all Query)
-        let shapes: std::collections::HashSet<_> =
-            a.iter().map(|m| m.delivery.label()).collect();
-        assert!(
-            shapes.len() >= 3,
-            "delivery axis not varied: {shapes:?}"
-        );
+        let shapes: std::collections::HashSet<_> = a.iter().map(|m| m.delivery.label()).collect();
+        assert!(shapes.len() >= 3, "delivery axis not varied: {shapes:?}");
     }
 
     #[test]
@@ -690,10 +689,7 @@ mod delivery_api_tests {
             .unwrap()
             .1;
         assert!(
-            !cv.contains('\r')
-                && !cv.contains('\n')
-                && !cv.contains(';')
-                && !cv.contains('\0'),
+            !cv.contains('\r') && !cv.contains('\n') && !cv.contains(';') && !cv.contains('\0'),
             "cookie value can forge structure: {cv:?}"
         );
     }
@@ -714,9 +710,18 @@ mod delivery_api_tests {
         // edge-whitespace payload would arrive TRIMMED (≠ member.payload)
         // — must be rejected as unsound, not "usually fine".
         assert!(!hv.transport_legal(" <svg>"), "leading SP would be trimmed");
-        assert!(!hv.transport_legal("<svg> "), "trailing SP would be trimmed");
-        assert!(!hv.transport_legal("\t<svg>"), "leading HTAB would be trimmed");
-        assert!(!hv.transport_legal("<svg>\t"), "trailing HTAB would be trimmed");
+        assert!(
+            !hv.transport_legal("<svg> "),
+            "trailing SP would be trimmed"
+        );
+        assert!(
+            !hv.transport_legal("\t<svg>"),
+            "leading HTAB would be trimmed"
+        );
+        assert!(
+            !hv.transport_legal("<svg>\t"),
+            "trailing HTAB would be trimmed"
+        );
         // Cookie-octet: space, `;`, `,`, `"`, `\`, CTL all illegal.
         assert!(ck.transport_legal("<svg/onload=alert(1)>"));
         assert!(!ck.transport_legal("<svg onload=alert(1)>")); // space
@@ -873,7 +878,7 @@ mod delivery_roundtrip_tests {
         "\"';--></script>",   // quotes + angle
         "100% done",          // literal percent
         "a\r\nSet-Cookie: x", // CRLF (encoding shapes MUST still recover)
-        "日本語<害>",          // multibyte
+        "日本語<害>",         // multibyte
         "a/b/../c",           // slashes + dot segments
         "\\back\\slash\\",    // backslashes (JSON-sensitive)
         ";semi;colons;",      // cookie-sensitive
@@ -909,8 +914,7 @@ mod delivery_roundtrip_tests {
                     content_type: c.clone(),
                 }
                 .to_request(t, p);
-                let jbody =
-                    String::from_utf8(jb.body.clone().unwrap_or_default()).unwrap();
+                let jbody = String::from_utf8(jb.body.clone().unwrap_or_default()).unwrap();
                 // {"<k>":"<v>"} — strip the structural frame, unescape.
                 let inner = jbody
                     .strip_prefix('{')
@@ -937,8 +941,7 @@ mod delivery_roundtrip_tests {
                 },
             ] {
                 let mp = d.to_request(t, p);
-                let body =
-                    String::from_utf8(mp.body.clone().unwrap_or_default()).unwrap();
+                let body = String::from_utf8(mp.body.clone().unwrap_or_default()).unwrap();
                 let bnd = ct(&mp)
                     .split_once("boundary=")
                     .map(|(_, b)| b.to_string())
@@ -963,7 +966,10 @@ mod delivery_roundtrip_tests {
             // PathSegment
             let ps = DeliveryShape::PathSegment.to_request(t, p);
             let path = ps.url.split_once('?').map_or(ps.url.as_str(), |(a, _)| a);
-            let seg = path.rsplit_once('/').map(|(_, s)| s).expect("a path segment");
+            let seg = path
+                .rsplit_once('/')
+                .map(|(_, s)| s)
+                .expect("a path segment");
             assert_eq!(pct_decode(seg), p, "PathSegment mangled {p:?}");
         }
     }

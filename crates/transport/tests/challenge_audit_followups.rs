@@ -7,8 +7,8 @@
 use std::thread;
 use std::time::Duration;
 use wafrift_transport::challenge::{
-    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, SolveAction,
-    classify_with_status, dispatch,
+    CLASSIFY_BODY_SCAN_CAP, ChallengeKind, ChallengeStore, SolveAction, classify_with_status,
+    dispatch,
 };
 
 // ── HIGH: classify body OOM ─────────────────────────────────────
@@ -47,7 +47,10 @@ fn classify_keyword_inside_cap_still_works() {
     // Negative twin: the keyword must still be detected when it's
     // inside the cap.
     let body = b"<html>turnstile</html>";
-    assert_eq!(classify_with_status(body, &[], 403), ChallengeKind::Turnstile);
+    assert_eq!(
+        classify_with_status(body, &[], 403),
+        ChallengeKind::Turnstile
+    );
 }
 
 // ── MEDIUM: host case + port normalization ─────────────────────
@@ -142,9 +145,24 @@ fn store_record_purges_expired_entries_on_insert() {
 #[test]
 fn store_record_does_not_purge_live_entries() {
     let s = ChallengeStore::new();
-    s.record("a", "cf_clearance=a", ChallengeKind::CloudflareManaged, None);
-    s.record("b", "cf_clearance=b", ChallengeKind::CloudflareManaged, None);
-    s.record("c", "cf_clearance=c", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "a",
+        "cf_clearance=a",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    s.record(
+        "b",
+        "cf_clearance=b",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    s.record(
+        "c",
+        "cf_clearance=c",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     assert_eq!(s.len(), 3, "live entries must survive opportunistic purge");
 }
 
@@ -185,9 +203,18 @@ fn classify_with_status_classifies_on_503() {
 #[test]
 fn classify_with_status_classifies_on_500_5xx_range() {
     let body = b"<html>turnstile</html>";
-    assert_eq!(classify_with_status(body, &[], 500), ChallengeKind::Turnstile);
-    assert_eq!(classify_with_status(body, &[], 502), ChallengeKind::Turnstile);
-    assert_eq!(classify_with_status(body, &[], 599), ChallengeKind::Turnstile);
+    assert_eq!(
+        classify_with_status(body, &[], 500),
+        ChallengeKind::Turnstile
+    );
+    assert_eq!(
+        classify_with_status(body, &[], 502),
+        ChallengeKind::Turnstile
+    );
+    assert_eq!(
+        classify_with_status(body, &[], 599),
+        ChallengeKind::Turnstile
+    );
 }
 
 #[test]

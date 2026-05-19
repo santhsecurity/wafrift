@@ -72,7 +72,10 @@ fn ssrf_does_not_false_positive_on_digit_zero_in_path() {
     // (e.g. /page?id=100) was falsely flagged as SSRF.
     let oracle = SsrfOracle;
     assert!(
-        !oracle.is_semantically_valid("http://public.example.com/page?id=100", "http://public.example.com/page?id=100"),
+        !oracle.is_semantically_valid(
+            "http://public.example.com/page?id=100",
+            "http://public.example.com/page?id=100"
+        ),
         "digit '0' inside a public URL must NOT trigger SSRF"
     );
     // Avoid using "/api" / "/v1" / "/admin" etc. in the URL — those
@@ -86,8 +89,6 @@ fn ssrf_does_not_false_positive_on_digit_zero_in_path() {
         "year/date digits must not trigger SSRF on benign path"
     );
 }
-
-
 
 #[test]
 fn ssrf_still_detects_zero_shorthand_loopback() {

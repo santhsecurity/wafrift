@@ -182,7 +182,8 @@ fn read_genome_dir(dir: &std::path::Path) -> Result<BTreeMap<String, serde_json:
         }
         let stem = path
             .file_stem()
-            .and_then(|s| s.to_str()).map_or_else(|| "unknown".into(), std::string::ToString::to_string);
+            .and_then(|s| s.to_str())
+            .map_or_else(|| "unknown".into(), std::string::ToString::to_string);
         let raw = match fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {

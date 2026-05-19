@@ -12,9 +12,16 @@ use wafrift_grammar::grammar::equiv::{DeliveryShape, MP_BOUNDARY};
 
 fn shapes(param: &str) -> Vec<DeliveryShape> {
     vec![
-        DeliveryShape::Query { param: param.into() },
-        DeliveryShape::FormBody { param: param.into() },
-        DeliveryShape::JsonBody { param: param.into(), content_type: None },
+        DeliveryShape::Query {
+            param: param.into(),
+        },
+        DeliveryShape::FormBody {
+            param: param.into(),
+        },
+        DeliveryShape::JsonBody {
+            param: param.into(),
+            content_type: None,
+        },
         DeliveryShape::JsonBody {
             param: param.into(),
             content_type: Some("application/json".into()),
@@ -26,7 +33,10 @@ fn shapes(param: &str) -> Vec<DeliveryShape> {
             part_ct: "text/plain".into(),
         },
         DeliveryShape::PathSegment,
-        DeliveryShape::HppSplit { param: param.into(), parts: 2 },
+        DeliveryShape::HppSplit {
+            param: param.into(),
+            parts: 2,
+        },
     ]
 }
 

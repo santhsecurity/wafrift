@@ -519,7 +519,8 @@ impl State {
     }
 
     pub fn uptime(&self) -> Duration {
-        self.started.map_or_else(|| Duration::from_secs(0), |s| s.elapsed())
+        self.started
+            .map_or_else(|| Duration::from_secs(0), |s| s.elapsed())
     }
 
     pub fn avg_latency_ms(&self) -> u64 {
@@ -1026,7 +1027,10 @@ mod tests {
             }
         }
         assert!(missing_odd, "a lowest-sent host must have been evicted");
-        assert!(s.hosts.contains_key(new_host), "newly inserted host must survive");
+        assert!(
+            s.hosts.contains_key(new_host),
+            "newly inserted host must survive"
+        );
     }
 
     #[test]

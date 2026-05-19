@@ -29,9 +29,8 @@ fn specific_target_is_never_rewritten_to_passwd() {
     // The real attack must still appear in genuine evasion shapes, not
     // only as a bare absolute path.
     assert!(
-        variants
-            .iter()
-            .any(|v| v.contains("secrets.php") && (v.contains("%2f") || v.contains("..%00") || v.contains("....//"))),
+        variants.iter().any(|v| v.contains("secrets.php")
+            && (v.contains("%2f") || v.contains("..%00") || v.contains("....//"))),
         "no encoded-traversal evasion carried the real target"
     );
 }

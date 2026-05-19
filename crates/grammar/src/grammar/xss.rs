@@ -246,7 +246,10 @@ fn exec_spans(p: &str) -> Vec<(usize, usize)> {
     let mut i = 0;
     while i < b.len() {
         // on<handler>= … (value to matching quote, or to space/>)
-        if (lb[i] == b'o' && i + 2 < b.len() && lb[i + 1] == b'n' && lb[i + 2].is_ascii_alphabetic())
+        if (lb[i] == b'o'
+            && i + 2 < b.len()
+            && lb[i + 1] == b'n'
+            && lb[i + 2].is_ascii_alphabetic())
             && (i == 0 || !b[i - 1].is_ascii_alphabetic())
         {
             let mut e = i + 2;
@@ -481,7 +484,16 @@ fn rw_scheme_break(p: &str, rng: &mut Rng) -> String {
     let Some(pos) = lc.find("javascript:") else {
         return p.to_string();
     };
-    let inj = *rng.pick(&["\t", "\n", "\r", "\x0c", "&Tab;", "&NewLine;", "&#9;", "&#10;"]);
+    let inj = *rng.pick(&[
+        "\t",
+        "\n",
+        "\r",
+        "\x0c",
+        "&Tab;",
+        "&NewLine;",
+        "&#9;",
+        "&#10;",
+    ]);
     let cut = pos + 4; // after "java"
     format!("{}{}{}", &p[..cut], inj, &p[cut..])
 }
@@ -1528,9 +1540,9 @@ mod tests {
         // a cosmetic reshuffle.
         let atk = "<img src=x onerror=alert(1)>";
         let v = systematic_variants(atk, 80);
-        let evasive = v.iter().any(|m| {
-            !m.payload.contains("alert(") && still_executes_xss(atk, &m.payload)
-        });
+        let evasive = v
+            .iter()
+            .any(|m| !m.payload.contains("alert(") && still_executes_xss(atk, &m.payload));
         assert!(evasive, "no variant evaded the literal `alert(` token");
     }
 
@@ -1570,7 +1582,11 @@ mod tests {
             exclude: std::collections::HashSet::new(),
         };
         let out = mutate_request(atk, crate::PayloadType::Xss, &req);
-        assert!(out.len() >= 20, "scald gets too few variants: {}", out.len());
+        assert!(
+            out.len() >= 20,
+            "scald gets too few variants: {}",
+            out.len()
+        );
         // No emitted variant may be a non-attack (anti-rig end to end).
         for m in &out {
             assert!(

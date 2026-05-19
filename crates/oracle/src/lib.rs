@@ -59,6 +59,7 @@
 //! assert!(!oracle.is_semantically_valid("http://127.0.0.1/", "http://example.com/"));
 //! ```
 
+mod ascii_scan;
 /// Per-target calibration session.
 pub mod calibration;
 /// Command injection oracle.
@@ -71,7 +72,6 @@ pub mod path;
 pub mod response_oracle;
 /// Body-marker signal extractor.
 pub mod signal_body_marker;
-mod ascii_scan;
 
 /// Connection-behavior signal extractor.
 pub mod signal_connection;

@@ -48,16 +48,8 @@ fn chain_order_ab_produces_different_output_than_ba() {
         "swapped encoder order must produce different output"
     );
 
-    let tech_ab: Vec<_> = res_ab
-        .techniques
-        .iter()
-        .map(|t| format!("{t:?}"))
-        .collect();
-    let tech_ba: Vec<_> = res_ba
-        .techniques
-        .iter()
-        .map(|t| format!("{t:?}"))
-        .collect();
+    let tech_ab: Vec<_> = res_ab.techniques.iter().map(|t| format!("{t:?}")).collect();
+    let tech_ba: Vec<_> = res_ba.techniques.iter().map(|t| format!("{t:?}")).collect();
     assert_eq!(
         tech_ab,
         vec![
@@ -142,8 +134,7 @@ fn single_encoder_in_chain_mutates_once() {
     let result = evade_adaptive(&req, &config, &plan, &state);
 
     assert_ne!(
-        result.request.body,
-        req.body,
+        result.request.body, req.body,
         "single encoder must still mutate the body"
     );
     assert_eq!(result.techniques.len(), 1);

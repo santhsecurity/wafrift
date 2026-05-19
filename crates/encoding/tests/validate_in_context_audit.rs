@@ -57,8 +57,8 @@ fn xml_text_accepts_proper_entity_references() {
 
 #[test]
 fn html_attribute_rejects_raw_lt() {
-    let err = validate_in_context("a < b", InjectionContext::HtmlAttribute)
-        .expect_err("must reject <");
+    let err =
+        validate_in_context("a < b", InjectionContext::HtmlAttribute).expect_err("must reject <");
     assert!(format!("{err}").contains('<'));
 }
 

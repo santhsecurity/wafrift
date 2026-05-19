@@ -75,7 +75,11 @@ async fn test_evasion_client_mocked_server_get() {
         .mount(&mock_server)
         .await;
 
-    let client = EvasionClient::with_config(EvasionConfig { allow_private_upstream: true, ..Default::default() }).unwrap();
+    let client = EvasionClient::with_config(EvasionConfig {
+        allow_private_upstream: true,
+        ..Default::default()
+    })
+    .unwrap();
     let target_url = format!("{}/target", mock_server.uri());
 
     let response = client
@@ -133,7 +137,11 @@ async fn test_evasion_client_send_post() {
         .mount(&mock_server)
         .await;
 
-    let client = EvasionClient::with_config(EvasionConfig { allow_private_upstream: true, ..Default::default() }).unwrap();
+    let client = EvasionClient::with_config(EvasionConfig {
+        allow_private_upstream: true,
+        ..Default::default()
+    })
+    .unwrap();
     let target_url = format!("{}/submit", mock_server.uri());
 
     let req =

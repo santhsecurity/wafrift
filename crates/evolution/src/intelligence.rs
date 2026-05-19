@@ -373,15 +373,21 @@ mod tests {
 
     #[test]
     fn step_terminates_when_budget_exhausted() {
-        let mut il = IntelligenceLoop::with_budget(5, 0, Budget {
-            max_requests: 3,
-            ..Budget::default()
-        });
+        let mut il = IntelligenceLoop::with_budget(
+            5,
+            0,
+            Budget {
+                max_requests: 3,
+                ..Budget::default()
+            },
+        );
         // Burn through budget quickly
         let mut sent = 0;
         for _ in 0..20 {
             match il.step(Feedback::Passed) {
-                LoopAction::SendProbe(_) | LoopAction::SendPayload(_) | LoopAction::SaveCheckpoint => {
+                LoopAction::SendProbe(_)
+                | LoopAction::SendPayload(_)
+                | LoopAction::SaveCheckpoint => {
                     sent += 1;
                 }
                 LoopAction::Terminate(TerminationReason::BudgetExhausted) => {
@@ -432,7 +438,10 @@ mod tests {
             },
         );
         let mut iterations = 0;
-        while let LoopAction::SendProbe(_) | LoopAction::SendPayload(_) | LoopAction::SaveCheckpoint = il.step(Feedback::Blocked) {
+        while let LoopAction::SendProbe(_)
+        | LoopAction::SendPayload(_)
+        | LoopAction::SaveCheckpoint = il.step(Feedback::Blocked)
+        {
             iterations += 1;
             if iterations > 500 {
                 panic!("engine did not terminate within 500 iterations (budget was 50)");

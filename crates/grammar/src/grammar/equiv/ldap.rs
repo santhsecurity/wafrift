@@ -45,7 +45,10 @@ fn normalize(s: &str) -> String {
     let mut o = String::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == '\\' && i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit()
+        if b[i] == '\\'
+            && i + 2 < b.len()
+            && b[i + 1].is_ascii_hexdigit()
+            && b[i + 2].is_ascii_hexdigit()
         {
             let h: String = b[i + 1..i + 3].iter().collect();
             if let Some(c) = u8::from_str_radix(&h, 16).ok().map(|x| x as char) {
@@ -210,8 +213,7 @@ fn rw_oid_alias(s: &str, rng: &mut Rng) -> Option<String> {
             }
             // descriptor must start a clause (preceded by ( & | ! or
             // be at string start) — otherwise it is value text.
-            let ok_start =
-                j == 0 || matches!(b[j - 1], '(' | '&' | '|' | '!' | ')');
+            let ok_start = j == 0 || matches!(b[j - 1], '(' | '&' | '|' | '!' | ')');
             if ok_start && j < i {
                 let name: String = b[j..i].iter().collect::<String>().to_ascii_lowercase();
                 if OID_ALIASES.iter().any(|(n, _)| *n == name) {
@@ -229,7 +231,10 @@ fn rw_oid_alias(s: &str, rng: &mut Rng) -> Option<String> {
     let pick = rng.below(spans.len());
     let (st, en) = spans[pick];
     let name: String = b[st..en].iter().collect::<String>().to_ascii_lowercase();
-    let oid = OID_ALIASES.iter().find(|(n, _)| *n == name).map(|(_, o)| *o)?;
+    let oid = OID_ALIASES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, o)| *o)?;
     let mut out = String::with_capacity(s.len() + 24);
     out.extend(b[..st].iter());
     out.push_str(oid);
@@ -498,7 +503,10 @@ mod tests {
         assert!(still_matches("*)(uid=*)", "*)(UID=*)"));
         // value-only escaping never touches the descriptor:
         let esc = rw_hex_escape("*)(uid=admin)", &mut Rng::new(1));
-        assert!(esc.contains("uid="), "attribute descriptor was escaped (invalid LDAP): {esc}");
+        assert!(
+            esc.contains("uid="),
+            "attribute descriptor was escaped (invalid LDAP): {esc}"
+        );
     }
 
     #[test]
@@ -583,13 +591,13 @@ mod tests {
         let atk = "*)(&(uid=admin)(userPassword=secret))";
         let c = rw_filter_commute(atk, &mut Rng::new(1)).expect("multi-child AND commutes");
         assert_ne!(c, atk, "order must actually change");
-        assert!(still_matches(atk, &c), "commuted AND is not equivalent: {c}");
+        assert!(
+            still_matches(atk, &c),
+            "commuted AND is not equivalent: {c}"
+        );
         let nc = normalize(&c);
         assert!(nc.contains("uid") && nc.contains("userpassword"));
-        assert!(still_matches(
-            "(|(cn=a)(cn=b))",
-            "(|(cn=b)(cn=a))"
-        ));
+        assert!(still_matches("(|(cn=a)(cn=b))", "(|(cn=b)(cn=a))"));
         // Single-child group has nothing to commute.
         assert!(rw_filter_commute("(&(uid=*))", &mut Rng::new(1)).is_none());
     }
@@ -621,7 +629,10 @@ mod tests {
         let f = rw_full_hex("*)(uid=admin)", &mut Rng::new(1));
         assert!(!f.contains("admin"), "literal value survived: {f}");
         assert!(f.contains("uid="), "descriptor must NOT be escaped: {f}");
-        assert!(f.contains("\\61") && f.contains("\\6E"), "not full-hex: {f}");
+        assert!(
+            f.contains("\\61") && f.contains("\\6E"),
+            "not full-hex: {f}"
+        );
         assert!(still_matches("*)(uid=admin)", &f));
         // sanity: the escaped value unescapes to the original.
         assert_eq!(normalize(&f), normalize("*)(uid=admin)"));
@@ -650,7 +661,12 @@ mod tests {
                 }
             }
         }
-        for need in ["oid_alias", "and_or_commute", "presence_identity_pad", "rfc4515_full_hex"] {
+        for need in [
+            "oid_alias",
+            "and_or_commute",
+            "presence_identity_pad",
+            "rfc4515_full_hex",
+        ] {
             assert!(
                 seen_rules.contains(need),
                 "new sound class {need:?} never produced across 40 seeds (have {seen_rules:?})"
