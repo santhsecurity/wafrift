@@ -2125,6 +2125,34 @@ mod tests {
             !hpp.url.contains("q=v0&q=v1") || hpp.url.ends_with(&urlencoding::encode(p).to_string()),
             "decoys must precede the payload"
         );
+
+        // Raw reflected channels → httpbin echo endpoints, rendered
+        // through the single-source `to_request` (smuggle-guarded).
+        let hv = build_request_for_delivery(
+            "http://h",
+            &D::HeaderValue { name: "X-Forwarded-Host".into() },
+            p,
+        );
+        assert_eq!(hv.method, Method::Get);
+        assert_eq!(hv.url, "http://h/headers", "header shape hits /headers");
+        assert_eq!(
+            hv.get_header("X-Forwarded-Host"),
+            Some(p),
+            "header carries the exact payload bytes"
+        );
+
+        let ck = build_request_for_delivery(
+            "http://h",
+            &D::Cookie { name: "q".into() },
+            p,
+        );
+        assert_eq!(ck.method, Method::Get);
+        assert_eq!(ck.url, "http://h/cookies", "cookie shape hits /cookies");
+        assert_eq!(
+            ck.get_header("cookie"),
+            Some(format!("q={p}").as_str()),
+            "cookie carries name=payload (p has no ';'/CRLF to strip)"
+        );
     }
 
     #[test]

@@ -4,6 +4,19 @@ Prereq: `wafrift-{types,grammar} = "=0.2.16"` published; scald
 `crates/scald-core/Cargo.toml` repinned to `=0.2.16`;
 `cargo update -p wafrift-grammar -p wafrift-types`.
 
+## 0.2.17 update — two more channels, ZERO scald code change
+
+0.2.17 adds `DeliveryShape::HeaderValue` (e.g. `X-Forwarded-Host`) and
+`DeliveryShape::Cookie` — the reflected-XSS surface a CRS-class WAF
+covers more weakly in `REQUEST_HEADERS` / `REQUEST_COOKIES` than in
+ARGS at PL1. **`waf_delivery.rs` needs no change**: it already
+iterates `xss_delivered()` and renders each member via
+`m.delivery.to_request()`, both of which now include the two new
+channels (smuggle-guarded: CR/LF/NUL/`;` can never reach the wire, and
+the generator never pairs a transport-illegal payload with a raw
+channel). To pick them up: bump the scald pin to `=0.2.17`, then
+`cargo update -p wafrift-grammar -p wafrift-types`. Nothing else.
+
 Honest basis: payload-string XSS = 0 % vs CRS (it normalises every
 encoding); the only lever that beats CRS = delivery shape
 (multipart-file / path-segment / JSON-no-CT) = 18.5 %. scald's

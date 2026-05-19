@@ -59,6 +59,8 @@ pub const FEATURES: &[&str] = &[
     "dlv_multipart_field",
     "dlv_form_body",
     "dlv_query",
+    "dlv_header_value",
+    "dlv_cookie",
 ];
 
 #[must_use]
@@ -182,6 +184,12 @@ pub fn featurize(payload: &str, delivery_arm: usize) -> Vec<f64> {
         4 => "dlv_json_ct",
         5 => "dlv_multipart_field",
         6 => "dlv_form_body",
+        7 => "dlv_query",
+        8 => "dlv_header_value",
+        9 => "dlv_cookie",
+        // Unknown arm ⇒ baseline; never silently fold header/cookie
+        // (8/9) into query — that blinds the learner to the channels
+        // that actually beat the WAF.
         _ => "dlv_query",
     };
     set(dlv);
@@ -418,22 +426,32 @@ mod tests {
 
     #[test]
     fn feature_space_is_stable_and_sized() {
+        use crate::grammar::equiv::sql::{delivery_kind_label, DELIVERY_ARMS};
         assert_eq!(feature_count(), FEATURES.len());
-        // one-hot delivery block present and last 8 entries.
-        for (i, name) in [
-            "dlv_multipart_file",
-            "dlv_path_segment",
-            "dlv_hpp_split",
-            "dlv_json_no_ct",
-            "dlv_json_ct",
-            "dlv_multipart_field",
-            "dlv_form_body",
-            "dlv_query",
-        ]
-        .iter()
-        .enumerate()
-        {
-            assert_eq!(FEATURES[FEATURES.len() - 8 + i], *name);
+        // The one-hot delivery block is exactly the LAST `DELIVERY_ARMS`
+        // entries and is `dlv_<delivery_kind_label(i)>` for every arm —
+        // derived, not a hand-copied 8-list, so adding an arm (0.2.17
+        // added header_value/cookie) is auto-checked and `featurize`'s
+        // `dlv` mapper can never silently fold an arm into query.
+        let base = FEATURES.len() - DELIVERY_ARMS;
+        for i in 0..DELIVERY_ARMS {
+            let expect = format!("dlv_{}", delivery_kind_label(i));
+            assert_eq!(
+                FEATURES[base + i],
+                expect,
+                "delivery one-hot slot {i} drifted from delivery_kind_label"
+            );
+            // And `featurize` must actually set THAT slot for arm `i`.
+            let v = featurize("x", i);
+            assert_eq!(
+                v[base + i], 1.0,
+                "featurize(arm={i}) did not set its own one-hot slot"
+            );
+            assert_eq!(
+                v[base..].iter().filter(|&&b| b == 1.0).count(),
+                1,
+                "arm {i} must set exactly one delivery one-hot bit"
+            );
         }
     }
 

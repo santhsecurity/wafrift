@@ -582,8 +582,12 @@ fn rw_insert_sep(toks: &mut Vec<Tok>, rng: &mut Rng) -> bool {
 // Empirically-strong-first against modsec CRS PL1 (multipart-file and
 // path-segment carry STRUCTURED exfil straight through).
 /// Number of delivery-shape arms (index space for `force_delivery` /
-/// the Phase-C bandit). Must equal `delivery_set(..).len()`.
-pub const DELIVERY_ARMS: usize = 8;
+/// the Phase-C bandit). MUST equal `delivery_set(..).len()` — pinned
+/// by `delivery_api_tests::phase_c_arm_table_is_aligned_injective_
+/// and_tail_stable`. (8 → 10 in 0.2.17: the bandit must explore the
+/// new `header_value` / `cookie` arms or they are dead in the
+/// adaptive scan path.)
+pub const DELIVERY_ARMS: usize = 10;
 
 /// Stable label for delivery-shape arm `i` (matches `delivery_set`
 /// order). Out-of-range ⇒ "query".
@@ -597,6 +601,9 @@ pub fn delivery_kind_label(i: usize) -> &'static str {
         4 => "json_ct",
         5 => "multipart_field",
         6 => "form_body",
+        7 => "query",
+        8 => "header_value",
+        9 => "cookie",
         _ => "query",
     }
 }
@@ -629,6 +636,16 @@ pub(crate) fn delivery_set(param: &str) -> Vec<DeliveryShape> {
         },
         DeliveryShape::Query {
             param: param.to_string(),
+        },
+        // Raw reflected channels — CRS covers REQUEST_HEADERS /
+        // REQUEST_COOKIES weaker than ARGS at PL1. Sound only for
+        // transport-legal payloads; the generator filters per
+        // `DeliveryShape::transport_legal`.
+        DeliveryShape::HeaderValue {
+            name: "X-Forwarded-Host".to_string(),
+        },
+        DeliveryShape::Cookie {
+            name: param.to_string(),
         },
     ]
 }
@@ -735,6 +752,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
             rules,
         });
     }
+    super::enforce_transport_legal(&mut out);
     out.truncate(cfg.max);
     out
 }

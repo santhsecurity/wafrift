@@ -285,6 +285,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
             rules: vec!["log4j_lookup_collapse"],
         });
     }
+    super::enforce_transport_legal(&mut out);
     out.truncate(cfg.max);
     out
 }

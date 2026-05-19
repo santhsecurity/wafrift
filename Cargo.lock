@@ -4584,7 +4584,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-captchaforge-bridge"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4601,7 +4601,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-cli"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "base64",
  "clap",
@@ -4638,7 +4638,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-content-type"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "proptest",
  "rand 0.8.6",
@@ -4649,7 +4649,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-core"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "rand 0.8.6",
  "rcgen",
@@ -4674,7 +4674,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-detect"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "aho-corasick",
  "criterion",
@@ -4693,7 +4693,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-encoding"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "base64",
  "flate2",
@@ -4712,7 +4712,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-evolution"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "lru 0.18.0",
  "proptest",
@@ -4732,7 +4732,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-fingerprint"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "proptest",
  "rand 0.8.6",
@@ -4742,7 +4742,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-genome-registry"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -4758,7 +4758,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-grammar"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "proptest",
  "rand 0.8.6",
@@ -4773,7 +4773,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-oracle"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "async-trait",
  "flate2",
@@ -4793,7 +4793,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-pool"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "reqwest 0.12.28",
  "thiserror 2.0.18",
@@ -4803,7 +4803,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-proxy"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4847,7 +4847,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-recon"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "anyhow",
  "axum",
@@ -4864,7 +4864,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-smuggling"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "base64",
  "httparse",
@@ -4878,7 +4878,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-strategy"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "dirs",
  "fs4",
@@ -4903,7 +4903,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-transport"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "base64",
  "bytes",
@@ -4930,7 +4930,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-types"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "rand 0.8.6",
  "serde",

@@ -215,6 +215,12 @@ pub fn build_request_for_delivery(
             qs.push(format!("{param}={}", urlencoding::encode(payload)));
             Request::get(format!("{b}/get?{}", qs.join("&")))
         }
+        // Raw reflected channels → httpbin's echo endpoints (`/headers`
+        // echoes request headers, `/cookies` echoes cookies). Render
+        // via the single-source `to_request` so the smuggling guard
+        // (CR/LF/NUL/`;` strip) is not re-implemented here.
+        D::HeaderValue { .. } => d.to_request(&format!("{b}/headers"), payload),
+        D::Cookie { .. } => d.to_request(&format!("{b}/cookies"), payload),
     }
 }
 

@@ -4,6 +4,96 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+## [0.2.17] — 2026-05-18
+
+### Added
+
+- Two sound **raw delivery channels** for the joint `(payload ×
+  delivery)` equivalence algebra: `DeliveryShape::HeaderValue { name }`
+  and `DeliveryShape::Cookie { name }`. Reflected `X-Forwarded-Host` /
+  cookie XSS is a real class that a CRS-class WAF covers more weakly in
+  `REQUEST_HEADERS` / `REQUEST_COOKIES` than in ARGS at PL1 — these are
+  the channels scald's WAF-evasion tier was missing. Each carries the
+  **exact** payload bytes (no encoding — the backend XSS sink must see
+  literal markup) and is gated by `DeliveryShape::transport_legal`: a
+  per-channel RFC constraint (RFC 9110 field-value for headers —
+  including the §5.5 rule that recipients strip leading/trailing
+  OWS, so an edge-whitespace payload would arrive trimmed and is
+  rejected as unsound; RFC 6265 cookie-octet for cookies). They flow
+  to scald automatically —
+  `xss_delivered` + `to_request` already iterate every shape, so no
+  scald code change is needed beyond repinning.
+
+### Fixed / Hardened
+
+- **Request-smuggling guard.** `DeliveryShape::to_request` hard-strips
+  CR/LF/NUL (and the request-`Cookie:` pair separator `;`) from
+  raw-channel values, so even a careless direct caller can never turn a
+  payload into header injection / request smuggling. Provably a no-op
+  on generator-produced members (they are pre-filtered).
+- **Cross-class delivery soundness gate.** The new raw shapes live in
+  the *shared* `delivery_set`, so a shared `enforce_transport_legal`
+  finalizer now runs at the tail of all 10 class generators
+  (sql/xss/cmdi/path/ssti/ldap/ssrf/nosql/log4shell/xxe). Without it a
+  CR/LF/`;`/space-bearing SQLi/etc. payload could be emitted paired
+  with a raw channel whose renderer strips those bytes — i.e.
+  `member.payload` would differ from what reaches the backend (an
+  unsound, rigged member). XSS additionally guards inline (re-samples
+  instead of dropping, preserving recall).
+- **`HppSplit` documentation corrected to the truthful mechanism.**
+  The variant previously claimed "the backend concatenates a+b" (a
+  payload-splitting model) but the implementation emits benign decoy
+  values followed by the intact payload in the *last* occurrence — a
+  last-occurrence-pollution evasion, sound on last-wins backends
+  (PHP/Express/Spring/Rails) and explicitly NOT sound on first-wins or
+  value-concatenating (legacy ASP.NET) backends. Now documented
+  accurately and pinned by a test.
+
+### Tests
+
+- Full per-rule contract for the new channels: exact-byte render,
+  negative precision, adversarial smuggle battery, 4000-case proptest
+  (legality + no-smuggle + bounded), cross-thread determinism, and a
+  scald-shaped consumption e2e.
+- `delivery_roundtrip_tests`: every encoding shape
+  (query/form/json±CT/multipart-field/file/path) and every legal raw
+  channel recovers the exact payload bytes a conforming backend would
+  parse, over a byte-class-adversarial corpus (CRLF, percent,
+  multibyte, control bytes, quotes, backslash).
+- `every_emitted_member_is_transport_legal_for_its_delivery` across all
+  10 classes × 4 seeds × 3 caps.
+
+## [0.2.16] — 2026-05-18
+
+### Added
+
+- **Delivery-aware XSS public API for scald**: `xss_delivered(payload,
+  max)` and `DeliveryShape::to_request(target, payload)` — one source
+  of truth for the joint `(payload × delivery)` algebra. Honest basis:
+  payload-string XSS obfuscation is ≈0% vs a CRS-class WAF (it
+  normalises every encoding); the delivery shape (multipart-file /
+  path-segment / JSON-without-Content-Type) is the lever that bypasses
+  it.
+- equiv generators extended **6 → 10 classes**: added sound `ssrf`,
+  `nosql`, `log4shell`, `xxe` with independent anti-rig soundness
+  oracles (`still_targets` / `still_injects` / `still_executes` /
+  `still_exfils`).
+
+### Fixed
+
+- Multibyte / char-boundary panics in `log4shell::innermost`, the
+  `xxe` URI scan, and `ssti::rw_string_split` (a byte index was used as
+  a char index on non-ASCII input).
+- `url_with_pair` / `FormBody` now percent-encode the parameter
+  **name** (a name containing space / `&` / `#` previously corrupted
+  the request structure).
+- RFC 7578 collision-safe multipart boundary (`effective_boundary`):
+  an attacker payload echoing the constant boundary can no longer forge
+  multipart structure in the request wafrift builds.
+- LDAP soundness oracle rebuilt (host-closer count decoupled from
+  prefix depth; `%00`/NUL truncation; escape-tolerant parse); three
+  rigged tests that asserted a benign filter was "valid" corrected.
+
 ## [0.2.15] — 2026-05-17
 
 ### Fixed

@@ -469,6 +469,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
             rules,
         });
     }
+    super::enforce_transport_legal(&mut out);
     out.truncate(cfg.max);
     out
 }

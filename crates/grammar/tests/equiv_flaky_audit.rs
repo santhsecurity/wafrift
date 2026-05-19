@@ -139,6 +139,39 @@ fn output_is_bounded_by_max() {
     }
 }
 
+/// CROSS-CLASS DELIVERY SOUNDNESS: adding the raw `HeaderValue`/
+/// `Cookie` shapes to the *shared* `delivery_set` means EVERY class —
+/// not just XSS — could otherwise pair a CR/LF/`;`/space-bearing
+/// payload with a raw channel whose `to_request` strips those bytes,
+/// making `member.payload` differ from what reaches the backend (an
+/// unsound, rigged member). The shared `enforce_transport_legal`
+/// finalizer must hold for all 10 classes on real attacks and across
+/// seeds. A regression that dropped the finalizer from any one
+/// generator flips this for that class.
+#[test]
+fn every_emitted_member_is_transport_legal_for_its_delivery() {
+    for &(class, payload) in CORPUS {
+        let mut any = false;
+        for seed in [1u64, 7, 0xDEAD_BEEF, 0x7761_6672_6966_7421] {
+            for max in [8usize, 24, 64] {
+                let members = equiv::equiv_for(class, payload, &cfg(seed, max));
+                for m in &members {
+                    any = true;
+                    assert!(
+                        m.delivery.transport_legal(&m.payload),
+                        "{class}: emitted {} member whose payload {:?} is \
+                         ILLEGAL for that channel — to_request would strip \
+                         bytes, so the delivered attack ≠ member.payload",
+                        m.delivery.label(),
+                        m.payload
+                    );
+                }
+            }
+        }
+        assert!(any, "{class}: no members for real attack {payload:?}");
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 4000, max_shrink_iters: 200, ..ProptestConfig::default() })]
 
