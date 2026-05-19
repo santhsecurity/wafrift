@@ -194,7 +194,7 @@ jobs:
       - run: cargo test -p wafrift-wafmodel --release
 
   mutants:
-    name: mutants (E5 — anti-rig core, mine.rs; 0 missed)
+    name: mutants (E5 — anti-rig core mine.rs + sfa.rs; 0 missed)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -205,29 +205,58 @@ jobs:
           tool: cargo-mutants
       # Mutation testing is the ground truth that the suite is not
       # decoration. Scoped to the *baselined & hardened* anti-rig core
-      # (mine.rs); the scope ratchets to more engine files as each is
-      # baselined in subsequent slices — we never claim a file is
-      # mutation-gated before it provably is. The one provably-
-      # equivalent mutant is excluded WITH a written justification in
-      # mutants.toml (item 40). The gate is: ZERO `MISSED` mutants.
-      # TIMEOUT mutants (arithmetic corruptions that infinite-loop the
-      # KMP build) are a real detection signal — a hung test fails CI —
-      # so they are acceptable, only silent survivors are not.
-      - name: cargo-mutants on the anti-rig core (mine.rs)
+      # (mine.rs + sfa.rs); the scope ratchets to more engine files as
+      # each is baselined in subsequent slices — we never claim a file
+      # is mutation-gated before it provably is. The handful of
+      # provably-equivalent mutants are excluded WITH written
+      # justifications in mutants.toml (item 40); `--config` is passed
+      # EXPLICITLY because cargo-mutants only auto-reads
+      # `.cargo/mutants.toml`, never `./mutants.toml`. The gate fails on
+      # any surviving (MISSED) mutant. TIMEOUT mutants (arithmetic
+      # corruptions that infinite-loop the KMP build) are a real
+      # detection signal — a hung test fails CI — so they are
+      # acceptable; only silent survivors are not.
+      #
+      # Robustness (this gate was a false-green once: cargo-mutants'
+      # ANSI colour made `grep '^MISSED'` anchor on an ESC byte and the
+      # gate could never fire — fixed): force `CARGO_TERM_COLOR=never`
+      # AND assert the machine summary line reports exactly "0 missed".
+      - name: cargo-mutants on the anti-rig core (mine.rs + sfa.rs)
         env:
           WAFMODEL_PROPTEST_CASES: "24"
           WAFMODEL_SCALE_CONFIGS: "8"
+          CARGO_TERM_COLOR: "never"
         run: |
           set -o pipefail
-          # NB: cargo-mutants owns the `mutants.out/` directory; tee to
-          # a distinct log file to avoid a file/dir name collision.
-          cargo mutants --manifest-path crates/wafmodel/Cargo.toml \
-            -f crates/wafmodel/src/mine.rs --no-shuffle \
-            -- --test mine_contract --test mine_solve_props --test scale_corpus \
+          # cargo-mutants owns the `mutants.out/` dir; tee elsewhere.
+          cargo mutants --config mutants.toml \
+            --manifest-path crates/wafmodel/Cargo.toml --no-shuffle \
+            -f crates/wafmodel/src/mine.rs -f crates/wafmodel/src/sfa.rs \
+            -- --test mine_contract --test mine_solve_props \
+               --test scale_corpus --test sfa_algebra --test artifact_contract \
             2>&1 | tee mutants_run.log || true
-          if grep -q '^MISSED' mutants_run.log; then
+          # Belt: no MISSED line at all (colour stripped ⇒ real anchor).
+          if grep -qE '^MISSED' mutants_run.log; then
             echo "::error::surviving (MISSED) mutant in the anti-rig core"
-            grep '^MISSED' mutants_run.log
+            grep -E '^MISSED' mutants_run.log
             exit 1
           fi
-          echo "0 missed — every non-equivalent mutant in mine.rs is detected"
+          # Suspenders: the machine summary must exist and must not
+          # report any missed mutant. cargo-mutants OMITS the "N missed"
+          # token entirely when it is zero, so: no summary line at all
+          # ⇒ the run itself broke (fail); summary present without a
+          # "missed" token ⇒ genuinely 0 (pass); "N missed" with N>0 ⇒
+          # fail.
+          summary="$(grep -E '[0-9]+ mutants tested' mutants_run.log | tail -1)"
+          if [ -z "$summary" ]; then
+            echo "::error::no cargo-mutants summary — the run did not complete"
+            exit 1
+          fi
+          echo "summary: $summary"
+          missed="$(printf '%s' "$summary" | grep -oE '[0-9]+ missed' | grep -oE '[0-9]+' | head -1)"
+          missed="${missed:-0}"
+          if [ "$missed" != "0" ]; then
+            echo "::error::cargo-mutants reports ${missed} missed mutant(s)"
+            exit 1
+          fi
+          echo "0 missed — every non-equivalent mutant in mine.rs + sfa.rs is detected"

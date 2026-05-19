@@ -42,4 +42,16 @@ additional_cargo_test_args = ["--no-fail-fast"]
 #   (exhaustive vs an independent oracle over bordered needles ×
 #   every word ≤ 2·|needle|): zero divergence. Efficiency-only ⇒
 #   equivalent ⇒ excluded, not chased.
-exclude_re = ["mine\\.rs:34:34: replace != with == in kmp_sfa"]
+# `sfa.rs:206:9  replace Sfa::is_empty -> bool with false`
+#   `is_empty` is `self.accept.is_empty()`. `Sfa::new` rejects an
+#   empty automaton, so for EVERY constructible `Sfa` the true value
+#   is already `false` — the mutant is behaviourally identical. The
+#   meaningful direction, `-> true`, IS killed (the soundness-primitive
+#   test asserts `!sfa.is_empty()`). `-> false` is unkillable because
+#   no input can distinguish it ⇒ provably equivalent ⇒ excluded, not
+#   chased (the method exists only to satisfy clippy's
+#   `len_without_is_empty` honestly).
+exclude_re = [
+    "mine\\.rs:34:34: replace != with == in kmp_sfa",
+    "sfa\\.rs:206:9: replace Sfa::is_empty -> bool with false",
+]
