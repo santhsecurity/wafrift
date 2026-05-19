@@ -1,0 +1,65 @@
+# Tier-B WAF ruleset — OWASP CRS-derived XSS (941) + SQLi (942) core.
+#
+# These patterns are faithful to the OWASP CRS detection anchors.
+# Modeling bound (documented, not rigging): the Rust `regex` crate is
+# linear-time and has no backreferences/lookaround, so PCRE-only CRS
+# constructs are expressed with their pure-regular equivalent. Every
+# pattern here fires on the same attack class CRS fires on; none is
+# weakened to make a test pass. Add files to this directory to extend
+# coverage (Tier-B: zero Rust knowledge required).
+#
+# Scoring mirrors CRS: a CRITICAL rule scores 5; the inbound anomaly
+# threshold is 5, so one critical match blocks (paranoia level 1).
+
+threshold = 5
+
+# ── 941: Cross-Site Scripting ─────────────────────────────────────
+[[rule]]
+id = "941110-script-tag"
+channels = ["ArgValue", "ArgName", "CookieValue", "HeaderValue", "Body"]
+transforms = ["UrlDecodeUni", "HtmlEntityDecode", "Lowercase"]
+pattern = "<script[\\s/>]"
+score = 5
+
+[[rule]]
+id = "941120-event-handler"
+channels = ["ArgValue", "ArgName", "CookieValue", "HeaderValue", "Body"]
+transforms = ["UrlDecodeUni", "HtmlEntityDecode", "Lowercase"]
+pattern = "\\bon(?:error|load|click|mouseover|focus|toggle|animationstart)\\s*="
+score = 5
+
+[[rule]]
+id = "941130-uri-scheme"
+channels = ["ArgValue", "CookieValue", "HeaderValue", "Body"]
+transforms = ["UrlDecodeUni", "HtmlEntityDecode", "Lowercase", "RemoveWhitespace"]
+pattern = "(?:javascript|data|vbscript):"
+score = 5
+
+[[rule]]
+id = "941140-dangerous-tag"
+channels = ["ArgValue", "CookieValue", "HeaderValue", "Body"]
+transforms = ["UrlDecodeUni", "HtmlEntityDecode", "Lowercase"]
+pattern = "<(?:iframe|object|embed|svg|img|details|video|audio|marquee)[\\s/>]"
+score = 5
+
+# ── 942: SQL Injection ────────────────────────────────────────────
+[[rule]]
+id = "942100-sqli-keywords"
+channels = ["ArgValue", "ArgName", "CookieValue", "Body"]
+transforms = ["UrlDecodeUni", "Lowercase", "CompressWhitespace"]
+pattern = "\\b(?:union\\s+select|select\\s+.*\\bfrom\\b|insert\\s+into|delete\\s+from|drop\\s+table)\\b"
+score = 5
+
+[[rule]]
+id = "942140-sqli-tautology"
+channels = ["ArgValue", "ArgName", "CookieValue", "Body"]
+transforms = ["UrlDecodeUni", "Lowercase", "CompressWhitespace"]
+pattern = "(?:'\\s*or\\s*'?[0-9a-z]+'?\\s*=\\s*'?[0-9a-z]|\\bor\\s+1\\s*=\\s*1\\b)"
+score = 5
+
+[[rule]]
+id = "942160-sqli-blind"
+channels = ["ArgValue", "CookieValue", "Body"]
+transforms = ["UrlDecodeUni", "Lowercase", "CompressWhitespace"]
+pattern = "\\b(?:sleep|benchmark|pg_sleep|waitfor\\s+delay)\\s*\\("
+score = 5

@@ -1,0 +1,423 @@
+//! Symbolic finite automata over the byte domain.
+//!
+//! A WAF's decision over one inspection channel is a regular language
+//! (CRS rules *are* regexes). The learned model is therefore a
+//! deterministic finite automaton — but a 256-way transition table per
+//! state is wasteful and does not match how rules actually partition
+//! the input. An [`Sfa`] labels each transition with a [`BytePred`]
+//! (an exact subset of `0..=256`); the predicates out of every state
+//! are a *total partition* of the byte domain, so the automaton is
+//! deterministic and complete by construction.
+//!
+//! Everything here is exact (no PAC, no sampling): membership, the
+//! full Boolean algebra (∩, ∪, ¬, set-difference), emptiness, the
+//! shortest accepted word, and — the operation the learner's
+//! equivalence query and the bypass miner both stand on — the
+//! **shortest distinguishing word** between two automata.
+
+/// An exact predicate over a byte: the characteristic set of `0..=255`
+/// as a 256-bit vector. Boolean ops are four `u64` ops; this is small
+/// enough to keep per transition and exact enough that the automaton
+/// algebra has no rounding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct BytePred([u64; 4]);
+
+impl BytePred {
+    /// The empty predicate (matches nothing).
+    #[must_use]
+    pub const fn none() -> Self {
+        BytePred([0; 4])
+    }
+
+    /// The full predicate (matches every byte).
+    #[must_use]
+    pub const fn any() -> Self {
+        BytePred([u64::MAX; 4])
+    }
+
+    /// Predicate matching exactly one byte.
+    #[must_use]
+    pub fn byte(b: u8) -> Self {
+        let mut p = BytePred::none();
+        p.insert(b);
+        p
+    }
+
+    /// Predicate matching an inclusive byte range.
+    #[must_use]
+    pub fn range(lo: u8, hi: u8) -> Self {
+        let mut p = BytePred::none();
+        for b in lo..=hi {
+            p.insert(b);
+        }
+        p
+    }
+
+    /// Add a byte to the set.
+    pub fn insert(&mut self, b: u8) {
+        self.0[(b >> 6) as usize] |= 1u64 << (b & 63);
+    }
+
+    /// Is `b` in the set?
+    #[must_use]
+    pub fn contains(&self, b: u8) -> bool {
+        self.0[(b >> 6) as usize] & (1u64 << (b & 63)) != 0
+    }
+
+    /// Set union.
+    #[must_use]
+    pub fn or(self, o: Self) -> Self {
+        BytePred(std::array::from_fn(|i| self.0[i] | o.0[i]))
+    }
+
+    /// Set intersection.
+    #[must_use]
+    pub fn and(self, o: Self) -> Self {
+        BytePred(std::array::from_fn(|i| self.0[i] & o.0[i]))
+    }
+
+    /// Set difference `self \ o`.
+    #[must_use]
+    pub fn minus(self, o: Self) -> Self {
+        self.and(!o)
+    }
+
+    /// Is the set empty?
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0 == [0; 4]
+    }
+
+    /// The smallest byte in the set, if any — the canonical witness
+    /// used to concretize a symbolic transition into real bytes
+    /// (stable so the learner and miner are deterministic).
+    #[must_use]
+    pub fn witness(&self) -> Option<u8> {
+        for (i, &w) in self.0.iter().enumerate() {
+            if w != 0 {
+                return Some((i as u8) * 64 + w.trailing_zeros() as u8);
+            }
+        }
+        None
+    }
+
+    /// Number of bytes in the set.
+    #[must_use]
+    pub fn count(&self) -> u32 {
+        self.0.iter().map(|w| w.count_ones()).sum()
+    }
+
+    /// Lossless 64-hex-char encoding (4 little-endian `u64` words) for
+    /// the Tier-B model artifact.
+    #[must_use]
+    pub fn to_hex(&self) -> String {
+        let mut s = String::with_capacity(64);
+        for w in self.0 {
+            s.push_str(&format!("{w:016x}"));
+        }
+        s
+    }
+
+    /// Inverse of [`BytePred::to_hex`]. `None` on malformed input.
+    #[must_use]
+    pub fn from_hex(h: &str) -> Option<Self> {
+        if h.len() != 64 {
+            return None;
+        }
+        let mut p = [0u64; 4];
+        for (i, word) in p.iter_mut().enumerate() {
+            *word = u64::from_str_radix(&h[i * 16..i * 16 + 16], 16).ok()?;
+        }
+        Some(BytePred(p))
+    }
+}
+
+impl std::ops::Not for BytePred {
+    type Output = BytePred;
+    /// Set complement within `0..=255`.
+    fn not(self) -> BytePred {
+        BytePred(std::array::from_fn(|i| !self.0[i]))
+    }
+}
+
+/// Index of a state within an [`Sfa`].
+pub type StateId = usize;
+
+/// A complete, deterministic transition table: per state, a list of
+/// `(guard, target)` whose guards partition the byte domain.
+pub type DeltaTable = Vec<Vec<(BytePred, StateId)>>;
+
+/// A deterministic, complete symbolic finite automaton over bytes.
+///
+/// Invariant (checked by [`Sfa::new`] and preserved by every method):
+/// for each state the transition predicates are pairwise disjoint and
+/// their union is [`BytePred::any`] — so running any byte string lands
+/// in exactly one state.
+#[derive(Debug, Clone)]
+pub struct Sfa {
+    start: StateId,
+    accept: Vec<bool>,
+    /// `delta[s]` = guarded transitions out of `s`; total + disjoint.
+    delta: Vec<Vec<(BytePred, StateId)>>,
+}
+
+impl Sfa {
+    /// Construct and validate the determinism+totality invariant.
+    ///
+    /// # Panics
+    /// Panics if any state's guards overlap or fail to cover every
+    /// byte — a malformed automaton is a bug, never silently repaired.
+    #[must_use]
+    pub fn new(start: StateId, accept: Vec<bool>, delta: Vec<Vec<(BytePred, StateId)>>) -> Self {
+        assert_eq!(accept.len(), delta.len(), "accept/delta arity mismatch");
+        assert!(start < accept.len(), "start state out of range");
+        for (s, trans) in delta.iter().enumerate() {
+            let mut cover = BytePred::none();
+            for (g, t) in trans {
+                assert!(
+                    *t < accept.len(),
+                    "state {s}: transition target out of range"
+                );
+                assert!(
+                    cover.and(*g).is_empty(),
+                    "state {s}: overlapping guards (non-deterministic)"
+                );
+                cover = cover.or(*g);
+            }
+            assert_eq!(cover, BytePred::any(), "state {s}: guards are not total");
+        }
+        Sfa {
+            start,
+            accept,
+            delta,
+        }
+    }
+
+    /// Number of states.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.accept.len()
+    }
+
+    /// Always false (an automaton has at least one state); present so
+    /// clippy's `len_without_is_empty` is satisfied honestly.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.accept.is_empty()
+    }
+
+    /// Export the raw parts for serialization (clones).
+    #[must_use]
+    pub fn export(&self) -> (StateId, Vec<bool>, DeltaTable) {
+        (self.start, self.accept.clone(), self.delta.clone())
+    }
+
+    /// Rebuild from exported parts, re-validating the
+    /// determinism+totality invariant (a tampered artifact is
+    /// rejected, never trusted).
+    #[must_use]
+    pub fn import(start: StateId, accept: Vec<bool>, delta: DeltaTable) -> Self {
+        Sfa::new(start, accept, delta)
+    }
+
+    /// The start state.
+    #[must_use]
+    pub fn start_state(&self) -> StateId {
+        self.start
+    }
+
+    /// Is state `s` accepting?
+    #[must_use]
+    pub fn is_accepting(&self, s: StateId) -> bool {
+        self.accept[s]
+    }
+
+    /// Guarded transitions out of `s` (total + pairwise disjoint).
+    #[must_use]
+    pub fn transitions(&self, s: StateId) -> &[(BytePred, StateId)] {
+        &self.delta[s]
+    }
+
+    /// The state reached from `s` on byte `b`.
+    #[must_use]
+    pub fn step_byte(&self, s: StateId, b: u8) -> StateId {
+        self.step(s, b)
+    }
+
+    fn step(&self, s: StateId, b: u8) -> StateId {
+        for (g, t) in &self.delta[s] {
+            if g.contains(b) {
+                return *t;
+            }
+        }
+        unreachable!("totality invariant guarantees a transition for every byte")
+    }
+
+    /// Does the automaton accept `word`?
+    #[must_use]
+    pub fn accepts(&self, word: &[u8]) -> bool {
+        let mut s = self.start;
+        for &b in word {
+            s = self.step(s, b);
+        }
+        self.accept[s]
+    }
+
+    /// Complement: accept ⇔ the original rejects. Exact because the
+    /// automaton is total.
+    #[must_use]
+    pub fn complement(&self) -> Sfa {
+        Sfa {
+            start: self.start,
+            accept: self.accept.iter().map(|a| !a).collect(),
+            delta: self.delta.clone(),
+        }
+    }
+
+    /// Synchronous product under a state-acceptance combiner. The
+    /// product alphabet is the set of *minterms* — maximal byte sets
+    /// on which both automata agree which transition to take — so the
+    /// result stays deterministic, total, and exact.
+    fn product(&self, o: &Sfa, accept: impl Fn(bool, bool) -> bool) -> Sfa {
+        use std::collections::HashMap;
+        let mut id: HashMap<(StateId, StateId), StateId> = HashMap::new();
+        let mut work = vec![(self.start, o.start)];
+        id.insert((self.start, o.start), 0);
+        let mut acc = vec![accept(self.accept[self.start], o.accept[o.start])];
+        let mut delta: Vec<Vec<(BytePred, StateId)>> = vec![Vec::new()];
+        let mut i = 0;
+        while i < work.len() {
+            let (a, b) = work[i];
+            let src = i;
+            for (ga, ta) in &self.delta[a] {
+                for (gb, tb) in &o.delta[b] {
+                    let g = ga.and(*gb);
+                    if g.is_empty() {
+                        continue;
+                    }
+                    let key = (*ta, *tb);
+                    let next = *id.entry(key).or_insert_with(|| {
+                        work.push(key);
+                        acc.push(accept(self.accept[*ta], o.accept[*tb]));
+                        delta.push(Vec::new());
+                        work.len() - 1
+                    });
+                    delta[src].push((g, next));
+                }
+            }
+            i += 1;
+        }
+        Sfa::new(0, acc, delta)
+    }
+
+    /// Language intersection.
+    #[must_use]
+    pub fn intersect(&self, o: &Sfa) -> Sfa {
+        self.product(o, |a, b| a && b)
+    }
+
+    /// Language union.
+    #[must_use]
+    pub fn union(&self, o: &Sfa) -> Sfa {
+        self.product(o, |a, b| a || b)
+    }
+
+    /// Set difference `self \ o` (in this language, not in `o`'s).
+    #[must_use]
+    pub fn difference(&self, o: &Sfa) -> Sfa {
+        self.product(o, |a, b| a && !b)
+    }
+
+    /// Shortest accepted word (BFS over states, expanding each
+    /// transition by its witness byte). `None` ⇔ the language is
+    /// empty. The witness is the minimum byte, so the result is the
+    /// length-then-lexicographic minimum: a *deterministic, minimal*
+    /// counterexample.
+    #[must_use]
+    pub fn shortest_accepted(&self) -> Option<Vec<u8>> {
+        use std::collections::VecDeque;
+        let mut seen = vec![false; self.len()];
+        let mut q = VecDeque::new();
+        q.push_back((self.start, Vec::new()));
+        seen[self.start] = true;
+        while let Some((s, w)) = q.pop_front() {
+            if self.accept[s] {
+                return Some(w);
+            }
+            // Visit transitions by ascending witness for determinism.
+            let mut edges: Vec<(u8, StateId)> = self.delta[s]
+                .iter()
+                .filter_map(|(g, t)| g.witness().map(|b| (b, *t)))
+                .collect();
+            edges.sort_unstable();
+            for (b, t) in edges {
+                if !seen[t] {
+                    seen[t] = true;
+                    let mut nw = w.clone();
+                    nw.push(b);
+                    q.push_back((t, nw));
+                }
+            }
+        }
+        None
+    }
+
+    /// Is the language empty?
+    #[must_use]
+    pub fn is_language_empty(&self) -> bool {
+        self.shortest_accepted().is_none()
+    }
+
+    /// Enumerate up to `max_words` accepted words, shortest-then-
+    /// lexicographically-smallest first, none longer than `max_len`.
+    /// Deterministic (transitions expanded by ascending witness byte).
+    /// This is the bypass miner's harvest primitive.
+    #[must_use]
+    pub fn enumerate_accepted(&self, max_words: usize, max_len: usize) -> Vec<Vec<u8>> {
+        use std::collections::VecDeque;
+        let mut out = Vec::new();
+        if max_words == 0 {
+            return out;
+        }
+        let mut q = VecDeque::from([(self.start, Vec::<u8>::new())]);
+        while let Some((s, w)) = q.pop_front() {
+            if self.accept[s] {
+                out.push(w.clone());
+                if out.len() == max_words {
+                    return out;
+                }
+            }
+            if w.len() >= max_len {
+                continue;
+            }
+            let mut edges: Vec<(u8, StateId)> = self.delta[s]
+                .iter()
+                .filter_map(|(g, t)| g.witness().map(|b| (b, *t)))
+                .collect();
+            edges.sort_unstable();
+            for (b, t) in edges {
+                let mut nw = w.clone();
+                nw.push(b);
+                q.push_back((t, nw));
+            }
+        }
+        out
+    }
+
+    /// The shortest word accepted by exactly one of the two automata,
+    /// or `None` iff they recognise the *same* language. This is the
+    /// exact equivalence oracle the active learner uses and the
+    /// witness the WAF-diff product reports.
+    #[must_use]
+    pub fn distinguishing_word(&self, o: &Sfa) -> Option<Vec<u8>> {
+        // (L(self) \ L(o)) ∪ (L(o) \ L(self)) — shortest member.
+        let sym = self.difference(o).union(&o.difference(self));
+        sym.shortest_accepted()
+    }
+
+    /// Exact language equivalence.
+    #[must_use]
+    pub fn equivalent(&self, o: &Sfa) -> bool {
+        self.distinguishing_word(o).is_none()
+    }
+}

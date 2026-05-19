@@ -4942,6 +4942,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "wafrift-wafmodel"
+version = "0.2.17"
+dependencies = [
+ "proptest",
+ "rand 0.8.6",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml",
+ "tracing",
+ "wafrift-encoding",
+ "wafrift-grammar",
+ "wafrift-types",
+]
+
+[[package]]
 name = "wait-timeout"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

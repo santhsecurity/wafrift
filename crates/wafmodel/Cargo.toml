@@ -1,0 +1,29 @@
+[package]
+name = "wafrift-wafmodel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Active-learning WAF decompiler: reconstruct a WAF's decision boundary as an executable symbolic automaton, mine bypasses offline, and prove hole-closure."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "automata-learning", "security", "evasion", "verification"]
+categories = ["algorithms", "network-programming"]
+
+[dependencies]
+wafrift-types = { workspace = true }
+wafrift-encoding = { workspace = true }
+wafrift-grammar = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+regex = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
