@@ -1,6 +1,14 @@
-[target.x86_64-unknown-linux-gnu]
-linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold", "-C", "link-arg=-L/usr/lib/gcc/x86_64-linux-gnu/13"]
+# NOTE: a committed `[target.x86_64-unknown-linux-gnu]` block forcing
+# `linker = "clang"` + `-fuse-ld=mold` + a machine-specific
+# `-L/usr/lib/gcc/x86_64-linux-gnu/13` was removed. It was leaked from a
+# local dev environment via a checkpoint commit and made EVERY build
+# (CI, and `cargo install wafrift` for any user) fail on hosts without
+# mold/clang/gcc-13 at those exact paths — CI runners report
+# `clang: error: invalid linker name in argument '-fuse-ld=mold'`,
+# failing all build scripts with exit 101. The default system linker is
+# correct and portable for a published crate; mold is a personal
+# build-speed choice that belongs in `~/.cargo/config.toml`
+# (user-global), never in the repo.
 
 [build]
 jobs = 8
