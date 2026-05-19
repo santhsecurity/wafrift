@@ -274,6 +274,38 @@ The bar is met only if the process *catches* things. It has:
   2 documented provably-equivalent — `is_empty -> false` is
   unkillable because no constructible `Sfa` has an empty `accept`).
 
+  F5 was a THREE-layer saga, each layer a real defect surfaced only by
+  reading the actual job log:
+  1. *False green* — the gate could not fire (ANSI-anchored
+     `grep '^MISSED'` + `mutants.toml` in the wrong dir so `exclude_re`
+     never loaded). Fixed: explicit `--config`,
+     `CARGO_TERM_COLOR=never`, dual MISSED-scan + summary-parse.
+  2. *CI-runtime blowup* — the now-real gate ran ~85 min on the slow
+     runner (180s timeout × ~30 timeout-mutants) and was killed at
+     exit 143. Fixed: `minimum_test_timeout` 180→25, explicit
+     `--timeout 30 --jobs 3`, job-level `timeout-minutes: 40`.
+  3. *set-e false-RED* — GitHub runs `run:` as `bash -e -o pipefail`,
+     so the missed-count `grep` inside `$()` aborted the whole step
+     on a GENUINELY CLEAN run (the clean summary omits the "missed"
+     token, so the grep matched nothing). Fixed: `shell: bash
+     --noprofile --norc {0}` to drop `-e`, `sed -nE` extraction (never
+     errors on no-match), failure path re-proven under the real shell.
+  Confirmed honest on real infra (6866e56): `150 mutants tested in
+  27m: 54 caught, 20 unviable, 76 timeouts; 0 missed`. The slow runner
+  inflates the timeout share — that is still honest detection (a
+  hung/slow mutant is an observable behaviour change CI surfaces); the
+  contract is **0 silently-surviving mutants**, met.
+
+- **E5 ratchet — solve.rs already legendary (no work needed).**
+  Baseline `cargo-mutants` on the CEGIS solver: 24 mutants, **23
+  caught, 1 unviable, 0 missed, 0 timeouts** — the existing anti-rig
+  suite (E3/26 solver-invariant, cve_replay solver-rediscovery,
+  equiv_bridge canonical-member, `our_own_solver_cannot_evade`)
+  already kills every viable solver mutant. No hardening required; the
+  `mutants` CI gate scope extended to mine.rs + sfa.rs + solve.rs
+  (gate proven honest+bounded; `timeout-minutes` raised 40→50 for the
+  added file's headroom).
+
 - **Cross-cutting law reinforced:** never trust a green CI check —
   read the job log. A gate is only real once its *failure* path has
-  been exercised.
+  been exercised, *in the shell it actually runs in*.
