@@ -109,7 +109,10 @@ fn decoders_are_not_idempotent_pinned_precision_twin() {
     let p2 = Transform::UrlDecodeUni.apply(&p1);
     assert_eq!(p1, b"%25", "first url-decode pass");
     assert_eq!(p2, b"%", "second pass decodes again — NOT idempotent");
-    assert_ne!(p1, p2, "UrlDecodeUni must NOT be idempotent (mismatch class)");
+    assert_ne!(
+        p1, p2,
+        "UrlDecodeUni must NOT be idempotent (mismatch class)"
+    );
 
     // &amp;lt; -> &lt; (one pass) -> < (second pass).
     let ent = b"&amp;lt;";

@@ -210,3 +210,20 @@ The bar is met only if the process *catches* things. It has:
   which W-method is adequate. Pinned permanently by
   `wmethod_soundness.rs` (asserts the limitation is *real* and
   non-vacuous, and that the sound oracle + passive both recover exact).
+
+- **F3 — an error variant with no producer (dead contract, fixed).**
+  E10/77 (every `WafModelError` variant produced by a real path) found
+  that `BudgetExhausted { queries }` — documented as "the learner
+  exhausted its membership-query budget … carries the budget spent" —
+  was constructed *nowhere* in the crate: an unfulfillable contract.
+  Per the no-stub / no-evasion law it is neither faked in a test nor
+  deleted; instead the real path was wired: `l_star` was refactored
+  (no signature change — it delegates to a private `l_star_impl` with
+  `budget = u64::MAX`) and a new public `l_star_budgeted(.., max_queries)`
+  returns `BudgetExhausted` with the exact spend when the
+  close/consistency fixpoint crosses the cap — genuine production
+  safety against a live/hostile WAF, not a partial model dressed up as
+  complete. Pinned by `error_coverage.rs` (real-path trigger + exact
+  Display + anti-vacuous control: the same target learns under an
+  unbounded budget) and a rustc-enforced exhaustiveness guard so a
+  future variant cannot be added without a producing test.

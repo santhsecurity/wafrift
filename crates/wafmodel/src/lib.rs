@@ -59,7 +59,8 @@ pub use error::{Result, WafModelError};
 pub use fingerprint::{Candidate, Fingerprinter, Identification, default_battery};
 pub use harden::{ClosureReport, synthesize_closure};
 pub use learn::{
-    Alphabet, BoundedExhaustiveEq, EquivalenceOracle, LearnReport, kv_learn, l_star, passive_learn,
+    Alphabet, BoundedExhaustiveEq, EquivalenceOracle, LearnReport, kv_learn, l_star,
+    l_star_budgeted, passive_learn,
 };
 pub use mine::{attack_grammar, mine_bypasses, minimal_bypass, waf_diff};
 pub use mlwaf::{MlEvasion, MlWaf, evade_ml};

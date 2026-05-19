@@ -404,12 +404,19 @@ where
     })
 }
 
-/// Angluin L\* with all-suffixes counterexample handling.
-pub fn l_star<B>(
+/// Angluin L\* with all-suffixes counterexample handling, bounded by a
+/// membership-query budget. When the distinct-query count exceeds
+/// `budget` the learner stops and returns
+/// [`WafModelError::BudgetExhausted`](crate::error::WafModelError)
+/// carrying the spend, so a caller against a live/hostile WAF can raise
+/// the budget rather than silently trust a partial model. `l_star`
+/// passes `u64::MAX` (unbounded); `l_star_budgeted` exposes the cap.
+fn l_star_impl<B>(
     oracle: &mut dyn WafOracle,
     build: &B,
     alpha: &Alphabet,
     eq: &mut dyn EquivalenceOracle,
+    budget: u64,
 ) -> Result<LearnReport>
 where
     B: Fn(&[u8]) -> Request,
@@ -506,6 +513,16 @@ where
             break;
         }
 
+        // Budget gate: the close/consistency fixpoint above is where
+        // membership queries are spent. If the distinct-query count has
+        // passed the cap, stop honestly with the spend rather than
+        // continue or return a partial hypothesis as if complete.
+        if mqx.cache.len() as u64 > budget {
+            return Err(crate::error::WafModelError::BudgetExhausted {
+                queries: mqx.cache.len() as u64,
+            });
+        }
+
         let hyp = {
             let mut ask = |w: &[usize]| mqx.ask(w);
             build_hypothesis(&mut t, alpha, &mut ask)?
@@ -536,6 +553,40 @@ where
             }
         }
     }
+}
+
+/// Angluin L\* with all-suffixes counterexample handling (unbounded
+/// membership budget — the offline / trusted-oracle path).
+pub fn l_star<B>(
+    oracle: &mut dyn WafOracle,
+    build: &B,
+    alpha: &Alphabet,
+    eq: &mut dyn EquivalenceOracle,
+) -> Result<LearnReport>
+where
+    B: Fn(&[u8]) -> Request,
+{
+    l_star_impl(oracle, build, alpha, eq, u64::MAX)
+}
+
+/// L\* with a hard membership-query budget. Against a live or hostile
+/// WAF an unbounded learner can issue unboundedly many requests; this
+/// entry point caps the spend and returns
+/// [`WafModelError::BudgetExhausted`](crate::error::WafModelError) with
+/// the exact count when the cap is crossed — never a partial model
+/// dressed up as complete. `max_queries == u64::MAX` is exactly
+/// `l_star`.
+pub fn l_star_budgeted<B>(
+    oracle: &mut dyn WafOracle,
+    build: &B,
+    alpha: &Alphabet,
+    eq: &mut dyn EquivalenceOracle,
+    max_queries: u64,
+) -> Result<LearnReport>
+where
+    B: Fn(&[u8]) -> Request,
+{
+    l_star_impl(oracle, build, alpha, eq, max_queries)
 }
 
 // ── Kearns–Vazirani discrimination-tree learner ────────────────────

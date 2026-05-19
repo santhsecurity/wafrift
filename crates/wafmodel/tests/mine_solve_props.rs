@@ -97,7 +97,9 @@ proptest! {
 fn stage(i: u8) -> Stage {
     match i % 5 {
         0 => Stage::Identity,
-        1 => Stage::UrlDecode { plus_is_space: false },
+        1 => Stage::UrlDecode {
+            plus_is_space: false,
+        },
         2 => Stage::DoubleUrlDecode,
         3 => Stage::JsonUnescape,
         _ => Stage::HtmlEntityDecode,
