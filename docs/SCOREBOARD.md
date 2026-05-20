@@ -4,16 +4,16 @@ _Generated 2026-05-20 from `wafrift-bench/results/` via `wafrift-bench/scripts/r
 
 | class | modsec-pl1 | modsec-pl2 | modsec-pl3 | modsec-pl4 | coraza | bunkerweb | naxsi |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| sql | 40.2 | 39.0 | 39.7 | 39.1 | 20.9 | 21.1 | 12.6 |
-| xss | — | — | — | — | 12.1 | 12.1 | 12.1 |
-| cmdi | — | — | — | — | 24.8 | 22.3 | 14.0 |
-| ssti | — | — | — | — | 59.4 | 56.0 | 38.5 |
-| path | — | — | — | — | 12.6 | 12.2 | 12.0 |
-| ldap | — | — | — | — | 33.3 | 33.3 | 16.7 |
-| xxe | — | — | — | — | 0.0 | 0.0 | 0.0 |
-| ssrf | — | — | — | — | 0.0 | 0.0 | 0.0 |
-| nosql | — | — | — | — | 0.0 | 0.0 | 0.0 |
-| log4shell | — | — | — | — | 0.0 | 0.0 | 0.0 |
+| sql | 40.2 | 39.0 | 39.7 | 27.3 | 8.7 | 39.4 | 30.0 |
+| xss | — | — | — | 25.9 | — | — | — |
+| cmdi | — | — | — | 27.3 | — | — | — |
+| ssti | — | — | — | 27.6 | — | — | — |
+| path | — | — | — | 28.4 | — | — | — |
+| ldap | — | — | — | 28.8 | — | — | — |
+| xxe | — | — | — | 25.8 | — | — | — |
+| ssrf | — | — | — | 26.5 | — | — | — |
+| nosql | — | — | — | 29.3 | — | — | — |
+| log4shell | — | — | — | 30.4 | — | — | — |
 
 ## Per-stack roll-up
 
@@ -22,10 +22,10 @@ _Generated 2026-05-20 from `wafrift-bench/results/` via `wafrift-bench/scripts/r
 | modsec-pl1 | 1 | 1,730 | 696 | 40.2% |
 | modsec-pl2 | 1 | 1,730 | 675 | 39.0% |
 | modsec-pl3 | 1 | 1,730 | 686 | 39.7% |
-| modsec-pl4 | 1 | 1,730 | 676 | 39.1% |
-| coraza | 10 | 10,312 | 2,221 | 21.5% |
-| bunkerweb | 10 | 10,312 | 2,163 | 21.0% |
-| naxsi | 10 | 10,312 | 1,520 | 14.7% |
+| modsec-pl4 | 10 | 59,941 | 16,319 | 27.2% |
+| coraza | 1 | 1,730 | 150 | 8.7% |
+| bunkerweb | 1 | 1,730 | 682 | 39.4% |
+| naxsi | 1 | 1,730 | 519 | 30.0% |
 
 ## Source
 
@@ -34,10 +34,10 @@ Latest result file picked per stack:
 - `v022-quotefree-modsec-pl1.json` -> **modsec-pl1**
 - `v022-quotefree-modsec-pl2.json` -> **modsec-pl2**
 - `v022-quotefree-modsec-pl3.json` -> **modsec-pl3**
-- `v022-quotefree-modsec-pl4.json` -> **modsec-pl4**
-- `honest-coraza-equiv-cegis-0.2.16.json` -> **coraza**
-- `honest-bunkerweb-equiv-cegis-0.2.16.json` -> **bunkerweb**
-- `honest-naxsi-equiv-cegis-0.2.16.json` -> **naxsi**
+- `modsec-pl4-multi.json` -> **modsec-pl4**
+- `v022-quotefree-coraza.json` -> **coraza**
+- `v022-quotefree-bunkerweb.json` -> **bunkerweb**
+- `v022-quotefree-naxsi.json` -> **naxsi**
 
 ## Reproduce
 
