@@ -32,7 +32,9 @@
 use clap::Args;
 use reqwest::{Client, Method};
 use std::str::FromStr;
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 #[derive(Args, Debug)]
 pub struct BypassProbeArgs {
@@ -210,6 +212,18 @@ struct UrlReport {
     /// this report is then measured against an error page and the whole
     /// run is inconclusive.
     baseline_was_throttled: bool,
+    /// Number of probe responses that carried a parseable `Retry-After`
+    /// header AND a throttle status — i.e., the target asked us to slow
+    /// down with a precise number. Distinguishes polite WAFs (parse +
+    /// obey their hint) from silent ones (fall back to our own backoff).
+    retry_after_responses: u32,
+    /// Maximum `Retry-After` we obeyed across all probes for this URL,
+    /// in milliseconds. Capped by [`crate::retry_after::MAX_OBEYED`] so
+    /// a hostile origin cannot pin us asleep for an hour. Useful when
+    /// reading the report after the fact to know "the longest cooldown
+    /// the target named was N seconds — that's the floor for a future
+    /// `--delay-ms` value if you re-scan."
+    max_retry_after_obeyed_ms: u64,
     divergences: Vec<Divergence>,
 }
 
@@ -306,13 +320,25 @@ async fn probe_one_url(
         );
     }
 
-    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let delay_ms = args.delay_ms;
     let body_thresh = args.body_diff_threshold_pct;
     let url_owned = url.to_string();
     let base_origin = url.split('/').take(3).collect::<Vec<_>>().join("/");
     let probes_fired = work.len();
-    let rate_limited = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let rate_limited = Arc::new(AtomicU32::new(0));
+    // Shared cooldown deadline (process-monotonic ms since `start`) that
+    // every spawned probe honours before firing. The scan loop's batched
+    // analogue is `batch_retry_after`; here we are semaphore-throttled
+    // concurrent so the natural primitive is a deadline + fetch_max,
+    // not a per-batch accumulator. fetch_max is the cleanest way for
+    // sibling tasks to publish "everyone wait until at least T" without
+    // a mutex — and `Instant`-derived ms is monotonic, so a wall-clock
+    // skip can't accidentally rush past it.
+    let start = Instant::now();
+    let not_before_ms = Arc::new(AtomicU64::new(0));
+    let retry_after_responses = Arc::new(AtomicU32::new(0));
+    let max_retry_after_obeyed_ms = Arc::new(AtomicU64::new(0));
     let baseline_was_throttled = is_throttle_or_unavailable(baseline_status);
     if baseline_was_throttled && !args.quiet {
         eprintln!(
@@ -323,16 +349,38 @@ async fn probe_one_url(
     }
 
     let mut handles = Vec::with_capacity(work.len());
-    for job in work {
+    for (idx, job) in work.into_iter().enumerate() {
         let sem_c = sem.clone();
         let client_c = client.clone();
         let url_c = url_owned.clone();
         let base_origin_c = base_origin.clone();
         let rl_c = rate_limited.clone();
+        let nbf_c = not_before_ms.clone();
+        let rar_c = retry_after_responses.clone();
+        let max_ra_c = max_retry_after_obeyed_ms.clone();
+        // Per-task nonce for jittered cooldown sleep. The task index in
+        // the work list is monotonic, deterministic within a run, and
+        // unique — exactly the contract `retry_after::jittered` wants.
+        let nonce = u32::try_from(idx).unwrap_or(u32::MAX);
         handles.push(tokio::spawn(async move {
             let _permit = sem_c.acquire_owned().await.ok()?;
             if delay_ms > 0 {
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+            // Honour any cooldown a sibling task has discovered. We
+            // sleep ONCE — if the deadline moves while we are asleep
+            // (a sibling fires, hits another 429, pushes the deadline
+            // further), we accept that we may fire one premature probe
+            // before the system re-converges. That probe will itself
+            // be throttled and re-extend the deadline; siblings spawned
+            // after will see the new value. This is strictly safer than
+            // a busy re-check loop (no infinite-sleep risk on a hostile
+            // origin) and converges in O(1) extra probes.
+            let now_ms = elapsed_ms(start);
+            let deadline = nbf_c.load(Ordering::Relaxed);
+            if deadline > now_ms {
+                let wait = Duration::from_millis(deadline.saturating_sub(now_ms));
+                tokio::time::sleep(crate::retry_after::jittered(wait, nonce)).await;
             }
             run_probe_job(
                 &client_c,
@@ -343,6 +391,10 @@ async fn probe_one_url(
                 baseline_len,
                 body_thresh,
                 &rl_c,
+                &nbf_c,
+                &rar_c,
+                &max_ra_c,
+                start,
             )
             .await
         }));
@@ -354,7 +406,9 @@ async fn probe_one_url(
             divergences.push(div);
         }
     }
-    let rate_limited_probes = rate_limited.load(std::sync::atomic::Ordering::Relaxed);
+    let rate_limited_probes = rate_limited.load(Ordering::Relaxed);
+    let retry_after_responses_n = retry_after_responses.load(Ordering::Relaxed);
+    let max_retry_after_obeyed_ms_n = max_retry_after_obeyed_ms.load(Ordering::Relaxed);
     if rate_limited_probes > 0 && !args.quiet {
         let pct = f64::from(rate_limited_probes) / probes_fired.max(1) as f64 * 100.0;
         eprintln!(
@@ -362,6 +416,15 @@ async fn probe_one_url(
              rate-limited (HTTP 429/503/…) and excluded from divergences — they are the \
              target throttling us, not access bypasses."
         );
+        if retry_after_responses_n > 0 {
+            eprintln!(
+                "Retry-After: obeyed on {retry_after_responses_n} probe(s); longest \
+                 server-named cooldown was {max_retry_after_obeyed_ms_n} ms (capped at \
+                 {} ms). Use --delay-ms >= {} to stay polite on a re-scan.",
+                crate::retry_after::MAX_OBEYED.as_millis(),
+                max_retry_after_obeyed_ms_n
+            );
+        }
     }
 
     divergences.sort_by(|a, b| {
@@ -380,8 +443,18 @@ async fn probe_one_url(
         rate_limited_probes,
         probes_fired,
         baseline_was_throttled,
+        retry_after_responses: retry_after_responses_n,
+        max_retry_after_obeyed_ms: max_retry_after_obeyed_ms_n,
         divergences,
     })
+}
+
+/// Process-monotonic elapsed milliseconds since the per-URL `start`
+/// Instant. Monotonic so a wall-clock skip cannot accidentally bring
+/// `now_ms` above the cooldown deadline early; `Instant::elapsed`
+/// saturates rather than overflowing on tiny intervals.
+fn elapsed_ms(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 #[derive(Debug)]
@@ -400,13 +473,43 @@ async fn run_probe_job(
     baseline_status: u16,
     baseline_len: usize,
     body_thresh: f64,
-    rate_limited: &std::sync::atomic::AtomicU32,
+    rate_limited: &AtomicU32,
+    not_before_ms: &AtomicU64,
+    retry_after_responses: &AtomicU32,
+    max_retry_after_obeyed_ms: &AtomicU64,
+    start: Instant,
 ) -> Option<Divergence> {
-    use std::sync::atomic::Ordering::Relaxed;
     let note_throttle = |status: u16| {
         if is_throttle_or_unavailable(status) {
-            rate_limited.fetch_add(1, Relaxed);
+            rate_limited.fetch_add(1, Ordering::Relaxed);
         }
+    };
+    // Pull the `Retry-After` header off a response *before* the body is
+    // consumed (`resp.bytes()` moves `resp`). Only meaningful on a
+    // throttle/unavailable status; on a 200 we explicitly do not honour
+    // the header (some CDNs ship it even on success and we would
+    // gratuitously stall on every probe).
+    let consume_retry_after = |resp: &reqwest::Response, status: u16| -> Option<Duration> {
+        if !is_throttle_or_unavailable(status) {
+            return None;
+        }
+        let now = std::time::SystemTime::now();
+        resp.headers()
+            .get_all("retry-after")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .filter_map(|s| crate::retry_after::parse(s, now))
+            .max()
+    };
+    let publish_retry_after = |d: Duration| {
+        let ms = u64::try_from(d.as_millis()).unwrap_or(u64::MAX);
+        if ms == 0 {
+            return;
+        }
+        let deadline = elapsed_ms(start).saturating_add(ms);
+        not_before_ms.fetch_max(deadline, Ordering::Relaxed);
+        retry_after_responses.fetch_add(1, Ordering::Relaxed);
+        max_retry_after_obeyed_ms.fetch_max(ms, Ordering::Relaxed);
     };
     match job {
         ProbeJob::Header(probe) => {
@@ -418,6 +521,9 @@ async fn run_probe_job(
                 .ok()?;
             let status = resp.status().as_u16();
             note_throttle(status);
+            if let Some(d) = consume_retry_after(&resp, status) {
+                publish_retry_after(d);
+            }
             let body = resp.bytes().await.unwrap_or_default();
             classify(
                 "headers",
@@ -445,6 +551,9 @@ async fn run_probe_job(
             let resp = client.get(&probe_url).send().await.ok()?;
             let status = resp.status().as_u16();
             note_throttle(status);
+            if let Some(d) = consume_retry_after(&resp, status) {
+                publish_retry_after(d);
+            }
             let body = resp.bytes().await.unwrap_or_default();
             classify(
                 "paths",
@@ -463,6 +572,9 @@ async fn run_probe_job(
             let resp = client.request(method, url).send().await.ok()?;
             let status = resp.status().as_u16();
             note_throttle(status);
+            if let Some(d) = consume_retry_after(&resp, status) {
+                publish_retry_after(d);
+            }
             let body = resp.bytes().await.unwrap_or_default();
             classify(
                 "methods",
@@ -498,6 +610,12 @@ fn print_report_text(r: &UrlReport) {
             "rate-limited: {}/{} probes ({pct:.0}%) returned 429/503/… — excluded from \
              divergences (target throttling, not a bypass)",
             r.rate_limited_probes, r.probes_fired
+        );
+    }
+    if r.retry_after_responses > 0 {
+        println!(
+            "retry-after: obeyed on {} probe(s); longest server-named cooldown {} ms",
+            r.retry_after_responses, r.max_retry_after_obeyed_ms
         );
     }
     if r.divergences.is_empty() {
@@ -699,5 +817,216 @@ mod tests {
             "curl".to_string()
         });
         assert!(d.is_none());
+    }
+
+    // ── shared-deadline Retry-After integration ─────────────────────
+    //
+    // These tests stand up a minimal in-process HTTP server with
+    // tokio's TcpListener (axum is not a dev-dep here and we want
+    // exact control over the response bytes — wiremock buys nothing
+    // we don't already get from 15 lines of raw socket code). The
+    // server's per-request behaviour is driven by a shared atomic
+    // counter, so a single test can name exactly which probes
+    // throttle and which succeed.
+
+    use std::sync::atomic::AtomicUsize;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Spin a localhost server. `respond(n)` is called with the 0-based
+    /// request index (n=0 is the baseline GET fired by `probe_one_url`
+    /// before the probe loop, n≥1 are probe requests). The returned
+    /// `String` is sent verbatim as the HTTP response.
+    async fn spawn_mock_server<F>(respond: F) -> std::net::SocketAddr
+    where
+        F: Fn(usize) -> String + Send + Sync + 'static,
+    {
+        let count = Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let respond = Arc::new(respond);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let count_c = count.clone();
+                let respond_c = respond.clone();
+                tokio::spawn(async move {
+                    // Drain the request headers — we don't inspect them,
+                    // but reqwest will close the connection if we reply
+                    // before reading at least the first line, and a
+                    // single read() is enough for a header-only GET.
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let n = count_c.fetch_add(1, Ordering::SeqCst);
+                    let body = respond_c(n);
+                    let _ = sock.write_all(body.as_bytes()).await;
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        // Give the listener a beat to be ready before any client connects.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        addr
+    }
+
+    fn ok_response(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn rate_limited_response(retry_after_secs: u32) -> String {
+        format!(
+            "HTTP/1.1 429 Too Many Requests\r\nRetry-After: {retry_after_secs}\r\n\
+             Content-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    }
+
+    fn methods_only_args(url: String) -> BypassProbeArgs {
+        // 7 method-override probes only — keeps the test loop short
+        // and deterministic. delay_ms=0 because the cooldown wait is
+        // what we want to observe, not the user politeness spread.
+        BypassProbeArgs {
+            url,
+            paths_file: None,
+            timeout_secs: 4,
+            delay_ms: 0,
+            concurrency: 4,
+            insecure: false,
+            format: "text".into(),
+            skip_headers: true,
+            skip_paths: true,
+            skip_methods: false,
+            body_diff_threshold_pct: 10.0,
+            min_severity: "low".into(),
+            quiet: true,
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retry_after_extends_cooldown_across_subsequent_probes() {
+        // Server: baseline 200, next 2 probes return 429 + Retry-After:1,
+        // the rest return 200. After the first concurrent batch trips
+        // the rate limit, every remaining probe must wait ≥ ~1 s before
+        // firing — proving the shared deadline is published and obeyed.
+        let addr = spawn_mock_server(|n| match n {
+            0 => ok_response("baseline body 11"),
+            1 | 2 => rate_limited_response(1),
+            _ => ok_response("bypassed body!!"),
+        })
+        .await;
+        let url = format!("http://{addr}/admin");
+        let args = methods_only_args(url.clone());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(3))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let t0 = Instant::now();
+        let report = probe_one_url(&client, &url, &args, 4)
+            .await
+            .expect("probe should run");
+        let elapsed = t0.elapsed();
+
+        assert_eq!(report.probes_fired, 7, "7 method overrides expected");
+        assert!(
+            report.retry_after_responses >= 1,
+            "expected ≥ 1 obeyed Retry-After, got {}",
+            report.retry_after_responses
+        );
+        assert!(
+            report.max_retry_after_obeyed_ms >= 1000,
+            "expected ≥ 1000 ms obeyed, got {}",
+            report.max_retry_after_obeyed_ms
+        );
+        // ~800 ms is the jittered floor (0.80 × 1000). Use 700 ms as the
+        // hard lower bound to absorb mock-server scheduling jitter on
+        // slow CI runners without making the test a tautology.
+        assert!(
+            elapsed >= Duration::from_millis(700),
+            "expected elapsed ≥ 700 ms after a 1-s Retry-After, got {elapsed:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_retry_after_header_means_no_obeyed_counter_bump() {
+        // Anti-rig: a target that throttles without a Retry-After must
+        // not falsely inflate `retry_after_responses`. Only a parseable
+        // header on a throttle status should count.
+        let addr = spawn_mock_server(|n| {
+            if n == 0 {
+                ok_response("base")
+            } else {
+                // 429 with NO Retry-After at all.
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\
+                 Connection: close\r\n\r\n"
+                    .to_string()
+            }
+        })
+        .await;
+        let url = format!("http://{addr}/admin");
+        let args = methods_only_args(url.clone());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(3))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let report = probe_one_url(&client, &url, &args, 4)
+            .await
+            .expect("probe should run");
+
+        assert!(
+            report.rate_limited_probes >= 1,
+            "expected ≥ 1 RL probe, got {}",
+            report.rate_limited_probes
+        );
+        assert_eq!(
+            report.retry_after_responses, 0,
+            "no Retry-After header was sent — counter must stay at zero"
+        );
+        assert_eq!(
+            report.max_retry_after_obeyed_ms, 0,
+            "no Retry-After header was sent — max must stay at zero"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retry_after_zero_is_not_a_spurious_sleep() {
+        // RFC permits `Retry-After: 0` and we honour it as "no wait"
+        // rather than fabricating a deadline at `now`. Anti-rig against
+        // a degenerate counter that bumps even for zero-duration hints.
+        let addr = spawn_mock_server(|n| match n {
+            0 => ok_response("base"),
+            1 => format!(
+                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\n\
+                 Content-Length: 0\r\nConnection: close\r\n\r\n"
+            ),
+            _ => ok_response("bypassed!"),
+        })
+        .await;
+        let url = format!("http://{addr}/admin");
+        let args = methods_only_args(url.clone());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(3))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let t0 = Instant::now();
+        let _report = probe_one_url(&client, &url, &args, 4)
+            .await
+            .expect("probe should run");
+        let elapsed = t0.elapsed();
+
+        // No real cooldown means the whole 7-probe sweep finishes well
+        // under a second on any reasonable host. If the deadline was
+        // falsely set to `now + 0` we'd still finish fast, but the test
+        // remains a useful smoke against a future regression that
+        // computes the deadline differently.
+        assert!(
+            elapsed < Duration::from_millis(800),
+            "Retry-After: 0 must not introduce a real cooldown — elapsed {elapsed:?}"
+        );
     }
 }
