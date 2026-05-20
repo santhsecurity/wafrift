@@ -83,6 +83,13 @@ pub(crate) async fn run_scan(
     // operator can correlate any inbound hit at their listener back
     // to this scan. Skipped silently when either side is absent —
     // unchanged behaviour for scans that don't use OOB verification.
+    //
+    // The (token, callback_url) pair is captured into
+    // `callback_pending` so the post-fire poll can ask the listener
+    // "did you receive this token?" via the /_wafrift/check/<TOKEN>
+    // management API — closes the oracle loop for blind/stored vuln
+    // classes that never echo a verdict on the same response.
+    let mut callback_pending: Option<(String, String, String)> = None; // (token, callback_url, base_url)
     if let Some(ref base_url) = args.callback_url {
         if let Some(sub) = crate::callback_token::substitute(&args.payload, base_url) {
             if args.format == "text" {
@@ -96,6 +103,7 @@ pub(crate) async fn run_scan(
                     sub.callback_url.bright_white()
                 );
             }
+            callback_pending = Some((sub.token, sub.callback_url, base_url.clone()));
             args.payload = sub.payload;
         } else if args.format == "text" {
             eprintln!(
@@ -2319,6 +2327,54 @@ pub(crate) async fn run_scan(
             raw_blocked,
             bypass_rate,
         );
+    }
+
+    // OOB callback verification: when --callback-url was set and a
+    // token was minted, ask the listener's /_wafrift/check/<TOKEN>
+    // management API whether any inbound request landed. This is
+    // the post-fire oracle close for blind / stored vuln classes —
+    // the scan as a whole gets a binary "callback observed" signal
+    // (the operator may need to correlate with the listener log
+    // for per-variant attribution; that's the next ship).
+    if let Some((ref token, ref callback_url, ref base_url)) = callback_pending {
+        let check_url = format!(
+            "{}/_wafrift/check/{token}",
+            base_url.trim_end_matches('/')
+        );
+        // Build a NEW client without the session-init default headers
+        // — the listener is on infrastructure WE control, so we
+        // don't want auth cookies replayed at it.
+        let listener_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build();
+        let verified = match listener_client {
+            Ok(c) => match c.get(&check_url).send().await {
+                Ok(resp) => resp.status().as_u16() == 200,
+                Err(_) => false,
+            },
+            Err(_) => false,
+        };
+        if scan_text {
+            if verified {
+                println!(
+                    "{} {} (token {} fired at {})",
+                    "📡".bold(),
+                    "OOB callback VERIFIED — blind / stored vuln confirmed"
+                        .bold()
+                        .green(),
+                    token.bold().yellow(),
+                    callback_url.bright_white()
+                );
+            } else {
+                println!(
+                    "{} {} (token {} — no inbound at {})",
+                    "📡".bright_black(),
+                    "OOB callback not observed".bright_black(),
+                    token.bright_black(),
+                    check_url.bright_black()
+                );
+            }
+        }
     }
 
     println!();
