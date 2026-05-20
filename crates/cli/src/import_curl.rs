@@ -359,6 +359,10 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         // work could parse the body or look up a CURL → class mapping,
         // but for now the global gene-bank warm-start applies.
         payload_class: None,
+        // No OOB callback for an imported-curl one-shot — operator
+        // can re-run via `wafrift scan --callback-url ...` if they
+        // need a blind-vuln verification path.
+        callback_url: None,
         level: parse_level(&args.level),
         encoding_only: false,
         delay_ms: args.delay_ms,

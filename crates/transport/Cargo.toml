@@ -17,6 +17,13 @@ serde = { workspace = true, features = ["derive"] }
 base64 = { workspace = true }
 wafrift-types = { workspace = true }
 wafrift-strategy = { workspace = true }
+# Per-host browser-profile coherence (HeaderOrder + H2Profile +
+# SessionPool) — used by the wire-time header reorder step so
+# `--tls-impersonate chrome131` ALSO emits headers in Chrome's
+# canonical insertion order, not whichever order callers happened
+# to push them. The fingerprint crate is dep-light (no TLS, no h2),
+# so this isn't a build-cost penalty.
+wafrift-fingerprint = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
