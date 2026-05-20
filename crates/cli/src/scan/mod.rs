@@ -13,6 +13,7 @@ pub(crate) mod baseline;
 pub(crate) mod callback_poll;
 pub(crate) mod detect_phase;
 pub(crate) mod differential_phase;
+pub(crate) mod header_obf_phase;
 pub(crate) mod multi_vector;
 pub(crate) mod session_init_plug;
 pub(crate) mod state;
@@ -26,8 +27,8 @@ use std::time::{Duration, Instant};
 
 // waf_detect now consumed via `crate::scan::detect_phase`.
 // compression is now consumed via `crate::scan::multi_vector`.
+// header obfuscation is now consumed via `crate::scan::header_obf_phase`.
 use wafrift_encoding::encoding::{self, Strategy};
-use wafrift_encoding::header as header_obfuscation;
 use wafrift_encoding::tamper::TamperRegistry;
 // advisor now consumed via `crate::scan::detect_phase`.
 // IntelligenceLoop now consumed via `crate::scan::differential_phase`.
@@ -1440,134 +1441,44 @@ pub(crate) async fn run_scan(
         );
     }
 
-    // Step 6/7: Header obfuscation probing — exploit WAF header parser bugs.
+    // Step 6/7: Header obfuscation probing — exploit WAF header
+    // parser bugs. Dispatch + per-technique wire shape lives in
+    // `scan::header_obf_phase`.
     if evasion_plan.use_header_obfuscation && !bypass_variants.is_empty() {
-        let header_techniques = [
-            ("case_mixing", "Content-Type"),
-            ("underscore_sub", "Content-Type"),
-            ("null_byte", "X-Forwarded-For"),
-            ("whitespace_pad", "Content-Type"),
-            ("trailing_space", "Content-Type"),
-            ("line_fold", "Content-Type"),
-        ];
-        // Apply to BOTH bypass payloads and top blocked payloads (rescue).
         let top_bypass_payloads: Vec<String> = bypass_variants
             .iter()
             .take(5)
             .map(|(_, p, _, _)| p.clone())
             .collect();
-        // Collect top blocked payloads for rescue attempts.
+        let bypass_payload_set: std::collections::HashSet<&String> =
+            bypass_variants.iter().map(|(_, p, _, _)| p).collect();
         let blocked_payloads: Vec<String> = variants
             .iter()
-            .filter(|v| !bypass_variants.iter().any(|(_, p, _, _)| p == &v.payload))
+            .filter(|v| !bypass_payload_set.contains(&v.payload))
             .take(5)
             .map(|v| v.payload.clone())
             .collect();
-        let all_header_payloads: Vec<(String, bool)> = top_bypass_payloads
-            .iter()
-            .map(|p| (p.clone(), true))
-            .chain(blocked_payloads.iter().map(|p| (p.clone(), false)))
-            .collect();
 
-        if scan_text {
-            println!(
-                "\n{}",
-                format!(
-                    "[6/7] Header obfuscation — {} payloads ({} bypass + {} rescue) × {} techniques...",
-                    all_header_payloads.len(),
-                    top_bypass_payloads.len(),
-                    blocked_payloads.len(),
-                    header_techniques.len()
-                )
-                .bold()
-                .cyan()
-            );
-        }
+        let phase = header_obf_phase::run_phase(header_obf_phase::PhaseInput {
+            http: &http,
+            target,
+            param: &args.param,
+            top_payloads: &top_bypass_payloads,
+            rescue_payloads: &blocked_payloads,
+            oracle: &oracle,
+            cancel: &cancel,
+            scan_text,
+            delay,
+            variant_id_base: total_fired,
+        })
+        .await;
 
-        let mut header_bypassed = 0_u32;
-        let mut header_fired = 0_u32;
-
-        for (payload, _is_bypass) in &all_header_payloads {
-            for (technique_name, header_name) in &header_techniques {
-                let obfuscated_header = match *technique_name {
-                    "case_mixing" => header_obfuscation::case_mix(header_name),
-                    "underscore_sub" => header_obfuscation::underscore_substitute(header_name),
-                    "null_byte" => header_obfuscation::null_byte_inject(header_name),
-                    "whitespace_pad" => header_obfuscation::whitespace_pad(
-                        header_name,
-                        "application/x-www-form-urlencoded",
-                    ),
-                    "trailing_space" => header_obfuscation::trailing_space(
-                        header_name,
-                        "application/x-www-form-urlencoded",
-                    ),
-                    "line_fold" => header_obfuscation::line_fold(
-                        header_name,
-                        "application/x-www-form-urlencoded",
-                    ),
-                    _ => header_name.to_string(),
-                };
-
-                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(payload));
-
-                let verdict = match http
-                    .get(&url)
-                    .header(&obfuscated_header, "application/x-www-form-urlencoded")
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
-                        oracle.classify(&ResponseContext {
-                            status,
-                            body: body.to_vec(),
-                            ..Default::default()
-                        })
-                    }
-                    Err(_) => {
-                        errors += 1;
-                        continue;
-                    }
-                };
-
-                header_fired += 1;
-                total_fired += 1;
-
-                if !verdict.is_blocked() && !verdict.is_challenge() {
-                    header_bypassed += 1;
-                    bypassed += 1;
-                    let mut techs: Vec<String> = bypass_variants
-                        .iter()
-                        .find(|(_, p, _, _)| p == payload)
-                        .map(|(_, _, t, _)| t.clone())
-                        .unwrap_or_default();
-                    techs.push(format!("header::{technique_name}"));
-                    bypass_variants.push((total_fired, payload.clone(), techs, 0.85));
-                    if scan_text {
-                        print!("{}", "!".bright_green().bold());
-                    }
-                } else {
-                    blocked += 1;
-                    if scan_text {
-                        print!("{}", ".".bright_black());
-                    }
-                }
-
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-            }
-        }
-
-        if scan_text && header_fired > 0 {
-            let rate = f64::from(header_bypassed) / f64::from(header_fired) * 100.0;
-            println!(
-                "\n  {} {}",
-                "Header results:".bold().cyan(),
-                format!("{header_bypassed}/{header_fired} bypassed ({rate:.0}%)").yellow()
-            );
-        }
+        total_fired += phase.total_fired_delta;
+        bypassed += phase.bypassed_delta;
+        blocked += phase.blocked_delta;
+        errors += phase.errors_delta;
+        variant_outcomes.extend(phase.new_variant_outcomes);
+        bypass_variants.extend(phase.new_bypass_variants);
     }
 
     // Step 7/7: Intelligence loop — evolution-guided candidate generation.
