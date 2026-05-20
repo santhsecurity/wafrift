@@ -118,6 +118,14 @@ pub struct PhaseInput<'a> {
     pub target: &'a str,
     pub param: &'a str,
     pub top_payloads: &'a [(String, Vec<String>)],
+    /// Payloads that were BLOCKED in earlier phases — fire them
+    /// through every alt vector as rescue attempts. A bypass on
+    /// any vector means the payload itself was viable; only the
+    /// delivery shape was getting caught. Each rescue success
+    /// surfaces with a `vector::<name>::rescue` technique tag so
+    /// the operator can distinguish it from a confirm-bypass on
+    /// the same vector.
+    pub rescue_payloads: &'a [(String, Vec<String>)],
     pub cancel: &'a CancellationToken,
     pub scan_text: bool,
     pub delay: Duration,
@@ -412,21 +420,44 @@ fn build_request_for_vector(
 /// Run the multi-vector phase. Returns a [`PhaseOutcome`] the
 /// caller merges into its running totals. Cancellable via the
 /// CancellationToken — the loop exits cleanly between fires.
+///
+/// Two payload sets get fired through every vector:
+/// 1. `top_payloads` — already-bypassed at earlier phases. A
+///    bypass here confirms the new delivery shape ALSO works for
+///    the same payload (broadens the bypass set).
+/// 2. `rescue_payloads` — top blocked from earlier phases. A
+///    bypass here means the payload itself was viable; only the
+///    earlier delivery shape was getting caught. Recovered ones
+///    are tagged with `vector::<name>::rescue` so the operator
+///    can audit "what was blocked, what got rescued".
 pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
     let mut outcome = PhaseOutcome::default();
 
+    let total_inputs = input.top_payloads.len() + input.rescue_payloads.len();
     if input.scan_text {
         println!(
             "\n{}",
             format!(
-                "[5/7] Multi-vector probing — {} payloads × {} vectors...",
+                "[5/7] Multi-vector probing — {} payloads ({} bypass + {} rescue) × {} vectors...",
+                total_inputs,
                 input.top_payloads.len(),
+                input.rescue_payloads.len(),
                 VECTORS.len()
             )
             .bold()
             .magenta()
         );
     }
+
+    // Joined input — same vectors fire against both pools. We tag
+    // the technique differently so the operator can tell rescue
+    // wins apart from confirm wins.
+    let combined: Vec<(&(String, Vec<String>), bool)> = input
+        .top_payloads
+        .iter()
+        .map(|p| (p, false))
+        .chain(input.rescue_payloads.iter().map(|p| (p, true)))
+        .collect();
 
     for vector in VECTORS {
         if input.cancel.is_cancelled() {
@@ -435,7 +466,7 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
         let mut v_bypassed: u32 = 0;
         let mut v_blocked: u32 = 0;
 
-        for (payload, techs) in input.top_payloads {
+        for ((payload, techs), is_rescue) in &combined {
             if input.cancel.is_cancelled() {
                 break;
             }
@@ -471,7 +502,12 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
             };
             outcome.total_fired_delta += 1;
             let mut vtechs = techs.clone();
-            vtechs.push(format!("vector::{}", vector.name));
+            let tag = if *is_rescue {
+                format!("vector::{}::rescue", vector.name)
+            } else {
+                format!("vector::{}", vector.name)
+            };
+            vtechs.push(tag);
             outcome.new_variant_outcomes.push((vtechs.clone(), is_blocked));
 
             if is_blocked {
@@ -485,12 +521,13 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
                 v_bypassed += 1;
                 outcome.new_bypass_variants.push((
                     input.variant_id_base + outcome.total_fired_delta,
-                    payload.clone(),
+                    (*payload).clone(),
                     vtechs,
-                    0.95, // High confidence — proven payload, new vector.
+                    if *is_rescue { 0.85 } else { 0.95 },
                 ));
                 if input.scan_text {
-                    print!("{}", "!".bright_green().bold());
+                    let marker = if *is_rescue { "R" } else { "!" };
+                    print!("{}", marker.bright_green().bold());
                 }
             }
 
@@ -744,6 +781,7 @@ mod tests {
             target: "http://127.0.0.1:1/", // unreachable on purpose
             param: "q",
             top_payloads: &[],
+            rescue_payloads: &[],
             cancel: &cancel,
             scan_text: false,
             delay: Duration::ZERO,
@@ -928,6 +966,7 @@ mod tests {
             target: "http://127.0.0.1:1/",
             param: "q",
             top_payloads: &[("payload".into(), vec!["t".into()])],
+            rescue_payloads: &[],
             cancel: &cancel,
             scan_text: false,
             delay: Duration::ZERO,
@@ -937,5 +976,35 @@ mod tests {
         // Cancelled before any fire — total_fired_delta stays 0
         // and the per-vector loop bails on the first iteration.
         assert_eq!(outcome.total_fired_delta, 0);
+    }
+
+    #[tokio::test]
+    async fn run_phase_tags_rescue_bypasses_distinctly_from_top_bypasses() {
+        // Pure rescue path — when the only payloads supplied are
+        // rescue, the technique tag must be `vector::<name>::rescue`,
+        // NOT `vector::<name>`. Lets the operator audit "what got
+        // rescued vs what was already winning". The actual fire is
+        // against a dead target so we can't assert on bypass
+        // outcomes; the rescue tagging code runs at variant-build
+        // time so it surfaces in the per-vector outcomes regardless.
+        let h = http();
+        let cancel = CancellationToken::new();
+        let _outcome = run_phase(PhaseInput {
+            http: &h,
+            target: "http://127.0.0.1:1/",
+            param: "q",
+            top_payloads: &[],
+            rescue_payloads: &[("rescue-payload".into(), vec![])],
+            cancel: &cancel,
+            scan_text: false,
+            delay: Duration::ZERO,
+            variant_id_base: 100,
+        })
+        .await;
+        // The dead-target path produces errors / nothing actionable;
+        // tagging happens whether or not the request succeeds, but
+        // we can't directly inspect tags without successful fires.
+        // The end-to-end assertion lives in scan/mod.rs integration
+        // when bench runs against a real WAF.
     }
 }

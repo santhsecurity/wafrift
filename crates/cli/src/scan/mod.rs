@@ -1378,7 +1378,15 @@ pub(crate) async fn run_scan(
     // just the caller that merges the phase's outcome back into
     // the running counters. Adding a new vector is a single-file
     // edit in `scan/multi_vector.rs`.
-    if !bypass_variants.is_empty() && !cancel.is_cancelled() {
+    //
+    // The phase fires every vector against TWO pools:
+    //   1. top_payloads (already bypassed) — broaden the bypass set
+    //   2. rescue_payloads (top blocked) — rescue payloads that
+    //      were viable but got caught on their original delivery
+    //      shape. Header-obfuscation phase already does rescue;
+    //      doing it for multi-vector roughly doubles the number
+    //      of bypass opportunities the operator gets per scan.
+    if (!bypass_variants.is_empty() || !variants.is_empty()) && !cancel.is_cancelled() {
         // Dedup the top-confidence payloads BEFORE handing them
         // to the phase — keeps the phase module ignorant of how
         // bypass_variants is structured.
@@ -1389,11 +1397,24 @@ pub(crate) async fn run_scan(
             .collect();
         top_payloads.dedup_by(|a, b| a.0 == b.0);
 
+        // Top blocked payloads for rescue attempts — any variant
+        // whose payload string isn't already in the bypass set.
+        let bypass_payload_set: std::collections::HashSet<&String> =
+            bypass_variants.iter().map(|(_, p, _, _)| p).collect();
+        let mut rescue_payloads: Vec<(String, Vec<String>)> = variants
+            .iter()
+            .filter(|v| !bypass_payload_set.contains(&v.payload))
+            .take(10)
+            .map(|v| (v.payload.clone(), vec![]))
+            .collect();
+        rescue_payloads.dedup_by(|a, b| a.0 == b.0);
+
         let phase = multi_vector::run_phase(multi_vector::PhaseInput {
             http: &http,
             target,
             param: &args.param,
             top_payloads: &top_payloads,
+            rescue_payloads: &rescue_payloads,
             cancel: &cancel,
             scan_text,
             delay,
@@ -1410,7 +1431,7 @@ pub(crate) async fn run_scan(
     } else if scan_text {
         println!(
             "\n{}",
-            "[5/7] No bypasses — skipping multi-vector probing".bright_black()
+            "[5/7] No payloads — skipping multi-vector probing".bright_black()
         );
     }
 
