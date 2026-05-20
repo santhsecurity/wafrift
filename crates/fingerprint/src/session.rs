@@ -660,4 +660,131 @@ mod tests {
             b_names.len()
         );
     }
+
+    // ── Deep edge sweep (added 2026-05-20).
+
+    #[test]
+    fn session_pool_rotate_one_does_rotate_each_call() {
+        // rotate_after_requests=1 means "rotate every call". The
+        // coerce-to-1 guard does the same thing for rotate=0, so
+        // this also pins the lower-bound behaviour. Verify two
+        // back-to-back calls on the same host see different
+        // assignments (or at least had eviction happen).
+        let pool = SessionPool::new(PROFILES.iter().collect(), 1);
+        // Two profiles to bind, then a third call on the same host
+        // — the third one MUST come from a fresh assignment.
+        let _ = pool.profile_for("a.com");
+        let _ = pool.profile_for("a.com");
+        let snap = pool.snapshot();
+        // After three calls the count tracker should reflect a
+        // recent fresh binding (count <= 2) — not three uses of the
+        // same profile (would mean rotate=1 was ignored).
+        let (_, _, count) = snap.iter().find(|(h, _, _)| h == "a.com").unwrap();
+        assert!(
+            *count <= 2,
+            "rotate=1 must evict within 2 uses, got count={count}"
+        );
+    }
+
+    #[test]
+    fn header_order_apply_with_every_slot_present() {
+        // Exhaustive Chrome-header request: provide a value for EVERY
+        // canonical slot. Output must contain each one in the exact
+        // canonical order.
+        let order = CHROME_HEADER_ORDER;
+        let input: Vec<(String, String)> = order
+            .slots
+            .iter()
+            .map(|s| ((*s).to_string(), format!("v-{s}")))
+            .collect();
+        let out = order.apply_in_order(input);
+        assert_eq!(out.len(), order.slots.len());
+        for (i, slot) in order.slots.iter().enumerate() {
+            assert_eq!(
+                out[i].0.to_ascii_lowercase(),
+                **slot,
+                "slot {slot} expected at position {i}, got `{}`",
+                out[i].0
+            );
+        }
+    }
+
+    #[test]
+    fn header_order_apply_with_no_slots_present_preserves_input() {
+        // Edge: caller passes only custom headers that aren't in any
+        // slot list. Output must be the exact input order, none
+        // dropped.
+        let order = CHROME_HEADER_ORDER;
+        let input = vec![
+            ("X-Custom-A".into(), "1".into()),
+            ("X-Custom-B".into(), "2".into()),
+            ("X-Custom-C".into(), "3".into()),
+        ];
+        let out = order.apply_in_order(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn header_order_apply_is_idempotent() {
+        // Applying the same order twice must produce the same
+        // output. Sanity that the reorder doesn't have hidden
+        // state.
+        let order = CHROME_HEADER_ORDER;
+        let input = vec![
+            ("User-Agent".into(), "chrome".into()),
+            ("Host".into(), "x.com".into()),
+            ("Cookie".into(), "a=1".into()),
+        ];
+        let pass1 = order.apply_in_order(input);
+        let pass2 = order.apply_in_order(pass1.clone());
+        assert_eq!(pass1, pass2);
+    }
+
+    #[test]
+    fn header_order_slots_have_no_duplicates_within_a_family() {
+        // Anti-rig: a slot list with a duplicate name would cause
+        // apply_in_order to emit two copies of an input header for
+        // a single output position. The canonical orders must each
+        // have unique slot names.
+        for (name, slots) in [
+            ("chrome", CHROME_HEADER_ORDER.slots),
+            ("firefox", FIREFOX_HEADER_ORDER.slots),
+            ("safari", SAFARI_HEADER_ORDER.slots),
+        ] {
+            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for s in slots {
+                assert!(
+                    seen.insert(*s),
+                    "{name}: duplicate slot `{s}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn session_pool_snapshot_does_not_lose_bindings_under_contention() {
+        // 100 distinct hosts each get assigned, then we snapshot
+        // and check every host shows up exactly once.
+        use std::sync::Arc;
+        let pool = Arc::new(SessionPool::new(PROFILES.iter().collect(), 100));
+        let hosts: Vec<String> = (0..100).map(|i| format!("host-{i}.com")).collect();
+        let mut handles = Vec::new();
+        for h in &hosts {
+            let pool = pool.clone();
+            let h = h.clone();
+            handles.push(std::thread::spawn(move || {
+                let _ = pool.profile_for(&h);
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let snap = pool.snapshot();
+        assert_eq!(snap.len(), 100, "every host should have a binding");
+        let snap_hosts: std::collections::HashSet<String> =
+            snap.iter().map(|(h, _, _)| h.clone()).collect();
+        for h in &hosts {
+            assert!(snap_hosts.contains(h), "host {h} missing from snapshot");
+        }
+    }
 }

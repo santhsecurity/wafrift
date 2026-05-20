@@ -103,6 +103,9 @@ One\-shot demo command — runs detect + fingerprint + bypass\-probe (and option
 wafrift\-listener(1)
 Out\-of\-band callback receiver — pre\-mints unique tokens to embed in payloads (blind SQLi / stored XSS / blind SSRF / OOB command injection); logs any inbound HTTP request matching a minted token. The oracle for the vuln classes that never echo a verdict on the same response
 .TP
+wafrift\-parser\-diff(1)
+Parser\-differential fingerprinter — fires URL\-shape variants that exercise known WAF↔origin parser disagreements (semicolon\-strip, backslash\-as\-separator, NUL truncation, double\-URL\-decode, fullwidth slash, dot\-segment, percent case, empty\-segment collapse, trailing dot). A divergence from baseline is evidence the WAF and the origin disagree on what the URL means — exploit the seam without any payload mutation
+.TP
 wafrift\-help(1)
 Print this message or the help of the given subcommand(s)
 .SH VERSION

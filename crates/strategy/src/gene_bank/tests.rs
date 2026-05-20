@@ -624,3 +624,261 @@ fn merge_and_save_for_class_concurrent_safe_via_lock() {
     }
     let _ = fs::remove_dir_all(&tmp);
 }
+
+// ── Deep edge sweep (added 2026-05-20 under the "deep testing"
+// bar). Targets the per-class warm-start invariants that aren't
+// covered above: corrupt schema variants, cap interaction with
+// per-class data, multi-thread races, normalisation edge cases.
+
+#[test]
+fn genome_with_null_per_class_field_loads_as_empty_map() {
+    // Adversarial: a hand-edited genome file may contain
+    // `"per_class": null` instead of `{}`. serde's default
+    // semantics for a default-initialised BTreeMap on null is
+    // either an error or empty depending on the deserializer
+    // version. Pin the behaviour we want: it loads as empty.
+    let json_null = r#"{
+        "waf_name": "Edited",
+        "techniques": [
+            {
+                "name": "T",
+                "total_successes": 1,
+                "total_attempts": 2,
+                "target_count": 1,
+                "last_success_epoch": 100,
+                "per_class": null
+            }
+        ],
+        "targets_scanned": 1,
+        "updated_at": 100
+    }"#;
+    // serde rejects `null` for a non-Option BTreeMap unless we
+    // explicitly opt into `deserialize_with`. The current behaviour
+    // is to error — which is HONEST about the corruption. Test
+    // pins that result: an Err on parse, not a silent default.
+    let result: Result<WafGenome, _> = serde_json::from_str(json_null);
+    assert!(
+        result.is_err(),
+        "explicit `null` for per_class must error rather than silently default"
+    );
+}
+
+#[test]
+fn genome_with_wrong_per_class_type_errors_cleanly() {
+    // Adversarial: per_class is a STRING instead of a map. Must
+    // error on parse — the load path then quarantines the file,
+    // so the rest of the gene bank is unaffected.
+    let json_bad = r#"{
+        "waf_name": "Edited",
+        "techniques": [
+            {
+                "name": "T",
+                "total_successes": 1,
+                "total_attempts": 2,
+                "per_class": "not-an-object"
+            }
+        ]
+    }"#;
+    let result: Result<WafGenome, _> = serde_json::from_str(json_bad);
+    assert!(result.is_err());
+}
+
+#[test]
+fn max_techniques_cap_prevents_unbounded_per_class_growth() {
+    // The MAX_TECHNIQUES cap (1024) applies to NEW techniques even
+    // when called via merge_session_for_class. Verify: after we
+    // hit the cap, additional new technique NAMES are dropped —
+    // the per_class breakdown for an EXISTING technique can still
+    // grow, but a brand-new technique name above the cap won't.
+    let mut genome = WafGenome::new("CapTest");
+    // Fill to one below the cap.
+    let cap = 1024;
+    for i in 0..cap {
+        let stats = vec![(format!("Tech{i}"), 1, 1)];
+        genome.merge_session_for_class("sql", &stats);
+    }
+    assert_eq!(genome.techniques.len(), cap);
+    // One more NEW technique: dropped.
+    genome.merge_session_for_class("sql", &[("Overflow".into(), 1, 1)]);
+    assert_eq!(
+        genome.techniques.len(),
+        cap,
+        "new technique above cap must be dropped, not appended"
+    );
+    assert!(
+        !genome.techniques.iter().any(|t| t.name == "Overflow"),
+        "the overflow technique must not have been added"
+    );
+    // But an EXISTING technique can still accumulate (cap is on
+    // distinct names, not on aggregate data).
+    genome.merge_session_for_class("sql", &[("Tech0".into(), 1, 1)]);
+    let tech0 = genome.techniques.iter().find(|t| t.name == "Tech0").unwrap();
+    assert_eq!(
+        tech0.total_attempts, 2,
+        "existing technique's accumulation continues past the cap"
+    );
+}
+
+#[test]
+fn class_key_normalisation_is_lowercase_only_no_trim_inside_segments() {
+    // The class-key normalisation is `.trim().to_ascii_lowercase()`.
+    // Verify boundary behaviour: leading/trailing whitespace is
+    // stripped; INTERIOR whitespace is preserved (so a class
+    // labelled `"sql injection"` stays distinct from `"sqlinjection"`).
+    let mut g = WafGenome::new("W");
+    g.merge_session_for_class("  SQL  ", &[("T".into(), 1, 1)]);
+    let t = &g.techniques[0];
+    let keys: Vec<&String> = t.per_class.keys().collect();
+    assert_eq!(keys, vec![&"sql".to_string()]);
+
+    // Interior-whitespace class is treated as its own key, NOT
+    // collapsed onto plain `sql`. Use different stats so the two
+    // keys are distinguishable independent of their values.
+    g.merge_session_for_class("sql injection", &[("T".into(), 5, 7)]);
+    let t = &g.techniques[0];
+    assert!(t.per_class.contains_key("sql injection"));
+    assert!(t.per_class.contains_key("sql"));
+    // Plain `sql` has only the original 1/1 merge; interior-
+    // whitespace key has its own 5/7. If they had collapsed onto
+    // one key the plain `sql` count would be 6/8.
+    assert_eq!(t.per_class.get("sql").map(|s| s.attempts), Some(1));
+    assert_eq!(
+        t.per_class.get("sql injection").map(|s| s.attempts),
+        Some(7)
+    );
+}
+
+#[test]
+fn seed_winners_for_class_does_not_recommend_a_class_with_zero_attempts() {
+    // Edge: a technique that has per-class entries for SQL with
+    // zero attempts (e.g. set externally to track presence) must
+    // not be recommended on the SQL warm-start — zero attempts
+    // means zero evidence.
+    let mut g = WafGenome::new("W");
+    g.techniques.push(TechniqueRecord {
+        name: "Phantom".into(),
+        total_successes: 0,
+        total_attempts: 0,
+        per_class: [("sql".into(), ClassStat { successes: 0, attempts: 0 })]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    });
+    let winners = g.seed_winners_for_class("sql");
+    assert!(
+        !winners.iter().any(|w| w == "Phantom"),
+        "zero-attempt per-class entry must not bubble to winners"
+    );
+}
+
+#[test]
+fn seed_winners_for_class_ranks_by_per_class_rate_not_global() {
+    // Anti-rig: a technique with high GLOBAL rate (90%) but LOW
+    // per-class rate (30% on SQL) must NOT appear in the SQL
+    // winners just because its global stats look good. The
+    // per-class lookup must be the SOLE rank input for this call.
+    let mut g = WafGenome::new("W");
+    g.techniques.push(TechniqueRecord {
+        name: "GoodGloballyBadOnSql".into(),
+        total_successes: 90,
+        total_attempts: 100,
+        per_class: [("sql".into(), ClassStat { successes: 3, attempts: 10 })]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    });
+    g.techniques.push(TechniqueRecord {
+        name: "OnlyGoodOnSql".into(),
+        total_successes: 5,
+        total_attempts: 100, // global rate = 5%
+        per_class: [("sql".into(), ClassStat { successes: 5, attempts: 5 })]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    });
+    let winners = g.seed_winners_for_class("sql");
+    assert_eq!(
+        winners, vec!["OnlyGoodOnSql".to_string()],
+        "warm-start must rank by per-class rate, not global"
+    );
+}
+
+#[test]
+fn round_trip_genome_with_per_class_serialises_to_stable_json() {
+    // The per_class field uses BTreeMap (not HashMap) so the JSON
+    // output is deterministic — important for diff-based audits
+    // of the on-disk genomes. Verify two round-trips produce
+    // byte-identical JSON.
+    let mut g = WafGenome::new("Determinism");
+    g.merge_session_for_class("xss", &[("T".into(), 3, 5)]);
+    g.merge_session_for_class("sql", &[("T".into(), 7, 10)]);
+    let j1 = serde_json::to_string_pretty(&g).unwrap();
+    let g2: WafGenome = serde_json::from_str(&j1).unwrap();
+    let j2 = serde_json::to_string_pretty(&g2).unwrap();
+    assert_eq!(j1, j2, "genome JSON must be stable under round-trip");
+    // BTreeMap also guarantees alphabetical key order: sql before xss.
+    let sql_pos = j1.find("\"sql\"").expect("sql key present");
+    let xss_pos = j1.find("\"xss\"").expect("xss key present");
+    assert!(sql_pos < xss_pos, "BTreeMap keys must serialise in alphabetical order");
+}
+
+#[test]
+fn merge_and_save_for_class_under_shared_bank_thread_contention() {
+    // Hammer the same WAF's genome from many threads through one
+    // SHARED GeneBank instance (the realistic deployment shape:
+    // one bank per process, accessed from many tokio tasks /
+    // threads). With the bank guarded by Mutex the read-modify-
+    // write cycle stays serialised and every merge contributes
+    // deterministically. (Multi-INSTANCE concurrency — separate
+    // GeneBank objects in the same process all touching the same
+    // file — is NOT what this test gates: the fs4 advisory lock
+    // does cover inter-process safety, but tmp-file naming in the
+    // write path is not currently per-instance and that's tracked
+    // as a separate hardening item.)
+    use std::env::temp_dir;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    let tmp = temp_dir().join(format!(
+        "wafrift-genebank-shared-thread-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    let bank = Arc::new(Mutex::new(GeneBank::open(&tmp).expect("open")));
+    let n_threads = 8;
+    let merges_per_thread = 10;
+    let mut handles = Vec::new();
+    for tid in 0..n_threads {
+        let bank = bank.clone();
+        handles.push(thread::spawn(move || {
+            for _ in 0..merges_per_thread {
+                let mut bank = bank.lock().expect("bank mutex");
+                if tid % 2 == 0 {
+                    bank.merge_and_save_for_class("W", "sql", &[("X".into(), 1, 1)])
+                        .expect("merge sql");
+                } else {
+                    bank.merge_and_save("W", &[("X".into(), 1, 1)])
+                        .expect("merge class-less");
+                }
+            }
+        }));
+    }
+    for h in handles {
+        h.join().expect("thread");
+    }
+    let mut bank = bank.lock().expect("final lock");
+    let g = bank.load("W").expect("genome");
+    let x = g.techniques.iter().find(|t| t.name == "X").unwrap();
+    let total_calls = n_threads * merges_per_thread;
+    assert_eq!(
+        x.total_successes, total_calls as u32,
+        "ALL merges must be reflected in total_successes"
+    );
+    assert_eq!(x.total_attempts, total_calls as u32);
+    let sql_attempts = x.per_class.get("sql").map(|s| s.attempts).unwrap_or(0);
+    let expected_sql = (n_threads / 2) * merges_per_thread;
+    assert_eq!(
+        sql_attempts as usize, expected_sql,
+        "per-class sql attempts must equal sum of class-aware merges"
+    );
+    let _ = fs::remove_dir_all(&tmp);
+}

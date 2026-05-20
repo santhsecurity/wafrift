@@ -315,4 +315,120 @@ mod tests {
         // response header, not a fingerprint anchor) — must be dropped.
         assert!(!m.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")));
     }
+
+    // ── Live --url path against a mock server (added 2026-05-20).
+
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn spawn_mock(body: &'static str, status: u16) -> std::net::SocketAddr {
+        let body = body.to_string();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let resp = format!(
+                        "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\n\
+                         Connection: close\r\nServer: nginx/1.25.3\r\n\
+                         CF-Ray: abc123-LHR\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        addr
+    }
+
+    /// `fetch_for_detect` builds its own tokio runtime — we drive it
+    /// from a sync `#[test]` (no `#[tokio::test]`) so the nested
+    /// runtime panic doesn't trip.
+    #[test]
+    fn fetch_for_detect_against_local_mock_returns_status_and_headers() {
+        // Run the mock from a worker tokio runtime, then call the
+        // sync fetch_for_detect against the bound address.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(1)
+            .build()
+            .unwrap();
+        let addr = rt.block_on(spawn_mock("hello world", 200));
+        let url = format!("http://{addr}/");
+        let (status, headers, body) =
+            fetch_for_detect(&url, 5, false).expect("fetch_for_detect must succeed");
+        assert_eq!(status, 200);
+        assert_eq!(body, b"hello world");
+        let has_server = headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("server") && v.contains("nginx"));
+        assert!(has_server, "Server header should be present: {headers:?}");
+        let has_cf = headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("cf-ray") && v.contains("abc123"));
+        assert!(has_cf, "CF-Ray header should be present");
+    }
+
+    #[test]
+    fn fetch_for_detect_caps_body_at_64_kib() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(1)
+            .build()
+            .unwrap();
+        // Mock that ships 128 KiB of body — we want to confirm the
+        // fetch caps the read at 64 KiB.
+        let big_body = Box::leak("X".repeat(128 * 1024).into_boxed_str()) as &'static str;
+        let addr = rt.block_on(spawn_mock(big_body, 200));
+        let url = format!("http://{addr}/");
+        let (_, _, body) = fetch_for_detect(&url, 5, false).expect("fetch ok");
+        assert_eq!(
+            body.len(),
+            64 * 1024,
+            "body must be capped at 64 KiB, got {}",
+            body.len()
+        );
+    }
+
+    #[test]
+    fn fetch_for_detect_passes_through_403_status() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(1)
+            .build()
+            .unwrap();
+        let addr = rt.block_on(spawn_mock("blocked by WAF", 403));
+        let url = format!("http://{addr}/");
+        let (status, _, body) = fetch_for_detect(&url, 5, false).expect("fetch ok");
+        assert_eq!(status, 403);
+        assert_eq!(body, b"blocked by WAF");
+    }
+
+    #[test]
+    fn fetch_for_detect_returns_err_on_connection_refused() {
+        // Connect to a localhost port that's almost certainly not
+        // listening. Must surface as Err, not panic. Use the
+        // unassigned port range (49152–65535 IANA dynamic, but
+        // 65501 specifically is rarely used).
+        let result = fetch_for_detect("http://127.0.0.1:1/", 2, false);
+        assert!(result.is_err(), "unreachable target must return Err");
+    }
+
+    #[test]
+    fn fetch_for_detect_with_unparseable_url_returns_err() {
+        let result = fetch_for_detect("not-a-url://", 2, false);
+        assert!(result.is_err(), "unparseable URL must return Err");
+    }
+
+    // Suppress dead_code warnings on the test-only helper.
+    #[allow(dead_code)]
+    fn _ensure_arc_in_scope(_: Arc<u8>) {}
 }
