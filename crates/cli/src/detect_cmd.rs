@@ -57,6 +57,17 @@ pub struct DetectArgs {
     /// With `--url`: disable TLS certificate verification (lab targets).
     #[arg(long, default_value_t = false)]
     pub insecure: bool,
+
+    /// With `--url`: also fire a SECOND probe with an obvious SQLi
+    /// payload and compare the responses. When the server header
+    /// differs, status flips, or body length swings >50%, that's
+    /// strong evidence of a WAF in "block but don't fingerprint"
+    /// mode (e.g. ModSec returning Apache's generic 403, or any
+    /// WAF that strips its own block-page markers). Off by default
+    /// because it sends a real attack-shaped string — only enable
+    /// against targets you own / are authorized to test.
+    #[arg(long, default_value_t = false)]
+    pub differential: bool,
 }
 
 /// clap value-parser for an HTTP status code. RFC 9110 status codes are
@@ -127,6 +138,133 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
         let body = bytes[..bytes.len().min(64 * 1024)].to_vec();
         Ok((status, headers, body))
     })
+}
+
+/// Evidence of a WAF inferred from differential probing — a benign
+/// GET vs a SQLi-payload GET produced significantly different
+/// responses, which is strong WAF presence signal even when no rule
+/// in the 160+ corpus matched. Surfaced under "differential
+/// detection" in the report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DifferentialEvidence {
+    /// Status of the benign baseline.
+    pub baseline_status: u16,
+    /// Status of the attack probe.
+    pub attack_status: u16,
+    /// Server header on benign (e.g. "gunicorn/19.9.0").
+    pub baseline_server: String,
+    /// Server header on attack (e.g. "Apache" — different stack
+    /// answering means a WAF intercepted).
+    pub attack_server: String,
+    /// Body length on benign.
+    pub baseline_body_len: usize,
+    /// Body length on attack.
+    pub attack_body_len: usize,
+    /// Specific reasons the differential classifier flagged.
+    pub reasons: Vec<String>,
+}
+
+/// Compare a benign-probe response with an attack-probe response.
+/// Returns `Some(evidence)` when the differences are strong enough
+/// to infer a WAF is intercepting, `None` otherwise. Pure function
+/// — no I/O, fully testable on synthetic inputs.
+#[must_use]
+pub fn classify_differential(
+    baseline_status: u16,
+    baseline_headers: &[(String, String)],
+    baseline_body_len: usize,
+    attack_status: u16,
+    attack_headers: &[(String, String)],
+    attack_body_len: usize,
+) -> Option<DifferentialEvidence> {
+    fn server_of(h: &[(String, String)]) -> String {
+        h.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("server"))
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    }
+    let baseline_server = server_of(baseline_headers);
+    let attack_server = server_of(attack_headers);
+
+    let mut reasons: Vec<String> = Vec::new();
+    // 1. Status flip: benign 200 vs attack 403/406/429/501/etc.
+    if baseline_status != attack_status {
+        reasons.push(format!(
+            "status flipped {baseline_status} → {attack_status}"
+        ));
+    }
+    // 2. Server-header change: different proxy answering attacks
+    // = a WAF is intercepting (the typical Apache+ModSec in front
+    // of gunicorn pattern lives here).
+    if !baseline_server.is_empty()
+        && !attack_server.is_empty()
+        && !baseline_server.eq_ignore_ascii_case(&attack_server)
+    {
+        reasons.push(format!(
+            "server header changed: '{baseline_server}' → '{attack_server}'"
+        ));
+    }
+    // 3. Body length swing > 50%. The threshold is generous —
+    // small differences (different timestamps, request IDs) don't
+    // count; a swing from 1 KB origin response to 200-byte block
+    // page does.
+    if baseline_body_len > 0 {
+        let larger = baseline_body_len.max(attack_body_len);
+        let smaller = baseline_body_len.min(attack_body_len);
+        let pct_diff = ((larger - smaller) as f64 / baseline_body_len as f64) * 100.0;
+        if pct_diff >= 50.0 {
+            reasons.push(format!(
+                "body length swung {pct_diff:.0}% ({baseline_body_len} → {attack_body_len} bytes)"
+            ));
+        }
+    } else if attack_body_len > 0 {
+        // Benign returned an empty body; attack returned content.
+        // Unusual on its own; combined with other signals it's
+        // meaningful.
+        reasons.push(format!(
+            "attack response had {attack_body_len} bytes vs empty baseline"
+        ));
+    }
+
+    if reasons.is_empty() {
+        None
+    } else {
+        Some(DifferentialEvidence {
+            baseline_status,
+            attack_status,
+            baseline_server,
+            attack_server,
+            baseline_body_len,
+            attack_body_len,
+            reasons,
+        })
+    }
+}
+
+/// Fire two probes against `url`: a benign GET, then an attack
+/// GET with a canonical SQLi payload in the `q` parameter.
+/// Returns `Some(evidence)` when the responses differ enough to
+/// infer a WAF.
+pub(crate) fn fetch_differential(
+    url: &str,
+    timeout_secs: u64,
+    insecure: bool,
+) -> Result<Option<DifferentialEvidence>, String> {
+    let (b_status, b_headers, b_body) = fetch_for_detect(url, timeout_secs, insecure)?;
+    let attack_url = if url.contains('?') {
+        format!("{url}&q=%27+OR+1%3D1--")
+    } else {
+        format!("{url}?q=%27+OR+1%3D1--")
+    };
+    let (a_status, a_headers, a_body) = fetch_for_detect(&attack_url, timeout_secs, insecure)?;
+    Ok(classify_differential(
+        b_status,
+        &b_headers,
+        b_body.len(),
+        a_status,
+        &a_headers,
+        a_body.len(),
+    ))
 }
 
 /// Infrastructure markers worth surfacing even when no WAF crosses the
@@ -203,6 +341,31 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
             (status, headers, args.body.clone().into_bytes())
         };
 
+    // Differential WAF detection (opt-in): fire a SECOND probe
+    // with an attack-shaped payload and compare. When the static-
+    // signature corpus comes back empty but the responses to a
+    // benign vs attack request differ significantly, we still know
+    // a WAF is intercepting — even if its block page is generic
+    // (Apache stock 403, etc.).
+    let differential_evidence: Option<DifferentialEvidence> =
+        if args.differential && args.url.is_some() {
+            let url = args.url.as_deref().expect("differential gated on Some(url)");
+            match fetch_differential(url, args.timeout_secs, args.insecure) {
+                Ok(ev) => ev,
+                Err(e) => {
+                    if !quiet {
+                        eprintln!(
+                            "{} differential probe error (continuing without): {e}",
+                            "warn:".yellow()
+                        );
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     let detected = waf_detect::detect(status, &headers, &body);
     if quiet {
         let results: Vec<_> = detected
@@ -264,6 +427,32 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 "These are CDN/proxy/origin banners, not a WAF verdict — \
                  a WAF may still be present in monitor-only mode."
                     .bright_black()
+            );
+        }
+        // Differential evidence — even when the static-corpus came
+        // back empty, a differing response on a benign vs attack
+        // probe is strong WAF-presence signal (the typical
+        // ModSec-in-front-of-gunicorn-returning-generic-Apache-403
+        // pattern lives here).
+        if let Some(ev) = differential_evidence.as_ref() {
+            println!();
+            println!(
+                "{}",
+                "WAF inferred via differential probing:".bold().green()
+            );
+            for reason in &ev.reasons {
+                println!("  {} {}", "✓".green(), reason.yellow());
+            }
+            println!(
+                "  {}",
+                format!(
+                    "(benign GET → HTTP {} from '{}'; attack GET → HTTP {} from '{}')",
+                    ev.baseline_status,
+                    ev.baseline_server,
+                    ev.attack_status,
+                    ev.attack_server
+                )
+                .bright_black()
             );
         }
         ExitCode::SUCCESS
@@ -431,4 +620,133 @@ mod tests {
     // Suppress dead_code warnings on the test-only helper.
     #[allow(dead_code)]
     fn _ensure_arc_in_scope(_: Arc<u8>) {}
+
+    // ── classify_differential ────────────────────────────────────
+    //
+    // Pure function — tested without I/O. Each case names the
+    // real-world WAF detection pattern it gates.
+
+    fn hdr(server: &str) -> Vec<(String, String)> {
+        vec![("Server".into(), server.into())]
+    }
+
+    #[test]
+    fn differential_identical_responses_returns_none() {
+        // Anti-rig: if benign and attack produce identical
+        // responses, NO inference. Returning Some here would be
+        // a false-positive WAF detection on every plain HTTP host.
+        let ev = classify_differential(200, &hdr("nginx"), 1024, 200, &hdr("nginx"), 1024);
+        assert!(ev.is_none(), "identical responses must not infer a WAF");
+    }
+
+    #[test]
+    fn differential_status_flip_alone_is_evidence() {
+        // The bare 200 → 403 case: server header may not even be
+        // present, but the status flip is unambiguous WAF signal.
+        let ev = classify_differential(200, &[], 100, 403, &[], 200)
+            .expect("status flip must classify");
+        assert_eq!(ev.baseline_status, 200);
+        assert_eq!(ev.attack_status, 403);
+        assert!(
+            ev.reasons.iter().any(|r| r.contains("status flipped")),
+            "reasons should mention status flip"
+        );
+    }
+
+    #[test]
+    fn differential_server_change_classifies_as_waf() {
+        // The exact ModSec-in-front-of-gunicorn case from dogfooding:
+        // benign 200 from 'gunicorn/19.9.0', attack 403 from
+        // 'Apache' (ModSec block page). The server-change reason
+        // must surface.
+        let ev = classify_differential(
+            200,
+            &hdr("gunicorn/19.9.0"),
+            445,
+            403,
+            &hdr("Apache"),
+            239,
+        )
+        .expect("classify");
+        assert!(
+            ev.reasons.iter().any(|r| r.contains("server header changed")),
+            "expected server-change reason: {:?}",
+            ev.reasons
+        );
+        assert_eq!(ev.baseline_server, "gunicorn/19.9.0");
+        assert_eq!(ev.attack_server, "Apache");
+    }
+
+    #[test]
+    fn differential_server_change_is_case_insensitive() {
+        // Apache vs apache should NOT count as a server change —
+        // it's the same software, just different casing on the
+        // server's part.
+        let ev = classify_differential(403, &hdr("Apache"), 100, 403, &hdr("apache"), 100);
+        assert!(
+            ev.is_none(),
+            "case-only server difference must not classify"
+        );
+    }
+
+    #[test]
+    fn differential_body_swing_over_50pct_is_evidence() {
+        // Same status + same server, but body collapses from 10 KB
+        // (real response) to 200 bytes (block page). The 50%+
+        // shrinkage is the only signal in this case.
+        let ev = classify_differential(200, &hdr("nginx"), 10_000, 200, &hdr("nginx"), 200)
+            .expect("body swing must classify");
+        assert!(
+            ev.reasons.iter().any(|r| r.contains("body length swung")),
+            "reasons should mention body swing: {:?}",
+            ev.reasons
+        );
+    }
+
+    #[test]
+    fn differential_small_body_change_is_not_evidence() {
+        // 10% difference (timestamps, request IDs, jitter in
+        // body) must NOT classify. 50% is the threshold.
+        let ev = classify_differential(200, &hdr("nginx"), 10_000, 200, &hdr("nginx"), 9_500);
+        assert!(
+            ev.is_none(),
+            "5% body change must not classify"
+        );
+    }
+
+    #[test]
+    fn differential_multiple_signals_all_listed_in_reasons() {
+        // The strongest case: status flip + server change + body
+        // swing all together. Every reason should appear in the
+        // output so the operator sees the full picture.
+        let ev = classify_differential(
+            200,
+            &hdr("gunicorn"),
+            10_000,
+            403,
+            &hdr("Apache"),
+            200,
+        )
+        .expect("classify");
+        let reasons: String = ev.reasons.join(" | ");
+        assert!(reasons.contains("status flipped"));
+        assert!(reasons.contains("server header changed"));
+        assert!(reasons.contains("body length swung"));
+    }
+
+    #[test]
+    fn differential_empty_baseline_with_attack_body_still_signal() {
+        // Edge: benign returned 0 bytes (unusual but valid for a
+        // HEAD-style endpoint), attack returned a block page.
+        // We can't compute pct_diff against zero, but the
+        // non-zero attack body IS still signal.
+        let ev = classify_differential(200, &[], 0, 403, &[], 500)
+            .expect("classify");
+        let reasons: String = ev.reasons.join(" | ");
+        assert!(
+            reasons.contains("attack response had 500 bytes") || reasons.contains("status flipped"),
+            "expected either body-vs-empty or status-flip reason: {:?}",
+            ev.reasons
+        );
+    }
 }
