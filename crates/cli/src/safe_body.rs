@@ -476,4 +476,312 @@ mod tests {
         assert!(MAX_OPERATOR_INPUT_BYTES >= 64 * 1024);
         assert!(MAX_OPERATOR_INPUT_BYTES <= 16 * 1024 * 1024);
     }
+
+    // ── boundary conditions on read_bounded ───────────────────
+    //
+    // Off-by-one is exactly the kind of bug a P0 researcher would
+    // hunt for. Each of the next three tests targets one bound
+    // (cap == len, cap == len-1, cap == len+1) explicitly.
+
+    #[tokio::test]
+    async fn read_bounded_succeeds_when_cap_equals_exact_body_length() {
+        let body = b"1234567890"; // 10 bytes
+        let url = spawn_server(ok_response(body)).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let got = read_bounded(resp, 10).await.expect("cap == len must pass");
+        assert_eq!(&got[..], body);
+    }
+
+    #[tokio::test]
+    async fn read_bounded_overruns_when_cap_is_one_byte_under_body_length() {
+        let body = b"1234567890"; // 10 bytes
+        let url = spawn_server(ok_response(body)).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let err = read_bounded(resp, 9).await.expect_err("cap = len-1 must overrun");
+        match err {
+            ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            } => {
+                assert_eq!(cap_bytes, 9);
+                assert!(observed_bytes >= 10);
+            }
+            other => panic!("expected Overrun, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn read_bounded_succeeds_when_cap_is_one_byte_over_body_length() {
+        let body = b"1234567890"; // 10 bytes
+        let url = spawn_server(ok_response(body)).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let got = read_bounded(resp, 11).await.expect("cap = len+1 must pass");
+        assert_eq!(&got[..], body);
+    }
+
+    #[tokio::test]
+    async fn read_bounded_returns_empty_vec_for_empty_body_with_positive_cap() {
+        let url = spawn_server(ok_response(b"")).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let got = read_bounded(resp, 1).await.expect("empty body always under cap");
+        assert!(got.is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_bounded_returns_empty_vec_for_empty_body_with_zero_cap() {
+        // The previous case + cap = 0. Empty body still must pass
+        // because the cap check is acc.len + chunk.len > max — at
+        // empty body there are no chunks to compare.
+        let url = spawn_server(ok_response(b"")).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let got = read_bounded(resp, 0).await.expect("empty body + zero cap is valid");
+        assert!(got.is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_bounded_single_byte_body_with_one_byte_cap_succeeds() {
+        let url = spawn_server(ok_response(b"x")).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let got = read_bounded(resp, 1).await.expect("one-byte cap covers one-byte body");
+        assert_eq!(&got[..], b"x");
+    }
+
+    // ── read_bounded_text boundary cases ──────────────────────
+
+    #[tokio::test]
+    async fn read_bounded_text_propagates_overrun_error() {
+        // The text wrapper must NOT swallow Overrun into the
+        // string path — overruns are control-flow critical.
+        let body = vec![b'X'; 4096];
+        let url = spawn_server(ok_response(&body)).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let err = read_bounded_text(resp, 16).await.expect_err("must overrun");
+        assert!(matches!(err, ReadError::Overrun { .. }));
+    }
+
+    #[tokio::test]
+    async fn read_bounded_text_empty_body_returns_empty_string() {
+        let url = spawn_server(ok_response(b"")).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let got = read_bounded_text(resp, 1024).await.unwrap();
+        assert!(got.is_empty());
+    }
+
+    // ── read_bounded_text_file boundary cases ─────────────────
+
+    #[test]
+    fn read_bounded_text_file_succeeds_at_exact_cap() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-sb-exact-{}-{}.txt",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, vec![b'A'; 100]).unwrap();
+        let got = read_bounded_text_file(&tmp, 100).expect("cap == file size must pass");
+        assert_eq!(got.len(), 100);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_text_file_overruns_one_byte_above_cap() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-sb-above-{}-{}.txt",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, vec![b'A'; 101]).unwrap();
+        let err = read_bounded_text_file(&tmp, 100).expect_err("101 over cap 100");
+        assert!(matches!(err, ReadError::Overrun { .. }));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_text_file_empty_file_returns_empty_string_with_zero_cap() {
+        // The path that the previous test catches a missing file
+        // on; here we verify the cap-check still respects an
+        // existing empty file.
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-sb-empty-{}-{}.txt",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, b"").unwrap();
+        let got = read_bounded_text_file(&tmp, 0).expect("empty file always passes");
+        assert!(got.is_empty());
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_text_file_one_byte_file_with_zero_cap_overruns() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-sb-zero-{}-{}.txt",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, b"x").unwrap();
+        let err = read_bounded_text_file(&tmp, 0).expect_err("1 byte > 0 cap");
+        match err {
+            ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            } => {
+                assert_eq!(cap_bytes, 0);
+                assert!(observed_bytes >= 1);
+            }
+            other => panic!("expected Overrun, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_text_file_binary_with_nul_bytes_lossy_decoded() {
+        // NUL is valid UTF-8, must NOT be replaced. Verifies the
+        // lossy decode preserves the NUL between two valid chars.
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-sb-nul-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, [b'a', 0, b'b']).unwrap();
+        let got = read_bounded_text_file(&tmp, 1024).unwrap();
+        assert_eq!(got, "a\0b");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    // ── ReadError invariants ──────────────────────────────────
+
+    #[test]
+    fn read_error_debug_includes_variant_name() {
+        let e = ReadError::Overrun {
+            cap_bytes: 100,
+            observed_bytes: 200,
+        };
+        let d = format!("{e:?}");
+        assert!(d.contains("Overrun"));
+
+        let e2 = ReadError::Transport("X".into());
+        let d2 = format!("{e2:?}");
+        assert!(d2.contains("Transport"));
+    }
+
+    #[test]
+    fn read_error_implements_std_error_trait() {
+        // Anti-rig: a refactor that removed `impl Error for ReadError`
+        // would silently drop the `?`-propagation behaviour in
+        // callers that use `Box<dyn Error>`.
+        fn assert_impl<E: std::error::Error + 'static>(_: &E) {}
+        let e = ReadError::Overrun {
+            cap_bytes: 0,
+            observed_bytes: 1,
+        };
+        assert_impl(&e);
+    }
+
+    #[test]
+    fn read_error_overrun_display_mentions_bomb_defence_in_message() {
+        // Operator should immediately understand WHY the read
+        // aborted — phrase the message in attack terms, not bland
+        // "limit reached".
+        let e = ReadError::Overrun {
+            cap_bytes: 100,
+            observed_bytes: 200,
+        };
+        let s = format!("{e}");
+        assert!(
+            s.to_lowercase().contains("decompression-bomb"),
+            "must blame the bomb explicitly: {s}"
+        );
+    }
+
+    // ── Bomb defence on alternate compression types ───────────
+
+    #[tokio::test]
+    async fn read_bounded_defends_against_real_brotli_bomb() {
+        // Mirror of the gzip-bomb test for brotli. Reqwest's brotli
+        // decoder sits behind bytes_stream too; the cap must apply
+        // there as well or the defence has a hole.
+        let bomb_uncompressed = vec![0u8; 16 * 1024 * 1024];
+        let compressed = wafrift_encoding::compression::compress(
+            &bomb_uncompressed,
+            wafrift_encoding::compression::Algorithm::Brotli,
+        )
+        .unwrap();
+        assert!(
+            compressed.body.len() < 256 * 1024,
+            "brotli bomb compresses >> 64x: got {} bytes",
+            compressed.body.len()
+        );
+        let mut framed = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Encoding: br\r\n\
+             Content-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
+            compressed.body.len()
+        )
+        .into_bytes();
+        framed.extend_from_slice(&compressed.body);
+        let url = spawn_server(framed).await;
+        let resp = reqwest::Client::builder()
+            .brotli(true)
+            .build()
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap();
+        let err = read_bounded(resp, DEFAULT_MAX_RESPONSE_BYTES)
+            .await
+            .expect_err("brotli bomb must abort at cap");
+        assert!(matches!(err, ReadError::Overrun { .. }));
+    }
+
+    // ── Multi-chunk semantics ─────────────────────────────────
+
+    #[tokio::test]
+    async fn read_bounded_handles_body_arriving_in_many_small_chunks() {
+        // Some servers split a small response across multiple TCP
+        // writes; the cap check must NOT be confused by chunk
+        // boundaries (e.g. mistakenly comparing chunk size alone
+        // against the cap).
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut read = [0u8; 4096];
+            let _ = sock.read(&mut read).await;
+            // Header
+            let _ = sock
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\nConnection: close\r\n\r\n",
+                )
+                .await;
+            // Body in 1-byte chunks
+            for b in b"sixteen byte body" {
+                let _ = sock.write_all(&[*b]).await;
+                let _ = sock.flush().await;
+            }
+            let _ = sock.shutdown().await;
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let url = format!("http://{addr}/");
+        let resp = reqwest::get(&url).await.unwrap();
+        let got = read_bounded(resp, 32).await.expect("32 > 16");
+        // Content-Length=16 but body sent is "sixteen byte body"
+        // which is 17 bytes — reqwest reads ONLY the declared
+        // content length, so the result is exactly 16 bytes.
+        assert_eq!(got.len(), 16);
+        assert!(got.starts_with(b"sixteen byte bod"));
+    }
+
+    #[tokio::test]
+    async fn read_bounded_cap_check_fires_within_first_chunk_when_chunk_above_cap() {
+        // 1 MB body arrives in one chunk. Cap of 1024 must abort
+        // on the first chunk read — chunk.len() pushes the running
+        // total over the cap in a single comparison.
+        let body = vec![b'X'; 1_000_000];
+        let url = spawn_server(ok_response(&body)).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let err = read_bounded(resp, 1024).await.expect_err("first-chunk overrun");
+        assert!(matches!(err, ReadError::Overrun { .. }));
+    }
 }
