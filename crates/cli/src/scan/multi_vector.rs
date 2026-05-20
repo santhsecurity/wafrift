@@ -218,6 +218,21 @@ pub const VECTORS: &[Vector] = &[
     // (or honour Forwarded when present) flow the payload
     // through.
     Vector { name: "forwarded", content_type: "" },
+    // Origin header (CORS routing). Apps that read Origin for
+    // CORS allow-list checks, audit logs, or template rendering
+    // flow the payload. WAFs inspect Origin for CSRF / SSRF
+    // detection, not SQL/XSS/cmdi patterns.
+    Vector { name: "origin", content_type: "" },
+    // Range header (RFC 9110 §14.2). Some backends parse Range
+    // malformed and reflect the value, or use it to key
+    // partial-content caches. The payload rides as `bytes=`
+    // value.
+    Vector { name: "range", content_type: "" },
+    // From header (RFC 9110 §10.1.2) — historically an operator
+    // email address. Apps that log From, render it in admin
+    // dashboards, or pass it to a notification sink flow the
+    // payload. WAFs almost never inspect From for attacks.
+    Vector { name: "from", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
     Vector { name: "referer", content_type: "" },
 ];
@@ -796,6 +811,34 @@ fn build_request_for_vector(
             Some(
                 http.get(target)
                     .header("Forwarded", format!("for={payload}")),
+            )
+        }
+        "origin" => {
+            // Origin: <scheme>://<host> shape. We embed the
+            // payload as if it were a host name — apps that
+            // log/render Origin flow it through.
+            Some(
+                http.get(target)
+                    .header("Origin", format!("https://{payload}")),
+            )
+        }
+        "range" => {
+            // Range: bytes=<payload> shape. Wafrift's lazy on
+            // exact RFC 9110 syntax — the point is to fire a
+            // header value past the WAF; backend reflection /
+            // logging is what lands the attack.
+            Some(
+                http.get(target)
+                    .header("Range", format!("bytes={payload}")),
+            )
+        }
+        "from" => {
+            // From: <payload>@wafrift.example shape. Apps that
+            // log From, render in admin dashboards, or feed it
+            // to a notification sink flow the payload.
+            Some(
+                http.get(target)
+                    .header("From", format!("{payload}@wafrift.example")),
             )
         }
         "hpp" => {
@@ -3352,6 +3395,95 @@ mod tests {
             "POST-json-key-as-payload",
             "forwarded",
         ] {
+            assert!(names.contains(required), "missing vector {required}");
+        }
+    }
+
+    // ── origin / range / from header carriers ─────────────────
+
+    #[test]
+    fn build_origin_uses_https_scheme_prefix_with_payload_as_host() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "origin").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "evil.example", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let hdr = req.headers().get("origin").unwrap().to_str().unwrap();
+        assert!(hdr.starts_with("https://"));
+        assert!(hdr.contains("evil.example"));
+    }
+
+    #[test]
+    fn build_origin_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "origin").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    #[test]
+    fn build_range_uses_bytes_equals_prefix() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "range").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "0-100", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let hdr = req.headers().get("range").unwrap().to_str().unwrap();
+        assert!(hdr.starts_with("bytes="));
+        assert!(hdr.contains("0-100"));
+    }
+
+    #[test]
+    fn build_range_carries_payload_verbatim_in_value() {
+        // Range may carry arbitrary bytes (modulo header-value
+        // validity). The payload survives the `bytes=` wrapper.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "range").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "PAYLOAD", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let hdr = req.headers().get("range").unwrap().to_str().unwrap();
+        assert!(hdr.contains("PAYLOAD"));
+    }
+
+    #[test]
+    fn build_from_appends_at_suffix_so_value_looks_like_email() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "from").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "operator", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let hdr = req.headers().get("from").unwrap().to_str().unwrap();
+        // Must contain `@` so an email-format-checking middleware
+        // doesn't reject the request before our payload gets logged.
+        assert!(hdr.contains('@'));
+        assert!(hdr.starts_with("operator"));
+    }
+
+    #[test]
+    fn build_from_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "from").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    // ── catalogue presence (round 7) ──────────────────────────
+
+    #[test]
+    fn round_seven_vectors_are_in_catalogue() {
+        let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
+        for required in ["origin", "range", "from"] {
             assert!(names.contains(required), "missing vector {required}");
         }
     }
