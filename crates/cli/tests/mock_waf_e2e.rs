@@ -864,6 +864,173 @@ async fn mock_modsec_dupkey_first_occurrence_json_bypasses() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_text_xml_sqli_body_bypasses() {
+    // POST-text-xml vector. text/xml falls to the raw-bytes scan
+    // path; SQL UNION isn't in the raw-marker set, so it passes.
+    let (addr, _) = spawn_mock_modsec().await;
+    let body = "<?xml version=\"1.0\"?><request><id>' OR 1=1--</id></request>";
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "text/xml")
+        .body(body.as_bytes().to_vec())
+        .send()
+        .await
+        .expect("post text-xml");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "text/xml XML body with SQLi MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_multipart_filename_payload_bypasses() {
+    // POST-multipart-filename vector. Multipart falls to the
+    // raw-bytes scan path; SQL UNION isn't in the strong marker
+    // set, so the payload-in-filename hides successfully.
+    let (addr, _) = spawn_mock_modsec().await;
+    let boundary = "----WafRiftMockFnBoundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"' OR 1=1--\"\r\n\r\nx\r\n--{boundary}--\r\n"
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("post multipart filename");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "filename-positioned SQLi in multipart MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_compound_bom_plus_brotli_bypasses() {
+    // POST-json-bom-br compound vector. Brotli alone bypasses
+    // (mock has no brotli decoder); the BOM is the inner stacked
+    // axis that would defeat a brotli-capable WAF too.
+    use wafrift_encoding::compression::{Algorithm, compress};
+    let (addr, _) = spawn_mock_modsec().await;
+    let mut bom_prefixed: Vec<u8> = vec![0xEF, 0xBB, 0xBF];
+    bom_prefixed.extend_from_slice(br#"{"q":"' OR 1=1--"}"#);
+    let blob = compress(&bom_prefixed, Algorithm::Brotli).expect("brotli");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/json")
+        .header("Content-Encoding", &blob.content_encoding)
+        .body(blob.body)
+        .send()
+        .await
+        .expect("post bom+br");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "BOM+brotli compound MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_deeply_nested_json_is_blocked_by_naive_walker() {
+    // The mock's JSON walker is depth-UNAWARE: it scans the whole
+    // body for "key":"value" pairs regardless of nesting, so it
+    // catches SQL UNION even at depth 12. This is a tighter mock
+    // than CRS PL4's actual `json_request_body_processor`, which
+    // enforces a depth cap and abandons inspection past it. The
+    // POST-json-deeply-nested vector is built for that real-WAF
+    // gap; locally it surfaces as a STILL-BLOCKED control which
+    // proves the mock isn't accidentally aliased to the brotli
+    // / BOM / CT-routing bypasses above.
+    let (addr, _) = spawn_mock_modsec().await;
+    let mut json = serde_json::json!({ "q": "' OR 1=1--" });
+    for _ in 0..11 {
+        json = serde_json::json!({ "n": json });
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/json")
+        .body(json.to_string().into_bytes())
+        .send()
+        .await
+        .expect("post deeply nested");
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "mock's depth-unaware walker catches nested SQLi — \
+         real CRS PL4 with depth cap would let it bypass"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_authorization_basic_payload_bypasses() {
+    // authorization-basic vector. Mock does not inspect the
+    // Authorization header for attacks; sends a regular GET with
+    // Basic auth where the username carries the payload.
+    use base64::Engine as _;
+    let (addr, _) = spawn_mock_modsec().await;
+    let payload = "' OR 1=1--";
+    let basic = format!("{payload}:probe");
+    let encoded = base64::engine::general_purpose::STANDARD.encode(basic.as_bytes());
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .get(format!("http://{addr}/some/api"))
+        .header("Authorization", format!("Basic {encoded}"))
+        .send()
+        .await
+        .expect("get authorization-basic");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "Authorization: Basic with payload-as-username MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_origin_header_payload_bypasses() {
+    // origin vector. Origin header is not inspected for attacks.
+    let (addr, _) = spawn_mock_modsec().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .get(format!("http://{addr}/some/api"))
+        .header("Origin", "https://' OR 1=1--.example")
+        .send()
+        .await
+        .expect("get origin");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "Origin header with payload MUST bypass the mock"
+    );
+}
+
 // Test-only harness module that re-exports the internal cli
 // surfaces we want to drive in these tests. Lives inline as a
 // submodule of the test file so the integration test still
