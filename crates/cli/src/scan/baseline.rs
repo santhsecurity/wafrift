@@ -112,7 +112,7 @@ fn render_text(outcome: &BaselineOutcome) {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
