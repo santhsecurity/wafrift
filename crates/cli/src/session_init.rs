@@ -395,4 +395,115 @@ mod tests {
         assert!(state.summary.contains("200"));
         assert!(state.summary.contains("2 cookie(s)"));
     }
+
+    // ── Deep integration: full file-on-disk path ──────────────────
+    //
+    // The unit tests above exercise `establish_from_curl` with a
+    // pre-built ParsedCurl. The wrapper `establish_from_file` adds
+    // a `read_to_string` + `shell_tokenize` + `parse_curl` chain
+    // that the operator's flow actually takes. These tests prove
+    // the WHOLE chain works against a real temp file on disk and
+    // the captured state is plug-and-play with reqwest's
+    // `default_headers` — the exact wiring scan/mod.rs takes.
+
+    fn write_curl_to_temp(text: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-session-init-test-{}-{}.curl",
+            std::process::id(),
+            // Use a SystemTime nano for uniqueness across same-pid
+            // tests running back-to-back.
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos())
+        ));
+        std::fs::write(&path, text.as_bytes()).expect("write tmp curl file");
+        path
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn establish_from_file_full_e2e_with_real_disk_curl_file() {
+        let addr = spawn_session_server(|_| {
+            ok_with_setcookie("ok", &[("session", "ABC123XYZ"), ("csrf", "DEF456")])
+        })
+        .await;
+        let curl = format!(
+            "curl 'http://{addr}/login' \\\n  -X POST \\\n  -H 'Accept: application/json'"
+        );
+        let path = write_curl_to_temp(&curl);
+
+        let state = establish_from_file(&path, Duration::from_secs(5), false)
+            .await
+            .expect("file-driven init must succeed");
+
+        let cookie = state
+            .headers
+            .get(reqwest::header::COOKIE)
+            .expect("cookie present")
+            .to_str()
+            .unwrap();
+        assert!(cookie.contains("session=ABC123XYZ"));
+        assert!(cookie.contains("csrf=DEF456"));
+
+        // Verify the captured state plugs cleanly into a reqwest
+        // client's default_headers (the actual wire scan/mod.rs takes).
+        let client_result = reqwest::Client::builder()
+            .default_headers(state.headers.clone())
+            .build();
+        assert!(
+            client_result.is_ok(),
+            "captured headers must be valid default_headers input"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn establish_from_file_missing_file_returns_read_file_error() {
+        let missing = std::env::temp_dir()
+            .join("wafrift-session-init-DOES-NOT-EXIST-9999.curl");
+        let err = establish_from_file(&missing, Duration::from_secs(2), false)
+            .await
+            .expect_err("missing file must error");
+        match err {
+            SessionInitError::ReadFile(path, _) => {
+                assert!(path.contains("DOES-NOT-EXIST"));
+            }
+            other => panic!("expected ReadFile error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn establish_from_file_with_malformed_curl_returns_typed_error() {
+        // Anti-rig: malformed curl input must produce a TYPED error
+        // (Parse or Request), never a panic. The specific variant
+        // depends on whether shell_tokenize rejects the input outright
+        // (Parse) or whether it produces a "plausible" URL that
+        // then fails at the request layer (Request). Both are
+        // acceptable — the bar is "no panic, structured error."
+        let path = write_curl_to_temp("curl 'http://x.example/x");
+        let err = establish_from_file(&path, Duration::from_secs(2), false)
+            .await
+            .expect_err("malformed must error");
+        match err {
+            SessionInitError::Parse(_) | SessionInitError::Request(_) => {}
+            other => panic!("expected Parse or Request error, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn establish_from_file_with_empty_curl_file_returns_no_url_error() {
+        let path = write_curl_to_temp("");
+        let err = establish_from_file(&path, Duration::from_secs(2), false)
+            .await
+            .expect_err("empty must error");
+        // An empty token list -> ParsedCurl with no URL -> NoUrl.
+        // (The Parse path could also reach this; either is fine —
+        // both are typed, neither panics.)
+        match err {
+            SessionInitError::NoUrl | SessionInitError::Parse(_) => {}
+            other => panic!("expected NoUrl/Parse, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }

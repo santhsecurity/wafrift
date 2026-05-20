@@ -231,4 +231,146 @@ mod tests {
             "clear via clone must drop bindings visible from the original"
         );
     }
+
+    // ── Deep proxy-realistic inputs (added in LEGENDARY part 7)
+
+    #[test]
+    fn reorder_handles_mixed_case_host_header_canonically() {
+        // Real-world: clients send `Host:` in any of Host / host /
+        // HOST capitalisation. The reorder logic is case-insensitive
+        // at the slot-match step, so all three must land at position
+        // 0 in Chrome's order.
+        for spelling in ["Host", "host", "HOST"] {
+            let input = vec![
+                ("User-Agent".into(), "ua".into()),
+                (spelling.into(), "x.com".into()),
+            ];
+            let out = reorder_headers_for_profile("chrome131", input);
+            assert!(
+                out[0].0.eq_ignore_ascii_case("host"),
+                "spelling `{spelling}` should land at position 0; got `{}`",
+                out[0].0
+            );
+        }
+    }
+
+    #[test]
+    fn reorder_preserves_multi_cookie_relative_order() {
+        // RFC 6265 §5.4: when multiple Cookie headers are present
+        // (rare but legal), their relative order in the request
+        // matters — the server may interpret them as ordered. Our
+        // reorder must NOT shuffle them.
+        let input = vec![
+            ("Host".into(), "x".into()),
+            ("Cookie".into(), "first=A".into()),
+            ("Cookie".into(), "second=B".into()),
+            ("Cookie".into(), "third=C".into()),
+        ];
+        let out = reorder_headers_for_profile("chrome131", input);
+        let cookies: Vec<&str> = out
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            .map(|(_, v)| v.as_str())
+            .collect();
+        assert_eq!(cookies, vec!["first=A", "second=B", "third=C"]);
+    }
+
+    #[test]
+    fn reorder_with_very_long_header_value_doesnt_crash() {
+        // Realistic adversarial: an Authorization header carrying a
+        // long JWT (say 4 KB) or a Cookie with a huge session blob.
+        // The reorder must handle it without blowing memory or
+        // panicking on slice arithmetic.
+        let big_value: String = "x".repeat(4096);
+        let input = vec![
+            ("Host".into(), "x".into()),
+            ("Authorization".into(), format!("Bearer {big_value}")),
+            ("User-Agent".into(), "ua".into()),
+        ];
+        let out = reorder_headers_for_profile("chrome131", input);
+        // Authorization isn't in Chrome's canonical slot list — it
+        // travels at the tail after the browser block.
+        let auth_pos = out
+            .iter()
+            .position(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+            .expect("auth survives");
+        let host_pos = out
+            .iter()
+            .position(|(k, _)| k.eq_ignore_ascii_case("host"))
+            .unwrap();
+        assert!(auth_pos > host_pos);
+        // Value bytes preserved verbatim.
+        assert!(out[auth_pos].1.ends_with(&big_value));
+    }
+
+    #[test]
+    fn reorder_with_zero_headers_returns_empty() {
+        // Edge: empty input. No panic, empty output.
+        assert!(reorder_headers_for_profile("chrome131", vec![]).is_empty());
+        assert!(reorder_headers_for_profile("unknown", vec![]).is_empty());
+    }
+
+    #[test]
+    fn reorder_with_a_single_header_returns_single_element() {
+        // Edge: 1 header — output is the same 1-element vec
+        // regardless of slot membership.
+        let input = vec![("X-Custom".into(), "1".into())];
+        let out = reorder_headers_for_profile("chrome131", input.clone());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0], input[0]);
+    }
+
+    #[test]
+    fn reorder_is_total_no_input_dropped_across_browsers() {
+        // Anti-rig: across all three families, the reorder MUST be a
+        // permutation of the input (no header dropped, no header
+        // duplicated). Test on a 12-header bag that exercises Chrome
+        // / Firefox / Safari canonical slots + customs.
+        let input = vec![
+            ("Host".into(), "x".into()),
+            ("Accept".into(), "*/*".into()),
+            ("Accept-Encoding".into(), "gzip".into()),
+            ("Accept-Language".into(), "en".into()),
+            ("Connection".into(), "keep-alive".into()),
+            ("Cookie".into(), "k=v".into()),
+            ("Sec-Ch-Ua".into(), "chrome".into()),
+            ("Sec-Fetch-Site".into(), "same-origin".into()),
+            ("User-Agent".into(), "ua".into()),
+            ("X-Custom-1".into(), "a".into()),
+            ("X-Custom-2".into(), "b".into()),
+            ("X-Custom-3".into(), "c".into()),
+        ];
+        for family in ["chrome131", "firefox133", "safari18", "unknown"] {
+            let out = reorder_headers_for_profile(family, input.clone());
+            assert_eq!(
+                out.len(),
+                input.len(),
+                "family `{family}`: reorder must preserve count, got in={} out={}",
+                input.len(),
+                out.len()
+            );
+            // Multiset equality — every input entry must appear in
+            // the output exactly once.
+            let mut sorted_in = input.clone();
+            sorted_in.sort();
+            let mut sorted_out = out;
+            sorted_out.sort();
+            assert_eq!(
+                sorted_in, sorted_out,
+                "family `{family}`: reorder must be a permutation"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_session_pool_zero_rotate_coerces_inside_wrapper_too() {
+        // The inner SessionPool coerces rotate=0 to rotate=1 to
+        // avoid div-by-zero. The Arc-wrapped SharedSessionPool
+        // must inherit that — no panic on the boundary.
+        let pool = SharedSessionPool::new(PROFILES.iter().collect(), 0);
+        // Several calls; never panic.
+        for _ in 0..10 {
+            let _ = pool.profile_for("a.com");
+        }
+    }
 }
