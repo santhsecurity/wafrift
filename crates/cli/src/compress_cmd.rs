@@ -402,4 +402,208 @@ mod tests {
         // disabling the defence.
         assert!(MAX_COMPRESS_INPUT_BYTES <= 1024 * 1024 * 1024);
     }
+
+    // ── parse_algorithms edge cases ───────────────────────────
+
+    #[test]
+    fn parse_algorithms_accepts_chain_of_same_algo() {
+        // Layering gzip on gzip is a valid chain: stage one decoder
+        // sees gzip, decodes, finds another gzip blob, decodes
+        // again. Two-layer gzip with the same algo MUST work.
+        let parsed = parse_algorithms(&["gzip".into(), "gzip".into()])
+            .expect("repeated algo is a valid chain");
+        assert_eq!(parsed, vec![Algorithm::Gzip, Algorithm::Gzip]);
+    }
+
+    #[test]
+    fn parse_algorithms_rejects_whitespace_only_token() {
+        // A token of just whitespace is operator typo — must
+        // surface an error not silently map to a default algo.
+        let err = parse_algorithms(&["   ".into()]).expect_err("whitespace-only invalid");
+        assert!(err.contains("supported:"));
+    }
+
+    #[test]
+    fn parse_algorithms_rejects_empty_string_token() {
+        let err = parse_algorithms(&["".into()]).expect_err("empty string invalid");
+        assert!(err.contains("supported:"));
+    }
+
+    #[test]
+    fn parse_algorithms_error_message_includes_user_input_verbatim() {
+        // Operator must see WHICH algo string was bad — the error
+        // message must contain it.
+        let err = parse_algorithms(&["snappy42".into()]).expect_err("unknown");
+        assert!(err.contains("snappy42"), "must echo the bad token: {err}");
+    }
+
+    #[test]
+    fn parse_algorithms_recognises_x_gzip_legacy_alias() {
+        // The encoding crate accepts `x-gzip` as a gzip alias per
+        // RFC 9110 §8.4.1.3. This contract leak-tests that the
+        // CLI surface passes it through.
+        let parsed = parse_algorithms(&["x-gzip".into()]).expect("x-gzip is gzip");
+        assert_eq!(parsed, vec![Algorithm::Gzip]);
+    }
+
+    // ── read_bounded_file boundary conditions ─────────────────
+
+    #[test]
+    fn read_bounded_file_succeeds_at_exact_cap() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-cb-exact-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, vec![b'A'; 100]).unwrap();
+        let got = read_bounded_file(&tmp, 100).expect("cap == file len passes");
+        assert_eq!(got.len(), 100);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_overruns_one_byte_above_cap() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-cb-above-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, vec![b'A'; 101]).unwrap();
+        let err = read_bounded_file(&tmp, 100).expect_err("101 over 100");
+        assert!(err.contains("100-byte cap"));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_succeeds_one_byte_under_cap() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-cb-under-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, vec![b'A'; 99]).unwrap();
+        let got = read_bounded_file(&tmp, 100).expect("99 under 100");
+        assert_eq!(got.len(), 99);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_zero_byte_file_with_zero_cap_succeeds() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-cb-empty-zero-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, b"").unwrap();
+        let got = read_bounded_file(&tmp, 0).expect("empty file always passes");
+        assert!(got.is_empty());
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_one_byte_file_with_zero_cap_overruns() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-cb-onezero-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, b"x").unwrap();
+        let err = read_bounded_file(&tmp, 0).expect_err("1 > 0 cap");
+        assert!(err.contains("0-byte cap"));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_preserves_nul_bytes() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-cb-nul-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&tmp, [b'a', 0, 0, b'b']).unwrap();
+        let got = read_bounded_file(&tmp, 1024).unwrap();
+        assert_eq!(&got[..], &[b'a', 0, 0, b'b']);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_missing_path_returns_clean_error() {
+        let err = read_bounded_file(
+            std::path::Path::new("/nonexistent/wafrift/path/does/not/exist"),
+            1024,
+        )
+        .expect_err("missing file must error");
+        assert!(err.to_lowercase().contains("open"));
+    }
+
+    #[test]
+    fn read_bounded_file_handles_binary_payload_byte_identical() {
+        // Compress-input MUST be binary-clean — gzip/brotli output
+        // has no text guarantee. The bounded reader must preserve
+        // every byte including high-bit and 0xFF.
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-cb-bin-{}-{}.bin",
+            std::process::id(),
+            line!()
+        ));
+        let payload: Vec<u8> = (0..=255u8).collect();
+        std::fs::write(&tmp, &payload).unwrap();
+        let got = read_bounded_file(&tmp, 1024).unwrap();
+        assert_eq!(got, payload);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    // ── End-to-end compression sanity ─────────────────────────
+
+    #[test]
+    fn chain_with_identity_alone_preserves_body_byte_identical() {
+        // Identity is the no-op anchor. A chain of just `identity`
+        // round-trips the body untouched. Anti-rig: a refactor that
+        // made identity into a "compress with default" would silently
+        // change the wire shape.
+        let body = b"unchanged bytes";
+        let blob = chain(body, &[Algorithm::Identity]).unwrap();
+        assert_eq!(&blob.body[..], body);
+        assert!(blob.content_encoding == "identity" || blob.content_encoding.is_empty());
+    }
+
+    #[test]
+    fn chain_with_gzip_alone_produces_decodable_gzip() {
+        use wafrift_encoding::compression::{CompressedBody, decompress};
+        let body = b"some test payload";
+        let blob = chain(body, &[Algorithm::Gzip]).unwrap();
+        let recovered = decompress(&CompressedBody {
+            body: blob.body.clone(),
+            content_encoding: blob.content_encoding.clone(),
+        })
+        .unwrap();
+        assert_eq!(&recovered[..], body);
+    }
+
+    #[test]
+    fn chain_with_deflate_alone_produces_decodable_deflate() {
+        // Mirror the gzip test for deflate — proves the CLI's
+        // deflate path matches the encoding crate's contract end
+        // to end.
+        use wafrift_encoding::compression::{CompressedBody, decompress};
+        let body = b"deflate test payload";
+        let blob = chain(body, &[Algorithm::Deflate]).unwrap();
+        let recovered = decompress(&CompressedBody {
+            body: blob.body.clone(),
+            content_encoding: blob.content_encoding.clone(),
+        })
+        .unwrap();
+        assert_eq!(&recovered[..], body);
+    }
+
+    #[test]
+    fn chain_with_gzip_then_br_emits_outer_to_inner_content_encoding() {
+        // RFC 9110 §8.4 list order: leftmost is the OUTERMOST
+        // wrapper. A `gzip, br` chain means body is gzip(br(payload)).
+        // Confirm the resulting header value lists gzip before br.
+        let blob = chain(b"payload", &[Algorithm::Gzip, Algorithm::Brotli]).unwrap();
+        let gz_pos = blob.content_encoding.find("gzip").expect("gzip");
+        let br_pos = blob.content_encoding.find("br").expect("br");
+        assert!(gz_pos < br_pos, "ce={}", blob.content_encoding);
+    }
 }
