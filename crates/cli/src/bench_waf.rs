@@ -1906,8 +1906,7 @@ mod tests {
         // (`WHERE id = <frag>`), so use a numeric-context injection
         // whose oracle verdict is known (their own unit test asserts
         // `1 OR 1=1 --` parses). This test pins the 3-gate AND
-        // composition, not the oracle's context policy (that limitation
-        // is a separate, documented finding in ROBUSTNESS_AUDIT.md).
+        // composition, not the oracle's context policy.
         let ok = "1 OR 1=1 --"; // oracle-VALID in numeric context
         let junk = ")) not sql at all (("; // oracle-INVALID (won't parse)
 

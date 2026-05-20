@@ -390,10 +390,10 @@ fn report_rejects_non_scan_json_adversarial() {
 
 // ───────────────────────── CLI: positional target ergonomics ─────────────
 //
-// Named-open in ROBUSTNESS_AUDIT: `scan` and `origin-hints` required
-// `--target` / `--host` flags while `bypass-probe` already took a
-// positional URL — users had to consult `--help` for every subcommand.
-// These tests pin the both-forms-accepted contract end-to-end.
+// `scan` and `origin-hints` historically required `--target` / `--host`
+// flags while `bypass-probe` already took a positional URL — users had
+// to consult `--help` for every subcommand. These tests pin the
+// both-forms-accepted contract end-to-end.
 
 #[test]
 fn scan_accepts_positional_target_url() {

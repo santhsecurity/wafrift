@@ -28,8 +28,8 @@
 > the sound delivery-shape axis — `multipart_file` (44) + `path_segment`
 > (44): CRS's LDAP rule is ARGS/body-scoped, so the same RFC-4515-sound
 > filter-break that 403s in the query sails through an upload part or
-> path segment. The LDAP oracle was rebuilt (see `ROBUSTNESS_AUDIT.md`)
-> so this number is honest, not the prior 0 % rig.
+> path segment. The LDAP oracle was rebuilt so this number is honest,
+> not the prior 0 % rig.
 >
 > **Full honest per-class × per-WAF matrix** (de-rigged oracle,
 > equiv-cegis, live containers; TRUE verified-bypass %, oracle +
@@ -54,8 +54,8 @@
 >
 > Caveat: even 4.7 % is approximate — the SQL oracle splices into a
 > numeric context, so it under-counts quote-context SQLi and over-counts
-> any parseable-but-benign expression. See `ROBUSTNESS_AUDIT.md`.
-> The de-rig is pinned by `bench_waf::tests::verified_bypass_*`.
+> any parseable-but-benign expression. The de-rig is pinned by
+> `bench_waf::tests::verified_bypass_*`.
 >
 > Everything below this line is the retracted pre-correction record,
 > kept only so the rigged claims remain auditable.
