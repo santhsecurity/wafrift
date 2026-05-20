@@ -172,7 +172,20 @@ pub const VECTORS: &[Vector] = &[
     // template sinks.
     Vector { name: "authorization-basic", content_type: "" },
     Vector { name: "cookie", content_type: "" },
+    // Cookie HPP — duplicate cookie pairs with the same name, RFC
+    // 6265 §5.4 allows multiple. WAF takes one, backend takes the
+    // other. Benign first, attack second; last-occurrence-wins
+    // (Java Servlet, ASP.NET, Express cookie-parser default) gets
+    // the attack.
+    Vector { name: "cookie-hpp", content_type: "" },
     Vector { name: "hpp", content_type: "" },
+    // Path-segment vector — payload lives in the URL path itself,
+    // not the query string. WAF rules scoped to ARGS / REQUEST_URI
+    // miss path-positioned attacks; backends with catch-all
+    // routes (Express `/api/*`, Spring `@PathVariable`, Flask
+    // `<path:p>`) read the raw path segment. New attack axis
+    // distinct from every other vector.
+    Vector { name: "path-segment", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
     Vector { name: "referer", content_type: "" },
 ];
@@ -251,6 +264,50 @@ fn encode_cbor_text_string(s: &str, out: &mut Vec<u8>) {
         out.extend_from_slice(&n16.to_be_bytes());
     }
     out.extend_from_slice(bytes);
+}
+
+/// Splice a percent-encoded payload into the path of the target
+/// URL, BEFORE the existing path and query. Preserves the existing
+/// scheme + authority + query string + fragment.
+///
+/// Examples:
+/// - `http://x.com/`             + `p`  → `http://x.com/p`
+/// - `http://x.com/api/users?id=1` + `p`  → `http://x.com/p/api/users?id=1`
+/// - `http://x.com`              + `p`  → `http://x.com/p`
+///
+/// The original target's path is RETAINED — many backends route on
+/// catch-all `/api/*` patterns and we want the extra segment to
+/// extend, not replace. Backends that ONLY match the exact original
+/// path will 404; that's an honest "vector did not land" signal,
+/// not an evasion failure.
+fn splice_payload_into_path(target: &str, encoded_payload: &str) -> String {
+    // Find the host/path boundary: skip `scheme://`, then the first
+    // `/` is the path start.
+    let scheme_end = target.find("://").map_or(0, |i| i + 3);
+    let after_scheme = &target[scheme_end..];
+    // Path starts at first `/` after authority; if none, append.
+    let path_start_in_after_scheme = after_scheme.find('/');
+    let (authority_end, original_path_with_query) = match path_start_in_after_scheme {
+        Some(i) => (scheme_end + i, &target[scheme_end + i..]),
+        None => (target.len(), ""),
+    };
+    let authority = &target[..authority_end];
+    // Split path from query: payload goes BEFORE the query.
+    let (path_only, query_and_frag) = match original_path_with_query.find('?') {
+        Some(i) => (
+            &original_path_with_query[..i],
+            &original_path_with_query[i..],
+        ),
+        None => (original_path_with_query, ""),
+    };
+    // If the original path is `/` or empty, the spliced path is
+    // `/<payload>`; otherwise prepend the payload as a fresh
+    // segment in front of the original path.
+    if path_only.is_empty() || path_only == "/" {
+        format!("{authority}/{encoded_payload}{query_and_frag}")
+    } else {
+        format!("{authority}/{encoded_payload}{path_only}{query_and_frag}")
+    }
 }
 
 /// Public encoder for the `POST-cbor` vector: produces a
@@ -623,6 +680,28 @@ fn build_request_for_vector(
             http.get(target)
                 .header("Cookie", format!("{param}={}", urlencoding::encode(payload))),
         ),
+        "cookie-hpp" => {
+            // Two pairs, same name. RFC 6265 §5.4 lets a UA send
+            // multiples; servers and WAFs disagree on which wins.
+            let encoded = urlencoding::encode(payload);
+            Some(
+                http.get(target)
+                    .header(
+                        "Cookie",
+                        format!("{param}=harmless; {param}={encoded}"),
+                    ),
+            )
+        }
+        "path-segment" => {
+            // Splice the payload into the URL path between the
+            // host and the existing path. Origin handlers with
+            // catch-all routes see it; ARGS-scoped WAF rules don't.
+            // Payload bytes get percent-encoded so the URL parser
+            // accepts them; backends decode back to the raw bytes.
+            let encoded = urlencoding::encode(payload);
+            let url = splice_payload_into_path(target, &encoded);
+            Some(http.get(url))
+        }
         "hpp" => {
             let url = format!(
                 "{target}?{param}=harmless&{param}={}",
@@ -2738,6 +2817,158 @@ mod tests {
             "POST-multipart-filename",
             "authorization-basic",
         ] {
+            assert!(names.contains(required), "missing vector {required}");
+        }
+    }
+
+    // ── cookie-hpp ────────────────────────────────────────────
+
+    #[test]
+    fn build_cookie_hpp_emits_two_pairs_with_same_name() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "cookie-hpp").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let cookie = req.headers().get("cookie").unwrap().to_str().unwrap();
+        assert_eq!(
+            cookie.matches("q=").count(),
+            2,
+            "must emit q= twice: {cookie}"
+        );
+    }
+
+    #[test]
+    fn build_cookie_hpp_benign_pair_comes_first() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "cookie-hpp").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let cookie = req.headers().get("cookie").unwrap().to_str().unwrap();
+        let h_pos = cookie.find("q=harmless").unwrap();
+        let a_pos = cookie.find("q=attack").unwrap();
+        assert!(h_pos < a_pos, "harmless before attack: {cookie}");
+    }
+
+    #[test]
+    fn build_cookie_hpp_uses_semicolon_space_separator_per_rfc6265() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "cookie-hpp").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let cookie = req.headers().get("cookie").unwrap().to_str().unwrap();
+        // RFC 6265 cookie-string syntax: `name=value; name=value`
+        assert!(cookie.contains("; "), "must use `; ` separator: {cookie}");
+    }
+
+    #[test]
+    fn build_cookie_hpp_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "cookie-hpp").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    // ── path-segment + splice helper ──────────────────────────
+
+    #[test]
+    fn splice_payload_into_path_handles_root_path() {
+        let got = splice_payload_into_path("http://example.com/", "abc");
+        assert_eq!(got, "http://example.com/abc");
+    }
+
+    #[test]
+    fn splice_payload_into_path_handles_no_path_segment_in_target() {
+        let got = splice_payload_into_path("http://example.com", "abc");
+        assert_eq!(got, "http://example.com/abc");
+    }
+
+    #[test]
+    fn splice_payload_into_path_prepends_before_existing_segments() {
+        let got = splice_payload_into_path("http://example.com/api/users", "payload");
+        assert_eq!(got, "http://example.com/payload/api/users");
+    }
+
+    #[test]
+    fn splice_payload_into_path_preserves_query_string() {
+        let got = splice_payload_into_path("http://example.com/api?id=1", "payload");
+        assert_eq!(got, "http://example.com/payload/api?id=1");
+    }
+
+    #[test]
+    fn splice_payload_into_path_preserves_query_string_on_root_path() {
+        let got = splice_payload_into_path("http://example.com/?id=1", "payload");
+        assert_eq!(got, "http://example.com/payload?id=1");
+    }
+
+    #[test]
+    fn splice_payload_into_path_handles_https_scheme() {
+        let got = splice_payload_into_path("https://x.com/api", "p");
+        assert_eq!(got, "https://x.com/p/api");
+    }
+
+    #[test]
+    fn splice_payload_into_path_handles_authority_with_port() {
+        let got = splice_payload_into_path("http://x.com:8080/api", "p");
+        assert_eq!(got, "http://x.com:8080/p/api");
+    }
+
+    #[test]
+    fn build_path_segment_vector_emits_url_with_payload_in_path() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "path-segment").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/api", "q", "PAYLOAD", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let url = req.url().to_string();
+        // The percent-encoded payload appears in the path,
+        // BEFORE the original path segment.
+        assert!(url.contains("/PAYLOAD/api") || url.contains("/PAYLOAD%2Fapi"), "url: {url}");
+    }
+
+    #[test]
+    fn build_path_segment_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "path-segment").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    #[test]
+    fn build_path_segment_percent_encodes_payload() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "path-segment").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "a b", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let url = req.url().to_string();
+        // Space in payload MUST be url-encoded — otherwise the
+        // URL is malformed and reqwest will refuse / mangle.
+        assert!(
+            url.contains("a%20b") || url.contains("a+b"),
+            "space must encode: {url}"
+        );
+    }
+
+    // ── catalogue presence (round 4) ──────────────────────────
+
+    #[test]
+    fn round_four_vectors_are_in_catalogue() {
+        let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
+        for required in ["cookie-hpp", "path-segment"] {
             assert!(names.contains(required), "missing vector {required}");
         }
     }
