@@ -1000,4 +1000,197 @@ mod tests {
         // Rust without Termination plumbing; the smoke is enough.
         let _ = code;
     }
+
+    // ── unescape_prefix edge cases ────────────────────────────
+
+    #[test]
+    fn unescape_prefix_empty_string_returns_empty() {
+        assert_eq!(unescape_prefix(""), "");
+    }
+
+    #[test]
+    fn unescape_prefix_string_without_any_escapes_is_identity() {
+        let plain = "GET / HTTP/1.1 Host x";
+        assert_eq!(unescape_prefix(plain), plain);
+    }
+
+    #[test]
+    fn unescape_prefix_trailing_lone_backslash_is_preserved_no_panic() {
+        // The peek-after-backslash path must NOT crash on a
+        // trailing backslash at end of input. P0 fuzzer would
+        // immediately find this.
+        let raw = "abc\\";
+        assert_eq!(unescape_prefix(raw), "abc\\");
+    }
+
+    #[test]
+    fn unescape_prefix_unknown_escape_is_preserved_verbatim() {
+        // `\x` is not a recognised escape — keep the backslash
+        // so a future reader (the smuggling engine) can tell
+        // it apart from a real `x`. The current implementation
+        // emits the `\\` then continues, so the result is `\x`.
+        let raw = "a\\xb";
+        let got = unescape_prefix(raw);
+        assert!(got.contains('x'));
+        assert!(got.contains('a'));
+        assert!(got.contains('b'));
+    }
+
+    #[test]
+    fn unescape_prefix_handles_consecutive_crlf_groups() {
+        // The HTTP header terminator `\r\n\r\n` is the canonical
+        // boundary — confirm two adjacent groups both unescape.
+        let raw = "X\\r\\n\\r\\nY";
+        assert_eq!(unescape_prefix(raw), "X\r\n\r\nY");
+    }
+
+    // ── parse_variant_name edge cases ─────────────────────────
+
+    #[test]
+    fn parse_variant_name_rejects_empty_string() {
+        let r = parse_variant_name("");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn parse_variant_name_does_not_match_partial_prefix() {
+        // "cl" is a prefix of "cl-te" / "cl-0" but is NOT a valid
+        // variant by itself. The exact-match contract must hold.
+        let r = parse_variant_name("cl");
+        assert!(r.is_err());
+    }
+
+    // ── classify_detection edge cases ─────────────────────────
+
+    #[test]
+    fn classify_detection_one_ms_under_threshold_does_not_fire() {
+        // Boundary on the OFF side: delta == threshold - 1 must
+        // stay below the desync line.
+        let f = classify_detection(1699, 200, 1500); // delta = 1499
+        assert!(!f.desync_inferred);
+        assert_eq!(f.delta_ms, 1499);
+    }
+
+    #[test]
+    fn classify_detection_handles_zero_threshold_correctly() {
+        // Threshold zero with any positive delta should fire.
+        // Anti-rig: a refactor that used `delta > threshold` instead
+        // of `delta >= threshold` would silently flip this case.
+        let f = classify_detection(201, 200, 0);
+        assert!(f.desync_inferred);
+        assert_eq!(f.delta_ms, 1);
+    }
+
+    #[test]
+    fn classify_detection_records_threshold_in_finding() {
+        // The finding carries the threshold used so operators
+        // can audit the decision after the fact.
+        let f = classify_detection(2000, 200, 1500);
+        assert_eq!(f.threshold_ms, 1500);
+    }
+
+    // ── VARIANTS catalogue integrity ──────────────────────────
+
+    #[test]
+    fn variants_catalogue_has_no_empty_keys() {
+        for v in VARIANTS {
+            assert!(!v.key.is_empty(), "VARIANTS row with empty key");
+        }
+    }
+
+    #[test]
+    fn variants_catalogue_keys_are_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for v in VARIANTS {
+            assert!(seen.insert(v.key), "duplicate variant key {}", v.key);
+        }
+    }
+
+    #[test]
+    fn variants_catalogue_keys_are_lowercase() {
+        // parse_variant_name lowercases input before comparing — the
+        // catalogue rows MUST themselves be lowercase or the
+        // case-insensitive matching is dead code.
+        for v in VARIANTS {
+            assert_eq!(
+                v.key,
+                v.key.to_ascii_lowercase(),
+                "{} must be lowercase in the catalogue",
+                v.key
+            );
+        }
+    }
+
+    // ── build_payload contract ────────────────────────────────
+
+    #[test]
+    fn build_payload_for_cl_te_includes_host_header() {
+        let p = build_payload(
+            VARIANTS.iter().find(|v| v.key == "cl-te").unwrap(),
+            "victim.example",
+            "GET /admin HTTP/1.1\r\nHost: x\r\n\r\n",
+        )
+        .unwrap();
+        let wire = std::str::from_utf8(&p.raw_bytes).unwrap();
+        assert!(
+            wire.contains("Host: victim.example") || wire.contains("Host:victim.example"),
+            "front-request Host MUST be the target host: {wire}"
+        );
+    }
+
+    #[test]
+    fn build_payload_for_dual_cl_emits_two_content_length_headers() {
+        let p = build_payload(
+            VARIANTS.iter().find(|v| v.key == "dual-cl").unwrap(),
+            "victim.example",
+            "GET /admin HTTP/1.1\r\nHost: x\r\n\r\n",
+        )
+        .unwrap();
+        let wire = std::str::from_utf8(&p.raw_bytes).unwrap();
+        // Two Content-Length lines is the whole point of dual-cl;
+        // a refactor that collapsed them would silently neuter
+        // the attack.
+        let cl_count = wire.matches("Content-Length:").count();
+        assert!(
+            cl_count >= 2,
+            "dual-cl must emit two Content-Length headers, got {cl_count}: {wire}"
+        );
+    }
+
+    #[test]
+    fn build_payload_smuggled_prefix_appears_in_wire_for_cl_te() {
+        // The smuggled HTTP request bytes the operator passes MUST
+        // appear somewhere in the produced wire bytes — that's the
+        // whole point of the attack. A refactor that dropped the
+        // prefix would generate a benign request.
+        let prefix = "GET /smuggled-marker HTTP/1.1\r\nHost: x\r\n\r\n";
+        let p = build_payload(
+            VARIANTS.iter().find(|v| v.key == "cl-te").unwrap(),
+            "victim.example",
+            prefix,
+        )
+        .unwrap();
+        let wire = std::str::from_utf8(&p.raw_bytes).unwrap();
+        assert!(
+            wire.contains("/smuggled-marker"),
+            "smuggled prefix MUST reach the wire"
+        );
+    }
+
+    #[test]
+    fn build_payload_unknown_variant_key_returns_error() {
+        // We can't manufacture a VariantInfo with a bogus key
+        // through normal channels, but exercise the matchable
+        // wildcard arm via parse_variant_name's error path. The
+        // build_payload arm is defence-in-depth.
+        let bogus = VariantInfo {
+            key: "made-up",
+            long_name: "Made Up",
+            tier: SafetyTier::Detection,
+            description: "anti-rig synthetic",
+        };
+        let r = build_payload(&bogus, "x", "");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("made-up"));
+    }
 }

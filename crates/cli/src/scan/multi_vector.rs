@@ -1933,7 +1933,7 @@ mod tests {
     }
 
     #[test]
-    fn build_post_multipart_b64_raw_payload_is_NOT_present_on_wire() {
+    fn build_post_multipart_b64_raw_payload_is_not_present_on_wire() {
         // Anti-rig: a refactor that accidentally fell through to
         // the plaintext multipart shape would emit the raw payload
         // (defeating the point of the vector).
