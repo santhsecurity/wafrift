@@ -11,6 +11,7 @@
 
 pub(crate) mod baseline;
 pub(crate) mod callback_poll;
+pub(crate) mod detect_phase;
 pub(crate) mod session_init_plug;
 pub(crate) mod state;
 
@@ -21,11 +22,11 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use wafrift_detect::waf_detect;
+// waf_detect now consumed via `crate::scan::detect_phase`.
 use wafrift_encoding::encoding::{self, Strategy};
 use wafrift_encoding::header as header_obfuscation;
 use wafrift_encoding::tamper::TamperRegistry;
-use wafrift_evolution::advisor;
+// advisor now consumed via `crate::scan::detect_phase`.
 use wafrift_evolution::intelligence::IntelligenceLoop;
 use wafrift_grammar::grammar::{self, PayloadType};
 use wafrift_oracle::response_oracle::{ResponseContext, ResponseOracle};
@@ -302,79 +303,18 @@ pub(crate) async fn run_scan(
     };
     let scan_start = Instant::now();
 
-    if scan_text {
-        println!("{}", "[1/3] Detecting WAF...".bold().cyan());
-    }
-    let baseline_response = match http.get(target).send().await {
-        Ok(resp) => resp,
-        Err(err) => {
-            eprintln!(
-                "  {} {} ({})\n    {}",
-                "✗ Cannot reach target:".red().bold(),
-                target,
-                err,
-                "hint: check the URL is reachable, the host resolves, and your network allows the connection".bright_black()
-            );
-            return ExitCode::from(1);
-        }
+    // Step 1: WAF detection + advisor planning — see `detect_phase`.
+    let detect_outcome = match detect_phase::run(&http, target, scan_text).await {
+        Ok(o) => o,
+        Err(code) => return code,
     };
-
-    let baseline_status = baseline_response.status().as_u16();
-    let headers_vec: Vec<(String, String)> = baseline_response
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-        .collect();
-    let body_bytes = baseline_response.bytes().await.unwrap_or_default();
-
-    let detected = waf_detect::detect(baseline_status, &headers_vec, &body_bytes);
-    let top_detection = detected
-        .first()
-        .filter(|result| result.confidence >= waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD);
-    let waf_name = if let Some(result) = top_detection {
-        if scan_text {
-            println!(
-                "  {} {} ({:.0}% confidence)",
-                "✓ Detected:".green().bold(),
-                result.name.bold().yellow(),
-                result.confidence * 100.0
-            );
-        }
-        result.name.clone()
-    } else {
-        if scan_text {
-            println!(
-                "  {}",
-                "⚠ No WAF confidently detected (testing anyway)"
-                    .yellow()
-                    .bold()
-            );
-        }
-        String::from("Unknown")
-    };
-
-    // Advisor: generate WAF-specific evasion plan.
-    let detected_waf_obj = top_detection.cloned();
-    let evasion_plan = advisor::advise(
-        detected_waf_obj.as_ref(),
-        None, // No fingerprint drift yet
-    );
-    if scan_text {
-        for rationale in &evasion_plan.rationale {
-            println!("  {} {}", "📋 Advisor:".bold().cyan(), rationale.yellow());
-        }
-        if evasion_plan.use_header_obfuscation {
-            println!("    {} header obfuscation", "✓".green());
-        }
-        if evasion_plan.use_content_type_switch {
-            println!("    {} content-type switching", "✓".green());
-        }
-        if evasion_plan.use_h2 {
-            println!("    {} HTTP/2 evasion", "✓".green());
-        }
-    }
-
-    // Advisor strategies stored for exploit-phase amplification (WAF detection runs after build_variants).
+    let baseline_status = detect_outcome.baseline_status;
+    let _headers_vec = detect_outcome.headers_vec;
+    let _body_bytes = detect_outcome.body_bytes;
+    let detected = detect_outcome.detected;
+    let waf_name = detect_outcome.waf_name;
+    let _detected_waf_obj = detect_outcome.detected_waf_obj;
+    let evasion_plan = detect_outcome.evasion_plan;
     let advisor_strategies = evasion_plan.encoding_strategies.clone();
 
     // Learning cache: load historical winning pipelines.
