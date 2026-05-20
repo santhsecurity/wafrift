@@ -58,6 +58,9 @@ libc = "0.2"
 
 [dev-dependencies]
 proptest = { workspace = true }
+# Used by safe_body's gzip-bomb integration test — proves the
+# bounded-reader defence actually defeats a real-world bomb.
+flate2 = "1"
 
 [features]
 # proxy-pool (HTTP/SOCKS proxy rotation via wafrift-pool) is on by default

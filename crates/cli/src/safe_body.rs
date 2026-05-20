@@ -402,6 +402,71 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
     }
 
+    #[tokio::test]
+    async fn read_bounded_defends_against_real_gzip_bomb() {
+        // PROOF that the fix works: build a tiny gzip payload that
+        // expands to ~100 MiB at decode time, serve it with
+        // Content-Encoding: gzip, and confirm `read_bounded`
+        // aborts at the cap. Reqwest's gzip decoder sits BEHIND
+        // the bytes_stream chain, so this exercises the full
+        // defence path.
+        use std::io::Write as _;
+        // Build the bomb: 100 MiB of zeros, gzip-compressed.
+        // 100 MiB of zeros gzip to ~100 KiB (super compressible);
+        // the cap of 8 MiB is well below 100 MiB, so the stream
+        // MUST abort.
+        let bomb_uncompressed = vec![0u8; 100 * 1024 * 1024];
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        enc.write_all(&bomb_uncompressed).unwrap();
+        let bomb_gzip = enc.finish().unwrap();
+        assert!(
+            bomb_gzip.len() < 1_000_000,
+            "the bomb's whole point: compressed << uncompressed (got {} bytes)",
+            bomb_gzip.len()
+        );
+
+        // Serve it with Content-Encoding: gzip + Content-Length.
+        let mut framed = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Encoding: gzip\r\n\
+             Content-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
+            bomb_gzip.len()
+        )
+        .into_bytes();
+        framed.extend_from_slice(&bomb_gzip);
+
+        let url = spawn_server(framed).await;
+        let resp = reqwest::Client::builder()
+            .gzip(true)
+            .build()
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap();
+        let start = std::time::Instant::now();
+        let err = read_bounded(resp, DEFAULT_MAX_RESPONSE_BYTES)
+            .await
+            .expect_err("MUST abort on bomb");
+        let elapsed = start.elapsed();
+        match err {
+            ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            } => {
+                assert_eq!(cap_bytes, DEFAULT_MAX_RESPONSE_BYTES);
+                assert!(
+                    observed_bytes > DEFAULT_MAX_RESPONSE_BYTES,
+                    "must have seen MORE than the cap before bailing"
+                );
+            }
+            other => panic!("expected Overrun, got {other:?}"),
+        }
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "the abort must be fast — bomb fully expanded would take much longer"
+        );
+    }
+
     #[test]
     fn max_operator_input_bytes_is_at_least_64_kib_but_under_16_mib() {
         // Floor: a refactor to 1 KiB would break legitimate big-curl
