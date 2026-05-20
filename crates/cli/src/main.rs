@@ -11,6 +11,7 @@ mod bench_diff;
 mod bench_waf;
 mod bypass_probe;
 mod callback_token;
+mod compress_cmd;
 mod config;
 mod detect_cmd;
 mod discover_cmd;
@@ -35,6 +36,7 @@ mod report;
 mod retry_after;
 mod scan;
 mod seed;
+mod session_init;
 mod target_context;
 mod technique_filter;
 mod wafmodel_cmd;
@@ -154,6 +156,13 @@ enum Commands {
     /// payload mutation.
     #[command(name = "parser-diff")]
     ParserDiff(parser_diff_cmd::ParserDiffArgs),
+    /// Wrap a request body in one or more `Content-Encoding` layers
+    /// (gzip / deflate / brotli / chain). The compression-confusion
+    /// attack: WAFs that inspect raw bytes pass over the encoded
+    /// body while the origin decompresses normally. Brotli is the
+    /// headline gap — many WAFs don't ship a brotli decompressor
+    /// even though Chrome / nginx / Apache all do.
+    Compress(compress_cmd::CompressArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -226,6 +235,15 @@ pub struct ScanArgs {
     /// surfaced in each variant's scan report.
     #[arg(long, value_name = "URL")]
     pub callback_url: Option<String>,
+
+    /// Stateful chain mode — fire this curl-format request FIRST,
+    /// capture cookies + Authorization, then re-use them on every
+    /// variant. The file format is identical to `wafrift import-curl`'s
+    /// input (Burp / Chromium "Copy as cURL" pastes work verbatim).
+    /// Defeats WAFs that scrutinise unauthenticated traffic more —
+    /// most do, by a wide margin.
+    #[arg(long, value_name = "CURL_FILE")]
+    pub session_init: Option<PathBuf>,
 
     /// Evasion intensity.
     #[arg(long, value_enum, default_value_t = Level::Heavy)]
@@ -439,6 +457,7 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        Some(Commands::Compress(args)) => compress_cmd::run_compress(args),
     }
 }
 
@@ -558,6 +577,7 @@ async fn run_scan_from_discovery(
             param: param.clone(),
             payload_class: args.payload_class.clone(),
             callback_url: args.callback_url.clone(),
+            session_init: args.session_init.clone(),
             level: args.level,
             encoding_only: args.encoding_only,
             delay_ms: args.delay_ms,

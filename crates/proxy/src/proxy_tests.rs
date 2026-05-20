@@ -1,5 +1,13 @@
 use super::*;
 
+// Symbols carved out of main.rs into focused modules — the tests
+// were written when these all lived inline; re-import them at the
+// new locations so the test surface keeps its existing coverage.
+use crate::findings::{render_live_findings, sanitize_for_markdown};
+use crate::gene_bank_io::{
+    load as load_gene_bank, save as save_gene_bank, PersistedGeneBank, PersistedHostState,
+};
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -1279,6 +1287,7 @@ fn restore_gene_bank_under_cap_keeps_all() {
 
 // ── 3. save_gene_bank tempfile cleanup ─────────────────────────────────────
 
+#[cfg(unix)] // Windows does not block creating files inside a read-only directory.
 #[test]
 fn save_gene_bank_cleans_up_tempfile_on_error() {
     let dir = std::env::temp_dir().join(format!("wafrift_gb_ro_{}", std::process::id()));

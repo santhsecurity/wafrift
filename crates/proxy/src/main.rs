@@ -5,6 +5,9 @@
 //! state is tracked so the proxy learns what works and escalates when
 //! blocks are detected.
 
+mod findings;
+mod gene_bank_io;
+
 use clap::Parser;
 use futures_util::StreamExt;
 use std::collections::{HashMap, VecDeque};
@@ -33,6 +36,7 @@ use wafrift_proxy::rate_limit::RateLimiter;
 use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
     BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed,
+    resolve_forward_url_pinned,
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
@@ -427,13 +431,13 @@ impl WarnThrottle {
 
 /// Mutable proxy state shared across connections.
 #[derive(Default)]
-struct ProxyState {
+pub(crate) struct ProxyState {
     /// Per-host evasion state.
-    hosts: HashMap<String, HostState>,
+    pub(crate) hosts: HashMap<String, HostState>,
     /// FIFO queue tracking host insertion order. Used for deterministic
     /// eviction when the map exceeds its cap — prevents arbitrary
     /// HashMap-bucket-order removal from discarding active hosts.
-    host_fifo: VecDeque<String>,
+    pub(crate) host_fifo: VecDeque<String>,
     /// Total requests proxied.
     total_scanned: u32,
     /// Total WAF blocks observed.
@@ -442,210 +446,29 @@ struct ProxyState {
     techniques_used: HashMap<String, u32>,
 }
 
-/// Subset of `HostState` worth persisting across proxy restarts. Block
-/// counts and pending discovery state re-accumulate naturally; what we
-/// don't want to lose is the painstakingly-discovered winners pool and
-/// the per-host blocklist.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
-struct PersistedHostState {
-    proven_winners: Vec<String>,
-    blocklisted: Vec<String>,
-    waf_name: Option<String>,
-}
+impl ProxyState {
+    /// Accessor for the live-findings renderer in `crate::findings`.
+    #[inline]
+    pub(crate) fn total_scanned(&self) -> u32 {
+        self.total_scanned
+    }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
-struct PersistedGeneBank {
-    /// Format version so future schema changes can be detected.
-    schema: u32,
-    hosts: HashMap<String, PersistedHostState>,
-}
-
-fn default_gene_bank_path(supplied: &str) -> Option<std::path::PathBuf> {
-    if supplied.is_empty() {
-        // Default: ~/.wafrift/gene-bank.json. If $HOME is unset, disable.
-        let home = std::env::var_os("HOME")?;
-        let p = std::path::PathBuf::from(home)
-            .join(".wafrift")
-            .join("gene-bank.json");
-        Some(p)
-    } else if supplied == "off" || supplied == "-" {
-        None
-    } else {
-        Some(std::path::PathBuf::from(supplied))
+    /// Accessor for the live-findings renderer in `crate::findings`.
+    #[inline]
+    pub(crate) fn total_blocks(&self) -> u32 {
+        self.total_blocks
     }
 }
 
-fn load_gene_bank(path: &std::path::Path) -> PersistedGeneBank {
-    match std::fs::read_to_string(path) {
-        Ok(s) => {
-            if s.trim().is_empty() {
-                info!(path = %path.display(), "gene bank file is empty; starting fresh");
-                return PersistedGeneBank::default();
-            }
-            match serde_json::from_str::<PersistedGeneBank>(&s) {
-                Ok(bank) => {
-                    if bank.schema > 1 {
-                        warn!(
-                            path = %path.display(),
-                            schema = bank.schema,
-                            "gene bank has newer schema than expected (1); data may be incomplete"
-                        );
-                    }
-                    bank
-                }
-                Err(e) => {
-                    // Backward-compat: v0.1 gene-bank was a flat HashMap without
-                    // the schema wrapper. Don't discard a practitioner's saved
-                    // discovery just because they upgraded from an older build.
-                    if let Ok(flat) =
-                        serde_json::from_str::<HashMap<String, PersistedHostState>>(&s)
-                    {
-                        warn!(
-                            path = %path.display(),
-                            "loaded v0.1 gene-bank (flat HashMap); migrating to schema 1"
-                        );
-                        return PersistedGeneBank {
-                            schema: 1,
-                            hosts: flat,
-                        };
-                    }
-                    warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "gene bank malformed (invalid JSON); starting fresh. Fix: inspect the file and fix the JSON syntax, or delete it to start over."
-                    );
-                    PersistedGeneBank::default()
-                }
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            info!(path = %path.display(), "gene bank not found; starting fresh");
-            PersistedGeneBank::default()
-        }
-        Err(e) => {
-            warn!(
-                path = %path.display(),
-                error = %e,
-                "gene bank unreadable; starting fresh. Fix: check file permissions."
-            );
-            PersistedGeneBank::default()
-        }
-    }
-}
-
-fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let mut bank = PersistedGeneBank {
-        schema: 1,
-        hosts: HashMap::new(),
-    };
-    for (host, hs) in &state.hosts {
-        // Persist any host where the proxy has accumulated discovery
-        // signal — proven winners, blocklisted techniques, identified
-        // WAF, OR observed blocks. The earlier "skip empty hosts to
-        // keep the file small" rule dropped hosts with only
-        // block-count telemetry, so a practitioner who left the proxy
-        // running through 100 blocked attempts and then SIGTERM'd
-        // would lose every bit of discovery progress on restart.
-        // A host with non-zero blocks is a host worth remembering.
-        if hs.proven_winners.is_empty()
-            && hs.blocklisted.is_empty()
-            && hs.waf_name.is_none()
-            && hs.blocks == 0
-        {
-            continue; // truly empty — skip
-        }
-        bank.hosts.insert(
-            host.clone(),
-            PersistedHostState {
-                proven_winners: hs.proven_winners.clone(),
-                blocklisted: hs.blocklisted.clone(),
-                waf_name: hs.waf_name.clone(),
-            },
-        );
-    }
-    let json = serde_json::to_string_pretty(&bank)?;
-    // Atomic, durable write via tempfile + fsync + rename + parent fsync.
-    // Without the fsyncs a system crash between write and rename can leave
-    // the renamed file zero-length or partially flushed.
-    //
-    // The temp filename includes the PID + a nanosecond timestamp so two
-    // proxies pointed at the same gene-bank path don't both try to
-    // create the same `<path>.tmp` and clobber each other's file
-    // mid-flight (one rename succeeds; the other gets ENOENT). With a
-    // per-writer tmp name each rename is independent — the last one to
-    // rename wins, which matches the existing single-writer semantics.
-    let pid = std::process::id();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let tmp = path.with_extension(format!("json.tmp.{pid}.{nanos}"));
-    let write_result = (|| -> std::io::Result<()> {
-        use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(json.as_bytes())?;
-        f.sync_all()?;
-        Ok(())
-    })();
-    if let Err(e) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, path)?;
-    // Fsync parent directory so the rename is durable.
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent)
-    {
-        let _ = dir.sync_all();
-    }
-    Ok(())
-}
-
-/// Restore persisted host states from disk into the in-memory proxy state.
-///
-/// # Concurrency safety
-///
-/// This function must be called while holding the `ProxyState` mutex.
-/// In `main()` the load+restore is performed before the accept loop
-/// begins, and the mutex is held for the entire operation, so no
-/// request can interleave and create host entries during restore.
-/// The `HashMap::entry` call would merge with (and partially
-/// overwrite) any existing entry, which is why the atomic load+restore
-/// under the lock matters.
-fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
-    let mut restored = 0usize;
-    for (host, persisted) in bank.hosts {
-        let hs = state.hosts.entry(host.clone()).or_default();
-        if !persisted.proven_winners.is_empty() {
-            hs.proven_winners = persisted.proven_winners;
-            hs.discovery_complete = true;
-            restored += 1;
-        }
-        if !persisted.blocklisted.is_empty() {
-            hs.blocklisted = persisted.blocklisted;
-        }
-        if persisted.waf_name.is_some() {
-            hs.waf_name = persisted.waf_name;
-            hs.waf_confirmed = true;
-        }
-        if !state.host_fifo.contains(&host) {
-            state.host_fifo.push_back(host);
-        }
-    }
-    // Enforce the same runtime cap that applies during request processing.
-    // A malicious or corrupted gene-bank with millions of hosts must not
-    // exhaust proxy RAM on startup.
-    while state.hosts.len() > 10_000 {
-        if let Some(oldest) = state.host_fifo.pop_front() {
-            state.hosts.remove(&oldest);
-        } else {
-            break;
-        }
-    }
-    restored
-}
+// Gene-bank persistence (PersistedHostState, PersistedGeneBank,
+// default_gene_bank_path, load_gene_bank, save_gene_bank,
+// restore_gene_bank) lives in `crate::gene_bank_io`. Re-export the
+// fn names callers use locally so the move doesn't touch every
+// call site in this binary.
+use crate::gene_bank_io::{
+    default_gene_bank_path, load as load_gene_bank, restore as restore_gene_bank,
+    save as save_gene_bank,
+};
 
 use wafrift_proxy::extract_host_from_header;
 
@@ -1690,6 +1513,17 @@ async fn forward_wafrift_request(
         }
     }
 
+    // Pin upstream addresses before intercept so a long operator wait
+    // cannot reopen DNS-rebinding TOCTOU on the stealth TLS path.
+    let pinned_upstream = match resolve_forward_url_pinned(&evasion_result.request.url, &policy).await
+    {
+        Ok(v) => v,
+        Err(msg) => {
+            warn!(host = %host, url = %evasion_result.request.url, "{}", msg);
+            return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+        }
+    };
+
     // ── Operator intercept rendezvous (#119) ────────────────────────
     // When intercept-mode is on, park here until the operator
     // releases (forward unmodified) or kills (synthetic 403). 30s
@@ -1786,13 +1620,25 @@ async fn forward_wafrift_request(
             }
             filtered_headers.push((k.clone(), v.clone()));
         }
+        // Coherence: when we're impersonating a browser at the TLS
+        // layer, also emit headers in that browser's canonical
+        // insertion order. Without this, the WAF sees Chrome's
+        // ClientHello but Firefox-shaped header sequence — a
+        // disagreement that more aggressive bot stacks (Cloudflare
+        // Bot Management, Akamai BMP) flag.
+        let profile_name = sc.profile().name();
+        let filtered_headers = wafrift_transport::session_coherence::reorder_headers_for_profile(
+            profile_name,
+            filtered_headers,
+        );
         let stealth_resp = match sc
-            .send(
+            .send_pinned(
                 evasion_result.request.method.as_str(),
                 &evasion_result.request.url,
                 &filtered_headers,
                 evasion_result.request.body.as_deref(),
                 max,
+                Some(&pinned_upstream),
             )
             .await
         {
@@ -2799,74 +2645,8 @@ async fn forward_passthrough(
 /// state. Used by the `/_wafrift/findings.md` endpoint so practitioners
 /// can `curl` a writeup mid-session without exporting + re-importing
 /// through the gene bank file.
-fn render_live_findings(state: &ProxyState) -> String {
-    let mut out = String::new();
-    out.push_str("# wafrift live findings\n\n");
-    out.push_str(&format!(
-        "Total proxied: {} · Total WAF blocks observed: {} · Hosts seen: {}\n\n",
-        state.total_scanned,
-        state.total_blocks,
-        state.hosts.len(),
-    ));
-
-    if state.total_scanned == 0 {
-        out.push_str("No requests have been proxied yet. Send traffic through the proxy to begin evasion discovery.\n");
-        return out;
-    }
-
-    let mut hosts_with_winners: Vec<(&String, &HostState)> = state
-        .hosts
-        .iter()
-        .filter(|(_, hs)| !hs.proven_winners.is_empty())
-        .collect();
-    hosts_with_winners.sort_by(|a, b| a.0.cmp(b.0));
-
-    if hosts_with_winners.is_empty() {
-        out.push_str("_No bypasses discovered yet — keep traffic flowing through the proxy. Blocks are being recorded and will inform technique selection._\n");
-        return out;
-    }
-
-    out.push_str("## Hosts with proven bypasses\n\n");
-    for (host, hs) in hosts_with_winners {
-        // Hostnames come from Host headers — attacker-controllable in
-        // every relevant threat model. If a host contains backticks,
-        // pipes, or asterisks, they'd be interpreted as markdown
-        // formatting (or worse, raw HTML in renderers that allow it)
-        // and the local /_wafrift/findings.md endpoint would become a
-        // stored-markdown-injection sink. Sanitise to the printable-
-        // ASCII subset of valid host characters before interpolating.
-        let host_md = sanitize_for_markdown(host);
-        let waf_md = hs.waf_name.as_deref().map(sanitize_for_markdown);
-        out.push_str(&format!("### `{host_md}`\n\n"));
-        if let Some(waf) = &waf_md {
-            out.push_str(&format!("**Identified WAF:** {waf}\n\n"));
-        }
-        out.push_str("**Working techniques:**\n\n");
-        for t in &hs.proven_winners {
-            out.push_str(&format!("- `{}`\n", sanitize_for_markdown(t)));
-        }
-        out.push('\n');
-        out.push_str(&format!(
-            "**Reproduce:** `wafrift replay --target 'https://{host_md}/<PATH>' --param q --payload '<PAYLOAD>' --from-host '{host_md}'`\n\n",
-        ));
-    }
-    out
-}
-
-/// Replace markdown- and shell-special characters with `_` so attacker-
-/// controlled strings (host headers, technique pool keys round-tripped
-/// through gene bank) cannot break out of the rendered markdown.
-fn sanitize_for_markdown(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '/' | '+' | '@') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
+// render_live_findings + sanitize_for_markdown live in `crate::findings`.
+use crate::findings::render_live_findings;
 
 /// Extract the host:port from a URI authority.
 fn host_addr(uri: &hyper::Uri) -> Option<String> {

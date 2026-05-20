@@ -77,27 +77,27 @@ pub struct ImportCurlArgs {
 }
 
 #[derive(Debug, Default)]
-struct ParsedCurl {
+pub(crate) struct ParsedCurl {
     /// Method override from `-X / --request`. Defaults to GET (or POST
     /// when a body is present).
-    method: Option<String>,
+    pub method: Option<String>,
     /// The bare URL argument. If multiple appear (curl supports it),
     /// only the first is taken — practitioner intent is one request.
-    url: Option<String>,
+    pub url: Option<String>,
     /// All `-H / --header` values, preserved in order.
-    headers: Vec<(String, String)>,
+    pub headers: Vec<(String, String)>,
     /// `-A / --user-agent`.
-    user_agent: Option<String>,
+    pub user_agent: Option<String>,
     /// `-b / --cookie` raw string. Glued onto a `Cookie:` header.
-    cookie: Option<String>,
+    pub cookie: Option<String>,
     /// Concatenated `--data*` bodies.
-    body: Option<String>,
+    pub body: Option<String>,
 }
 
 /// Tokenise a shell-style command line. Honours single quotes, double
 /// quotes, and backslash continuations. Not a full shell parser, but
 /// covers what Burp / Chromium "Copy as cURL" produce.
-fn shell_tokenize(input: &str) -> Result<Vec<String>, String> {
+pub(crate) fn shell_tokenize(input: &str) -> Result<Vec<String>, String> {
     // Strip line continuations so multi-line curls (the common case
     // when copied from a terminal) collapse to one logical line.
     let cleaned = input.replace("\\\n", " ").replace("\\\r\n", " ");
@@ -156,7 +156,7 @@ fn shell_tokenize(input: &str) -> Result<Vec<String>, String> {
 }
 
 /// Parse a tokenised curl invocation into the subset of flags we honour.
-fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
+pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
     let mut p = ParsedCurl::default();
     let mut i = 1; // skip the literal `curl`
     while i < tokens.len() {
@@ -363,6 +363,12 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         // can re-run via `wafrift scan --callback-url ...` if they
         // need a blind-vuln verification path.
         callback_url: None,
+        // Stateful chain mode (session-init) is opt-in via the
+        // scan-side flag; import-curl already represents one
+        // captured request, so chaining a second auth-request curl
+        // file ON TOP would be a confusing UX. Operator can fall
+        // back to `wafrift scan --session-init ...` if needed.
+        session_init: None,
         level: parse_level(&args.level),
         encoding_only: false,
         delay_ms: args.delay_ms,

@@ -244,15 +244,57 @@ pub(crate) async fn run_scan(
         args.delay_ms
     );
 
+    // Step 0: Stateful chain — when --session-init is set, fire the
+    // operator's curl-format auth request FIRST and capture the
+    // resulting cookies + Authorization header. The scan-loop client
+    // then carries these on every subsequent variant, so the WAF
+    // sees AUTHENTICATED traffic — typically the looser of the two
+    // inspection tiers most WAFs run.
+    let session_state: Option<crate::session_init::SessionState> = if let Some(ref path) = args.session_init {
+        if scan_text {
+            println!("{}", "[0/3] Establishing session...".bold().cyan());
+        }
+        match crate::session_init::establish_from_file(
+            path,
+            Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS),
+            args.insecure,
+        )
+        .await
+        {
+            Ok(state) => {
+                if scan_text {
+                    println!("  {} {}", "✓".green(), state.summary.bright_white());
+                }
+                Some(state)
+            }
+            Err(e) => {
+                eprintln!(
+                    "  {} {e}",
+                    "✗ session-init failed:".red().bold()
+                );
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // Step 1: WAF detection — fetch target and identify WAF.
-    let http = match reqwest::Client::builder()
+    let mut http_builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS))
         .danger_accept_invalid_certs(args.insecure)
         .redirect(reqwest::redirect::Policy::limited(5))
         // Use a realistic browser User-Agent to avoid CRS scanner detection rules.
         // PL2+ blocks non-browser UAs (reqwest default triggers 913100/913110).
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-        .build()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36");
+    if let Some(ref state) = session_state {
+        // Default headers travel on every request issued by this
+        // client — so cookies/auth captured at init replay through
+        // detect, baseline, and every variant fire without each
+        // call site needing to remember.
+        http_builder = http_builder.default_headers(state.headers.clone());
+    }
+    let http = match http_builder.build()
     {
         Ok(client) => client,
         Err(e) => {
