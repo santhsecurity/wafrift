@@ -20,6 +20,12 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 rand = { workspace = true }
 flate2 = "1"
+# Brotli for the compression-confusion attack: many WAFs ship a
+# gzip/deflate decompressor but NOT a brotli one, so a brotli-encoded
+# request body reaches the origin (which IS brotli-capable since
+# Chrome 49 / Firefox 44 / nginx 1.11 ship native support) without
+# the WAF ever inspecting the decompressed bytes.
+brotli = "8"
 unicode-normalization = "0.1"
 thiserror = { workspace = true }
 tracing = { workspace = true }

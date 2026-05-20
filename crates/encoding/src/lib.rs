@@ -38,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 pub mod auth_bypass;
+pub mod compression;
 pub mod encoding;
 pub mod error;
 pub mod header;

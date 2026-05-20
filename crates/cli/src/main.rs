@@ -1,12 +1,9 @@
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use colored::Colorize;
-use serde_json::json;
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use wafrift_evolution::differential;
-use wafrift_grammar::grammar;
 
 mod bank;
 mod bank_registry;
@@ -18,6 +15,7 @@ mod detect_cmd;
 mod discover_cmd;
 mod egress_example;
 mod equiv_engine;
+mod evade_cmd;
 mod explain;
 mod helpers;
 mod import_curl;
@@ -25,9 +23,11 @@ mod init_cmd;
 mod interactive;
 mod legendary;
 mod listener_cmd;
+mod man_cmd;
 mod origin_hints;
 mod parser_diff_cmd;
 mod probe_classify;
+mod probe_cmd;
 mod recon_cmd;
 mod replay;
 mod report;
@@ -38,13 +38,8 @@ mod target_context;
 mod technique_filter;
 mod wafmodel_cmd;
 
-use explain::ExplainTrace;
-use helpers::{
-    build_variants_explained, confidence_badge, max_mutations_for_level,
-    payload_type_label, probe_target_label, strategy_pool,
-};
-use target_context::TargetContext;
-use technique_filter::TechniqueFilter;
+// All per-command helpers are imported by their command modules now.
+// main.rs is reduced to dispatch + the top-level Cli/Commands surface.
 
 #[derive(Parser, Debug)]
 #[command(
@@ -78,11 +73,11 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Transform a payload with evasion techniques.
-    Evade(EvadeArgs),
+    Evade(evade_cmd::EvadeArgs),
     /// Identify a WAF from response metadata.
     Detect(detect_cmd::DetectArgs),
     /// Generate differential analysis probes.
-    Probe(ProbeArgs),
+    Probe(probe_cmd::ProbeArgs),
     /// Fire evasion variants against a live target and report bypass results.
     Scan(ScanArgs),
     /// Reproducible WAF benchmark: measure raw block rate AND wafrift bypass rate.
@@ -129,7 +124,7 @@ enum Commands {
     #[command(name = "bypass-probe")]
     BypassProbe(bypass_probe::BypassProbeArgs),
     /// Generate a troff man page for `wafrift` (and optionally subcommands).
-    Man(ManArgs),
+    Man(man_cmd::ManArgs),
     /// Decompile a CRS-class ruleset and report the holes an attacker
     /// can drive through it (the WAF X-ray). Zero-config; `--ruleset`
     /// audits a custom Tier-B config.
@@ -160,102 +155,11 @@ enum Commands {
     ParserDiff(parser_diff_cmd::ParserDiffArgs),
 }
 
-/// Arguments for `wafrift man` — emits a troff(1) man page suitable for
-/// `man -l` consumption or installation under `/usr/local/share/man/man1/`.
-#[derive(clap::Args, Debug)]
-struct ManArgs {
-    /// Subcommand to render. Default: render the top-level `wafrift`
-    /// page. Pass `all` to emit a concatenated stream covering every
-    /// subcommand (one page per `\n.SH` section).
-    #[arg(long)]
-    sub: Option<String>,
-
-    /// Write to this file instead of stdout. Conventional install path
-    /// is `/usr/local/share/man/man1/wafrift.1`.
-    #[arg(long, short)]
-    output: Option<PathBuf>,
-}
-
-#[derive(clap::Args, Debug)]
-struct EvadeArgs {
-    /// Payload to mutate and encode. Mutually exclusive with `--stdin`
-    /// and `--payload-b64`.
-    #[arg(
-        long,
-        conflicts_with_all = ["stdin", "payload_b64"],
-        required_unless_present_any = ["stdin", "payload_b64"]
-    )]
-    payload: Option<String>,
-
-    /// Base64-encoded payload, for bytes a shell cannot pass on argv.
-    /// `--payload $'\x00\x01\x02'` is silently truncated at the first
-    /// NUL by the OS (argv is NUL-terminated C strings), so binary /
-    /// control-byte payloads MUST come in out-of-band: base64 here, or
-    /// raw bytes via `--stdin`. Decoded bytes are interpreted as UTF-8
-    /// (lossless for control/extended characters; the engine is text).
-    #[arg(long, value_name = "BASE64", conflicts_with_all = ["payload", "stdin"])]
-    payload_b64: Option<String>,
-
-    /// Read the payload from stdin instead of `--payload`. Useful for
-    /// piping (`echo 'X' | wafrift evade --stdin ...`) and the only
-    /// binary-safe path for payloads containing NUL/control bytes.
-    /// Refuses to run on an interactive terminal so it doesn't hang
-    /// silently.
-    #[arg(long)]
-    stdin: bool,
-
-    /// Output format: `text` (default) or `json`. `--format json` is
-    /// equivalent to the global `--quiet` for this command and exists
-    /// so `evade` matches `scan`/`bypass-probe`/`import-curl`, whose
-    /// `--format` flag pentesters already script against.
-    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
-    format: String,
-
-    /// Evasion intensity.
-    #[arg(long, value_enum, default_value_t = Level::Medium)]
-    level: Level,
-
-    /// Apply encoding only, without grammar-aware mutations.
-    /// (Shorthand for `--exclude grammar`.)
-    #[arg(long)]
-    encoding_only: bool,
-
-    /// Restrict to listed technique paths (comma-separated; e.g.
-    /// `encoding/url,grammar`). Run `wafrift techniques list` for paths.
-    /// Explicit selection here overrides `--level` for which strategies
-    /// are eligible (the level still bounds variant count).
-    #[arg(long, num_args = 1.., value_delimiter = ',')]
-    only: Vec<String>,
-
-    /// Drop listed technique paths (comma-separated; e.g.
-    /// `encoding/url/triple,smuggling`).
-    #[arg(long, num_args = 1.., value_delimiter = ',')]
-    exclude: Vec<String>,
-
-    /// Filter techniques by where the payload will land (header, body,
-    /// query-param, cookie). Encoding strategies whose output is
-    /// unusable in the chosen context are skipped (visible with --explain).
-    #[arg(long, value_enum)]
-    target_context: Option<TargetContext>,
-
-    /// Show per-technique trace: which strategies ran, which were
-    /// skipped, and why.
-    #[arg(long)]
-    explain: bool,
-
-    /// Write output to a file instead of stdout.
-    #[arg(long, short)]
-    output: Option<PathBuf>,
-}
-
-// `DetectArgs` + `parse_http_status` live in `crate::detect_cmd`.
-
-#[derive(clap::Args, Debug)]
-struct ProbeArgs {
-    /// Generate a smaller probe set.
-    #[arg(long)]
-    quick: bool,
-}
+// Per-command structs + entry points live in their own modules:
+// - `ManArgs` + `run_man`               -> crate::man_cmd
+// - `EvadeArgs` + `run_evade` + helpers -> crate::evade_cmd
+// - `DetectArgs` + `run_detect` + helpers -> crate::detect_cmd
+// - `ProbeArgs` + `run_probe`           -> crate::probe_cmd
 
 /// Arguments for the live WAF scan command. `pub` so sibling modules
 /// (e.g. `import_curl`) can construct one and dispatch through
@@ -443,10 +347,10 @@ fn main() -> ExitCode {
     let quiet = cli.quiet;
     match cli.command {
         None => interactive::run_interactive(),
-        Some(Commands::Evade(args)) => run_evade(args, quiet),
+        Some(Commands::Evade(args)) => evade_cmd::run_evade(args, quiet),
         Some(Commands::Detect(args)) => detect_cmd::run_detect(args, quiet),
         Some(Commands::Probe(args)) => {
-            run_probe(args);
+            probe_cmd::run_probe(args);
             ExitCode::SUCCESS
         }
         Some(Commands::Scan(args)) => {
@@ -511,7 +415,7 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
-        Some(Commands::Man(args)) => run_man(args),
+        Some(Commands::Man(args)) => man_cmd::run_man(args),
         Some(Commands::Audit(args)) => wafmodel_cmd::run_audit(args),
         Some(Commands::Harden(args)) => wafmodel_cmd::run_harden(args),
         Some(Commands::Legendary(args)) => legendary::run_legendary(args),
@@ -526,290 +430,10 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_man(args: ManArgs) -> ExitCode {
-    let cmd = Cli::command();
-    let target_cmd = match args.sub.as_deref() {
-        None | Some("wafrift") => cmd,
-        Some("all") => cmd, // future: walk every subcommand and concat
-        Some(name) => match cmd
-            .get_subcommands()
-            .find(|c| c.get_name() == name)
-            .cloned()
-        {
-            Some(c) => c,
-            None => {
-                let cmd = Cli::command();
-                let names: Vec<&str> = cmd.get_subcommands().map(clap::Command::get_name).collect();
-                eprintln!("error: unknown subcommand {name:?}. Available: {names:?}");
-                return ExitCode::from(1);
-            }
-        },
-    };
-    let man = clap_mangen::Man::new(target_cmd);
-    let mut buf: Vec<u8> = Vec::new();
-    if let Err(e) = man.render(&mut buf) {
-        eprintln!("error: render man page: {e}");
-        return ExitCode::from(1);
-    }
-    match args.output {
-        Some(p) => {
-            if let Some(parent) = p.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Err(e) = std::fs::write(&p, &buf) {
-                eprintln!("error: write {}: {e}", p.display());
-                return ExitCode::from(1);
-            }
-            eprintln!("wrote man page ({} bytes) → {}", buf.len(), p.display());
-        }
-        None => {
-            use std::io::Write;
-            if let Err(e) = std::io::stdout().write_all(&buf) {
-                eprintln!("error: write stdout: {e}");
-                return ExitCode::from(1);
-            }
-        }
-    }
-    ExitCode::SUCCESS
-}
-// (interactive TUI body lives in `crate::interactive::run_interactive`)
+// (interactive TUI body lives in `crate::interactive::run_interactive`;
+//  `run_man` lives in `crate::man_cmd`.)
 
-#[allow(clippy::needless_pass_by_value)]
-fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
-    // `--format json` is the per-command spelling of the global
-    // `--quiet`: both select machine-readable NDJSON. Shadow `quiet`
-    // so every downstream branch honours either spelling.
-    let quiet = quiet || args.format == "json";
-    let payload = match resolve_payload(&args) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("{} {msg}", "Input error:".red().bold());
-            return ExitCode::from(2);
-        }
-    };
-
-    let filter = match TechniqueFilter::parse(&args.only, &args.exclude) {
-        Ok(f) => f,
-        Err(msg) => {
-            eprintln!("{} {msg}", "Filter error:".red().bold());
-            return ExitCode::from(2);
-        }
-    };
-    let payload_type = grammar::classify(&payload);
-    let pool = strategy_pool(args.level, !args.only.is_empty());
-    let strategies = filter.filter_strategies(pool);
-    let max_mutations = max_mutations_for_level(args.level);
-    let encoding_only = args.encoding_only || !filter.grammar_enabled();
-
-    let mut trace = args.explain.then(ExplainTrace::default);
-    let variants = build_variants_explained(
-        &payload,
-        payload_type,
-        encoding_only,
-        &strategies,
-        max_mutations,
-        args.target_context,
-        trace.as_mut(),
-    );
-
-    if variants.is_empty() {
-        if quiet {
-            let mut body = json!({
-                "error": "no variants generated",
-                "payload_type": payload_type_label(payload_type),
-            });
-            if let Some(t) = trace.as_ref() {
-                body["explain"] = t.to_json()["explain"].clone();
-            }
-            if let Some(ref path) = args.output {
-                if let Err(e) = std::fs::write(path, format!("{body}\n")) {
-                    eprintln!("failed to write evade output to {}: {e}", path.display());
-                }
-            } else {
-                println!("{body}");
-            }
-        } else {
-            eprintln!(
-                "{}",
-                "No variants generated for the supplied payload."
-                    .red()
-                    .bold()
-            );
-            if let Some(ctx) = args.target_context {
-                eprintln!(
-                    "  Target context: {} — strategies whose output is unusable here were skipped.",
-                    ctx.label()
-                );
-            }
-            if !args.only.is_empty() && !args.explain {
-                eprintln!(
-                    "  Hint: re-run with --explain to see which techniques were considered and why each was skipped."
-                );
-            }
-            if let Some(t) = trace.as_ref() {
-                t.print_text();
-            }
-        }
-        return ExitCode::from(1);
-    }
-
-    if quiet {
-        // JSON output: one object per line (NDJSON), then an optional trailing
-        // {"explain": [...]} object so consumers can stream variants and still
-        // pick up the trace.
-        let mut buf = String::new();
-        for variant in &variants {
-            let obj = json!({
-                "payload": variant.payload,
-                "techniques": variant.techniques,
-                "confidence": variant.confidence,
-            });
-            if args.output.is_some() {
-                buf.push_str(&obj.to_string());
-                buf.push('\n');
-            } else {
-                println!("{obj}");
-            }
-        }
-        if let Some(t) = trace.as_ref() {
-            let explain_obj = t.to_json();
-            if args.output.is_some() {
-                buf.push_str(&explain_obj.to_string());
-                buf.push('\n');
-            } else {
-                println!("{explain_obj}");
-            }
-        }
-        if let Some(ref path) = args.output {
-            if let Err(e) = std::fs::write(path, &buf) {
-                eprintln!("failed to write evade output to {}: {e}", path.display());
-                return ExitCode::from(1);
-            }
-            eprintln!("evade results written to {}", path.display());
-        }
-    } else {
-        println!(
-            "{} {}",
-            "Payload Type:".bold().cyan(),
-            payload_type_label(payload_type).bold()
-        );
-        println!(
-            "{} {}",
-            "Encoding Level:".bold().cyan(),
-            format!("{:?}", args.level).to_lowercase().yellow()
-        );
-        if let Some(ctx) = args.target_context {
-            println!(
-                "{} {}",
-                "Target Context:".bold().cyan(),
-                ctx.label().yellow()
-            );
-        }
-
-        for (index, variant) in variants.iter().enumerate() {
-            println!(
-                "\n{} {} {}",
-                "Variant".bold().green(),
-                format!("#{}", index + 1).bold().green(),
-                confidence_badge(variant.confidence)
-            );
-            println!(
-                "{} {}",
-                "Techniques:".bold().cyan(),
-                variant.techniques.join(" -> ").yellow()
-            );
-            println!(
-                "{} {}",
-                "Payload:".bold().cyan(),
-                variant.payload.bright_white()
-            );
-        }
-
-        if let Some(t) = trace.as_ref() {
-            t.print_text();
-        }
-    }
-
-    ExitCode::SUCCESS
-}
-
-/// Resolve the evade payload from `--payload`, `--payload-b64`, or
-/// `--stdin`. Clap's `required_unless_present_any` + `conflicts_with`
-/// guarantees exactly one source at the CLI layer; this validates and
-/// decodes the value.
-///
-/// Binary-safety: `--stdin` is read as raw bytes (not
-/// `read_to_string`, which hard-errors on the first invalid UTF-8 byte
-/// and so could never accept a binary payload) and `--payload-b64`
-/// carries arbitrary bytes past the shell's NUL-terminated argv. Both
-/// are lossily decoded to UTF-8 because the mutation/encoding engine
-/// is text — control bytes (`\x00`–`\x1f`) survive losslessly; only
-/// genuinely invalid UTF-8 sequences become U+FFFD.
-fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
-    use base64::Engine as _;
-
-    if let Some(b64) = &args.payload_b64 {
-        let trimmed = b64.trim();
-        if trimmed.is_empty() {
-            return Err("--payload-b64 is empty".to_string());
-        }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(trimmed)
-            .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed))
-            .map_err(|e| format!("--payload-b64 is not valid base64: {e}"))?;
-        if bytes.is_empty() {
-            return Err("--payload-b64 decoded to zero bytes".to_string());
-        }
-        return Ok(String::from_utf8_lossy(&bytes).into_owned());
-    }
-
-    if args.stdin {
-        use std::io::{IsTerminal, Read};
-        if io::stdin().is_terminal() {
-            return Err(
-                "--stdin requires a pipe (e.g. `echo 'X' | wafrift evade --stdin ...`); refusing to wait on an interactive terminal".to_string(),
-            );
-        }
-        let mut buf: Vec<u8> = Vec::new();
-        io::stdin()
-            .read_to_end(&mut buf)
-            .map_err(|e| format!("failed to read payload from stdin: {e}"))?;
-        // Strip a single trailing newline (the `echo 'x' |` case) without
-        // mangling embedded control bytes in a deliberate binary payload.
-        if buf.last() == Some(&b'\n') {
-            buf.pop();
-            if buf.last() == Some(&b'\r') {
-                buf.pop();
-            }
-        }
-        if buf.is_empty() {
-            return Err("stdin produced an empty payload".to_string());
-        }
-        return Ok(String::from_utf8_lossy(&buf).into_owned());
-    }
-
-    let raw = args.payload.clone().ok_or_else(|| {
-        "no payload supplied (use --payload, --payload-b64, or --stdin)".to_string()
-    })?;
-    if raw.is_empty() {
-        // The overwhelmingly common cause of an *empty* `--payload`
-        // value is a shell binary literal: `--payload $'\x00\x01\x02'`.
-        // execve(2) passes argv as NUL-terminated C strings, so the
-        // kernel truncates the argument at the first NUL *before* the
-        // process ever sees it — wafrift receives "", not the bytes.
-        // No amount of in-process parsing can recover them; the only
-        // fix is an out-of-band channel. Say so, with the exact
-        // commands.
-        return Err("--payload is empty. If you passed binary/NUL bytes (e.g. \
-             $'\\x00\\x01\\x02'), the shell truncated the argument at the \
-             first NUL byte before wafrift could see it — argv cannot \
-             carry NULs. Use a binary-safe channel instead:\n  \
-             printf '\\x00\\x01\\x02' | wafrift evade --stdin ...\n  \
-             wafrift evade --payload-b64 \"$(printf '\\x00\\x01\\x02' | base64)\" ..."
-            .to_string());
-    }
-    Ok(raw)
-}
+// `run_evade` + `resolve_payload` live in `crate::evade_cmd`.
 
 // `DetectFetch`, `fetch_for_detect`, `infra_markers` live in
 // `crate::detect_cmd` and are re-exported pub(crate) for use by
@@ -939,21 +563,4 @@ async fn run_scan_from_discovery(
 
 // `run_detect` lives in `crate::detect_cmd`.
 
-#[allow(clippy::needless_pass_by_value)]
-fn run_probe(args: ProbeArgs) {
-    let probes = if args.quick {
-        differential::generate_quick_probes()
-    } else {
-        differential::generate_probes()
-    };
-
-    for probe in probes {
-        let line = json!({
-            "payload": probe.payload,
-            "tests": probe_target_label(&probe.tests),
-            "description": probe.description,
-            "expected_blocked": probe.expected_blocked,
-        });
-        println!("{}", line.to_string().blue());
-    }
-}
+// `run_probe` lives in `crate::probe_cmd`.
