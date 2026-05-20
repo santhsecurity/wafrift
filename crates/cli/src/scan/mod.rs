@@ -1399,12 +1399,17 @@ pub(crate) async fn run_scan(
 
         // Top blocked payloads for rescue attempts — any variant
         // whose payload string isn't already in the bypass set.
+        // Take 20 (vs the earlier 10) — the bench against ModSec
+        // PL4 shows the compression / BOM wrap vectors land at
+        // 100% on these payloads, so doubling the rescue pool
+        // doubles the bypass yield from this phase at the cost
+        // of one bounded request per (payload × vector) pair.
         let bypass_payload_set: std::collections::HashSet<&String> =
             bypass_variants.iter().map(|(_, p, _, _)| p).collect();
         let mut rescue_payloads: Vec<(String, Vec<String>)> = variants
             .iter()
             .filter(|v| !bypass_payload_set.contains(&v.payload))
-            .take(10)
+            .take(20)
             .map(|v| (v.payload.clone(), vec![]))
             .collect();
         rescue_payloads.dedup_by(|a, b| a.0 == b.0);
