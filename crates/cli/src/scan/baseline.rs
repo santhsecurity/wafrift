@@ -54,7 +54,15 @@ pub async fn run(
     let outcome = match http.get(&raw_url).send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
-            let body = resp.bytes().await.unwrap_or_default();
+            // Bounded read — decompression-bomb defence. A hostile
+            // target serving a gzip bomb would OOM the CLI without
+            // this cap.
+            let body = crate::safe_body::read_bounded(
+                resp,
+                crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+            )
+            .await
+            .unwrap_or_default();
             let blocked = is_waf_block(status, &body);
             BaselineOutcome {
                 status,

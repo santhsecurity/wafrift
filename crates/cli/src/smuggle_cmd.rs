@@ -642,8 +642,28 @@ async fn run_probe(args: ProbeSmuggleArgs) -> ExitCode {
         eprintln!("{} tcp flush: {e}", "error:".red());
         return ExitCode::from(1);
     }
+    // Bounded read — hostile target could ship an unbounded
+    // stream and OOM the scanner. Cap at 8 MiB (a real WAF block
+    // response is well under 1 MiB).
+    const MAX_SMUGGLE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
     let mut buf = Vec::with_capacity(4096);
-    let read_fut = stream.read_to_end(&mut buf);
+    let read_fut = async {
+        let mut chunk = [0u8; 8192];
+        loop {
+            match stream.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if buf.len() + n > MAX_SMUGGLE_RESPONSE_BYTES {
+                        // Hostile target — stop reading.
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                Err(_) => break,
+            }
+        }
+        Ok::<(), std::io::Error>(())
+    };
     let elapsed = Instant::now();
     let read_result = timeout(Duration::from_secs(args.timeout_secs), read_fut).await;
     let elapsed_ms = elapsed.elapsed().as_millis() as u64;

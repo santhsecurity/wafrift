@@ -48,7 +48,7 @@ use std::time::Duration;
 use colored::Colorize;
 use reqwest::Client;
 use tokio_util::sync::CancellationToken;
-use wafrift_encoding::compression::{self, Algorithm as CompressionAlgo};
+use wafrift_encoding::compression::{self, Algorithm as CompressionAlgo, chain as compress_chain};
 use wafrift_transport::is_waf_block;
 
 /// A single (vector_name, default_content_type) row in the
@@ -73,11 +73,25 @@ pub const VECTORS: &[Vector] = &[
     Vector { name: "POST-json-br", content_type: "application/json" },
     Vector { name: "POST-form-gz", content_type: "application/x-www-form-urlencoded" },
     Vector { name: "POST-json-gz", content_type: "application/json" },
+    // Chained Content-Encoding (gzip then brotli) — WAFs that
+    // decode ONE compression layer give up at the second, leaving
+    // an opaque blob. Origins decode both per RFC 9110 §8.4.
+    Vector { name: "POST-json-gz-br", content_type: "application/json" },
+    Vector { name: "POST-form-gz-br", content_type: "application/x-www-form-urlencoded" },
     Vector { name: "POST-json-bom", content_type: "application/json" },
     Vector { name: "POST-json-dupkey", content_type: "application/json" },
     Vector { name: "POST-json-array", content_type: "application/json" },
     Vector { name: "POST-json-as-plain", content_type: "text/plain" },
     Vector { name: "POST-form-as-octet", content_type: "application/octet-stream" },
+    // charset=utf-7 — WAFs route JSON parsing by charset; many
+    // refuse utf-7 + fall through to no body inspection. Modern
+    // backends (Python json, jsoniter, Go encoding/json) accept
+    // any charset that decodes to valid UTF-8 octets.
+    Vector { name: "POST-json-utf7", content_type: "application/json; charset=utf-7" },
+    // Duplicate-boundary multipart — two boundary strings, WAF
+    // tracks one, origin tracks the other; the attack part is
+    // visible only to the "wrong" one.
+    Vector { name: "POST-multipart-dupbound", content_type: "multipart/form-data" },
     Vector { name: "cookie", content_type: "" },
     Vector { name: "hpp", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
@@ -196,6 +210,64 @@ fn build_request_for_vector(
                     None
                 }
             }
+        }
+        "POST-json-gz-br" | "POST-form-gz-br" => {
+            let raw = if vector.name == "POST-json-gz-br" {
+                serde_json::json!({ param: payload }).to_string()
+            } else {
+                format!("{param}={}", urlencoding::encode(payload))
+            };
+            // Chain: outer = gzip, inner = brotli — body is
+            // gzip(brotli(payload)). WAFs that decode gzip then
+            // stop see a brotli blob; WAFs without brotli see the
+            // gzip blob; origins per RFC 9110 §8.4 decode both
+            // outer-to-inner.
+            match compress_chain(
+                raw.as_bytes(),
+                &[CompressionAlgo::Gzip, CompressionAlgo::Brotli],
+            ) {
+                Ok(blob) => Some(
+                    http.post(target)
+                        .header("Content-Type", ct)
+                        .header("Content-Encoding", blob.content_encoding)
+                        .body(blob.body),
+                ),
+                Err(e) => {
+                    eprintln!("[wafrift scan] gzip,br chain skipped: {e}");
+                    None
+                }
+            }
+        }
+        "POST-json-utf7" => {
+            // charset=utf-7 header → WAFs that route JSON parsing
+            // by declared charset refuse the body / fall through
+            // to no inspection. The body itself stays UTF-8;
+            // modern backends ignore the charset hint and just
+            // parse the bytes (Python json, jsoniter, Go's
+            // encoding/json, Java Jackson all accept).
+            let raw = serde_json::json!({ param: payload }).to_string();
+            Some(http.post(target).header("Content-Type", ct).body(raw))
+        }
+        "POST-multipart-dupbound" => {
+            // Two boundary strings declared (header lists one;
+            // body uses both). WAFs that re-parse the boundary
+            // from the body see one split, origins per RFC 7578
+            // honour ONLY the header-declared boundary.
+            let header_boundary = format!("----WafRiftA{fire_counter:x}");
+            let body_boundary = format!("----WafRiftB{fire_counter:x}");
+            let body = format!(
+                "--{header_boundary}\r\nContent-Disposition: form-data; name=\"{param}\"\r\n\r\n{payload}\r\n\
+                 --{body_boundary}\r\nContent-Disposition: form-data; name=\"decoy\"\r\n\r\nharmless\r\n\
+                 --{header_boundary}--\r\n",
+            );
+            Some(
+                http.post(target)
+                    .header(
+                        "Content-Type",
+                        format!("multipart/form-data; boundary={header_boundary}"),
+                    )
+                    .body(body),
+            )
         }
         "POST-json-bom" => {
             // UTF-8 BOM (EF BB BF) prefix on a JSON body. ModSec's
@@ -316,7 +388,14 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
             let is_blocked = match result {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
-                    let body = resp.bytes().await.unwrap_or_default();
+                    // Bounded read — hostile target could ship a
+                    // gzip-bomb response that OOMs the scanner.
+                    let body = crate::safe_body::read_bounded(
+                        resp,
+                        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                    )
+                    .await
+                    .unwrap_or_default();
                     is_waf_block(status, &body)
                 }
                 Err(_) => {
@@ -614,6 +693,73 @@ mod tests {
         // future regression that skipped vectors entirely would
         // surface here.
         assert_eq!(outcome.vector_results.len(), VECTORS.len());
+    }
+
+    #[test]
+    fn build_post_json_gz_br_emits_chain_content_encoding() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-gz-br").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ce = req.headers().get("content-encoding").unwrap().to_str().unwrap();
+        assert!(
+            ce.starts_with("gzip"),
+            "outer encoding must be gzip per RFC 9110 §8.4 list order"
+        );
+        assert!(ce.contains("br"), "inner encoding must be brotli");
+        // Round-trip: decode the body and confirm we recover JSON.
+        use wafrift_encoding::compression::{CompressedBody, decompress};
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let blob = CompressedBody {
+            body: body.to_vec(),
+            content_encoding: ce.to_string(),
+        };
+        let plain = decompress(&blob).expect("chain decode");
+        let s = String::from_utf8(plain).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(parsed["q"], "abc");
+    }
+
+    #[test]
+    fn build_post_json_utf7_declares_charset_in_content_type() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-utf7").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("charset=utf-7"));
+        assert!(ct.starts_with("application/json"));
+    }
+
+    #[test]
+    fn build_post_multipart_dupbound_uses_two_distinct_boundaries() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-multipart-dupbound")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 7)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body_bytes = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let body = std::str::from_utf8(body_bytes).unwrap();
+        // Header-declared boundary must appear in the Content-Type header.
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.starts_with("multipart/form-data; boundary="));
+        // The body must contain TWO distinct boundary strings —
+        // one in the header, one decoy. Both prefixed by --.
+        assert!(body.contains("WafRiftA"));
+        assert!(body.contains("WafRiftB"));
+        // The attack value must live in the header-boundary's part,
+        // decoy in the body-boundary's part.
+        let a_pos = body.find("WafRiftA").unwrap();
+        let attack_pos = body.find("attack").expect("attack must appear");
+        assert!(a_pos < attack_pos, "attack must follow the header boundary");
     }
 
     #[tokio::test]

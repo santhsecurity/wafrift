@@ -386,7 +386,13 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
         .await
         .map_err(|e| format!("baseline GET: {e}"))?;
     let baseline_status = baseline_resp.status().as_u16();
-    let baseline_body = baseline_resp.bytes().await.unwrap_or_default();
+    // Bounded read — decompression-bomb defence.
+    let baseline_body = crate::safe_body::read_bounded(
+        baseline_resp,
+        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+    )
+    .await
+    .unwrap_or_default();
     let baseline_len = baseline_body.len();
 
     let variants = generate_variants(&baseline_path);
@@ -409,7 +415,7 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
             let url = format!("{origin_c}{path}", origin_c = origin_c, path = v.variant_path);
             let resp = client_c.get(&url).send().await.ok()?;
             let probe_status = resp.status().as_u16();
-            let body = resp.bytes().await.unwrap_or_default();
+            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
             let probe_len = body.len();
             let delta = if baseline_len == 0 {
                 if probe_len == 0 { 0.0 } else { 100.0 }

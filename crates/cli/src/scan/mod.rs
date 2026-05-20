@@ -432,7 +432,7 @@ pub(crate) async fn run_scan(
                         scan_url_with_param(target, &args.param, &urlencoding::encode(enc_payload));
                     if let Ok(resp) = http.get(&url).send().await {
                         let status = resp.status().as_u16();
-                        let body = resp.bytes().await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                         if !is_waf_block(status, &body) {
                             cache_hit_bypass = true;
                             bypassed += 1;
@@ -676,7 +676,7 @@ pub(crate) async fn run_scan(
                         } else {
                             None
                         };
-                        let body = resp.bytes().await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                         let ctx = ResponseContext {
                             status,
                             body: body.to_vec(),
@@ -892,7 +892,7 @@ pub(crate) async fn run_scan(
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = resp.bytes().await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                         oracle.classify(&ResponseContext {
                             status,
                             body: body.to_vec(),
@@ -1117,7 +1117,7 @@ pub(crate) async fn run_scan(
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = resp.bytes().await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                         is_waf_block(status, &body)
                     }
                     Err(_) => {
@@ -1192,7 +1192,7 @@ pub(crate) async fn run_scan(
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = resp.bytes().await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                         is_waf_block(status, &body)
                     }
                     Err(_) => {
@@ -1285,7 +1285,7 @@ pub(crate) async fn run_scan(
                     let is_blocked = match http.get(&url).send().await {
                         Ok(resp) => {
                             let status = resp.status().as_u16();
-                            let body = resp.bytes().await.unwrap_or_default();
+                            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                             is_waf_block(status, &body)
                         }
                         Err(_) => {
@@ -1492,7 +1492,7 @@ pub(crate) async fn run_scan(
                 {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = resp.bytes().await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                         oracle.classify(&ResponseContext {
                             status,
                             body: body.to_vec(),
@@ -1605,7 +1605,7 @@ pub(crate) async fn run_scan(
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = resp.bytes().await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
                         oracle.classify(&ResponseContext {
                             status,
                             body: body.to_vec(),

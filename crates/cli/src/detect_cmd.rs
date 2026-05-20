@@ -133,8 +133,21 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
                 )
             })
             .collect();
-        // Cap the body read: don't let a hostile/huge response OOM the CLI.
-        let bytes = resp.bytes().await.map_err(|e| format!("read body: {e}"))?;
+        // Cap the body read against decompression bombs — reqwest
+        // ships gzip/brotli features and auto-decodes Content-Encoding,
+        // so a 1 KB gzip bomb expanding to 100 GB would OOM the CLI
+        // before reaching .bytes().await. The bounded stream reader
+        // aborts AS SOON as the cap is exceeded; we then truncate to
+        // the detection corpus's expected upper bound (64 KiB).
+        let bytes = match crate::safe_body::read_bounded(
+            resp,
+            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+        )
+        .await
+        {
+            Ok(b) => b,
+            Err(e) => return Err(format!("read body: {e}")),
+        };
         let body = bytes[..bytes.len().min(64 * 1024)].to_vec();
         Ok((status, headers, body))
     })

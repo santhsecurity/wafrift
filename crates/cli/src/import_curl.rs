@@ -440,7 +440,7 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
             )
         })
         .collect();
-    let body = resp.bytes().await.unwrap_or_default();
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
     let body = &body[..body.len().min(64 * 1024)];
     eprintln!(
         "probe: {method} {target} → HTTP {status} ({} headers)",

@@ -34,6 +34,7 @@ mod recon_cmd;
 mod replay;
 mod report;
 mod retry_after;
+mod safe_body;
 mod scan;
 mod seed;
 mod session_init;
