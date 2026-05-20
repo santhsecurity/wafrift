@@ -96,16 +96,27 @@ pub(crate) async fn run_scan(
     let max_mutations = max_mutations_for_level(args.level);
 
     // Gene bank: re-order strategies so historically proven ones go first.
+    // When `--payload-class` is set, prefer the per-class winners (a SQLi
+    // scan against Cloudflare warm-starts from the chains that beat CF
+    // on SQLi yesterday — not the global average); the class-aware lookup
+    // falls back to the global winners when this WAF has no per-class
+    // history yet, so unset `--payload-class` keeps the existing
+    // behaviour.
+    let payload_class_pre = args.payload_class.as_deref().unwrap_or("");
     let gene_seed_names: Vec<String> = match GeneBank::open_default() {
         Ok(mut bank) => {
-            // Try "Unknown" as fallback since WAF detection hasn't run yet.
-            // We'll also re-check after detection.
             let all_names: Vec<String> = bank
                 .list_wafs()
                 .into_iter()
                 .flat_map(|waf| {
                     bank.load(&waf)
-                        .map(wafrift_strategy::gene_bank::WafGenome::seed_winners)
+                        .map(|g| {
+                            if payload_class_pre.is_empty() {
+                                g.seed_winners()
+                            } else {
+                                g.seed_winners_for_class(payload_class_pre)
+                            }
+                        })
                         .unwrap_or_default()
                 })
                 .collect();
@@ -2102,22 +2113,42 @@ pub(crate) async fn run_scan(
         .collect();
 
     if !stats.is_empty() {
+        // When `--payload-class` was set, persist BOTH the global
+        // totals AND a per-class breakdown so subsequent scans of the
+        // same `(waf, class)` warm-start with class-specific winners.
+        let payload_class_post = args.payload_class.as_deref().unwrap_or("");
         match GeneBank::open_default() {
-            Ok(mut bank) => match bank.merge_and_save(&waf_name, &stats) {
-                Ok(()) => {
-                    if scan_text {
-                        println!(
-                            "\n{} {} {}",
-                            "🧬".bold(),
-                            "Gene bank updated:".bold().cyan(),
-                            format!("{} techniques saved for {waf_name}", stats.len()).yellow()
-                        );
+            Ok(mut bank) => {
+                let save_result = if payload_class_post.is_empty() {
+                    bank.merge_and_save(&waf_name, &stats)
+                } else {
+                    bank.merge_and_save_for_class(&waf_name, payload_class_post, &stats)
+                };
+                match save_result {
+                    Ok(()) => {
+                        if scan_text {
+                            let class_suffix = if payload_class_post.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" (class={payload_class_post})")
+                            };
+                            println!(
+                                "\n{} {} {}",
+                                "🧬".bold(),
+                                "Gene bank updated:".bold().cyan(),
+                                format!(
+                                    "{} techniques saved for {waf_name}{class_suffix}",
+                                    stats.len()
+                                )
+                                .yellow()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("  {} {}", "⚠ Gene bank save failed:".yellow(), e);
                     }
                 }
-                Err(e) => {
-                    eprintln!("  {} {}", "⚠ Gene bank save failed:".yellow(), e);
-                }
-            },
+            }
             Err(e) => {
                 eprintln!("  {} {}", "⚠ Gene bank unavailable:".yellow(), e);
             }

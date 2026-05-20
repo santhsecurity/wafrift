@@ -1,0 +1,770 @@
+//! `wafrift listener` — out-of-band callback receiver for blind /
+//! stored vulnerability oracles.
+//!
+//! Some classes of vulnerability never echo a verdict on the *same*
+//! response that triggered them:
+//!
+//! - **Blind SQLi (time-based)** — the difference is latency, not body.
+//! - **Stored XSS** — the script executes when a *different* user
+//!   loads the page, hours later.
+//! - **Blind SSRF** — the server-side fetch hits a host we control;
+//!   the original response is just a generic 200/500.
+//! - **Out-of-band command injection** — `nslookup attacker.example`
+//!   reaches our DNS, not the HTTP response.
+//!
+//! For each of these the oracle is an **external side-channel**: a
+//! callback that arrives at infrastructure WE own, tagged with a
+//! unique token that lets us correlate it back to the scan request
+//! that planted it. This module is the callback receiver.
+//!
+//! Workflow:
+//!
+//! ```text
+//!  wafrift listener --bind 0.0.0.0:9000              # start listener
+//!  wafrift scan --target T --payload "<...?token=ABCD...>"
+//!  (target's backend fetches http://listener.host:9000/ABCD)
+//!  listener logs the callback → operator correlates → blind hit
+//! ```
+//!
+//! Design notes (the load-bearing ones):
+//!
+//! - **Tokens are 128-bit, base32-encoded, collision-resistant.**
+//!   Random 16 bytes from `rand::thread_rng`; base32-no-padding so the
+//!   token is URL-safe without encoding (the typical embed point is a
+//!   URL path or query string). 128 bits is the same security floor
+//!   as a UUIDv4.
+//! - **The HTTP server is intentionally minimal.** Any GET / POST /
+//!   PUT / etc. on `/<token-or-anything>` counts as a callback; the
+//!   server records `(timestamp, method, path, source_ip, headers,
+//!   body_prefix)` and never executes anything. Body capped at
+//!   8 KiB (a callback that ships an exfil >8K is a different
+//!   problem).
+//! - **No HTTPS by default.** The listener runs HTTP — operators
+//!   front it with their own TLS-terminating reverse proxy or
+//!   Cloudflare tunnel when they need encryption. Shipping a self-
+//!   signed cert that no target will trust is worse than no TLS at
+//!   all.
+//! - **Bind to 127.0.0.1 by default.** Public-facing listeners are
+//!   an authorisation footgun. The operator has to type `--bind
+//!   0.0.0.0:PORT` to expose the listener — that explicit step is
+//!   the consent gate.
+//! - **Token-to-request correlation is the caller's problem.** This
+//!   module gives you the token, the embed point is up to the
+//!   scanner. Future work integrates this directly into `scan` so
+//!   the operator runs one command end-to-end; today it's a
+//!   building block.
+
+use clap::Args;
+use colored::Colorize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::process::ExitCode;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::RwLock;
+
+#[derive(Args, Debug)]
+pub struct ListenerArgs {
+    /// Address to bind the callback receiver to. Defaults to
+    /// loopback — public exposure (`0.0.0.0:PORT`) is an explicit
+    /// opt-in so an operator does not accidentally stand up a
+    /// world-readable side-channel.
+    #[arg(long, default_value = "127.0.0.1:9000")]
+    pub bind: String,
+
+    /// Number of tokens to pre-mint on startup (printed to stdout
+    /// so the operator can copy them into payloads). Each token
+    /// is independent — a callback on any of them is logged.
+    #[arg(long, default_value_t = 4)]
+    pub tokens: u32,
+
+    /// Output format: `text` prints a human stream; `json` emits one
+    /// NDJSON line per callback so the listener pipes cleanly into
+    /// `jq`, `tee`, or a downstream log collector.
+    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    pub format: String,
+
+    /// Cap on the body bytes recorded per callback. Anything beyond
+    /// is truncated (with a `truncated_bytes` counter in the JSON).
+    /// 8 KiB by default — generous for the typical "ping" payload,
+    /// hostile for exfil-style abuse.
+    #[arg(long, default_value_t = 8 * 1024)]
+    pub max_body_bytes: usize,
+
+    /// HTTP read timeout per connection (seconds). Closes lingering
+    /// connections that send headers but never the body.
+    #[arg(long, default_value_t = 10)]
+    pub read_timeout_secs: u64,
+}
+
+/// One observed inbound HTTP request — the smallest unit of evidence
+/// for an OOB callback. Serialised verbatim into NDJSON when
+/// `--format json` is selected.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Callback {
+    /// Unix timestamp (seconds) the callback was received.
+    pub received_at: u64,
+    /// Source IP:port of the inbound connection. Parsed via
+    /// `TcpStream::peer_addr`; useful when the listener is fronted by
+    /// a proxy that doesn't rewrite `X-Forwarded-For` cleanly.
+    pub source: String,
+    /// HTTP method as the inbound client sent it (uppercased).
+    pub method: String,
+    /// Request path (`/foo?bar=baz` form, including query string).
+    pub path: String,
+    /// Token extracted from the path / query string if it matches one
+    /// of the pre-minted tokens, else `None`. The token-match logic
+    /// is conservative: only an exact substring match against the
+    /// registered token set counts — it never tries to fuzzy-match
+    /// or normalise URL-encoded forms.
+    pub matched_token: Option<String>,
+    /// Inbound request headers (lowercased keys for stable diffing).
+    pub headers: Vec<(String, String)>,
+    /// Body bytes (UTF-8-lossy decoded, capped at `max_body_bytes`).
+    pub body_preview: String,
+    /// How many body bytes were dropped past the cap.
+    pub body_truncated_bytes: usize,
+}
+
+/// In-memory registry shared between the HTTP accept loop and the
+/// caller. Holds the set of valid tokens + the running callback log.
+//
+// `dead_code` is silenced because this is a binary crate: `cargo build`
+// only sees the call sites in `run_listener` + the tests, which exercise
+// every public method, but rustc's reachability analysis on `--bin`
+// targets does not always connect them. The library surface IS used.
+#[allow(dead_code)]
+#[derive(Debug, Default)]
+pub struct Registry {
+    tokens: RwLock<HashMap<String, ()>>,
+    callbacks: RwLock<Vec<Callback>>,
+}
+
+// See the comment on `Registry` for why these methods are marked
+// `dead_code`-allowed: the unit tests exercise them, but rustc's
+// reachability analysis on the binary's `main.rs` doesn't trace
+// through the test cfg-gated paths. They are real public API.
+#[allow(dead_code)]
+impl Registry {
+    /// New empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pre-mint `n` random tokens and return them in registration order.
+    pub async fn mint(&self, n: u32) -> Vec<String> {
+        let mut out = Vec::with_capacity(n as usize);
+        let mut tokens = self.tokens.write().await;
+        for _ in 0..n {
+            let tok = generate_token();
+            tokens.insert(tok.clone(), ());
+            out.push(tok);
+        }
+        out
+    }
+
+    /// Register an already-generated token. Useful when the caller
+    /// wants control over token generation (e.g. embedding a
+    /// payload-shape hint in the token prefix).
+    pub async fn register(&self, token: impl Into<String>) {
+        self.tokens.write().await.insert(token.into(), ());
+    }
+
+    /// Snapshot of currently registered tokens.
+    pub async fn known_tokens(&self) -> Vec<String> {
+        self.tokens.read().await.keys().cloned().collect()
+    }
+
+    /// Snapshot of all recorded callbacks.
+    pub async fn callbacks(&self) -> Vec<Callback> {
+        self.callbacks.read().await.clone()
+    }
+
+    /// Count of callbacks that matched a registered token. The
+    /// scan-side oracle gates on this: zero matched callbacks for a
+    /// given payload = no echo-back = no blind bypass.
+    pub async fn matched_count(&self) -> usize {
+        self.callbacks
+            .read()
+            .await
+            .iter()
+            .filter(|c| c.matched_token.is_some())
+            .count()
+    }
+
+    /// Look for the first registered token that appears as a
+    /// substring of `s`. Returns the matched token, not the location.
+    /// Conservative: no URL-decoding, no case folding — the caller
+    /// chose the token alphabet (base32) so it survives unmolested
+    /// through every reasonable transport.
+    pub async fn match_token_in(&self, s: &str) -> Option<String> {
+        let tokens = self.tokens.read().await;
+        tokens.keys().find(|t| s.contains(t.as_str())).cloned()
+    }
+
+    /// Append one observed callback. The matched_token field is
+    /// populated by the listener loop before push (so the registry
+    /// stays a pure store).
+    async fn push(&self, cb: Callback) {
+        self.callbacks.write().await.push(cb);
+    }
+}
+
+/// Generate one 128-bit base32 token. Suitable for embedding in URLs
+/// (RFC 4648 alphabet, no padding) so the operator can drop it
+/// straight into a payload without further encoding. Collision
+/// probability for N tokens is N²/2^129 — for any realistic N this
+/// is < the chance of CPU cosmic-ray flip.
+#[must_use]
+pub fn generate_token() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    base32_encode(&bytes)
+}
+
+/// RFC 4648 base32 (upper-case, no padding) — purposefully not
+/// pulling a crate for this since the alphabet is fixed and 16 bytes
+/// is the only input size we ever encode. Less code = less attack
+/// surface for the listener.
+fn base32_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut out = String::with_capacity((bytes.len() * 8).div_ceil(5));
+    let mut buffer: u32 = 0;
+    let mut bits: u32 = 0;
+    for &b in bytes {
+        buffer = (buffer << 8) | u32::from(b);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            let idx = ((buffer >> bits) & 0x1F) as usize;
+            out.push(char::from(ALPHABET[idx]));
+        }
+    }
+    if bits > 0 {
+        let idx = ((buffer << (5 - bits)) & 0x1F) as usize;
+        out.push(char::from(ALPHABET[idx]));
+    }
+    out
+}
+
+/// Entry point for `wafrift listener`. Blocks until SIGINT / SIGTERM.
+///
+/// # Errors
+///
+/// Returns `ExitCode::from(1)` if the bind address is malformed or
+/// the socket cannot be opened.
+pub fn run_listener(args: ListenerArgs) -> ExitCode {
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("{} tokio runtime: {e}", "error:".red());
+            return ExitCode::from(1);
+        }
+    };
+    rt.block_on(async move {
+        let registry = Arc::new(Registry::new());
+        let minted = registry.mint(args.tokens).await;
+
+        // Print the minted tokens so the operator can copy them into
+        // payloads. In json mode emit one JSON object describing the
+        // listener's startup state so downstream consumers know which
+        // tokens are valid.
+        if args.format == "json" {
+            let startup = serde_json::json!({
+                "kind": "listener_started",
+                "bind": args.bind,
+                "tokens": minted,
+            });
+            println!("{startup}");
+        } else {
+            println!(
+                "{} {}",
+                "[wafrift listener]".bold().cyan(),
+                format!("binding {}", args.bind).bright_black()
+            );
+            for t in &minted {
+                println!("  {} {}", "token:".green(), t.bold());
+            }
+            println!(
+                "  {}",
+                "(embed any of the above in your payload; callbacks log below)".bright_black()
+            );
+        }
+
+        let addr: SocketAddr = match args.bind.parse() {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("{} bind {} parse: {e}", "error:".red(), args.bind);
+                return ExitCode::from(1);
+            }
+        };
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("{} bind {addr}: {e}", "error:".red());
+                return ExitCode::from(1);
+            }
+        };
+
+        let format = args.format.clone();
+        let max_body = args.max_body_bytes;
+        let read_timeout = Duration::from_secs(args.read_timeout_secs);
+        loop {
+            let (sock, peer) = match listener.accept().await {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("{} accept: {e}", "warn:".yellow());
+                    continue;
+                }
+            };
+            let registry_c = registry.clone();
+            let format_c = format.clone();
+            tokio::spawn(async move {
+                let cb = match handle_conn(sock, peer, &registry_c, max_body, read_timeout).await {
+                    Ok(cb) => cb,
+                    Err(_) => return,
+                };
+                render_callback(&cb, &format_c);
+                registry_c.push(cb).await;
+            });
+        }
+    })
+}
+
+fn render_callback(cb: &Callback, format: &str) {
+    if format == "json" {
+        if let Ok(line) = serde_json::to_string(cb) {
+            println!("{line}");
+        }
+    } else {
+        let tag = cb
+            .matched_token
+            .as_deref()
+            .map(|t| format!("[token={}]", t))
+            .unwrap_or_else(|| "[unknown]".to_string());
+        println!(
+            "{} {} {} {} {} {}",
+            "callback:".bright_green(),
+            cb.received_at,
+            cb.source,
+            cb.method.yellow(),
+            cb.path.bright_white(),
+            tag.cyan()
+        );
+    }
+}
+
+/// Read one HTTP request off the socket and translate to a Callback.
+/// Handles malformed requests by returning Err — the connection is
+/// closed and the listener loop moves on.
+async fn handle_conn(
+    mut sock: tokio::net::TcpStream,
+    peer: SocketAddr,
+    registry: &Registry,
+    max_body: usize,
+    read_timeout: Duration,
+) -> Result<Callback, String> {
+    let mut buf = vec![0u8; 16 * 1024];
+    // Cap total bytes read so a malicious client cannot keep us in
+    // an infinite read loop without ever sending the header
+    // terminator. 64 KiB is more than enough for any header section.
+    let mut total_read = 0_usize;
+    let mut header_end: Option<usize> = None;
+    let header_cap = 64 * 1024;
+    while header_end.is_none() {
+        let read_fut = sock.read(&mut buf[total_read..]);
+        let n = tokio::time::timeout(read_timeout, read_fut)
+            .await
+            .map_err(|_| "timeout reading headers".to_string())?
+            .map_err(|e| format!("read: {e}"))?;
+        if n == 0 {
+            return Err("EOF before headers complete".into());
+        }
+        total_read += n;
+        if let Some(pos) = find_double_crlf(&buf[..total_read]) {
+            header_end = Some(pos);
+            break;
+        }
+        if total_read >= header_cap {
+            return Err("header too large".into());
+        }
+        if total_read == buf.len() {
+            buf.resize(buf.len() * 2, 0);
+        }
+    }
+    let header_end = header_end.expect("loop exited only when found");
+    let head = std::str::from_utf8(&buf[..header_end]).map_err(|e| format!("non-utf8 headers: {e}"))?;
+    let mut lines = head.split("\r\n");
+    let request_line = lines
+        .next()
+        .ok_or_else(|| "missing request line".to_string())?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("").to_ascii_uppercase();
+    let path = parts.next().unwrap_or("").to_string();
+
+    let mut headers: Vec<(String, String)> = Vec::new();
+    let mut content_length: usize = 0;
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            let k_lc = k.trim().to_ascii_lowercase();
+            let v_trim = v.trim().to_string();
+            if k_lc == "content-length" {
+                content_length = v_trim.parse().unwrap_or(0);
+            }
+            headers.push((k_lc, v_trim));
+        }
+    }
+
+    // Body = (bytes already in buf past the header terminator) + the rest.
+    let header_terminator_len = 4; // CRLF CRLF
+    let body_start = header_end + header_terminator_len;
+    let already_have = total_read.saturating_sub(body_start);
+    let mut body_truncated = 0_usize;
+    let mut body = Vec::with_capacity(content_length.min(max_body));
+    let take = already_have.min(max_body);
+    body.extend_from_slice(&buf[body_start..body_start + take]);
+    let mut remaining = content_length.saturating_sub(already_have);
+    while remaining > 0 {
+        let mut chunk = vec![0u8; remaining.min(16 * 1024)];
+        let read_fut = sock.read(&mut chunk);
+        let n = tokio::time::timeout(read_timeout, read_fut)
+            .await
+            .map_err(|_| "timeout reading body".to_string())?
+            .map_err(|e| format!("read body: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        let want = max_body.saturating_sub(body.len());
+        if want > 0 {
+            let take = n.min(want);
+            body.extend_from_slice(&chunk[..take]);
+            body_truncated += n.saturating_sub(take);
+        } else {
+            body_truncated += n;
+        }
+        remaining = remaining.saturating_sub(n);
+    }
+    body_truncated += already_have.saturating_sub(take);
+
+    // Reply with a tiny 200 so the upstream client gets a clean close.
+    let _ = sock
+        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .await;
+    let _ = sock.shutdown().await;
+
+    let received_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Token match: the token may appear in the path, in a header
+    // value, or in the body — search all three. We do not URL-decode
+    // because the token alphabet is base32 (alphanumeric only) which
+    // is already URL-safe; if a target encodes the token anyway it
+    // means the URL-decoded path string is what matters, which is
+    // what the inbound `path` already is (it's the raw request-line
+    // path, no decoding done by the listener).
+    let mut matched_token = registry.match_token_in(&path).await;
+    if matched_token.is_none() {
+        for (_, v) in &headers {
+            if let Some(t) = registry.match_token_in(v).await {
+                matched_token = Some(t);
+                break;
+            }
+        }
+    }
+    if matched_token.is_none() {
+        let body_str = String::from_utf8_lossy(&body);
+        matched_token = registry.match_token_in(&body_str).await;
+    }
+
+    Ok(Callback {
+        received_at,
+        source: peer.to_string(),
+        method,
+        path,
+        matched_token,
+        headers,
+        body_preview: String::from_utf8_lossy(&body).into_owned(),
+        body_truncated_bytes: body_truncated,
+    })
+}
+
+fn find_double_crlf(buf: &[u8]) -> Option<usize> {
+    // Standard HTTP header terminator is `\r\n\r\n`; tolerate the
+    // `\n\n` form some clients send.
+    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+        return Some(pos);
+    }
+    if let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+        return Some(pos);
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── token generation ──────────────────────────────────────────
+
+    #[test]
+    fn generated_token_is_base32_chars_only() {
+        for _ in 0..1000 {
+            let t = generate_token();
+            for c in t.chars() {
+                assert!(
+                    (c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7'),
+                    "token char `{c}` is not base32 (alphabet A-Z2-7): {t}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generated_token_length_is_constant() {
+        // 16 bytes -> 128 bits / 5 = 25.6 -> 26 chars (rounded up).
+        for _ in 0..100 {
+            assert_eq!(
+                generate_token().len(),
+                26,
+                "base32 of 128 bits should be 26 chars"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_tokens_do_not_collide_across_a_realistic_run() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..10_000 {
+            let t = generate_token();
+            assert!(
+                seen.insert(t.clone()),
+                "collision after {} tokens: {t}",
+                seen.len()
+            );
+        }
+    }
+
+    #[test]
+    fn base32_encode_known_vector() {
+        // RFC 4648 test vectors (selected): "" -> "", "f" -> "MY",
+        // "fo" -> "MZXQ", "foo" -> "MZXW6", "foobar" -> "MZXW6YTBOI".
+        assert_eq!(base32_encode(b""), "");
+        assert_eq!(base32_encode(b"f"), "MY");
+        assert_eq!(base32_encode(b"fo"), "MZXQ");
+        assert_eq!(base32_encode(b"foo"), "MZXW6");
+        assert_eq!(base32_encode(b"foobar"), "MZXW6YTBOI");
+    }
+
+    // ── registry ─────────────────────────────────────────────────
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_mint_returns_n_distinct_tokens() {
+        let r = Registry::new();
+        let mints = r.mint(8).await;
+        assert_eq!(mints.len(), 8);
+        let mut set = std::collections::HashSet::new();
+        for t in &mints {
+            assert!(set.insert(t.clone()), "duplicate token in mint batch: {t}");
+        }
+        // The registry's known_tokens should reflect the mint.
+        let known = r.known_tokens().await;
+        assert_eq!(known.len(), 8);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_match_token_in_finds_substring() {
+        let r = Registry::new();
+        r.register("ABCDEFGHIJKLMNOPQRSTUVWXY2").await;
+        // Exact, prefix, suffix, embedded — all must match.
+        assert_eq!(
+            r.match_token_in("ABCDEFGHIJKLMNOPQRSTUVWXY2").await.as_deref(),
+            Some("ABCDEFGHIJKLMNOPQRSTUVWXY2")
+        );
+        assert_eq!(
+            r.match_token_in("/ABCDEFGHIJKLMNOPQRSTUVWXY2/x").await.as_deref(),
+            Some("ABCDEFGHIJKLMNOPQRSTUVWXY2")
+        );
+        // Different token must not falsely match.
+        assert_eq!(
+            r.match_token_in("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").await,
+            None
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_match_token_in_is_case_sensitive() {
+        // Tokens are base32 upper-case; a lowercase substring should
+        // NOT match (caller's contract — we never normalise on lookup).
+        let r = Registry::new();
+        r.register("ABCDEFGHIJKLMNOPQRSTUVWXY2").await;
+        assert_eq!(
+            r.match_token_in("abcdefghijklmnopqrstuvwxy2").await,
+            None
+        );
+    }
+
+    // ── header parsing ───────────────────────────────────────────
+
+    #[test]
+    fn find_double_crlf_handles_canonical_and_loose_forms() {
+        // `GET / HTTP/1.1` is 14 bytes, so `\r\n\r\n` starts at
+        // position 14. `\n\n` starts at position 14 in the lf-only
+        // form too (request line is still 14 bytes).
+        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\r\n\r\n"), Some(14));
+        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\n\n"), Some(14));
+        assert_eq!(find_double_crlf(b"no terminator here"), None);
+    }
+
+    #[test]
+    fn find_double_crlf_locates_terminator_at_buffer_end() {
+        let mut buf = vec![b'X'; 100];
+        buf.extend_from_slice(b"\r\n\r\n");
+        let pos = find_double_crlf(&buf).expect("must find");
+        assert_eq!(pos, 100);
+    }
+
+    // ── end-to-end: real TCP listener answers a real callback ────
+
+    /// Drive the listener loop directly against a hand-rolled HTTP
+    /// client request. Bypasses run_listener's blocking entry so the
+    /// test can shut down cleanly.
+    async fn drive_one_callback(
+        registry: Arc<Registry>,
+        request: &[u8],
+    ) -> (Callback, std::net::SocketAddr) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let req = request.to_vec();
+        let server = tokio::spawn({
+            let registry = registry.clone();
+            async move {
+                let (sock, peer) = listener.accept().await.expect("accept");
+                handle_conn(sock, peer, &registry, 8 * 1024, Duration::from_secs(5))
+                    .await
+                    .expect("handle_conn")
+            }
+        });
+        // Tiny pause so the listener has time to be ready before we
+        // connect.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        client.write_all(&req).await.expect("write request");
+        let _ = client.shutdown().await;
+        let cb = server.await.expect("server join");
+        (cb, addr)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_callback_with_matching_token_in_path() {
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let req = format!(
+            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(cb.method, "GET");
+        assert_eq!(cb.path, format!("/{token}"));
+        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+        assert!(cb.body_preview.is_empty());
+        assert_eq!(cb.body_truncated_bytes, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_callback_with_token_in_body_is_matched() {
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let body = format!("ping {token} pong");
+        let req = format!(
+            "POST /noise HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(cb.method, "POST");
+        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+        assert_eq!(cb.body_preview, body);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_callback_with_unknown_token_records_unmatched() {
+        // Anti-rig: a callback we never planted (e.g. an unrelated
+        // bot scan against the listener port) must record as
+        // unmatched, not falsely tagged with a token we did plant.
+        let registry = Arc::new(Registry::new());
+        let _real = registry.mint(1).await;
+        let req = b"GET /OTHERTOKEN HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n";
+        let (cb, _) = drive_one_callback(registry, req).await;
+        assert_eq!(cb.matched_token, None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_body_above_cap_is_truncated_with_counter() {
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        // Body is 16 KiB — cap is 8 KiB → 8 KiB truncated.
+        let body = format!("{token}{}", "x".repeat(16 * 1024 - token.len()));
+        let req = format!(
+            "POST /p HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(cb.body_preview.len(), 8 * 1024);
+        assert!(cb.body_truncated_bytes >= 8 * 1024 - 8); // ~8 KiB dropped
+        // The token still matches because it sits in the first chunk
+        // of the body (which falls under the cap).
+        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_matched_count_excludes_unmatched_callbacks() {
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let req_match = format!(
+            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
+        );
+        let req_no_match = b"GET /random HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n";
+        let (cb1, _) = drive_one_callback(registry.clone(), req_match.as_bytes()).await;
+        registry.push(cb1).await;
+        let (cb2, _) = drive_one_callback(registry.clone(), req_no_match).await;
+        registry.push(cb2).await;
+        assert_eq!(registry.callbacks().await.len(), 2);
+        assert_eq!(registry.matched_count().await, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_malformed_request_does_not_crash_the_listener() {
+        // A client that sends garbage MUST NOT take the listener
+        // down with it. We don't drive_one_callback here because
+        // handle_conn returns Err on bad input — exercise it
+        // directly to assert the Err path is clean.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let registry = Arc::new(Registry::new());
+        let registry_c = registry.clone();
+        let server = tokio::spawn(async move {
+            let (sock, peer) = listener.accept().await.unwrap();
+            handle_conn(sock, peer, &registry_c, 8 * 1024, Duration::from_millis(200)).await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        // Garbage with no \r\n\r\n terminator — the listener should
+        // time out reading headers and return Err cleanly.
+        client.write_all(b"this is not http").await.unwrap();
+        let _ = client.shutdown().await;
+        let result = server.await.unwrap();
+        assert!(result.is_err(), "malformed request must return Err");
+    }
+}

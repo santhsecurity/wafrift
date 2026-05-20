@@ -25,13 +25,46 @@
 
 use fs4::FileExt;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
+/// Per-payload-class (sql / xss / cmdi / …) success/attempt totals
+/// for a single technique. Persisted as part of [`TechniqueRecord`]
+/// so a future scan against `(waf, payload_class)` can warm-start
+/// from the class-specific winners instead of the global average.
+///
+/// Why a separate struct: the JSON shape is forward-compatible —
+/// adding a new field here doesn't change the parent
+/// `TechniqueRecord` schema, and old genomes (pre-per-class) still
+/// deserialise via `#[serde(default)]` on the parent's `per_class`
+/// map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClassStat {
+    /// Successes for this technique on this payload class.
+    #[serde(default)]
+    pub successes: u32,
+    /// Attempts for this technique on this payload class.
+    #[serde(default)]
+    pub attempts: u32,
+}
+
+impl ClassStat {
+    /// Success rate (0.0–1.0) for this technique on this class. Zero
+    /// attempts -> 0.0 (callers should also check `attempts >=
+    /// min_attempts` before recommending).
+    #[must_use]
+    pub fn success_rate(&self) -> f64 {
+        if self.attempts == 0 {
+            return 0.0;
+        }
+        f64::from(self.successes) / f64::from(self.attempts)
+    }
+}
+
 /// A single technique's historical performance record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TechniqueRecord {
     /// Technique name (e.g., `"DoubleUrlEncode"`).
     #[serde(default)]
@@ -48,6 +81,13 @@ pub struct TechniqueRecord {
     /// Unix timestamp of last successful use.
     #[serde(default)]
     pub last_success_epoch: u64,
+    /// Per-payload-class breakdown of this technique's track record.
+    /// Empty for genomes saved before the per-class warm-start feature
+    /// landed (those still load + merge cleanly; the class-specific
+    /// `seed_winners_for_class` falls back to the global record when
+    /// a class has no per-class history yet).
+    #[serde(default)]
+    pub per_class: BTreeMap<String, ClassStat>,
 }
 
 impl TechniqueRecord {
@@ -58,6 +98,27 @@ impl TechniqueRecord {
             return 0.0;
         }
         f64::from(self.total_successes) / f64::from(self.total_attempts)
+    }
+
+    /// Success rate for this technique on the named payload class
+    /// (`sql`, `xss`, `cmdi`, …). Returns `None` when this technique
+    /// has no per-class history yet — caller should fall back to the
+    /// global [`Self::success_rate`].
+    #[must_use]
+    pub fn success_rate_for_class(&self, class: &str) -> Option<f64> {
+        self.per_class
+            .get(&class.to_ascii_lowercase())
+            .filter(|s| s.attempts > 0)
+            .map(ClassStat::success_rate)
+    }
+
+    /// Attempt count for this technique on the named payload class.
+    /// Zero when the class has never been exercised.
+    #[must_use]
+    pub fn attempts_for_class(&self, class: &str) -> u32 {
+        self.per_class
+            .get(&class.to_ascii_lowercase())
+            .map_or(0, |s| s.attempts)
     }
 }
 
@@ -145,6 +206,7 @@ impl WafGenome {
                     total_attempts: *attempts,
                     target_count: u32::from(*successes > 0),
                     last_success_epoch: if *successes > 0 { now } else { 0 },
+                    per_class: BTreeMap::new(),
                 });
             }
             // Beyond the cap, novel technique names are silently
@@ -164,6 +226,106 @@ impl WafGenome {
             .iter()
             .filter(|t| t.success_rate() >= 0.60)
             .map(|t| t.name.clone())
+            .collect()
+    }
+
+    /// Class-aware variant of [`Self::merge_session`]: every technique
+    /// stat is also folded into the per-class breakdown so subsequent
+    /// `seed_winners_for_class(class)` calls bias the variant order
+    /// toward what historically beat this specific WAF on this
+    /// specific payload class — the warm-start that makes a repeat
+    /// SQLi scan against Cloudflare start from "the chains that beat
+    /// CF on SQLi yesterday", not "the chains that beat anything on
+    /// anything."
+    ///
+    /// Class is normalised to lowercase for stable lookups. Pass
+    /// `""` or any whitespace-only string to fall through to the
+    /// class-less [`Self::merge_session`] — the per-class breakdown
+    /// then stays untouched, which is what callers want when they
+    /// don't know the class (e.g. a generic scan against an unknown
+    /// endpoint).
+    pub fn merge_session_for_class(
+        &mut self,
+        class: &str,
+        stats: &[(String, u32, u32)],
+    ) {
+        let class_key = class.trim().to_ascii_lowercase();
+        if class_key.is_empty() {
+            self.merge_session(stats);
+            return;
+        }
+        let now = current_epoch();
+        self.targets_scanned = self.targets_scanned.saturating_add(1);
+        self.updated_at = now;
+        for (name, successes, attempts) in stats {
+            if let Some(existing) = self.techniques.iter_mut().find(|t| t.name == *name) {
+                existing.total_successes = existing.total_successes.saturating_add(*successes);
+                existing.total_attempts = existing.total_attempts.saturating_add(*attempts);
+                if *successes > 0 {
+                    existing.target_count = existing.target_count.saturating_add(1);
+                    existing.last_success_epoch = now;
+                }
+                let entry = existing.per_class.entry(class_key.clone()).or_default();
+                entry.successes = entry.successes.saturating_add(*successes);
+                entry.attempts = entry.attempts.saturating_add(*attempts);
+            } else if self.techniques.len() < Self::MAX_TECHNIQUES {
+                let mut per_class = BTreeMap::new();
+                per_class.insert(
+                    class_key.clone(),
+                    ClassStat {
+                        successes: *successes,
+                        attempts: *attempts,
+                    },
+                );
+                self.techniques.push(TechniqueRecord {
+                    name: name.clone(),
+                    total_successes: *successes,
+                    total_attempts: *attempts,
+                    target_count: u32::from(*successes > 0),
+                    last_success_epoch: if *successes > 0 { now } else { 0 },
+                    per_class,
+                });
+            }
+        }
+    }
+
+    /// Class-aware variant of [`Self::seed_winners`]: returns the
+    /// techniques whose per-class success rate (for `class`) meets
+    /// the ≥60% / ≥5-attempt floor, sorted best-first. Falls back to
+    /// the class-less [`Self::seed_winners`] when:
+    ///
+    /// - `class` is empty/whitespace, OR
+    /// - no technique has enough per-class history yet.
+    ///
+    /// The fallback is the load-bearing property: a fresh genome (or
+    /// a genome saved before the per-class field landed) still warm-
+    /// starts the scan with the global winners; only when meaningful
+    /// per-class data accumulates does the class-aware path take over.
+    #[must_use]
+    pub fn seed_winners_for_class(&self, class: &str) -> Vec<String> {
+        let class_key = class.trim().to_ascii_lowercase();
+        if class_key.is_empty() {
+            return self.seed_winners();
+        }
+        let mut eligible: Vec<(&TechniqueRecord, f64)> = self
+            .techniques
+            .iter()
+            .filter_map(|t| {
+                let s = t.per_class.get(&class_key)?;
+                if s.attempts < 5 || s.success_rate() < 0.60 {
+                    return None;
+                }
+                Some((t, s.success_rate()))
+            })
+            .collect();
+        if eligible.is_empty() {
+            return self.seed_winners();
+        }
+        eligible.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        eligible
+            .into_iter()
+            .take(20)
+            .map(|(t, _)| t.name.clone())
             .collect()
     }
 }
@@ -298,6 +460,45 @@ impl GeneBank {
             .unwrap_or_else(|| WafGenome::new(waf_name));
 
         genome.merge_session(stats);
+        Self::write_genome(&path, &genome)?;
+        drop(lock_file);
+        let _ = fs::remove_file(&lock_path);
+        self.cache.insert(key, genome);
+        Ok(())
+    }
+
+    /// Class-aware variant of [`Self::merge_and_save`]: stats are
+    /// recorded both globally AND under the named payload class so
+    /// the next scan against `(waf_name, class)` warm-starts from the
+    /// class-specific winners. Same atomic-write + advisory-lock
+    /// guarantees as the class-less path.
+    ///
+    /// Pass `""` for `class` to fall through to [`Self::merge_and_save`]
+    /// — the per-class breakdown stays untouched.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the genome cannot be saved to disk.
+    pub fn merge_and_save_for_class(
+        &mut self,
+        waf_name: &str,
+        class: &str,
+        stats: &[(String, u32, u32)],
+    ) -> Result<(), GeneBankError> {
+        if class.trim().is_empty() {
+            return self.merge_and_save(waf_name, stats);
+        }
+        let key = normalize_name(waf_name);
+        let path = self.genome_path(&key);
+        let (lock_file, lock_path) = Self::acquire_lock(&path)?;
+
+        let mut genome = self
+            .cache
+            .remove(&key)
+            .or_else(|| Self::read_genome_from_disk(&path))
+            .unwrap_or_else(|| WafGenome::new(waf_name));
+
+        genome.merge_session_for_class(class, stats);
         Self::write_genome(&path, &genome)?;
         drop(lock_file);
         let _ = fs::remove_file(&lock_path);

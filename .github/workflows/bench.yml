@@ -8,13 +8,19 @@ on:
         required: false
         default: 'modsec-pl1'
       strategies:
-        description: 'Comma-separated evasion strategies (light,medium,heavy,mcts)'
+        description: 'Comma-separated evasion strategies (light,medium,heavy,mcts,equiv-cegis,differential,smuggling,content-type,...)'
         required: false
-        default: 'heavy'
+        # `heavy,equiv-cegis` matches the in-tree `bench-waf` default
+        # (the same engine shipped under `wafrift scan`). Manual dispatch
+        # can opt into deeper sets (e.g. `all`) without touching this file.
+        default: 'heavy,equiv-cegis'
       variants:
         description: 'Variants per case per strategy'
         required: false
-        default: '5'
+        # 20 = the depth used to generate the headline numbers in
+        # README. 5 was smoke-only and produced misleadingly thin
+        # per-(WAF × class) coverage on the public scoreboard.
+        default: '20'
   schedule:
     # 02:00 UTC daily — only fires from main branch.
     - cron: '0 2 * * *'

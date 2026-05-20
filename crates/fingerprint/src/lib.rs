@@ -28,4 +28,5 @@
 //! ```
 
 pub mod fingerprint;
+pub mod session;
 pub mod tls_fingerprint;

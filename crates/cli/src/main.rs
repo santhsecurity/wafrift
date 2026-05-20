@@ -24,6 +24,7 @@ mod import_curl;
 mod init_cmd;
 mod interactive;
 mod legendary;
+mod listener_cmd;
 mod origin_hints;
 mod recon_cmd;
 mod replay;
@@ -139,6 +140,12 @@ enum Commands {
     /// (and optionally scan) against a single target, and stitches the
     /// results into one polished markdown writeup.
     Legendary(legendary::LegendaryArgs),
+    /// Out-of-band callback receiver — pre-mints unique tokens to
+    /// embed in payloads (blind SQLi / stored XSS / blind SSRF / OOB
+    /// command injection); logs any inbound HTTP request matching a
+    /// minted token. The oracle for the vuln classes that never echo
+    /// a verdict on the same response.
+    Listener(listener_cmd::ListenerArgs),
 }
 
 /// Arguments for `wafrift man` — emits a troff(1) man page suitable for
@@ -278,6 +285,19 @@ pub struct ScanArgs {
     /// Query parameter name to inject into.
     #[arg(long, default_value = "q")]
     pub param: String,
+
+    /// Payload class label (`sql`, `xss`, `cmdi`, `ssti`, `path`,
+    /// `ldap`, `xxe`, `ssrf`, `nosql`, `log4shell`) used for the
+    /// per-class warm-start in the gene bank. When set, the pre-scan
+    /// winner pool is biased toward techniques that historically
+    /// beat THIS WAF on THIS payload class — a SQLi scan against
+    /// Cloudflare starts from "what beat CF on SQLi yesterday", not
+    /// "what beat anything on anything". When unset, the global
+    /// warm-start path runs (unchanged behaviour). The post-scan
+    /// merge also records the per-class breakdown so subsequent
+    /// scans benefit.
+    #[arg(long, value_name = "CLASS")]
+    pub payload_class: Option<String>,
 
     /// Evasion intensity.
     #[arg(long, value_enum, default_value_t = Level::Heavy)]
@@ -483,6 +503,7 @@ fn main() -> ExitCode {
         Some(Commands::Audit(args)) => wafmodel_cmd::run_audit(args),
         Some(Commands::Harden(args)) => wafmodel_cmd::run_harden(args),
         Some(Commands::Legendary(args)) => legendary::run_legendary(args),
+        Some(Commands::Listener(args)) => listener_cmd::run_listener(args),
     }
 }
 
@@ -880,6 +901,7 @@ async fn run_scan_from_discovery(
             from_discovery: None,
             payload: args.payload.clone(),
             param: param.clone(),
+            payload_class: args.payload_class.clone(),
             level: args.level,
             encoding_only: args.encoding_only,
             delay_ms: args.delay_ms,

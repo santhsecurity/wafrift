@@ -355,6 +355,10 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         // matching `wafrift scan`'s own default — consistency, not a
         // hard error the user has to guess their way past.
         param: args.param.unwrap_or_else(|| "q".to_string()),
+        // `import-curl` doesn't expose a per-class flag today; future
+        // work could parse the body or look up a CURL → class mapping,
+        // but for now the global gene-bank warm-start applies.
+        payload_class: None,
         level: parse_level(&args.level),
         encoding_only: false,
         delay_ms: args.delay_ms,
