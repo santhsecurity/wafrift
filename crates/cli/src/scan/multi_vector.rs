@@ -68,6 +68,7 @@ pub struct Vector {
 pub const VECTORS: &[Vector] = &[
     Vector { name: "POST-form", content_type: "application/x-www-form-urlencoded" },
     Vector { name: "POST-json", content_type: "application/json" },
+    Vector { name: "POST-xml", content_type: "application/xml" },
     Vector { name: "POST-multipart", content_type: "multipart/form-data" },
     Vector { name: "POST-form-br", content_type: "application/x-www-form-urlencoded" },
     Vector { name: "POST-json-br", content_type: "application/json" },
@@ -133,6 +134,27 @@ pub struct PhaseOutcome {
     pub vector_results: Vec<(String, u32, u32)>,
 }
 
+/// XML-entity-escape the bytes that go into an XML text node.
+/// Only the five XML-significant chars need handling — every
+/// other byte is fine in a text node per W3C XML 1.0 §2.4. The
+/// backend's XML parser un-escapes them, so the payload arrives
+/// byte-identical to what we'd have sent as a plain string in any
+/// other delivery shape.
+fn xml_text_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Build the reqwest::RequestBuilder for `vector` against the
 /// target with `payload`. Returns `None` when the vector chooses
 /// to skip this fire (e.g. a transient compression failure —
@@ -155,6 +177,23 @@ fn build_request_for_vector(
         }
         "POST-json" => {
             let body = serde_json::json!({ param: payload }).to_string();
+            Some(http.post(target).header("Content-Type", ct).body(body))
+        }
+        "POST-xml" => {
+            // XML body inspection is the most weakly-covered axis
+            // at CRS PL1: no `application/xml` parser fans out into
+            // ARGS_NAMES / ARGS the way `application/json` does
+            // with `tx.json_request_body_processor`. ARGS-scoped
+            // rules miss the payload entirely. Transparent to any
+            // backend that parses XML (SOAP, RSS, content-negotiating
+            // endpoints) and sinks the inner text node. Payload is
+            // XML-entity-escaped so `<` / `>` / `&` / `"` ride the
+            // wire safely; the backend's parser un-escapes them.
+            let escaped = xml_text_escape(payload);
+            let body = format!(
+                "<?xml version=\"1.0\"?><request><{name}>{escaped}</{name}></request>",
+                name = param,
+            );
             Some(http.post(target).header("Content-Type", ct).body(body))
         }
         "POST-multipart" => {
@@ -733,6 +772,57 @@ mod tests {
         let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
         assert!(ct.contains("charset=utf-7"));
         assert!(ct.starts_with("application/json"));
+    }
+
+    #[test]
+    fn xml_text_escape_escapes_the_five_xml_chars() {
+        assert_eq!(xml_text_escape("<a&b\"c'd>"), "&lt;a&amp;b&quot;c&apos;d&gt;");
+    }
+
+    #[test]
+    fn xml_text_escape_passes_through_safe_chars() {
+        assert_eq!(xml_text_escape("hello 123 äé"), "hello 123 äé");
+    }
+
+    #[test]
+    fn xml_text_escape_handles_empty_string() {
+        assert_eq!(xml_text_escape(""), "");
+    }
+
+    #[test]
+    fn build_post_xml_wraps_payload_in_xml_root_with_param_named_element() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-xml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "id", "1 OR 1=1", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.starts_with("application/xml"));
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("<?xml"));
+        assert!(s.contains("<id>"));
+        assert!(s.contains("1 OR 1=1"));
+        assert!(s.contains("</id>"));
+    }
+
+    #[test]
+    fn build_post_xml_escapes_payload_chars_that_would_break_xml() {
+        // Payload containing < / > / & must be entity-escaped so
+        // the XML stays well-formed at the wire layer; the
+        // backend's parser un-escapes back to the original bytes
+        // — exactly what every other delivery shape preserves.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-xml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "<script>", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("&lt;script&gt;"));
+        assert!(!s.contains("<script>"), "raw payload must NOT appear unescaped");
     }
 
     #[test]
