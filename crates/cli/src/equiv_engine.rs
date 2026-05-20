@@ -225,6 +225,11 @@ pub fn build_request_for_delivery(
         // (CR/LF/NUL/`;` strip) is not re-implemented here.
         D::HeaderValue { .. } => d.to_request(&format!("{b}/headers"), payload),
         D::Cookie { .. } => d.to_request(&format!("{b}/cookies"), payload),
+        // Body-channel shapes — single-source via grammar's renderer
+        // (XML escape, nested JSON, GraphQL envelope).
+        D::XmlBody { .. } | D::JsonNestedDeep { .. } | D::GraphQLQuery { .. } => {
+            d.to_request(&format!("{b}/post"), payload)
+        }
     }
 }
 
