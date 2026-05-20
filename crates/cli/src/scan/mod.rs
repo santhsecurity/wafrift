@@ -12,6 +12,7 @@
 pub(crate) mod baseline;
 pub(crate) mod callback_poll;
 pub(crate) mod detect_phase;
+pub(crate) mod differential_phase;
 pub(crate) mod session_init_plug;
 pub(crate) mod state;
 
@@ -27,7 +28,7 @@ use wafrift_encoding::encoding::{self, Strategy};
 use wafrift_encoding::header as header_obfuscation;
 use wafrift_encoding::tamper::TamperRegistry;
 // advisor now consumed via `crate::scan::detect_phase`.
-use wafrift_evolution::intelligence::IntelligenceLoop;
+// IntelligenceLoop now consumed via `crate::scan::differential_phase`.
 use wafrift_grammar::grammar::{self, PayloadType};
 use wafrift_oracle::response_oracle::{ResponseContext, ResponseOracle};
 use wafrift_strategy::composition;
@@ -381,57 +382,9 @@ pub(crate) async fn run_scan(
     // it (today none read it, but the baseline state is observable
     // via baseline_outcome.transport_ok if needed).
 
-    // Step 2b: Differential probing — isolate WAF trigger patterns.
-    let mut intel_loop = IntelligenceLoop::new(20);
-    let diff_probes = intel_loop.generate_quick_probes();
-    if scan_text && !diff_probes.is_empty() {
-        println!(
-            "\n{}",
-            format!(
-                "[2b/7] Differential probing — {} probes...",
-                diff_probes.len()
-            )
-            .bold()
-            .cyan()
-        );
-    }
-    for probe in &diff_probes {
-        let probe_payload = format!("{:?}", probe.tests);
-        let probe_url =
-            scan_url_with_param(target, &args.param, &urlencoding::encode(&probe_payload));
-        let was_blocked = match http.get(&probe_url).send().await {
-            Ok(resp) => {
-                let status = resp.status().as_u16();
-                let body = resp.bytes().await.unwrap_or_default();
-                is_waf_block(status, &body)
-            }
-            Err(_) => false,
-        };
-        intel_loop.record_probe(probe, was_blocked);
-        if scan_text {
-            print!("{}", if was_blocked { "." } else { "!" });
-        }
-        let diff_delay = Duration::from_millis(args.delay_ms);
-        if !diff_delay.is_zero() {
-            tokio::time::sleep(diff_delay).await;
-        }
-    }
-    if scan_text && intel_loop.has_sufficient_data() {
-        let suggestions = intel_loop.suggested_evasions();
-        if !suggestions.is_empty() {
-            println!(
-                "\n  {} {}",
-                "Differential insights:".bold().cyan(),
-                suggestions
-                    .iter()
-                    .take(3)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-                    .yellow()
-            );
-        }
-    }
+    // Step 2b: Differential probing — see `differential_phase` module.
+    let mut intel_loop =
+        differential_phase::run(&http, target, &args.param, args.delay_ms, scan_text).await;
 
     // Scan counters (declared early so cache replay can use them).
     let mut bypassed = 0_u32;
