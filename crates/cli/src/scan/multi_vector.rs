@@ -61,196 +61,131 @@ pub struct Vector {
     pub content_type: &'static str,
 }
 
-/// Catalogue. Vector ordering is meaningful — vectors that hit
-/// rare WAF surfaces (BOM JSON, brotli body) come AFTER the
-/// baseline form / JSON ones so the operator's text-mode output
-/// has the natural-shape vectors at the top of the table.
+/// Catalogue, organised by attack axis. Adding a new vector is one
+/// row in the right section + one match arm in
+/// [`build_request_for_vector`]. Each section's lead-comment names
+/// the WAF gap exploited and points at the backend behaviour that
+/// makes the vector land.
+///
+/// Display ordering is functionally meaningful only at the head —
+/// the operator's text-mode scan-output table starts with the
+/// natural body shapes (POST-form / POST-json) so the most-common
+/// surface is visible first. Beyond the baselines, ordering reflects
+/// the attack-axis grouping, not any per-row significance.
 pub const VECTORS: &[Vector] = &[
+    // ──────── BASELINE BODY SHAPES ────────────────────────────
+    // The four natural request shapes a backend speaks: form,
+    // JSON, XML, multipart. WAFs gate body inspection per
+    // Content-Type; everything below stretches one or more of
+    // those routing decisions until the gate breaks.
     Vector { name: "POST-form", content_type: "application/x-www-form-urlencoded" },
     Vector { name: "POST-json", content_type: "application/json" },
     Vector { name: "POST-xml", content_type: "application/xml" },
     Vector { name: "POST-multipart", content_type: "multipart/form-data" },
+
+    // ──────── COMPRESSION-CONFUSION (Content-Encoding gap) ────
+    // brotli is the headline class — almost no inspection
+    // pipeline ships a brotli decoder. gzip is the control (most
+    // WAFs do decode it); a gzip-only bypass is a separate bug.
+    // deflate is the third option — the encoding crate's own
+    // doc-comment flags it as "irregular WAF support".
+    // Chain `gzip,br` per RFC 9110 §8.4 stacks both layers so
+    // a WAF with ONE decoder still sees an opaque blob.
     Vector { name: "POST-form-br", content_type: "application/x-www-form-urlencoded" },
     Vector { name: "POST-json-br", content_type: "application/json" },
     Vector { name: "POST-form-gz", content_type: "application/x-www-form-urlencoded" },
     Vector { name: "POST-json-gz", content_type: "application/json" },
-    // Chained Content-Encoding (gzip then brotli) — WAFs that
-    // decode ONE compression layer give up at the second, leaving
-    // an opaque blob. Origins decode both per RFC 9110 §8.4.
+    Vector { name: "POST-form-deflate", content_type: "application/x-www-form-urlencoded" },
+    Vector { name: "POST-json-deflate", content_type: "application/json" },
     Vector { name: "POST-json-gz-br", content_type: "application/json" },
     Vector { name: "POST-form-gz-br", content_type: "application/x-www-form-urlencoded" },
+
+    // ──────── JSON PARSER-DISAGREEMENT ────────────────────────
+    // Bytes that parse one way for the WAF and a different way
+    // for the backend. UTF-8 BOM, duplicate keys, array root,
+    // deep nesting past the WAF's recursion cap, payload-as-key.
     Vector { name: "POST-json-bom", content_type: "application/json" },
     Vector { name: "POST-json-dupkey", content_type: "application/json" },
     Vector { name: "POST-json-array", content_type: "application/json" },
+    Vector { name: "POST-json-deeply-nested", content_type: "application/json" },
+    Vector { name: "POST-json-key-as-payload", content_type: "application/json" },
+
+    // ──────── CONTENT-TYPE LYING / CHARSET ROUTING ────────────
+    // The body is one shape; the declared Content-Type is
+    // another. Lenient backends accept anyway; WAFs skip the
+    // body-processor on the declared (wrong) shape.
     Vector { name: "POST-json-as-plain", content_type: "text/plain" },
     Vector { name: "POST-form-as-octet", content_type: "application/octet-stream" },
-    // HTTP method-override header — POST with
-    // `X-HTTP-Method-Override: GET`. Spring's HiddenHttpMethodFilter,
-    // Express's method-override middleware, Rails's
-    // ActionController::MethodOverride, Symfony's
-    // HttpMethodParameterOverride all route on the OVERRIDE header
-    // when present. WAF rule-sets that match by HTTP method (e.g.
-    // "this rule fires on POST only, GET is allowed-list") miss
-    // the request entirely.
-    Vector { name: "POST-method-override-GET", content_type: "application/x-www-form-urlencoded" },
-    Vector { name: "POST-method-override-PUT", content_type: "application/x-www-form-urlencoded" },
-    // charset=utf-7 — WAFs route JSON parsing by charset; many
-    // refuse utf-7 + fall through to no body inspection. Modern
-    // backends (Python json, jsoniter, Go encoding/json) accept
-    // any charset that decodes to valid UTF-8 octets.
     Vector { name: "POST-json-utf7", content_type: "application/json; charset=utf-7" },
-    // Symmetry vector — same charset trick on form bodies. WAFs
-    // that handled utf-7 JSON may NOT have plumbed the same gate
-    // through form-body inspection. Backends still decode form
-    // bytes as utf-8 regardless of the charset hint.
     Vector { name: "POST-form-utf7", content_type: "application/x-www-form-urlencoded; charset=utf-7" },
-    // Raw deflate / RFC 1951 — ModSecurity's SecGzipDecompression
-    // directive handles gzip only. `Content-Encoding: deflate`
-    // bodies opaque to the inspection pipeline; origins handle
-    // deflate via their HTTP stack (nginx, Apache, IIS, hyper).
-    // The encoding crate's own doc-comment flags deflate as
-    // "irregular WAF support" — exploit it.
-    Vector { name: "POST-json-deflate", content_type: "application/json" },
-    Vector { name: "POST-form-deflate", content_type: "application/x-www-form-urlencoded" },
-    // YAML body — CRS has json/xml processors, NO yaml processor.
-    // Payload lives in the YAML scalar value position. Spring's
-    // YamlPropertySourceFactory, Rails's safe-load YAML, Express
-    // yaml middleware all parse `application/yaml` request bodies;
-    // ModSec's inspection layer treats them as opaque bytes.
+    Vector { name: "POST-text-xml", content_type: "text/xml" },
     Vector { name: "POST-yaml", content_type: "application/yaml" },
-    // Multipart with `Content-Transfer-Encoding: base64` on the
-    // attack part. WAFs that inspect multipart bodies see only the
-    // base64-encoded blob; MIME-compliant backends (multer, Spring
-    // MultipartResolver, ASP.NET, Python multipart) decode CTE
-    // automatically per RFC 2045 §6.8.
-    Vector { name: "POST-multipart-b64", content_type: "multipart/form-data" },
-    // Duplicate-boundary multipart — two boundary strings, WAF
-    // tracks one, origin tracks the other; the attack part is
-    // visible only to the "wrong" one.
-    Vector { name: "POST-multipart-dupbound", content_type: "multipart/form-data" },
-    // Direct PUT / PATCH wire methods. Differs from
-    // POST-method-override-* in that the request line itself
-    // carries the alt method, not just a header. WAF rule paths
-    // that match on REQUEST_METHOD for "this rule fires on POST"
-    // miss the request entirely; backends with full REST routing
-    // (Spring, Rails, Express, Django REST) process PUT/PATCH
-    // bodies identically to POST.
+    Vector { name: "POST-cbor", content_type: "application/cbor" },
+
+    // ──────── METHOD-AXIS ────────────────────────────────────
+    // WAF rule paths gated on REQUEST_METHOD for POST miss the
+    // request entirely. PUT/PATCH/PUT-form ride the actual wire
+    // method; method-override-* keeps POST on the request line
+    // but signals the intended method via a header (Spring,
+    // Rails, Express, Symfony all honour the header).
     Vector { name: "PUT-json", content_type: "application/json" },
     Vector { name: "PATCH-json", content_type: "application/json" },
     Vector { name: "PUT-form", content_type: "application/x-www-form-urlencoded" },
-    // Semicolon-as-HPP-separator. Tomcat/Jetty/old Java
-    // containers treat `;` as a query-param separator equal to
-    // `&`; ModSec splits on `&` only. `q=harmless;q=attack` is
-    // ONE param ("harmless;q=attack") to the WAF, TWO params to
-    // the backend (last-occurrence-wins gives the attack).
-    Vector { name: "hpp-semicolon", content_type: "" },
-    // application/cbor — RFC 8949 binary serialization. Zero WAF
-    // body-processor support; every modern API stack (Rust ciborium,
-    // JS cbor-x, Python cbor2, Java jackson-cbor) decodes it
-    // server-side. We emit a minimal `{param: payload}` map.
-    Vector { name: "POST-cbor", content_type: "application/cbor" },
-    // Deeply-nested JSON. CRS json-body recursion depth in the
-    // default `tx.json_request_body_processor` is bounded; the
-    // body parser stops descending at ~5-10 levels. We bury the
-    // payload at depth 12 so it sits PAST inspection while
-    // server-side parsers (Python json, Jackson, Go encoding/json,
-    // serde_json) descend freely.
-    Vector { name: "POST-json-deeply-nested", content_type: "application/json" },
-    // Payload as the JSON KEY, with a benign value. WAFs that
-    // inspect ARGS values miss key-positioned attacks; backends
-    // that iterate keys (route resolvers, dynamic-property setters,
-    // logger field-name handlers) flow the attack into a sink.
-    Vector { name: "POST-json-key-as-payload", content_type: "application/json" },
-    // ── Compound vectors ──────────────────────────────────────
-    // Stacked-axis attacks. Each defeats WAFs that handle one
-    // axis but not the AND of both. BOM-prefix + brotli body:
-    // a WAF that has brotli decompression still chokes on the
-    // BOM-prefixed JSON post-decompress; one without brotli
-    // never gets past the opaque-blob compressed body.
-    Vector { name: "POST-json-bom-br", content_type: "application/json" },
-    // utf-7 charset + gzip body. Backends fluent in gzip + lax on
-    // charset still process; WAFs that decompress gzip but skip
-    // utf-7 charsets stop at the gate.
-    Vector { name: "POST-json-utf7-gz", content_type: "application/json; charset=utf-7" },
-    // Dup-key + BOM. Two parse-confusions stacked. Last-occurrence
-    // backend reads the attack; first-occurrence WAF reads the
-    // benign FIRST value — but the BOM kicks in BEFORE that to
-    // make ModSec's JSON processor skip the whole body.
-    Vector { name: "POST-json-dupkey-bom", content_type: "application/json" },
-    // text/xml — CRS xml-body rules anchor on `application/xml`
-    // ONLY in many profiles; `text/xml` is an RFC-7303-permitted
-    // alternate MIME most XML parsers (libxml2, Xerces, JAXB,
-    // dotnet System.Xml) accept identically. WAF declines body
-    // inspection; backend parses XML normally.
-    Vector { name: "POST-text-xml", content_type: "text/xml" },
-    // Multipart with payload in the `filename=` parameter, NOT
-    // the part body. CRS multipart rules inspect FIELD VALUES;
-    // `filename` is the attachment metadata. Backends that read
-    // `multipart.parts[i].filename` and pass it to a downstream
-    // sink (logger, search index, NoSQL store) flow the attack
-    // payload through. Especially potent for SQLi-in-filename and
-    // path-traversal-in-filename rule sets.
+    Vector { name: "POST-method-override-GET", content_type: "application/x-www-form-urlencoded" },
+    Vector { name: "POST-method-override-PUT", content_type: "application/x-www-form-urlencoded" },
+
+    // ──────── MULTIPART VARIANTS ──────────────────────────────
+    // The MIME parser is its own attack axis. Base64 CTE hides
+    // the payload behind RFC 2045 §6.8 encoding; dup-boundary
+    // splits the body across two boundary strings; filename=
+    // routes the attack through the part metadata.
+    Vector { name: "POST-multipart-b64", content_type: "multipart/form-data" },
+    Vector { name: "POST-multipart-dupbound", content_type: "multipart/form-data" },
     Vector { name: "POST-multipart-filename", content_type: "multipart/form-data" },
-    // Authorization: Basic carrying payload-in-username. Wafrift
-    // sends `Basic base64(<payload>:dummy)`. WAFs trust the
-    // Authorization header for routing / rate-limiting and skip
-    // body-shape ARGS inspection on its contents. Backends that
-    // log the decoded username (audit trails, login attempt
-    // metrics, custom auth middleware) flow it into SQL / log /
-    // template sinks.
-    Vector { name: "authorization-basic", content_type: "" },
-    Vector { name: "cookie", content_type: "" },
-    // Cookie HPP — duplicate cookie pairs with the same name, RFC
-    // 6265 §5.4 allows multiple. WAF takes one, backend takes the
-    // other. Benign first, attack second; last-occurrence-wins
-    // (Java Servlet, ASP.NET, Express cookie-parser default) gets
-    // the attack.
-    Vector { name: "cookie-hpp", content_type: "" },
+
+    // ──────── HTTP PARAMETER POLLUTION (HPP) ──────────────────
+    // Two values for one param, encoded so the WAF takes one
+    // and the backend takes the other. `&` is the standard
+    // separator; `;` is Tomcat/Jetty's parallel separator that
+    // ModSec doesn't split on.
     Vector { name: "hpp", content_type: "" },
-    // Path-segment vector — payload lives in the URL path itself,
-    // not the query string. WAF rules scoped to ARGS / REQUEST_URI
-    // miss path-positioned attacks; backends with catch-all
-    // routes (Express `/api/*`, Spring `@PathVariable`, Flask
-    // `<path:p>`) read the raw path segment. New attack axis
-    // distinct from every other vector.
+    Vector { name: "hpp-semicolon", content_type: "" },
+
+    // ──────── COMPOUND (STACKED-AXIS) ────────────────────────
+    // Combining two axes defeats WAFs that handle either
+    // alone but not the AND of both. Pair a parse-confusion
+    // with a compression layer (BOM+br), a charset routing
+    // with a compression layer (utf-7+gz), or stack two
+    // parse-confusions (dupkey+BOM).
+    Vector { name: "POST-json-bom-br", content_type: "application/json" },
+    Vector { name: "POST-json-utf7-gz", content_type: "application/json; charset=utf-7" },
+    Vector { name: "POST-json-dupkey-bom", content_type: "application/json" },
+
+    // ──────── URL POSITION ────────────────────────────────────
+    // Payload lives in the URL itself — path segment or
+    // header-driven proxy reverse-routing. WAFs scoped to
+    // ARGS / REQUEST_URI miss either.
     Vector { name: "path-segment", content_type: "" },
-    // Proxy reverse-routing headers. WAF inspects the
-    // request-line URI; reverse proxies (ASP.NET via X-Original-URL,
-    // Apache mod_rewrite, IIS UrlRewrite, Symfony's
-    // X-Original-URL / X-Rewrite-URL handling) re-route based on
-    // the header, sending the request to a DIFFERENT internal
-    // path. The classic admin-panel-bypass class extended to
-    // payload routing — payload lives in the override target.
     Vector { name: "x-original-url", content_type: "" },
     Vector { name: "x-rewrite-url", content_type: "" },
-    // Accept-Language with payload. Some apps log/render the
-    // Accept-Language header (i18n logic, locale fallback
-    // resolution, audit). WAFs that inspect Accept-Language do
-    // so for bot-detection, not for SQL/XSS/cmdi patterns.
-    Vector { name: "accept-language", content_type: "" },
-    // RFC 7239 `Forwarded:` header — XFF's official successor.
-    // Many WAFs and rule sets handle `X-Forwarded-For` but never
-    // had RFC-7239 plumbing wired in. Backends that read either
-    // (or honour Forwarded when present) flow the payload
-    // through.
-    Vector { name: "forwarded", content_type: "" },
-    // Origin header (CORS routing). Apps that read Origin for
-    // CORS allow-list checks, audit logs, or template rendering
-    // flow the payload. WAFs inspect Origin for CSRF / SSRF
-    // detection, not SQL/XSS/cmdi patterns.
-    Vector { name: "origin", content_type: "" },
-    // Range header (RFC 9110 §14.2). Some backends parse Range
-    // malformed and reflect the value, or use it to key
-    // partial-content caches. The payload rides as `bytes=`
-    // value.
-    Vector { name: "range", content_type: "" },
-    // From header (RFC 9110 §10.1.2) — historically an operator
-    // email address. Apps that log From, render it in admin
-    // dashboards, or pass it to a notification sink flow the
-    // payload. WAFs almost never inspect From for attacks.
-    Vector { name: "from", content_type: "" },
+
+    // ──────── HEADER CARRIERS ────────────────────────────────
+    // Less-inspected headers that backends still log, render,
+    // or use for routing decisions. Cookie + variants, the
+    // four well-known proxy-trust headers (XFF, Forwarded,
+    // Referer, Origin), Range/From/Accept-Language for apps
+    // that log them, Authorization-Basic for apps that log
+    // decoded usernames.
+    Vector { name: "cookie", content_type: "" },
+    Vector { name: "cookie-hpp", content_type: "" },
     Vector { name: "x-forwarded-for", content_type: "" },
+    Vector { name: "forwarded", content_type: "" },
     Vector { name: "referer", content_type: "" },
+    Vector { name: "origin", content_type: "" },
+    Vector { name: "range", content_type: "" },
+    Vector { name: "from", content_type: "" },
+    Vector { name: "accept-language", content_type: "" },
+    Vector { name: "authorization-basic", content_type: "" },
 ];
 
 /// The phase's I/O surface — keeps callers from having to know the
