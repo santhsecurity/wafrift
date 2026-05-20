@@ -213,9 +213,30 @@ pub async fn establish_from_file(
     timeout: Duration,
     insecure: bool,
 ) -> Result<SessionState, SessionInitError> {
-    let raw = std::fs::read_to_string(path).map_err(|e| {
-        SessionInitError::ReadFile(path.display().to_string(), e)
-    })?;
+    // Bounded read — operator-supplied curl file. Defends against
+    // `/dev/zero` typo and hostile symlink. Real "Copy as cURL"
+    // pastes are < 16 KiB; cap at 1 MiB is generous.
+    let raw = match crate::safe_body::read_bounded_text_file(
+        path,
+        crate::safe_body::MAX_OPERATOR_INPUT_BYTES,
+    ) {
+        Ok(s) => s,
+        Err(crate::safe_body::ReadError::Transport(msg)) => {
+            return Err(SessionInitError::ReadFile(
+                path.display().to_string(),
+                std::io::Error::other(msg),
+            ));
+        }
+        Err(crate::safe_body::ReadError::Overrun {
+            cap_bytes,
+            observed_bytes,
+        }) => {
+            return Err(SessionInitError::Parse(format!(
+                "session-init file exceeded {cap_bytes}-byte cap ({observed_bytes} bytes \
+                 seen) — a real `Copy as cURL` paste is < 16 KiB; check the path"
+            )));
+        }
+    };
     let tokens = shell_tokenize(&raw).map_err(SessionInitError::Parse)?;
     let parsed = parse_curl(&tokens).map_err(SessionInitError::Parse)?;
     establish_from_curl(parsed, timeout, insecure).await

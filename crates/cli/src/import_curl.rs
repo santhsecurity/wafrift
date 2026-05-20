@@ -14,8 +14,6 @@
 //! so this command stays in sync with whatever scan does.
 
 use clap::Args;
-use std::fs;
-use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -249,21 +247,25 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     // here we just pick the one that is.
     let raw = match (&args.curl, &args.curl_file, args.from_stdin) {
         (Some(s), _, _) => s.clone(),
-        (None, Some(p), false) => match fs::read_to_string(p) {
+        (None, Some(p), false) => match crate::safe_body::read_bounded_text_file(
+            p,
+            crate::safe_body::MAX_OPERATOR_INPUT_BYTES,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("error: read {}: {e}", p.display());
                 return ExitCode::from(1);
             }
         },
-        (None, None, true) => {
-            let mut buf = String::new();
-            if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+        (None, None, true) => match crate::safe_body::read_bounded_text_stdin(
+            crate::safe_body::MAX_OPERATOR_INPUT_BYTES,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
                 eprintln!("error: read stdin: {e}");
                 return ExitCode::from(1);
             }
-            buf
-        }
+        },
         (None, None, false) => {
             eprintln!(
                 "error: supply the curl command — as a positional arg \

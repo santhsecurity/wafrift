@@ -93,6 +93,7 @@ pub fn run_compress(args: CompressArgs) -> ExitCode {
         }
     };
 
+    let original_len = body.len();
     let compressed = match chain(&body, &algos) {
         Ok(c) => c,
         Err(e) => {
@@ -102,8 +103,8 @@ pub fn run_compress(args: CompressArgs) -> ExitCode {
     };
 
     match args.format.as_str() {
-        "json" => emit_json(&compressed, &args),
-        _ => emit_text(&compressed, &args),
+        "json" => emit_json(&compressed, original_len, &args),
+        _ => emit_text(&compressed, original_len, &args),
     }
 }
 
@@ -125,22 +126,77 @@ fn parse_algorithms(raw: &[String]) -> Result<Vec<Algorithm>, String> {
     Ok(out)
 }
 
+/// Cap on the input body. A compressed-confusion attack wraps a
+/// single HTTP request body — even fat JSON payloads stay well
+/// under 1 MiB in practice. 16 MiB is a generous cap that catches
+/// both `--input /dev/zero` operator typos AND a malicious upstream
+/// pipeline trying to OOM the CLI via unbounded stdin.
+pub const MAX_COMPRESS_INPUT_BYTES: usize = 16 * 1024 * 1024;
+
 fn read_input(args: &CompressArgs) -> Result<Vec<u8>, String> {
     if args.stdin {
-        let mut buf = Vec::new();
-        std::io::stdin()
-            .read_to_end(&mut buf)
-            .map_err(|e| format!("stdin read: {e}"))?;
-        return Ok(buf);
+        return read_bounded_stdin(MAX_COMPRESS_INPUT_BYTES);
     }
     if let Some(path) = &args.input {
-        return std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()));
+        return read_bounded_file(path, MAX_COMPRESS_INPUT_BYTES);
     }
     Err("no input source — pass `--input PATH` or `--stdin`".into())
 }
 
+/// Read stdin in chunks, aborting at the cap. Replaces
+/// `read_to_end` which has no upper bound — a hostile upstream in
+/// a shell pipeline could otherwise OOM the CLI.
+fn read_bounded_stdin(max_bytes: usize) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    let mut chunk = [0u8; 64 * 1024];
+    let mut stdin = std::io::stdin().lock();
+    loop {
+        let n = stdin
+            .read(&mut chunk)
+            .map_err(|e| format!("stdin read: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        if buf.len().saturating_add(n) > max_bytes {
+            return Err(format!(
+                "input exceeded {max_bytes}-byte cap — bounded-stdin defence aborted \
+                 the read. Use `--input PATH` for files larger than this if you really \
+                 need them."
+            ));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(buf)
+}
+
+/// Read a file in chunks, aborting at the cap. Defends against
+/// `--input /dev/zero` style operator typos AND symlink-to-large-
+/// file traps.
+fn read_bounded_file(path: &std::path::Path, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let mut f = std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let n = f
+            .read(&mut chunk)
+            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        if buf.len().saturating_add(n) > max_bytes {
+            return Err(format!(
+                "{} exceeded {max_bytes}-byte cap — bounded-file defence aborted the read",
+                path.display()
+            ));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(buf)
+}
+
 fn emit_text(
     blob: &wafrift_encoding::compression::CompressedBody,
+    original_len: usize,
     args: &CompressArgs,
 ) -> ExitCode {
     // Header value goes to stderr so an operator piping the
@@ -152,11 +208,16 @@ fn emit_text(
         "[wafrift compress]".bright_cyan(),
         blob.content_encoding.bold()
     );
+    let ratio_pct = if original_len == 0 {
+        0.0
+    } else {
+        (blob.body.len() as f64 / original_len as f64) * 100.0
+    };
     eprintln!(
         "  {} bytes -> {} bytes ({:.1}% of original)",
-        if blob.body.len() < usize::MAX / 2 { blob.body.len() } else { 0 },
+        original_len,
         blob.body.len(),
-        if blob.body.is_empty() { 0.0 } else { 100.0 }
+        ratio_pct
     );
 
     match &args.output {
@@ -191,6 +252,7 @@ fn emit_text(
 
 fn emit_json(
     blob: &wafrift_encoding::compression::CompressedBody,
+    original_len: usize,
     args: &CompressArgs,
 ) -> ExitCode {
     use base64::Engine as _;
@@ -199,6 +261,7 @@ fn emit_json(
         "content_encoding": blob.content_encoding,
         "body_b64": body_b64,
         "body_len": blob.body.len(),
+        "original_len": original_len,
     });
     let line = obj.to_string();
     match &args.output {
@@ -292,4 +355,51 @@ mod tests {
     // exercised by integration tests under tests/ — running them
     // unit-side would require capturing stdin/stdout via a fixture,
     // which the binary's #[test] surface doesn't support cleanly.
+
+    #[test]
+    fn read_bounded_file_returns_full_body_when_under_cap() {
+        // Round-trip a small file through the bounded reader and
+        // confirm we get the exact bytes back.
+        let tmp = std::env::temp_dir().join(format!("wafrift-cb-{}.bin", std::process::id()));
+        std::fs::write(&tmp, b"hello body").unwrap();
+        let got = read_bounded_file(&tmp, 1024).unwrap();
+        assert_eq!(&got, b"hello body");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_errors_when_file_exceeds_cap() {
+        let tmp = std::env::temp_dir().join(format!("wafrift-cb-big-{}.bin", std::process::id()));
+        std::fs::write(&tmp, &vec![b'A'; 4096]).unwrap();
+        let err = read_bounded_file(&tmp, 100).expect_err("must overrun");
+        assert!(err.contains("100-byte cap"));
+        assert!(err.contains(&tmp.display().to_string()));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_file_handles_empty_file() {
+        let tmp = std::env::temp_dir().join(format!("wafrift-cb-empty-{}.bin", std::process::id()));
+        std::fs::write(&tmp, b"").unwrap();
+        let got = read_bounded_file(&tmp, 1024).unwrap();
+        assert!(got.is_empty());
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn max_compress_input_bytes_is_at_least_one_megabyte() {
+        // Floor: a refactor to a tiny cap would break legitimate
+        // operator use on chunky JSON / multipart bodies. Lock the
+        // floor so future tightening doesn't sneak past review.
+        assert!(MAX_COMPRESS_INPUT_BYTES >= 1024 * 1024);
+    }
+
+    #[test]
+    fn max_compress_input_bytes_is_at_most_one_gigabyte() {
+        // Ceiling: a cap higher than 1 GiB defeats the DoS defence
+        // on most laptops. 16 MiB is the current default and the
+        // ceiling caps at 1 GiB to leave room for tuning without
+        // disabling the defence.
+        assert!(MAX_COMPRESS_INPUT_BYTES <= 1024 * 1024 * 1024);
+    }
 }

@@ -122,6 +122,69 @@ pub async fn read_bounded_text(resp: Response, max_bytes: usize) -> Result<Strin
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Sane cap for OPERATOR-supplied input files (curl-format paste,
+/// session-init file, gene-bank import). These are tiny in
+/// practice — a "Copy as cURL" Burp paste is < 16 KiB; a session
+/// init file is a single HTTP request. 1 MiB is generous and
+/// catches `--curl-file /dev/zero` operator typos AND symlink
+/// traps.
+pub const MAX_OPERATOR_INPUT_BYTES: usize = 1024 * 1024;
+
+/// Bounded `read_to_string`-equivalent for operator-supplied
+/// files. Replaces every `std::fs::read_to_string(path)?` site
+/// that was vulnerable to OOM on a `/dev/zero` typo / hostile
+/// symlink / multi-GB file.
+pub fn read_bounded_text_file(
+    path: &std::path::Path,
+    max_bytes: usize,
+) -> Result<String, ReadError> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| ReadError::Transport(format!("open {}: {e}", path.display())))?;
+    let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let n = f
+            .read(&mut chunk)
+            .map_err(|e| ReadError::Transport(format!("read {}: {e}", path.display())))?;
+        if n == 0 {
+            break;
+        }
+        if buf.len().saturating_add(n) > max_bytes {
+            return Err(ReadError::Overrun {
+                cap_bytes: max_bytes,
+                observed_bytes: buf.len() + n,
+            });
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// Bounded stdin reader for operator-piped curl-format pastes.
+pub fn read_bounded_text_stdin(max_bytes: usize) -> Result<String, ReadError> {
+    use std::io::Read;
+    let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
+    let mut chunk = [0u8; 64 * 1024];
+    let mut stdin = std::io::stdin().lock();
+    loop {
+        let n = stdin
+            .read(&mut chunk)
+            .map_err(|e| ReadError::Transport(format!("stdin read: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        if buf.len().saturating_add(n) > max_bytes {
+            return Err(ReadError::Overrun {
+                cap_bytes: max_bytes,
+                observed_bytes: buf.len() + n,
+            });
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +347,68 @@ mod tests {
         let e = ReadError::Transport("connection reset".into());
         let s = format!("{e}");
         assert!(s.contains("connection reset"));
+    }
+
+    #[test]
+    fn read_bounded_text_file_returns_contents_under_cap() {
+        let tmp = std::env::temp_dir().join(format!("wafrift-sb-{}.txt", std::process::id()));
+        std::fs::write(&tmp, "hello world").unwrap();
+        let got = read_bounded_text_file(&tmp, 1024).unwrap();
+        assert_eq!(got, "hello world");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_text_file_overruns_when_too_big() {
+        let tmp = std::env::temp_dir().join(format!("wafrift-sb-big-{}.txt", std::process::id()));
+        std::fs::write(&tmp, vec![b'X'; 4096]).unwrap();
+        let err = read_bounded_text_file(&tmp, 100).expect_err("must overrun");
+        match err {
+            ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            } => {
+                assert_eq!(cap_bytes, 100);
+                assert!(observed_bytes > 100);
+            }
+            other => panic!("expected Overrun, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn read_bounded_text_file_handles_missing_file() {
+        // Path that doesn't exist: must Transport-error, not panic.
+        let err = read_bounded_text_file(
+            std::path::Path::new("/nonexistent/wafrift/path/does/not/exist"),
+            1024,
+        )
+        .expect_err("must fail");
+        assert!(matches!(err, ReadError::Transport(_)));
+        let msg = format!("{err}");
+        assert!(msg.contains("open") || msg.contains("does not exist") || msg.contains("system cannot"));
+    }
+
+    #[test]
+    fn read_bounded_text_file_handles_lossy_utf8() {
+        // Mixed valid + invalid UTF-8 bytes — must not panic, must
+        // emit replacement chars for the bad sequences.
+        let tmp = std::env::temp_dir().join(format!("wafrift-sb-utf8-{}.bin", std::process::id()));
+        std::fs::write(&tmp, [0x68, 0x69, 0xFF, 0xFE, 0x21]).unwrap();
+        let got = read_bounded_text_file(&tmp, 1024).unwrap();
+        assert!(got.contains("hi"));
+        assert!(got.contains('\u{FFFD}'));
+        assert!(got.contains('!'));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn max_operator_input_bytes_is_at_least_64_kib_but_under_16_mib() {
+        // Floor: a refactor to 1 KiB would break legitimate big-curl
+        // pastes (Burp pastes with many cookies + headers cross 16 KiB).
+        // Ceiling: anything bigger than 16 MiB defeats the DoS defence
+        // on a typical laptop.
+        assert!(MAX_OPERATOR_INPUT_BYTES >= 64 * 1024);
+        assert!(MAX_OPERATOR_INPUT_BYTES <= 16 * 1024 * 1024);
     }
 }
