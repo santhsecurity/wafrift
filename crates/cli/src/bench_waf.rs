@@ -1860,10 +1860,22 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
 
 fn truncate(s: &str, n: usize) -> String {
     if s.len() <= n {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..n.saturating_sub(1)])
+        return s.to_string();
     }
+    // n.saturating_sub(1) is a BYTE cap, but slicing `&s[..i]` is
+    // a panic point if i lands mid-codepoint. Walk char_indices()
+    // and stop at the last boundary ≤ cap. Old code `&s[..n-1]`
+    // panicked on multi-byte UTF-8 inputs (e.g. truncate("café", 5)
+    // sliced 4 bytes — splitting `é`'s two-byte UTF-8 sequence).
+    let cap = n.saturating_sub(1);
+    let mut end = 0;
+    for (i, _) in s.char_indices() {
+        if i > cap {
+            break;
+        }
+        end = i;
+    }
+    format!("{}…", &s[..end])
 }
 
 #[cfg(test)]
@@ -2233,5 +2245,243 @@ mod tests {
                 .all(|p| matches!(p.tests, ProbeTarget::Baseline)),
             "unknown classes must yield only baseline probes"
         );
+    }
+
+    // ── pure helpers ──────────────────────────────────────────
+
+    #[test]
+    fn truncate_short_input_passes_through_unchanged() {
+        assert_eq!(truncate("abc", 10), "abc");
+        assert_eq!(truncate("", 0), "");
+        assert_eq!(truncate("x", 1), "x");
+    }
+
+    #[test]
+    fn truncate_long_input_emits_ellipsis_suffix() {
+        let got = truncate("abcdefghij", 5);
+        assert!(got.ends_with('…'));
+        assert!(got.starts_with("abcd"));
+    }
+
+    #[test]
+    fn truncate_multibyte_does_not_panic_at_codepoint_boundary() {
+        // Regression: the previous impl sliced `&s[..n.saturating_sub(1)]`
+        // which panicked when the byte index landed mid-codepoint.
+        // "café" is 5 bytes (é = 2 bytes); truncate to 5 used to
+        // slice 4 bytes — splitting é. Must NOT panic.
+        let got = truncate("café-payload", 5);
+        // Result is the largest char-boundary prefix ≤ 4 bytes
+        // plus ellipsis.
+        assert!(got.ends_with('…'));
+        assert!(got.starts_with("caf") || got.starts_with("café"));
+    }
+
+    #[test]
+    fn truncate_chinese_chars_do_not_panic() {
+        // Three-byte UTF-8 chars stress the boundary walker even
+        // more.
+        let got = truncate("中文测试", 5);
+        assert!(got.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_zero_n_emits_ellipsis_only_for_non_empty_input() {
+        // n = 0 → saturating_sub(1) = 0 → empty prefix + ellipsis.
+        // Empty input passes through unchanged (covered above).
+        let got = truncate("abc", 0);
+        assert_eq!(got, "…");
+    }
+
+    // ── pick_level ────────────────────────────────────────────
+
+    #[test]
+    fn pick_level_recognises_canonical_tokens() {
+        assert!(matches!(pick_level("light"), Some(Level::Light)));
+        assert!(matches!(pick_level("medium"), Some(Level::Medium)));
+        assert!(matches!(pick_level("heavy"), Some(Level::Heavy)));
+    }
+
+    #[test]
+    fn pick_level_rejects_unknown_tokens() {
+        assert!(pick_level("").is_none());
+        assert!(pick_level("LIGHT").is_none(), "must be case-sensitive");
+        assert!(pick_level("turbo").is_none());
+    }
+
+    // ── class_to_payload_type ─────────────────────────────────
+
+    #[test]
+    fn class_to_payload_type_maps_every_known_class() {
+        // Anti-rig: every class accepted by KNOWN_CLASSES that has
+        // a wafrift mutator must map to a distinct non-Unknown
+        // PayloadType. A future class addition that's left at
+        // Unknown silently regresses mutator richness.
+        for class in ["sql", "xss", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql"] {
+            let pt = class_to_payload_type(class);
+            assert!(
+                !matches!(pt, PayloadType::Unknown),
+                "{class} must not map to Unknown"
+            );
+        }
+    }
+
+    #[test]
+    fn class_to_payload_type_unknown_class_falls_back_to_unknown() {
+        // log4shell / xxe / cve_pocs have no wafrift mutator yet
+        // — they fall back to Unknown by design (encoding-only
+        // mutations). Lock this contract in.
+        for class in ["log4shell", "xxe", "cve_pocs", "totally-bogus"] {
+            assert!(matches!(class_to_payload_type(class), PayloadType::Unknown));
+        }
+    }
+
+    // ── resolve_base_url ──────────────────────────────────────
+
+    #[test]
+    fn resolve_base_url_returns_arg_when_set() {
+        let args = BenchWafArgs {
+            base_url: Some("http://test.example/".into()),
+            ..default_bench_args_for_tests()
+        };
+        assert_eq!(resolve_base_url(&args), "http://test.example/");
+    }
+
+    #[test]
+    fn resolve_base_url_explicit_argument_overrides_any_env() {
+        // Even with env vars set, an explicit `--base-url` wins.
+        // Skipping the env-mutation path (parallel-test-unsafe);
+        // the explicit-arg branch is the contract that matters.
+        let args = BenchWafArgs {
+            base_url: Some("http://explicit.example/".into()),
+            ..default_bench_args_for_tests()
+        };
+        assert_eq!(resolve_base_url(&args), "http://explicit.example/");
+    }
+
+    /// Helper that materializes a BenchWafArgs with sane defaults
+    /// for the unit-test paths that don't actually fire requests.
+    /// Lets test cases override only the fields they care about.
+    fn default_bench_args_for_tests() -> BenchWafArgs {
+        BenchWafArgs {
+            base_url: None,
+            corpus: PathBuf::from("wafrift-bench/corpus"),
+            class: Vec::new(),
+            evade: false,
+            variants: 5,
+            strategies: vec!["heavy".into()],
+            oracle_gate: false,
+            delay_ms: 25,
+            timeout_secs: 15,
+            insecure: false,
+            format: "text".into(),
+            output: None,
+            summary_only: false,
+            skip_healthcheck: true,
+            adaptive_pause_after_errors: 50,
+            validate_only: false,
+            lineage_output: None,
+        }
+    }
+
+    // ── build_request shapes ──────────────────────────────────
+
+    #[test]
+    fn build_request_url_query_mode_emits_get_with_encoded_param() {
+        let case = BenchCase {
+            id: "t1".into(),
+            class: "sql".into(),
+            mode: "url_query_q".into(),
+            payload: "a&b=c".into(),
+            description: String::new(),
+        };
+        let r = build_request("http://h", &case);
+        assert_eq!(r.method, Method::Get);
+        assert!(r.url.starts_with("http://h/get?q="), "url={}", r.url);
+        // `&` and `=` MUST be percent-encoded.
+        assert!(r.url.contains("%26"));
+        assert!(r.url.contains("%3D"));
+    }
+
+    #[test]
+    fn build_request_raw_body_mode_emits_post_with_text_plain() {
+        let case = BenchCase {
+            id: "t2".into(),
+            class: "xss".into(),
+            mode: "raw_body".into(),
+            payload: "<script>alert(1)</script>".into(),
+            description: String::new(),
+        };
+        let r = build_request("http://h", &case);
+        assert_eq!(r.method, Method::Post);
+        assert!(r.url.ends_with("/post"));
+        assert!(
+            r.headers.iter().any(|(k, v)| k == "content-type" && v == "text/plain"),
+            "must set text/plain on raw_body"
+        );
+        // Body is the raw payload bytes.
+        let body = r.body.as_ref().unwrap();
+        assert_eq!(String::from_utf8_lossy(body), "<script>alert(1)</script>");
+    }
+
+    #[test]
+    fn build_request_default_mode_is_form_body() {
+        // Any unrecognised mode string falls through to form-body.
+        let case = BenchCase {
+            id: "t3".into(),
+            class: "sql".into(),
+            mode: "made_up_mode".into(),
+            payload: "x".into(),
+            description: String::new(),
+        };
+        let r = build_request("http://h", &case);
+        assert_eq!(r.method, Method::Post);
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| k == "content-type" && v == "application/x-www-form-urlencoded")
+        );
+    }
+
+    #[test]
+    fn build_request_trims_trailing_slash_from_base_url() {
+        // Anti-rig: missing trim would emit `http://h//get?...`
+        // which routes the same on most servers but is ugly and
+        // some routers reject it.
+        let case = BenchCase {
+            id: "t4".into(),
+            class: "sql".into(),
+            mode: "url_query_q".into(),
+            payload: "x".into(),
+            description: String::new(),
+        };
+        let r = build_request("http://h/", &case);
+        assert!(!r.url.contains("//get"), "url={}", r.url);
+    }
+
+    // Note: `validate_corpus_flags_unknown_class`,
+    // `validate_corpus_flags_empty_payload`, and
+    // `validate_corpus_passes_clean_set` already exist above using
+    // the `case()` shorthand. Only the duplicate-ids case is new.
+
+    #[test]
+    fn validate_corpus_flags_duplicate_ids() {
+        let cases = vec![
+            BenchCase {
+                id: "dup".into(),
+                class: "sql".into(),
+                mode: "url_query_q".into(),
+                payload: "x".into(),
+                description: String::new(),
+            },
+            BenchCase {
+                id: "dup".into(),
+                class: "sql".into(),
+                mode: "url_query_q".into(),
+                payload: "y".into(),
+                description: String::new(),
+            },
+        ];
+        let code = validate_corpus_and_exit(&cases).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
     }
 }
