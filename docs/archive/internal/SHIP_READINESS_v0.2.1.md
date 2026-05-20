@@ -3,8 +3,8 @@
 > **Historical snapshot.** This audit was drafted ahead of the v0.2.1
 > release and pinned to that point in time. Every issue listed below
 > was either addressed in v0.2.1 or in a subsequent release through
-> v0.2.12. For the current state of credibility-tier audit findings,
-> see the `[0.2.4]` through `[0.2.12]` entries in `CHANGELOG.md`.
+> v0.2.17. For the current state of credibility-tier audit findings,
+> see the `[0.2.4]` through `[0.2.17]` entries in `CHANGELOG.md`.
 
 Anticipated reviewer/critic surface and what we shipped to defuse it.
 Captured 2026-05-09 against v0.2.1; preserved here as a public

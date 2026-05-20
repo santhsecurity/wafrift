@@ -77,3 +77,62 @@ jobs:
         with:
           name: bench-${{ matrix.stack }}
           path: wafrift-bench/results/
+
+  # ── Public bypass scoreboard ──────────────────────────────────────
+  # Collates the per-stack JSON artifacts into a (WAF × payload-class)
+  # markdown table at docs/SCOREBOARD.md. On the scheduled (nightly)
+  # run from `main`, commits the refreshed scoreboard so the public
+  # facing dashboard tracks the latest verified numbers. On manual
+  # dispatch the rendered file is uploaded as a build artifact only —
+  # no commit, no race with maintainer pushes.
+  scoreboard:
+    name: Scoreboard
+    needs: bench
+    runs-on: ubuntu-latest
+    if: always()  # render even if some stacks failed; partial table > no table
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need a writable, fast-forward-able checkout for the commit step.
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download all bench artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          path: bench-artifacts
+          merge-multiple: true
+
+      - name: Render scoreboard
+        run: |
+          mkdir -p docs
+          python wafrift-bench/scripts/render-scoreboard.py bench-artifacts/ \
+              --output docs/SCOREBOARD.md
+          echo '─── scoreboard preview ───────────────────────────────────────'
+          cat docs/SCOREBOARD.md
+
+      - name: Upload rendered scoreboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoreboard
+          path: docs/SCOREBOARD.md
+
+      - name: Commit scoreboard (nightly only)
+        if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "wafrift-bot"
+          git config user.email "wafrift-bot@users.noreply.github.com"
+          if git diff --quiet docs/SCOREBOARD.md; then
+            echo "scoreboard unchanged — no commit"
+            exit 0
+          fi
+          git add docs/SCOREBOARD.md
+          git commit -m "scoreboard: nightly refresh $(date -u +%Y-%m-%d)"
+          git push origin HEAD:main

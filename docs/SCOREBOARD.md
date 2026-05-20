@@ -1,0 +1,61 @@
+# WafRift bypass scoreboard
+
+_Generated 2026-05-20 from `wafrift-bench/results/` via `wafrift-bench/scripts/render-scoreboard.py`. Numbers are the **verified-bypass** rate per payload class — oracle-gated, transport-reached, no inflation. Cell = % of variants for that class that wafrift found a working bypass for; `—` = class not exercised on that stack._
+
+| class | modsec-pl1 | modsec-pl2 | modsec-pl3 | modsec-pl4 | coraza | bunkerweb | naxsi |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| sql | 40.2 | 39.0 | 39.7 | 39.1 | 20.9 | 21.1 | 12.6 |
+| xss | — | — | — | — | 12.1 | 12.1 | 12.1 |
+| cmdi | — | — | — | — | 24.8 | 22.3 | 14.0 |
+| ssti | — | — | — | — | 59.4 | 56.0 | 38.5 |
+| path | — | — | — | — | 12.6 | 12.2 | 12.0 |
+| ldap | — | — | — | — | 33.3 | 33.3 | 16.7 |
+| xxe | — | — | — | — | 0.0 | 0.0 | 0.0 |
+| ssrf | — | — | — | — | 0.0 | 0.0 | 0.0 |
+| nosql | — | — | — | — | 0.0 | 0.0 | 0.0 |
+| log4shell | — | — | — | — | 0.0 | 0.0 | 0.0 |
+
+## Per-stack roll-up
+
+| stack | classes exercised | total variants | total bypassed | overall rate |
+|---|---:|---:|---:|---:|
+| modsec-pl1 | 1 | 1,730 | 696 | 40.2% |
+| modsec-pl2 | 1 | 1,730 | 675 | 39.0% |
+| modsec-pl3 | 1 | 1,730 | 686 | 39.7% |
+| modsec-pl4 | 1 | 1,730 | 676 | 39.1% |
+| coraza | 10 | 10,312 | 2,221 | 21.5% |
+| bunkerweb | 10 | 10,312 | 2,163 | 21.0% |
+| naxsi | 10 | 10,312 | 1,520 | 14.7% |
+
+## Source
+
+Latest result file picked per stack:
+
+- `v022-quotefree-modsec-pl1.json` -> **modsec-pl1**
+- `v022-quotefree-modsec-pl2.json` -> **modsec-pl2**
+- `v022-quotefree-modsec-pl3.json` -> **modsec-pl3**
+- `v022-quotefree-modsec-pl4.json` -> **modsec-pl4**
+- `honest-coraza-equiv-cegis-0.2.16.json` -> **coraza**
+- `honest-bunkerweb-equiv-cegis-0.2.16.json` -> **bunkerweb**
+- `honest-naxsi-equiv-cegis-0.2.16.json` -> **naxsi**
+
+## Reproduce
+
+```bash
+# Bring up one stack
+wafrift-bench/scripts/up.sh modsec-pl4
+
+# Run the full bench with verified-bypass gating
+cargo run --release -p wafrift-cli -- bench-waf \
+    --base-url http://127.0.0.1:18084 \
+    --corpus wafrift-bench/corpus \
+    --evade --variants 20 \
+    --strategies heavy,mcts,smuggling,content-type,redos,hill-climb,sim-anneal,tabu,novelty,map-elites,differential \
+    --oracle-gate \
+    --format json \
+    --output wafrift-bench/results/modsec-pl4-$(date -u +%Y%m%d).json
+
+# Re-render the scoreboard
+wafrift-bench/scripts/render-scoreboard.py wafrift-bench/results/ \
+    > docs/SCOREBOARD.md
+```

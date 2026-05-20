@@ -1,171 +1,80 @@
-# Gap closure roadmap (EvilWAF-class parity)
+# Roadmap
 
-This document tracks work to match **common expectations** set by tools like [EvilWAF](https://github.com/matrixleons/evilwaf): transparent proxying, egress diversity, origin targeting, TLS/HTTP identity, and packaged “scanner” workflows. Items are ordered by **impact / risk** ratio for authorized testing only.
+Forward-looking — what's open, in priority order. Closed items live in [CHANGELOG.md](../CHANGELOG.md); this doc tracks **what's next**.
 
-## Legend
-
-| Tier | Meaning |
-|------|---------|
-| **P0** | Done or in progress in-tree; small follow-ups only |
-| **P1** | High value, bounded scope (weeks) |
-| **P2** | Large engineering (TLS stack, full MITM) |
-| **P3** | Research / vendor-specific / maintenance heavy |
+Operating principle: every entry below ships **measurable** value. We don't add a feature; we add a `+N%` on the scoreboard, a closed CWE class, a `wafrift X` command that didn't exist. If you can't measure it, it doesn't get prioritised.
 
 ---
 
-## 1. Forward proxy + tool integration
+## Tier 1 — legendary lift
 
-| Gap | Tier | Status / plan |
-|-----|------|----------------|
-| HTTP forward proxy with evasion | P0 | `wafrift-proxy` — HTTP `GET/POST` path applies `evade`, per-host `HostState`. |
-| HTTPS via CONNECT (passthrough) | P0 | CONNECT tunnels today — **no** payload mutation on tunneled TLS. |
-| **HTTPS MITM** (terminate client TLS, inspect HTTP, re-encrypt upstream) | P2 | **Done (v1):** `--write-mitm-ca-dir` / `--mitm --mitm-ca-dir`; CA-signed leaves; hop-by-hop headers stripped on upstream + downstream in `forward_wafrift_request` and on MITM ingest. **Follow-ups:** HTTP/2 to client, h2c, WebSocket on MITM path; parse `Connection` token list per RFC 7230. |
-| sqlmap / ffuzz `--proxy` docs | P1 | **Done:** [`PROXY_TOOLING.md`](./PROXY_TOOLING.md). |
+These three are what take wafrift from "best-in-class evader" to "the research instrument cited every time someone writes a WAF paper."
 
----
+### 1. Break the fingerprint ceiling — JA3/JA4 + H2 + header order
 
-## 2. Egress & session identity
+| Problem | Modern Cloudflare / Akamai / AWS Shield / Imperva Bot Management classify at TLS+H2 *before* the payload is parsed. Default wafrift looks like reqwest-the-library; no amount of payload cleverness gets through. |
+|---|---|
+| **Today** | `--features tls-impersonate` ships rquest + BoringSSL with Chrome/Firefox/Safari ClientHellos. Solid for static fingerprint. |
+| **What's missing** | (a) per-request JA3/JA4 rotation that's *coherent* — i.e. matches a real session lifecycle, not just round-robin profiles; (b) H2 frame-layout fingerprint (`SETTINGS` order, priority tree, `WINDOW_UPDATE` cadence); (c) browser-realistic header insertion order with the right entropy (Chrome doesn't emit `Accept-Encoding` in the same position as Firefox); (d) HPACK dynamic-table state that survives a real browsing session. |
+| **Plan** | (1) Move `StealthClient` to `rquest`'s lower-level builder so we control frame timing. (2) Add `wafrift_fingerprint::h2_profile::{chrome, firefox, safari}` with frame-by-frame ground truth captured from real browsers (mitmproxy + wireshark). (3) Header-order strategy in `wafrift-fingerprint` keyed off `--tls-impersonate`. (4) JA3-coherence: when rotating, group consecutive requests under one profile for a "session" window before flipping. |
+| **Measurable win** | Bypass rate on the cloud-WAF tier of the scoreboard (Tier 2). Today rustls-default is ~0% past Cloudflare Bot Management on a fresh IP; goal 70%+. |
 
-| Gap | Tier | Status / plan |
-|-----|------|----------------|
-| Rotating HTTP proxies | P0 | `EvasionConfig.proxies` + `wafrift-pool` (`proxy-pool` feature on transport). |
-| Tor / SOCKS presets | P1 | **Done:** [`PROXY_TOOLING.md`](./PROXY_TOOLING.md) + `wafrift egress-example --preset tor` prints merge-ready `proxies` JSON (`socks5h://127.0.0.1:9050`). |
-| Source-port / local bind rotation | P2 | **Done (v1 Parity):** Supported via `reqwest::ClientBuilder::local_address` utilizing custom connectors where needed. Documented in proxy tooling. |
+### 2. Public scoreboard
 
----
+| Problem | "Best-in-class" is a vibe today. Without a public benchmark there's no way to defend the claim — and no way to make every new mutator earn its keep. |
+|---|---|
+| **Plan** | (1) Docker-compose harness under `wafrift-bench/scoreboard/` with ModSec CRS PL1-4, Coraza, naxsi, libinjection-only. (2) Optional cloud-WAF rigs via terraform (`cf-staging.tf`, `aws-waf-staging.tf`) — opt-in, paid-tier required, gated behind `WAFRIFT_CLOUD_BENCH=1`. (3) GitHub Action that runs the full grid on every push, publishes per-(WAF × payload-class) pass/fail JSON to `wafrift-bench/results/`, and renders a dashboard page on the project site. (4) Per-mutator attribution: every bypass tagged with the technique chain, so we can answer "which mutator carried the bypass" not just "we bypassed." |
+| **Measurable win** | Every PR that adds a mutator must show `+N` on the scoreboard. Makes the project legible to outside reviewers and turns wafrift from "tool people try" into "tool people cite." |
 
-## 3. Origin bypass & discovery
+### 3. Persistent genome warm-start
 
-| Gap | Tier | Status / plan |
-|-----|------|----------------|
-| Manual host → IP | P0 | `EvasionConfig.origin_bypass` + `resolve()` in transport client builder. |
-| DNS-based hints | P1 | **Done:** `wafrift origin-hints --host <name> [--format json]` — resolves via `lookup_host`, prints `origin_bypass` JSON snippet. |
-| Full discovery (CT, historical DNS, leaks) | P3 | **Done (v1):** `wafrift recon --domain <name>` built via `wafrift-recon` crate. Queries crt.sh and resolves origins to bypass WAFs. |
-
----
-
-## 4. TLS & HTTP/2 fingerprint parity
-
-| Gap | Tier | Status / plan |
-|-----|------|----------------|
-| HTTP header fingerprints (UA, Accept, …) | P0 | `wafrift-fingerprint` + strategy `apply_profile`. |
-| JA3/JA4-style **documentation** of TLS profiles | P0 | **Done:** [`TLS_PARITY.md`](./TLS_PARITY.md) + `tls_fingerprint.rs` (limits of rustls vs browser JA3). |
-| **Wire-identical** browser ClientHello (JA3) | P2/P3 | **Done:** `wafrift-transport::stealth::StealthClient` wraps `rquest` (BoringSSL). Opt-in via `--features tls-impersonate`; CLI exposes `--tls-impersonate {chrome131,firefox133,safari18,…}`. See [`TLS_PARITY.md`](./TLS_PARITY.md). |
-| HTTP/2 SETTINGS / priority “fingerprint” | P2 | **Done:** rquest sends Chrome's exact `HEADER_TABLE_SIZE` / `INITIAL_WINDOW_SIZE` / `MAX_CONCURRENT_STREAMS` values in Chrome's exact order when `tls-impersonate` is on. |
-| **Per-request** TLS fingerprint rotation | P1 | **Done (v0.2.2):** `wafrift-proxy --tls-impersonate-rotate chrome131,firefox133,safari18` round-robins a `StealthPool` per upstream request. Defeats per-fingerprint reputation (Cloudflare bot-management, Akamai BMP, PerimeterX). |
-| Per-request **TCP source-port rotation** | P1 | **Done (v0.2.2):** `wafrift-proxy --no-conn-reuse` flips `pool_max_idle_per_host(0)`. Kernel picks a fresh ephemeral source port per upstream request. |
-| TCP **raw-options** rotation (MSS, window scale, timestamp, SACK) | P3 | **Open.** Needs `CAP_NET_RAW` and a custom connector replacing the kernel's TCP stack. WafRift uses pure userspace networking; no plan to add raw sockets. Filed honestly, not silently shipped. |
-| Body-size **inspection-window bypass** (Cloudflare 8KB / AWS WAF 16KB / Akamai 8KB caps) | P1 | **Done (v0.2.2):** `wafrift_evolution::body_padding` content-type-aware padder + `wafrift-proxy --body-padding-bytes <N>` + wired into `EvasionConfig::maximum()` so `wafrift scan` and `bench-waf` use it automatically. Closes nowafplsV2's primary advantage. |
-| **Real-time TUI dashboard** | P1 | **Done (v0.2.2):** `wafrift-proxy --tui` ships a ratatui/crossterm dashboard (per-host counters, TLS rotation distribution, padded-body counter, live request stream). Closes EvilWAF's TUI gap. |
+| Problem | Every scan today starts cold. The bandit + wafmodel rediscover the same Cloudflare quirks they discovered last week. |
+|---|---|
+| **Today** | Per-WAF gene-bank at `~/.wafrift/genomes/<waf>.json` stores winning technique chains but doesn't seed the bandit state. |
+| **Plan** | Persist Phase-C bandit posteriors + wafmodel SFA state to `~/.wafrift/genomes.db` keyed by `(waf_fingerprint, payload_class, delivery_shape)`. Warm-start from the persisted posterior on every scan; cross-target transfer when the fingerprint matches. |
+| **Measurable win** | 5× faster time-to-first-bypass on a repeat target (measured against the scoreboard). Compounds: every scan you run improves the next. |
 
 ---
 
-## 5. Edge / vendor-specific modules
+## Tier 2 — cheap, ship now
 
-| Gap | Tier | Status / plan |
-|-----|------|----------------|
-| Cloudflare-style header / allowlist probes | P3 | Optional `rules/edge/cloudflare.toml` + small oracle signals — **only** with clear “authorized lab” framing; avoid one-off bypass “cookbooks” in core. |
-| Multi-layer “scanner” report matrix | P1 | **Done (v1):** `wafrift scan --format json --report-layers` adds `layer_report` (network, detection, baseline_probe, evasion_campaign). Extend with timing/oracle later. |
+### 4. `wafrift legendary --target X` — one-shot demo
 
----
+Runs `detect → fingerprint → discover → scan → bypass-probe → report` in a single command, emits a polished HTML + markdown writeup. Today every step is a separate invocation; the demo magnet is one command that produces the artifact you'd actually show a stakeholder.
 
-## 6. Benchmarks & regression
+### 5. Oracle echo-back — close the DVWA 20% gap
 
-| Gap | Tier | Status / plan |
-|-----|------|----------------|
-| Local WAF + seed corpus | P0 | `bench-waf`, ModSecurity testbed, `run-waf-bench.sh`. |
-| Nightly Docker bench in CI | P3 | Optional workflow `workflow_dispatch` only (no default PR noise). |
+Blind / stored vulns need an oracle that observes the application side-channel, not the immediate response. `wafrift listener` brings up a loopback HTTP/DNS callback so blind SSRF / time-based SQLi / stored XSS produce a verifiable signal back into the scan. Lifts DVWA recall 80% → ~95%.
 
----
+### 6. CRS PL4 full coverage in bench
 
-## Execution order (recommended)
+Confirm the bench harness exercises PL4 across all 10 payload classes (not just smoke). Add any missing classes; report pass/fail per class on the scoreboard so PL4 gets its own column.
 
-1. **P1 docs:** `PROXY_TOOLING.md`, Tor/SOCKS examples, `TLS_PARITY.md` — **done.**  
-2. **P1 CLI:** `origin-hints` — **done.**  
-3. **P1 scan report:** `--report-layers` — **done (v1).**  
-4. **P2 MITM:** design review → implement behind `--mitm` + CA export.  
-5. **P2/P3 TLS parity:** spike after MITM (many users care about HTTP evasion first).  
-6. **P3:** vendor modules and external recon only if product scope explicitly includes them.
+### 7. Bypass-probe JSON telemetry surfacing
+
+The `retry_after_responses` / `max_retry_after_obeyed_ms` aggregates added in 0.2.18 are already in JSON — add them to the text report's "rate-limited" panel and to `--report-layers` output, so operators see "the WAF asked for 30 s and we obeyed" without parsing JSON.
 
 ---
 
-## Definition of “gaps closed”
+## Tier 3 — open, not blocking legendary
 
-- **Minimum:** All **P0–P1** rows implemented or explicitly documented with a **P2** owner and milestone.  
-- **Parity with EvilWAF marketing:** **Closed.** P2 MITM shipped (v1
-  CA + leaf signing), P2 TLS path shipped (StealthClient via rquest +
-  BoringSSL behind `--features tls-impersonate`), and P3 recon
-  shipped (`wafrift recon` + `wafrift discover` for OpenAPI / GraphQL
-  / param mining). The "documented limitation" framing in earlier
-  drafts of this document is no longer accurate as of f735ba8 +
-  this commit.
+| Item | Why open | Why not blocking |
+|---|---|---|
+| TCP raw-options rotation (MSS, window scale, SACK) | Needs `CAP_NET_RAW` + custom TCP stack | Coverage cost > value; the JA3/H2 work in #1 picks up most of the same signal |
+| Burp BApp Store extension | Distribution channel for non-CLI users | The proxy + chain workflow already works; BApp is polish |
+| `.genome` portable bundle export | Genome sharing surface | Today's `wafrift bank export` round-trips the same data; portable format is nice-to-have |
+| SARIF output for CI integration | Pentest pipeline polish | `--format json` covers the same machine consumer today |
+| Auto-generated SBOM (CycloneDX) | Supply-chain compliance | `cargo-cyclonedx` works out-of-tree if needed |
+| Code-signed release artefacts (sigstore / cosign) | Trust chain for binary distribution | Crates.io distribution path is already authenticated |
+
+These show up here so they're not forgotten — but none of them moves the scoreboard, so none of them blocks legendary.
 
 ---
 
-# Post-0.1: Programmable Proxy
+## How this roadmap stays honest
 
-The market gap WafRift fills is **not** "another bypass tool" — it's a **programmable WAF-evasion proxy with per-technique controls**, with the evolutionary engine as an optional mode. v0.1 ships the engine + CLI fine-grained flags; the items below land post-0.1.
+- Every Tier-1 + Tier-2 item lands behind a scoreboard delta. No "infrastructure" items that don't have an end-user measurable win.
+- "Done" rows are deleted, not buffered. The CHANGELOG is the audit trail; this doc is what's left.
+- If a Tier-3 item starts getting requested, it gets promoted with a measurable win statement. If a Tier-1 item stalls past a deadline, it gets demoted and re-scoped.
 
-## 7. Technique toggle tree (P1)
-
-Every technique becomes an addressable leaf in a hierarchical namespace, individually toggleable:
-
-```
-encoding/url/double-encode      encoding/url/mixed-case      encoding/url/overlong-utf8
-encoding/unicode/homoglyph      encoding/unicode/zwsp        encoding/unicode/normalize-bypass
-encoding/html-entity            encoding/base64
-grammar/sql/mysql               grammar/sql/postgres         grammar/sql/mssql
-grammar/sql/oracle              grammar/sql/sqlite           grammar/nosql/mongo
-grammar/nosql/elastic           grammar/nosql/redis
-grammar/shell/bash              grammar/shell/cmd            grammar/shell/powershell
-grammar/ssti/jinja2             grammar/ssti/twig            grammar/ssti/freemarker  …
-content-type/charset-switch     content-type/multipart-coerce
-smuggling/cl-te                 smuggling/te-cl              smuggling/h2-mixed-case
-fingerprint/ja3-rotate          fingerprint/header-order
-```
-
-- **Storage:** `~/.wafrift/hosts/<host>.toml` per-host, `~/.wafrift/global.toml` defaults.
-- **Wire-up:** in v0.1 we already expose `--only` / `--exclude` at the CLI; in post-0.1 the same selector is consumed by `wafrift-proxy` from the host config and is hot-reloadable on SIGHUP.
-- **Discoverability:** `wafrift techniques list [--tree]` + `wafrift techniques explain <leaf>`.
-
-## 8. Three operating modes (P1)
-
-| Mode | Behavior | Use case |
-|------|----------|----------|
-| **Passthrough** | Proxy sees traffic, modifies nothing, classifies + records oracle signals | Read-only intelligence; safe deployment in front of existing tooling |
-| **Manual** | Only enabled toggles applied, deterministic, no evolution | Surgical / reproducible / shareable test cases |
-| **Evolve** | Full gene-bank + search loop (current 0.1 default) | Discovery against an unknown WAF |
-
-CLI: `wafrift scan --mode {passthrough,manual,evolve}`. Proxy: `wafrift-proxy --mode …`.
-
-## 9. Burp Suite extension (P1)
-
-**Not a CLI bridge — a control panel.** The extension bundles `wafrift-proxy` as a managed sidecar started by the extension and configures Burp's upstream proxy automatically.
-
-| Feature | Detail |
-|---------|--------|
-| Toggle tree UI | Same hierarchy as #7, rendered as a Burp tab tree with per-host overrides |
-| Per-host gene-bank browser | Inspect, edit, delete, pin-as-winner, export learned bypasses |
-| Verdict timeline | Live stream of oracle classifications as Burp drives traffic |
-| Right-click → "Run through wafrift" | Repeater/Proxy context menu, mode selector inline |
-| Saved transforms | Lock a winning pipeline as a named Burp transform for reuse |
-| Distribution | BApp Store listing |
-
-Differentiator vs `nowafpls` / `WAF Bypadd` / `Bypass WAF` / `HTTP Smuggler`: those each implement one technique; this is the unified proxy with composable controls + persistent learning.
-
-## 10. Genome sharing surface (P2)
-
-- Each gene-bank entry serializable to a portable `.genome` (TOML or compact JSON) — typed technique pipeline + target WAF + signal evidence + provenance.
-- `wafrift genome export <waf> > cloudflare-2026-q2.genome`
-- `wafrift genome import path/to/file.genome`
-- Community-curated `wafrift/community-genomes` GitHub repo as social network-effect channel; the typed technique representation makes safe sharing possible (no raw payload dumps required — the *recipe* is enough).
-
-## 11. Live config reload + scoping (P2)
-
-- `wafrift-proxy` watches `~/.wafrift/hosts/` and reloads on change — no restart to flip a toggle mid-engagement.
-- Per-URL-pattern scopes inside a host config (e.g. `/api/*` uses one toggle set, `/admin/*` another).
-
-## 12. Positioning corollary (no code, but a release blocker for the *narrative*)
-
-- README hero must lead with **"programmable WAF-evasion proxy with per-technique controls — and an optional evolutionary mode that learns bypasses for you"**, not "evolutionary WAF evasion engine."
-- Without this reframe, glance-pattern-matching to nowafpls/whatwaf kills 90% of potential users in 5 seconds. Tracked in v0.1 README work.
+Supporting docs: [TLS_PARITY.md](./TLS_PARITY.md) · [PROXY_TOOLING.md](./PROXY_TOOLING.md) · [PRACTITIONER_WALKTHROUGH.md](./PRACTITIONER_WALKTHROUGH.md).

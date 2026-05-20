@@ -69,9 +69,18 @@ SCOREBOARD*.md
 *_status_*.md
 .audits/
 
-# Allow-list: governance artifacts that ARE public
+# Allow-list: governance artifacts AND shipped code that the broad
+# planning-doc patterns above would otherwise sweep up. Order matters:
+# later `!` re-includes win over earlier `*` excludes.
 !CODE_OF_CONDUCT.md
 !SECURITY.md
+# The `wafrift legendary` one-shot command — real Rust source, not a
+# "LEGENDARY_PLAN.md" planning doc.
+!crates/cli/src/legendary.rs
+# Public bypass-rate scoreboard, refreshed by CI from wafrift-bench
+# results — the `SCOREBOARD*.md` pattern above blocks stray local
+# scoreboards but this one is the canonical published artefact.
+!docs/SCOREBOARD.md
 !CONTRIBUTING.md
 !LICENSE
 !LICENSE-APACHE

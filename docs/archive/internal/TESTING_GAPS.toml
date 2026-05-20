@@ -1,16 +1,19 @@
 [meta]
-date = "2026-05-10"
+date = "2026-05-19"
 methodology = """
 For each workspace crate: source LoC, integration test LoC, inline
 test count. Crates with high src and zero/low tests/ are gaps.
 Crates with adversarial test coverage but no negative-twin / property
 / cross-file tests are partial gaps.
+
+Each [[gap]] and [[robustness]] entry carries status = "done" | "open".
 """
 
 # ── CRITICAL gaps: high src, zero or near-zero integration tests ─────
 
 [[gap]]
 crate = "smuggling"
+status = "done"
 src_loc = 2868
 tests_dir_loc = 0
 inline_tests = 89
@@ -25,37 +28,42 @@ keeps blocking, but the smuggling vector that was supposed to bypass
 is just no-op'd.
 """
 needed = [
-    "tests/cl_0_smuggling.rs — assert chunked body with CL=0 reaches upstream as two requests",
-    "tests/cl_te_smuggling.rs — CL+TE conflict, prove front-end uses CL while back-end uses TE",
-    "tests/te_te_smuggling.rs — duplicate TE headers with one obfuscated",
-    "tests/chunked_edge.rs — 0-size chunks, trailing CRLF games, chunk-extension abuse",
-    "tests/property_smuggling.rs — proptest 10k cases: any payload + smuggling encoding round-trips at the wire",
+    { file = "tests/cl_0_smuggling.rs", status = "done" },
+    { file = "tests/cl_te_smuggling.rs", status = "done" },
+    { file = "tests/te_te_smuggling.rs", status = "done" },
+    { file = "tests/chunked_edge.rs", status = "done" },
+    { file = "tests/property_smuggling.rs", status = "done" },
+    { file = "tests/h2_desync_integration.rs", status = "done" },
 ]
 
 [[gap]]
 crate = "proxy"
+status = "open"
 src_loc = 9719
 tests_dir_loc = 19
 inline_tests = 208
 severity = "critical"
 why = """
-9.7K LoC of proxy code with 19 LoC of integration tests. Inline
+9.7K LoC of proxy code with thin integration tests. Inline
 tests are unit-level (auth header parsing, cert generation). The
 end-to-end path (client → MITM → evade → upstream → MITM → client)
 has no test that walks the full pipeline through the real binary.
 Every regression in the forward path is invisible until production.
 """
 needed = [
-    "tests/forward_path_e2e.rs — real proxy binary, mock upstream (axum), assert evasion applied + response unchanged",
-    "tests/mitm_cert_chain.rs — generated CA + per-host leaf, openssl s_client verifies chain",
-    "tests/intercept_rendezvous.rs — INTERCEPT_MODE drains queue on toggle-off, no leaks",
-    "tests/mutate_url_pipeline.rs — --mutate-url end-to-end: GET /search?q=1' OR '1 → upstream sees percent-encoded",
-    "tests/captchaforge_install.rs — --captchaforge succeeds with feature on, errors with feature off",
-    "tests/challenge_replay.rs — Cloudflare clearance cookie captured + reattached on next req to same host",
+    { file = "tests/forward_path_e2e.rs", status = "open" },
+    { file = "tests/mitm_cert_chain.rs", status = "open" },
+    { file = "tests/intercept_rendezvous.rs", status = "done" },
+    { file = "tests/intercept_timeout_release.rs", status = "done" },
+    { file = "tests/bogon_types_parity.rs", status = "done" },
+    { file = "tests/mutate_url_pipeline.rs", status = "open" },
+    { file = "tests/captchaforge_install.rs", status = "open" },
+    { file = "tests/challenge_replay.rs", status = "open" },
 ]
 
 [[gap]]
 crate = "recon"
+status = "done"
 src_loc = 1381
 tests_dir_loc = 0
 inline_tests = 35
@@ -66,14 +74,15 @@ fingerprint cross-checks. Inline tests cover parse helpers; nothing
 exercises the network probing layer with a real (mock) target.
 """
 needed = [
-    "tests/header_probe_axum.rs — axum mock upstream returns canned headers, assert classifications",
-    "tests/banner_grab_tcp.rs — tokio::net::TcpListener serving canned banners",
-    "tests/timeout_robustness.rs — slow server, assert recon honours timeout + doesn't hang",
-    "tests/probe_idempotency.rs — same target twice, byte-equal results",
+    { file = "tests/header_probe_axum.rs", status = "done" },
+    { file = "tests/banner_grab_tcp.rs", status = "done" },
+    { file = "tests/timeout_robustness.rs", status = "done" },
+    { file = "tests/probe_idempotency.rs", status = "done" },
 ]
 
 [[gap]]
 crate = "fingerprint"
+status = "open"
 src_loc = 927
 tests_dir_loc = 0
 inline_tests = 27
@@ -86,14 +95,15 @@ detector and asserts the right WAF is named. Without this, a regex
 typo in any of the 70+ wafw00f-derived rules silently skips the WAF.
 """
 needed = [
-    "tests/wafw00f_corpus.rs — vendored signature corpus (one file per WAF), assert detect() names the WAF",
-    "tests/attribution_chain.rs — assert citation back to wafw00f survives detection (regression for stripped attribution)",
-    "tests/false_positive_corpus.rs — non-WAF responses (plain nginx/apache/cloudfront), assert zero detections",
-    "tests/cross_signature_priority.rs — overlapping signatures (CF + Akamai both match), assert deterministic priority",
+    { file = "tests/wafw00f_corpus.rs", status = "open" },
+    { file = "tests/attribution_chain.rs", status = "open" },
+    { file = "tests/false_positive_corpus.rs", status = "open" },
+    { file = "tests/cross_signature_priority.rs", status = "open" },
 ]
 
 [[gap]]
 crate = "captchaforge-bridge"
+status = "done"
 src_loc = 268
 tests_dir_loc = 0
 inline_tests = 2
@@ -106,16 +116,17 @@ honouring, (c) cookie-extraction round-trip into ChallengeStore,
 (d) global-config OnceCell semantics.
 """
 needed = [
-    "tests/chromium_missing.rs — set CHROMIUM_PATH to /nonexistent, assert error within timeout, no panic",
-    "tests/timeout_honoured.rs — solve_in_browser with 1s timeout against unresponsive challenge, assert timeout exit",
-    "tests/store_roundtrip.rs — solve_and_record writes cookie into ChallengeStore for the right host",
-    "tests/global_config_oncecell.rs — concurrent install_global_solver, assert single install, deterministic config",
+    { file = "tests/chromium_missing.rs", status = "done" },
+    { file = "tests/timeout_honoured.rs", status = "done" },
+    { file = "tests/store_roundtrip.rs", status = "done" },
+    { file = "tests/global_config_oncecell.rs", status = "done" },
 ]
 
 # ── HIGH gaps: existing test directory but lacks adversarial / negative-twin coverage ─
 
 [[gap]]
 crate = "strategy"
+status = "open"
 src_loc = 5430
 tests_dir_loc = 66
 inline_tests = 137
@@ -127,14 +138,15 @@ regressions (e.g. encoding chain order swapped, oracle short-circuit
 broken) need explicit coverage.
 """
 needed = [
-    "tests/evade_chain_order.rs — assert encoders apply in declared order; reordering breaks the test",
-    "tests/host_state_caching.rs — same host twice, second pass uses cache + skips reconnaissance",
-    "tests/oracle_shortcircuit.rs — OracleVerdict::Allowed early-exits the chain",
-    "tests/strategy_property.rs — proptest 10k payloads through evade(), assert no panic + idempotent under double-evade",
+    { file = "tests/evade_chain_order.rs", status = "open" },
+    { file = "tests/host_state_caching.rs", status = "open" },
+    { file = "tests/oracle_shortcircuit.rs", status = "open" },
+    { file = "tests/strategy_property.rs", status = "open" },
 ]
 
 [[gap]]
 crate = "grammar"
+status = "open"
 src_loc = 8409
 tests_dir_loc = 130
 inline_tests = 286
@@ -146,14 +158,15 @@ Cross-grammar interactions (SQL inside JSON inside URL-encoded)
 have no adversarial coverage.
 """
 needed = [
-    "tests/sql_in_json_in_url.rs — nested encoding chains, assert decode-by-WAF still finds vuln",
-    "tests/grammar_property.rs — proptest 10k mutations preserve semantic equivalence (parsed form unchanged)",
-    "tests/grammar_max_depth.rs — recursion ceiling enforced, deeply-nested input doesn't stack-overflow",
-    "tests/cross_grammar_priority.rs — same payload through 3 grammar mutators, assert deterministic order",
+    { file = "tests/sql_in_json_in_url.rs", status = "open" },
+    { file = "tests/grammar_property.rs", status = "open" },
+    { file = "tests/grammar_max_depth.rs", status = "open" },
+    { file = "tests/cross_grammar_priority.rs", status = "open" },
 ]
 
 [[gap]]
 crate = "evolution"
+status = "open"
 src_loc = 7677
 tests_dir_loc = 647
 inline_tests = 178
@@ -166,13 +179,14 @@ multi-thread shared-engine race conditions beyond the existing
 tokio::test, and search-algorithm correctness invariants.
 """
 needed = [
-    "tests/engine_panic_audit.rs — feed malformed Chromosome, assert engine returns Err not panics",
-    "tests/shared_engine_stress.rs — 100 concurrent submit_evaluations, assert cache + corpus consistent",
-    "tests/search_algorithm_invariants.rs — proptest: best fitness is monotonic non-decreasing across generations",
+    { file = "tests/engine_panic_audit.rs", status = "open" },
+    { file = "tests/shared_engine_stress.rs", status = "open" },
+    { file = "tests/search_algorithm_invariants.rs", status = "open" },
 ]
 
 [[gap]]
 crate = "genome-registry"
+status = "open"
 src_loc = 645
 tests_dir_loc = 0
 inline_tests = 22
@@ -183,30 +197,34 @@ Adversarial coverage missing: cross-version genome compat, malformed
 signatures, key revocation semantics, bundle-tampering detection.
 """
 needed = [
-    "tests/cross_version_compat.rs — bundle signed with v0.2.2 schema verifies under v0.2.3",
-    "tests/tamper_detection.rs — flip one byte in signed bundle, assert verify() returns Err",
-    "tests/key_revocation.rs — trust list revokes a publisher; previously-signed bundles fail verify",
-    "tests/bundle_property.rs — proptest 10k random bundles round-trip via sign+verify",
+    { file = "tests/cross_version_compat.rs", status = "open" },
+    { file = "tests/tamper_detection.rs", status = "open" },
+    { file = "tests/key_revocation.rs", status = "open" },
+    { file = "tests/bundle_property.rs", status = "open" },
 ]
 
 # ── ROBUSTNESS gaps: not test-shaped, but issues to fix-and-test ─
 
 [[robustness]]
+status = "done"
 file = "crates/encoding/src/url_mutate.rs"
 issue = "PercentEncodeAggressive does not encode bytes in the URL safe-set; verify with property test against multi-WAF corpus"
 proof_test = "tests/url_mutate_signature_evasion.rs"
 
 [[robustness]]
+status = "done"
 file = "crates/proxy/src/main.rs"
 issue = "INTERCEPT_TIMEOUT 30s — assert no leak when caller drops Receiver mid-decision"
-proof_test = "tests/intercept_drop_safety.rs"
+proof_test = "tests/intercept_timeout_release.rs"
 
 [[robustness]]
+status = "open"
 file = "crates/transport/src/challenge.rs"
 issue = "ChallengeStore is never garbage-collected; entries persist forever even after target rotates IPs / clearance expires"
 proof_test = "tests/challenge_store_ttl.rs"
 
 [[robustness]]
+status = "open"
 file = "crates/evolution/src/evolution/engine.rs"
 issue = "in_flight HashMap can grow unbounded if submit_evaluations is never called; needs TTL or eviction"
 proof_test = "tests/in_flight_eviction.rs"

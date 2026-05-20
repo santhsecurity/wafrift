@@ -69,9 +69,6 @@ The compile-time stub when the feature is off returns an actionable
 downstream code can call `StealthClient::new` unconditionally and get
 a clear error rather than a "method not found" build failure.
 
-Originally tracked as a "documented limitation" in
-[`GAP_CLOSURE_ROADMAP.md`](./GAP_CLOSURE_ROADMAP.md) — closed.
-
 ## Per-request fingerprint rotation
 
 `--tls-impersonate <profile>` keeps the same browser ClientHello on
@@ -90,13 +87,11 @@ source port (kernel-chosen ephemeral, fresh per request). 4 profiles
 × new src port = no two consecutive requests look alike at the
 connection layer.
 
-## What's still NOT in WafRift
+## Open work
 
-- **TCP raw-options rotation** (TCP MSS, window scale, timestamp,
-  SACK permitted bits — what EvilWAF rotates per request). This needs
-  `CAP_NET_RAW` and a bespoke connector replacing the kernel's TCP
-  stack. WafRift uses pure userspace networking; this gap is honest,
-  not silently shipped. Open work item, not "deferred."
+The static-profile path is solid; the **per-request fingerprint coherence** work — JA3 rotation that matches a real session lifecycle, H2 frame-layout fingerprint (`SETTINGS` order, priority tree, `WINDOW_UPDATE` cadence), browser-realistic header insertion order — is tracked as Tier 1, item 1 in the [roadmap](./GAP_CLOSURE_ROADMAP.md). This is what unlocks the cloud-WAF bot-management tier where rotating profiles round-robin still gets you classified as a bot.
+
+TCP raw-options rotation (MSS, window scale, SACK) needs `CAP_NET_RAW` + a bespoke connector replacing the kernel's TCP stack; coverage cost is high relative to the JA3/H2 gains, so it's parked in Tier 3.
 
 ## Body-size inspection bypass
 
