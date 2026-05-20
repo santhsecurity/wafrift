@@ -212,7 +212,14 @@ fn delivery_labels_are_stable() {
                 // 0.2.17 raw reflected channels (shared delivery_set);
                 // valid for SQL too where transport-legal.
                 "header_value",
-                "cookie"
+                "cookie",
+                // 0.2.18 third-body-axis + depth-defeat + GraphQL —
+                // shared delivery_set, sound for SQL identically (the
+                // backend SQL sink receives the same payload bytes
+                // regardless of the JSON/XML/GraphQL transport envelope).
+                "xml_body",
+                "json_nested_deep",
+                "graphql"
             ]
             .contains(&l),
             "unknown delivery label {l:?}"
@@ -543,6 +550,9 @@ fn end_to_end_public_api_shape() {
                 | DeliveryShape::HppSplit { .. }
                 | DeliveryShape::HeaderValue { .. }
                 | DeliveryShape::Cookie { .. }
+                | DeliveryShape::XmlBody { .. }
+                | DeliveryShape::JsonNestedDeep { .. }
+                | DeliveryShape::GraphQLQuery { .. }
         ));
     }
 }

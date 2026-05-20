@@ -61,6 +61,9 @@ pub const FEATURES: &[&str] = &[
     "dlv_query",
     "dlv_header_value",
     "dlv_cookie",
+    "dlv_xml_body",
+    "dlv_json_nested_deep",
+    "dlv_graphql",
 ];
 
 #[must_use]
@@ -187,9 +190,12 @@ pub fn featurize(payload: &str, delivery_arm: usize) -> Vec<f64> {
         7 => "dlv_query",
         8 => "dlv_header_value",
         9 => "dlv_cookie",
-        // Unknown arm ⇒ baseline; never silently fold header/cookie
-        // (8/9) into query — that blinds the learner to the channels
-        // that actually beat the WAF.
+        10 => "dlv_xml_body",
+        11 => "dlv_json_nested_deep",
+        12 => "dlv_graphql",
+        // Unknown arm ⇒ baseline; never silently fold a known channel
+        // into query — that blinds the learner to the channels that
+        // actually beat the WAF.
         _ => "dlv_query",
     };
     set(dlv);

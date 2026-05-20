@@ -668,10 +668,13 @@ fn rw_insert_sep(toks: &mut Vec<Tok>, rng: &mut Rng) -> bool {
 /// and_tail_stable`. (8 → 10 in 0.2.17: the bandit must explore the
 /// new `header_value` / `cookie` arms or they are dead in the
 /// adaptive scan path.)
-pub const DELIVERY_ARMS: usize = 10;
+pub const DELIVERY_ARMS: usize = 13;
 
 /// Stable label for delivery-shape arm `i` (matches `delivery_set`
-/// order). Out-of-range ⇒ "query".
+/// order). Out-of-range ⇒ "query". Indices 0-9 are LOAD-BEARING for
+/// the persisted bandit state + the wafmodel ML feature one-hot in
+/// `equiv::wafmodel.rs`; new shapes append at 10+ so older snapshots
+/// keep their arm semantics on upgrade (LAW 2 backwards-compat).
 #[must_use]
 pub fn delivery_kind_label(i: usize) -> &'static str {
     match i {
@@ -685,6 +688,9 @@ pub fn delivery_kind_label(i: usize) -> &'static str {
         7 => "query",
         8 => "header_value",
         9 => "cookie",
+        10 => "xml_body",
+        11 => "json_nested_deep",
+        12 => "graphql",
         _ => "query",
     }
 }
@@ -727,6 +733,27 @@ pub(crate) fn delivery_set(param: &str) -> Vec<DeliveryShape> {
         },
         DeliveryShape::Cookie {
             name: param.to_string(),
+        },
+        // Third body axis: XML. CRS PL1 has no body processor for
+        // `application/xml` — payload arrives as escaped text inside
+        // an element, parser decodes back to the original bytes for
+        // the backend sink. Transparent iff the app parses XML.
+        DeliveryShape::XmlBody {
+            root: "request".to_string(),
+            field: param.to_string(),
+        },
+        // Depth-defeated JSON: CRS body inspector at PL3 caps depth
+        // at `tx.json_max_depth = 5`. Backend traversal is unbounded.
+        DeliveryShape::JsonNestedDeep {
+            param: param.to_string(),
+            depth: 6,
+        },
+        // GraphQL envelope: a JSON body whose payload is one of many
+        // string variables. CRS has no GraphQL grammar — the payload
+        // is invisible to an ARGS- or JSON-path-scoped rule.
+        DeliveryShape::GraphQLQuery {
+            field: "search".to_string(),
+            var: "v".to_string(),
         },
     ]
 }
