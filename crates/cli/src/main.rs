@@ -38,6 +38,7 @@ mod retry_after;
 mod scan;
 mod seed;
 mod session_init;
+mod smuggle_cmd;
 mod takeover_cmd;
 mod target_context;
 mod technique_filter;
@@ -180,6 +181,17 @@ enum Commands {
     /// arbitrary content on the victim's subdomain. One of the
     /// highest-impact, lowest-effort findings in bug bounty.
     Takeover(takeover_cmd::TakeoverArgs),
+    /// HTTP request smuggling probes (CL.TE / TE.CL / TE.TE /
+    /// CL.0 / dual-CL / multi-value-CL). Subcommands:
+    /// `detect` runs the SAFE timing-differential probes that
+    /// can't poison the connection pool; `probe` fires the
+    /// exploit-grade payloads (requires `--unsafe`); `dry-run`
+    /// renders the raw wire bytes without sending anything;
+    /// `list` enumerates the variants. Built on the same engine
+    /// powering the `wafrift-smuggling` library, but exposed as
+    /// a first-class CLI surface so pentesters don't need to
+    /// roll their own runner.
+    Smuggle(smuggle_cmd::SmuggleArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -477,6 +489,7 @@ fn main() -> ExitCode {
         Some(Commands::Compress(args)) => compress_cmd::run_compress(args),
         Some(Commands::Jwt(args)) => jwt_cmd::run_jwt(args),
         Some(Commands::Takeover(args)) => takeover_cmd::run_takeover(args),
+        Some(Commands::Smuggle(args)) => smuggle_cmd::run_smuggle(args),
     }
 }
 
