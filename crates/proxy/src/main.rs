@@ -8,6 +8,7 @@
 mod findings;
 mod gene_bank_io;
 mod request_helpers;
+mod tunnel;
 mod warn_throttle;
 
 use clap::Parser;
@@ -27,7 +28,7 @@ use hyper::service::service_fn;
 use hyper::upgrade::Upgraded;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 
 use wafrift_proxy::hop_by_hop::{
     collect_connection_header_names, collect_connection_header_names_hyper,
@@ -2580,76 +2581,10 @@ async fn forward_passthrough(
 // render_live_findings + sanitize_for_markdown live in `crate::findings`.
 use crate::findings::render_live_findings;
 
-/// Extract the host:port from a URI authority.
-fn host_addr(uri: &hyper::Uri) -> Option<String> {
-    uri.authority().map(std::string::ToString::to_string)
-}
-
-/// Cap on bytes transferred per direction per CONNECT tunnel. Prevents
-/// a client from streaming gigabytes through the proxy under a single
-/// CONNECT — without this, `copy_bidirectional` runs unbounded and
-/// `MAX_PROXY_BODY_BYTES` / `max_upstream_response_bytes` (which guard the
-/// HTTP-mode paths) do not apply. 2 GiB is generous for legitimate
-/// long-lived TLS sessions while still blocking sustained exfil.
-const MAX_TUNNEL_BYTES_PER_DIRECTION: u64 = 2 * 1024 * 1024 * 1024;
-
-/// Bidirectional tunnel for CONNECT (HTTPS pass-through). Per-direction
-/// byte counter aborts the copy when either side exceeds the cap.
-///
-/// Audit (2026-05-10): takes a pre-resolved `Vec<SocketAddr>` instead
-/// of `addr: String`. The string form forced a SECOND DNS lookup at
-/// `TcpStream::connect`, opening a rebinding TOCTOU window after the
-/// caller had already validated the upstream as public. We now pass
-/// the validated `SocketAddrs` straight in and connect to whichever
-/// answers first.
-async fn tunnel(upgraded: Upgraded, addrs: Vec<std::net::SocketAddr>) -> std::io::Result<()> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut server = TcpStream::connect(addrs.as_slice()).await?;
-    let mut upgraded = TokioIo::new(upgraded);
-    let (mut up_r, mut up_w) = tokio::io::split(&mut upgraded);
-    let (mut sv_r, mut sv_w) = server.split();
-
-    // Each direction owns its own bounded copy loop. When either trips
-    // the byte cap, drop both halves and return a clean error.
-    let to_server = async {
-        let mut buf = vec![0u8; 16 * 1024];
-        let mut total: u64 = 0;
-        loop {
-            let n = up_r.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            total = total.saturating_add(n as u64);
-            if total > MAX_TUNNEL_BYTES_PER_DIRECTION {
-                return Err(std::io::Error::other(
-                    "tunnel exceeded byte cap (client→server)",
-                ));
-            }
-            sv_w.write_all(&buf[..n]).await?;
-        }
-        Ok::<(), std::io::Error>(())
-    };
-    let to_client = async {
-        let mut buf = vec![0u8; 16 * 1024];
-        let mut total: u64 = 0;
-        loop {
-            let n = sv_r.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            total = total.saturating_add(n as u64);
-            if total > MAX_TUNNEL_BYTES_PER_DIRECTION {
-                return Err(std::io::Error::other(
-                    "tunnel exceeded byte cap (server→client)",
-                ));
-            }
-            up_w.write_all(&buf[..n]).await?;
-        }
-        Ok::<(), std::io::Error>(())
-    };
-    tokio::try_join!(to_server, to_client)?;
-    Ok(())
-}
+// host_addr + tunnel + MAX_TUNNEL_BYTES_PER_DIRECTION live in
+// `crate::tunnel` — the CONNECT-tunnel byte-cap + bidirectional
+// copy is its own concern, tested in isolation.
+use crate::tunnel::{host_addr, tunnel};
 
 #[cfg(test)]
 #[path = "proxy_tests.rs"]
