@@ -76,7 +76,7 @@ pub(crate) async fn run_scan(
         );
         return ExitCode::from(1);
     }
-    let filter = match crate::TechniqueFilter::parse(&args.only, &args.exclude) {
+    let filter = match crate::technique_filter::TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,
         Err(msg) => {
             eprintln!("{} {msg}", "Filter error:".red().bold());
