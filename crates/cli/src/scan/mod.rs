@@ -9,7 +9,6 @@
 //! - [`state`] — `ScanState` (mutable counters) and `ScanConfig` (immutable args)
 //! - this module (`mod.rs`) — the `run_scan` orchestrator and step functions
 
-pub(crate) mod retry_after;
 pub(crate) mod state;
 
 use colored::Colorize;
@@ -743,7 +742,7 @@ pub(crate) async fn run_scan(
                                 .get_all("retry-after")
                                 .iter()
                                 .filter_map(|v| v.to_str().ok())
-                                .filter_map(|s| retry_after::parse(s, now))
+                                .filter_map(|s| crate::retry_after::parse(s, now))
                                 .max()
                         } else {
                             None
@@ -895,7 +894,7 @@ pub(crate) async fn run_scan(
             // Honest hint > our guess. Both are already capped (the
             // header parser at MAX_OBEYED, the computed at 30 s).
             let base = batch_retry_after.map_or(computed, |ra| ra.max(computed));
-            let backoff = retry_after::jittered(base, u32::try_from(total_fired).unwrap_or(u32::MAX));
+            let backoff = crate::retry_after::jittered(base, u32::try_from(total_fired).unwrap_or(u32::MAX));
             if let Some(ra) = batch_retry_after {
                 eprintln!(
                     "[wafrift scan] obeying Retry-After: {} ms (server-named cooldown)",
