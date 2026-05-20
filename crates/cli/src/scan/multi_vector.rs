@@ -84,6 +84,16 @@ pub const VECTORS: &[Vector] = &[
     Vector { name: "POST-json-array", content_type: "application/json" },
     Vector { name: "POST-json-as-plain", content_type: "text/plain" },
     Vector { name: "POST-form-as-octet", content_type: "application/octet-stream" },
+    // HTTP method-override header — POST with
+    // `X-HTTP-Method-Override: GET`. Spring's HiddenHttpMethodFilter,
+    // Express's method-override middleware, Rails's
+    // ActionController::MethodOverride, Symfony's
+    // HttpMethodParameterOverride all route on the OVERRIDE header
+    // when present. WAF rule-sets that match by HTTP method (e.g.
+    // "this rule fires on POST only, GET is allowed-list") miss
+    // the request entirely.
+    Vector { name: "POST-method-override-GET", content_type: "application/x-www-form-urlencoded" },
+    Vector { name: "POST-method-override-PUT", content_type: "application/x-www-form-urlencoded" },
     // charset=utf-7 — WAFs route JSON parsing by charset; many
     // refuse utf-7 + fall through to no body inspection. Modern
     // backends (Python json, jsoniter, Go encoding/json) accept
@@ -340,6 +350,23 @@ fn build_request_for_vector(
             // parse the body as JSON.
             let raw = serde_json::json!({ param: payload }).to_string();
             Some(http.post(target).header("Content-Type", ct).body(raw))
+        }
+        "POST-method-override-GET" | "POST-method-override-PUT" => {
+            // Wire shape: standard POST with form body, plus
+            // X-HTTP-Method-Override pointing at the masquerade
+            // method. A backend that honours the override routes
+            // the request to its GET / PUT handler; a WAF that
+            // gates by request-line method continues to apply its
+            // POST rule-set (often weaker on these methods than on
+            // POST).
+            let masquerade = if vector.name.ends_with("GET") { "GET" } else { "PUT" };
+            let body = format!("{param}={}", urlencoding::encode(payload));
+            Some(
+                http.post(target)
+                    .header("Content-Type", ct)
+                    .header("X-HTTP-Method-Override", masquerade)
+                    .body(body),
+            )
         }
         "POST-form-as-octet" => {
             // Content-Type lying for forms — declare form body as
@@ -787,6 +814,45 @@ mod tests {
     #[test]
     fn xml_text_escape_handles_empty_string() {
         assert_eq!(xml_text_escape(""), "");
+    }
+
+    #[test]
+    fn build_post_method_override_get_sets_override_header() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-method-override-GET")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "POST");
+        assert_eq!(
+            req.headers().get("x-http-method-override").unwrap(),
+            "GET",
+            "the masquerade method must reach the wire"
+        );
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        assert!(std::str::from_utf8(body).unwrap().starts_with("q="));
+    }
+
+    #[test]
+    fn build_post_method_override_put_sets_override_header() {
+        let h = http();
+        let v = VECTORS
+            .iter()
+            .find(|v| v.name == "POST-method-override-PUT")
+            .unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "attack", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "POST");
+        assert_eq!(
+            req.headers().get("x-http-method-override").unwrap(),
+            "PUT",
+        );
     }
 
     #[test]
