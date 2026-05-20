@@ -148,13 +148,131 @@ fn classify_request_bytes(req: &[u8]) -> String {
         "br" => None, // mock has no brotli decoder — the bypass
         _ => None,
     };
-    if let Some(decoded_body) = decoded {
+    let Some(decoded_body) = decoded else {
+        return gunicorn_200();
+    };
+
+    // Content-Type-routed body inspection. ModSec / Coraza only run
+    // JSON body processors on `application/json`, only run form
+    // processors on `application/x-www-form-urlencoded`. Anything
+    // else (text/plain, octet-stream, etc.) falls through to a
+    // raw-bytes scan that does NOT decode form-urlencoding or
+    // unwrap JSON quotes — so an attack marker hiding behind those
+    // wrappers escapes. This mirrors real-WAF behaviour for the
+    // Content-Type-lying vectors.
+    let ct = headers
+        .lines()
+        .find_map(|l| {
+            let lower = l.to_ascii_lowercase();
+            lower
+                .strip_prefix("content-type:")
+                .map(|v| v.trim().to_string())
+        })
+        .unwrap_or_default();
+    let main_ct = ct.split(';').next().unwrap_or("").trim().to_string();
+
+    if main_ct == "application/json" {
+        // ModSec's JSON body processor rejects on a UTF-8 BOM and
+        // falls back to no JSON inspection. Emulate that: a BOM
+        // prefix triggers "skip body" and the request flows through.
+        let bytes = decoded_body.as_bytes();
+        if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            return gunicorn_200();
+        }
+        // Duplicate-key handling: ModSec's first-occurrence parser
+        // reads only the FIRST value. Walk the JSON-string token
+        // stream and harvest values associated with each key in
+        // order; if a key appears twice, keep ONLY the first.
+        let dup_safe_view = json_first_occurrence_values(&decoded_body);
+        let lower = dup_safe_view.to_ascii_lowercase();
+        if body_matches_attack(&lower) {
+            return apache_403();
+        }
+        return gunicorn_200();
+    }
+    if main_ct == "application/x-www-form-urlencoded" {
         let lower = decoded_body.to_ascii_lowercase();
         if body_matches_attack(&lower) {
             return apache_403();
         }
+        return gunicorn_200();
+    }
+    // Anything else (text/plain, octet-stream, ...) — raw scan,
+    // no form decoding. The Content-Type-lying bypass.
+    let lower = decoded_body.to_ascii_lowercase();
+    if raw_bytes_match_strong_attack(&lower) {
+        return apache_403();
     }
     gunicorn_200()
+}
+
+/// First-occurrence JSON-value view: extracts the value of each
+/// key in order, keeping only the FIRST value when a key repeats.
+/// Operates on the raw string — no JSON parser involved — to
+/// match what ModSec's lightweight JSON walker actually does.
+fn json_first_occurrence_values(body: &str) -> String {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = String::new();
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            // Parse a quoted string (could be key or value).
+            let key_start = i + 1;
+            let mut j = key_start;
+            while j < bytes.len() && bytes[j] != b'"' {
+                if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                    j += 2;
+                    continue;
+                }
+                j += 1;
+            }
+            let key = String::from_utf8_lossy(&bytes[key_start..j]).to_string();
+            i = j + 1;
+            // Skip whitespace and a colon to find a value-pair.
+            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == b':' {
+                i += 1;
+                while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                if i < bytes.len() && bytes[i] == b'"' {
+                    let v_start = i + 1;
+                    let mut k = v_start;
+                    while k < bytes.len() && bytes[k] != b'"' {
+                        if bytes[k] == b'\\' && k + 1 < bytes.len() {
+                            k += 2;
+                            continue;
+                        }
+                        k += 1;
+                    }
+                    let value = String::from_utf8_lossy(&bytes[v_start..k]).to_string();
+                    if seen.insert(key) {
+                        out.push_str(&value);
+                        out.push('\n');
+                    }
+                    i = k + 1;
+                    continue;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Attack markers strong enough to match in a raw-bytes (no decode)
+/// scan. Used for text/plain / octet-stream bodies where the WAF
+/// does not run a form or JSON body processor — only patterns
+/// visible in the literal bytes will fire. Narrower than
+/// body_matches_attack on purpose (matches ModSec's reduced
+/// fallback rule set).
+fn raw_bytes_match_strong_attack(lower: &str) -> bool {
+    let markers = ["<script", "${jndi", "/etc/passwd"];
+    markers.iter().any(|m| lower.contains(m))
 }
 
 /// Attack-marker set used against the URL path. Kept narrow — must

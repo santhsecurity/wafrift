@@ -13,6 +13,7 @@ pub(crate) mod baseline;
 pub(crate) mod callback_poll;
 pub(crate) mod detect_phase;
 pub(crate) mod differential_phase;
+pub(crate) mod multi_vector;
 pub(crate) mod session_init_plug;
 pub(crate) mod state;
 
@@ -24,7 +25,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 // waf_detect now consumed via `crate::scan::detect_phase`.
-use wafrift_encoding::compression::{self, Algorithm as CompressionAlgo};
+// compression is now consumed via `crate::scan::multi_vector`.
 use wafrift_encoding::encoding::{self, Strategy};
 use wafrift_encoding::header as header_obfuscation;
 use wafrift_encoding::tamper::TamperRegistry;
@@ -1371,34 +1372,16 @@ pub(crate) async fn run_scan(
         );
     }
 
-    // Step 5: Multi-vector — re-fire top bypass payloads through alternative delivery vectors.
-    // WAFs often have weaker inspection for POST body, JSON body, cookies, etc.
+    // Step 5: Multi-vector — re-fire top bypass payloads through
+    // alternative delivery vectors. The dispatch + per-vector
+    // request shape lives in `scan::multi_vector`; this file is
+    // just the caller that merges the phase's outcome back into
+    // the running counters. Adding a new vector is a single-file
+    // edit in `scan/multi_vector.rs`.
     if !bypass_variants.is_empty() && !cancel.is_cancelled() {
-        // Vectors include compression-confusion variants — wrapping
-        // the body in Content-Encoding: br / gzip. Brotli is the
-        // headline WAF gap: ModSec / Cloudflare / AWS WAF parse the
-        // request body as raw bytes when the encoding is `br`
-        // (no brotli decompressor in the inspection pipeline), so
-        // the payload sails through unchecked while the origin
-        // (nginx / Apache / IIS) decompresses normally. Gzip is the
-        // control variant — most WAFs DO decompress gzip, so a
-        // gzip-only bypass is a separate (gzip-handling) bug worth
-        // surfacing on its own.
-        let vectors: Vec<(&str, &str)> = vec![
-            ("POST-form", "application/x-www-form-urlencoded"),
-            ("POST-json", "application/json"),
-            ("POST-multipart", "multipart/form-data"),
-            ("POST-form-br", "application/x-www-form-urlencoded"),
-            ("POST-json-br", "application/json"),
-            ("POST-form-gz", "application/x-www-form-urlencoded"),
-            ("POST-json-gz", "application/json"),
-            ("cookie", ""),
-            ("hpp", ""),
-            ("x-forwarded-for", ""),
-            ("referer", ""),
-        ];
-
-        // Take the top 10 unique bypass payloads (by confidence).
+        // Dedup the top-confidence payloads BEFORE handing them
+        // to the phase — keeps the phase module ignorant of how
+        // bypass_variants is structured.
         let mut top_payloads: Vec<(String, Vec<String>)> = bypass_variants
             .iter()
             .take(10)
@@ -1406,218 +1389,24 @@ pub(crate) async fn run_scan(
             .collect();
         top_payloads.dedup_by(|a, b| a.0 == b.0);
 
-        if scan_text {
-            println!(
-                "\n{}",
-                format!(
-                    "[5/7] Multi-vector probing — {} payloads × {} vectors...",
-                    top_payloads.len(),
-                    vectors.len()
-                )
-                .bold()
-                .magenta()
-            );
-        }
+        let phase = multi_vector::run_phase(multi_vector::PhaseInput {
+            http: &http,
+            target,
+            param: &args.param,
+            top_payloads: &top_payloads,
+            cancel: &cancel,
+            scan_text,
+            delay,
+            variant_id_base: total_fired,
+        })
+        .await;
 
-        let mut vector_results: Vec<(String, u32, u32)> = Vec::new();
-
-        for (vector_name, content_type) in &vectors {
-            let mut v_bypassed = 0_u32;
-            let mut v_blocked = 0_u32;
-
-            for (payload, techs) in &top_payloads {
-                let result = match *vector_name {
-                    "POST-form" => {
-                        let body = format!("{}={}", args.param, urlencoding::encode(payload));
-                        http.post(target)
-                            .header("Content-Type", *content_type)
-                            .body(body)
-                            .send()
-                            .await
-                    }
-                    "POST-json" => {
-                        let body = serde_json::json!({ &args.param: payload }).to_string();
-                        http.post(target)
-                            .header("Content-Type", *content_type)
-                            .body(body)
-                            .send()
-                            .await
-                    }
-                    "POST-form-br" | "POST-form-gz" => {
-                        let algo = if *vector_name == "POST-form-br" {
-                            CompressionAlgo::Brotli
-                        } else {
-                            CompressionAlgo::Gzip
-                        };
-                        let raw = format!("{}={}", args.param, urlencoding::encode(payload));
-                        match compression::compress(raw.as_bytes(), algo) {
-                            Ok(blob) => http
-                                .post(target)
-                                .header("Content-Type", *content_type)
-                                .header("Content-Encoding", blob.content_encoding)
-                                .body(blob.body)
-                                .send()
-                                .await,
-                            Err(e) => {
-                                // Compression error should be impossible
-                                // for in-memory operations; surface to
-                                // operator and skip the variant rather
-                                // than silently dropping it.
-                                eprintln!(
-                                    "[wafrift scan] compression {algo:?} skipped: {e}",
-                                );
-                                continue;
-                            }
-                        }
-                    }
-                    "POST-json-br" | "POST-json-gz" => {
-                        let algo = if *vector_name == "POST-json-br" {
-                            CompressionAlgo::Brotli
-                        } else {
-                            CompressionAlgo::Gzip
-                        };
-                        let raw = serde_json::json!({ &args.param: payload }).to_string();
-                        match compression::compress(raw.as_bytes(), algo) {
-                            Ok(blob) => http
-                                .post(target)
-                                .header("Content-Type", *content_type)
-                                .header("Content-Encoding", blob.content_encoding)
-                                .body(blob.body)
-                                .send()
-                                .await,
-                            Err(e) => {
-                                eprintln!(
-                                    "[wafrift scan] compression {algo:?} skipped: {e}",
-                                );
-                                continue;
-                            }
-                        }
-                    }
-                    "cookie" => {
-                        http.get(target)
-                            .header(
-                                "Cookie",
-                                format!("{}={}", args.param, urlencoding::encode(payload)),
-                            )
-                            .send()
-                            .await
-                    }
-                    "POST-multipart" => {
-                        // Multipart form-data with randomized boundary — confuses WAF parsers
-                        let boundary = format!("----WafRiftBoundary{total_fired:x}");
-                        let body = format!(
-                            "--{boundary}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{payload}\r\n--{boundary}--\r\n",
-                            args.param
-                        );
-                        http.post(target)
-                            .header(
-                                "Content-Type",
-                                format!("multipart/form-data; boundary={boundary}"),
-                            )
-                            .body(body)
-                            .send()
-                            .await
-                    }
-                    "hpp" => {
-                        // HTTP Parameter Pollution — WAF inspects first param, backend uses last
-                        let url = format!(
-                            "{}?{}=harmless&{}={}",
-                            target,
-                            args.param,
-                            args.param,
-                            urlencoding::encode(payload)
-                        );
-                        http.get(&url).send().await
-                    }
-                    "x-forwarded-for" => {
-                        // Inject payload in X-Forwarded-For header — many WAFs skip header inspection
-                        // or whitelist requests that appear to come from internal IPs.
-                        let url =
-                            scan_url_with_param(target, &args.param, &urlencoding::encode(payload));
-                        http.get(&url)
-                            .header("X-Forwarded-For", payload.as_str())
-                            .send()
-                            .await
-                    }
-                    "referer" => {
-                        // Inject payload in Referer header — many WAFs don't inspect Referer,
-                        // but some backends read it for analytics/redirect purposes.
-                        let url =
-                            scan_url_with_param(target, &args.param, &urlencoding::encode(payload));
-                        http.get(&url)
-                            .header("Referer", format!("https://example.com/?{payload}"))
-                            .send()
-                            .await
-                    }
-                    _ => continue,
-                };
-
-                let is_blocked = match result {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let body = resp.bytes().await.unwrap_or_default();
-                        is_waf_block(status, &body)
-                    }
-                    Err(_) => {
-                        errors += 1;
-                        continue;
-                    }
-                };
-
-                total_fired += 1;
-
-                let mut vtechs = techs.clone();
-                vtechs.push(format!("vector::{vector_name}"));
-                variant_outcomes.push((vtechs.clone(), is_blocked));
-
-                if is_blocked {
-                    blocked += 1;
-                    v_blocked += 1;
-                    if args.format == "text" {
-                        print!("{}", ".".bright_black());
-                    }
-                } else {
-                    bypassed += 1;
-                    v_bypassed += 1;
-                    bypass_variants.push((
-                        total_fired,
-                        payload.clone(),
-                        vtechs,
-                        0.95, // High confidence — proven payload, new vector
-                    ));
-                    if args.format == "text" {
-                        print!("{}", "!".bright_green().bold());
-                    }
-                }
-
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-            }
-
-            vector_results.push((vector_name.to_string(), v_bypassed, v_blocked));
-        }
-
-        if scan_text {
-            for (name, vb, vbl) in &vector_results {
-                let total = vb + vbl;
-                let rate = if total > 0 {
-                    f64::from(*vb) / f64::from(total) * 100.0
-                } else {
-                    0.0
-                };
-                let status = if *vb > 0 {
-                    format!("{vb}/{total} bypassed ({rate:.0}%)")
-                        .green()
-                        .to_string()
-                } else {
-                    format!("0/{total} — fully blocked")
-                        .bright_black()
-                        .to_string()
-                };
-                println!("  {} {}: {}", "→".bright_magenta(), name.yellow(), status);
-            }
-        }
+        total_fired += phase.total_fired_delta;
+        bypassed += phase.bypassed_delta;
+        blocked += phase.blocked_delta;
+        errors += phase.errors_delta;
+        variant_outcomes.extend(phase.new_variant_outcomes);
+        bypass_variants.extend(phase.new_bypass_variants);
     } else if scan_text {
         println!(
             "\n{}",
