@@ -662,6 +662,208 @@ async fn mock_modsec_brotli_wrapped_log4shell_bypasses() {
     );
 }
 
+// ── new vectors vs the mock ────────────────────────────────
+//
+// Each test below sends the wire shape produced by one of the new
+// multi-vector builders directly to the mock-WAF and asserts the
+// expected outcome (200 bypass or 403 block). The mock is built to
+// approximate CRS PL1 body-processor coverage; tests serve as a
+// local fast-feedback replacement for the bench until work-linux
+// is reachable again.
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_deflate_wrapped_sqli_form_body_bypasses() {
+    // POST-form-deflate vector. The mock decodes gzip but NOT raw
+    // deflate (Content-Encoding: deflate returns None → opaque body).
+    use wafrift_encoding::compression::{Algorithm, compress};
+    let (addr, _) = spawn_mock_modsec().await;
+    let attack = b"q=' OR 1=1--";
+    let blob = compress(attack, Algorithm::Deflate).expect("deflate compress");
+    assert_eq!(blob.content_encoding, "deflate");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Content-Encoding", &blob.content_encoding)
+        .body(blob.body)
+        .send()
+        .await
+        .expect("post deflate form");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "deflate-wrapped SQLi form body MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_deflate_wrapped_sqli_json_body_bypasses() {
+    // POST-json-deflate vector. Same gap on the JSON axis.
+    use wafrift_encoding::compression::{Algorithm, compress};
+    let (addr, _) = spawn_mock_modsec().await;
+    let body = br#"{"q":"' OR 1=1--"}"#;
+    let blob = compress(body, Algorithm::Deflate).expect("deflate compress");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/json")
+        .header("Content-Encoding", &blob.content_encoding)
+        .body(blob.body)
+        .send()
+        .await
+        .expect("post deflate json");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "deflate-wrapped SQLi JSON body MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_application_yaml_body_bypasses() {
+    // POST-yaml vector. application/yaml is not in the mock's
+    // routed-body Content-Types, so it falls to raw-bytes scan,
+    // whose marker set excludes SQL UNION — the bypass.
+    let (addr, _) = spawn_mock_modsec().await;
+    let yaml = "q: \"' OR 1=1--\"\n";
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/yaml")
+        .body(yaml.as_bytes().to_vec())
+        .send()
+        .await
+        .expect("post yaml");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "YAML body with SQLi MUST bypass the mock (no yaml processor)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_application_cbor_body_bypasses() {
+    // POST-cbor vector. CBOR is binary; mock's raw-bytes scan
+    // doesn't decode it, attack hidden in CBOR text-string bytes.
+    let (addr, _) = spawn_mock_modsec().await;
+    // Hand-build {"q": "' OR 1=1--"} in CBOR (RFC 8949).
+    let payload = "' OR 1=1--";
+    let mut body: Vec<u8> = Vec::new();
+    body.push(0xA1); // map(1)
+    body.push(0x61); // text(1)
+    body.push(b'q');
+    body.push(0x60 | (payload.len() as u8)); // text(N) for N ≤ 23
+    body.extend_from_slice(payload.as_bytes());
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/cbor")
+        .body(body)
+        .send()
+        .await
+        .expect("post cbor");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "CBOR body with SQLi MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_multipart_b64_filename_bypasses() {
+    // POST-multipart-b64 vector. Payload is base64-encoded inside a
+    // multipart part; mock's raw-bytes scan sees only the encoded
+    // blob.
+    use base64::Engine as _;
+    let (addr, _) = spawn_mock_modsec().await;
+    let attack = "' OR 1=1--";
+    let encoded = base64::engine::general_purpose::STANDARD.encode(attack.as_bytes());
+    let boundary = "----WafRiftMockTestBoundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"q\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{encoded}\r\n--{boundary}--\r\n"
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("post multipart b64");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "multipart base64-CTE SQLi MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_bom_prefixed_json_sqli_bypasses() {
+    // POST-json-bom vector. Mock's JSON path checks for UTF-8 BOM
+    // and skips body inspection on match.
+    let (addr, _) = spawn_mock_modsec().await;
+    let mut body: Vec<u8> = vec![0xEF, 0xBB, 0xBF];
+    body.extend_from_slice(br#"{"q":"' OR 1=1--"}"#);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("post bom json");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "BOM-prefixed JSON SQLi MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_dupkey_first_occurrence_json_bypasses() {
+    // POST-json-dupkey vector. Mock's JSON walker keeps only the
+    // FIRST value per key; benign 'x' comes first, attack second.
+    let (addr, _) = spawn_mock_modsec().await;
+    let body = br#"{"q":"x","q":"' OR 1=1--"}"#;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/json")
+        .body(body.to_vec())
+        .send()
+        .await
+        .expect("post dupkey json");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "dup-key JSON SQLi MUST bypass the mock (first-occurrence wins)"
+    );
+}
+
 // Test-only harness module that re-exports the internal cli
 // surfaces we want to drive in these tests. Lives inline as a
 // submodule of the test file so the integration test still
