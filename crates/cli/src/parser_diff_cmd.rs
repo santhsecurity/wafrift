@@ -352,9 +352,12 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
         .timeout(Duration::from_secs(args.timeout_secs))
         .redirect(reqwest::redirect::Policy::none());
     if args.insecure {
-        builder = builder
-            .danger_accept_invalid_certs(true)
-            .danger_accept_invalid_hostnames(true);
+        // Align with scan / detect / replay / bypass-probe — only
+        // accept_invalid_certs. `danger_accept_invalid_hostnames`
+        // would also accept an evil.com cert authenticating a
+        // probe to target.example.com, which is NOT what an
+        // operator running `--insecure` typically wants.
+        builder = builder.danger_accept_invalid_certs(true);
     }
     let client = builder.build().map_err(|e| format!("http client: {e}"))?;
 

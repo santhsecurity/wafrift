@@ -144,9 +144,17 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
         .timeout(Duration::from_secs(args.timeout_secs))
         .redirect(reqwest::redirect::Policy::none()); // see redirects, don't follow them
     if args.insecure {
-        builder = builder
-            .danger_accept_invalid_certs(true)
-            .danger_accept_invalid_hostnames(true);
+        // Align with `wafrift scan` / `detect` / `replay`: only
+        // accept_invalid_certs. Previously this also set
+        // `danger_accept_invalid_hostnames(true)`, which is much
+        // looser — it lets ANY cert authenticate the requested
+        // host (e.g. an evil.com cert would be trusted on a probe
+        // to target.example.com). Pentesters running --insecure
+        // expect "accept self-signed / expired on the actual
+        // target", not "accept any cert from any origin". The
+        // tighter default matches operator intent and removes a
+        // cross-command behaviour gap.
+        builder = builder.danger_accept_invalid_certs(true);
     }
     let client = builder
         .build()
