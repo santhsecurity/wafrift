@@ -26,6 +26,8 @@ mod interactive;
 mod legendary;
 mod listener_cmd;
 mod origin_hints;
+mod parser_diff_cmd;
+mod probe_classify;
 mod recon_cmd;
 mod replay;
 mod report;
@@ -146,6 +148,16 @@ enum Commands {
     /// minted token. The oracle for the vuln classes that never echo
     /// a verdict on the same response.
     Listener(listener_cmd::ListenerArgs),
+    /// Parser-differential fingerprinter — fires URL-shape variants
+    /// that exercise known WAF↔origin parser disagreements
+    /// (semicolon-strip, backslash-as-separator, NUL truncation,
+    /// double-URL-decode, fullwidth slash, dot-segment, percent
+    /// case, empty-segment collapse, trailing dot). A divergence
+    /// from baseline is evidence the WAF and the origin disagree
+    /// on what the URL means — exploit the seam without any
+    /// payload mutation.
+    #[command(name = "parser-diff")]
+    ParserDiff(parser_diff_cmd::ParserDiffArgs),
 }
 
 /// Arguments for `wafrift man` — emits a troff(1) man page suitable for
@@ -504,6 +516,13 @@ fn main() -> ExitCode {
         Some(Commands::Harden(args)) => wafmodel_cmd::run_harden(args),
         Some(Commands::Legendary(args)) => legendary::run_legendary(args),
         Some(Commands::Listener(args)) => listener_cmd::run_listener(args),
+        Some(Commands::ParserDiff(args)) => match parser_diff_cmd::run_parser_diff(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("parser-diff failed: {e}");
+                ExitCode::from(1)
+            }
+        },
     }
 }
 

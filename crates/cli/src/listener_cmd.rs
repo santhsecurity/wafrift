@@ -767,4 +767,199 @@ mod tests {
         let result = server.await.unwrap();
         assert!(result.is_err(), "malformed request must return Err");
     }
+
+    // ── Deep edge-case sweep (added 2026-05-20 under the "deep
+    // testing + over-the-top coverage" bar). Each test below names
+    // the failure mode it gates against in its body so a future
+    // reader can see why the case matters.
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_lowercase_method_is_normalised_to_upper() {
+        // The Callback.method field must always be uppercased so
+        // downstream consumers can match on `"GET"`, never having
+        // to worry about `"get"` vs `"GET"`.
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let req = format!(
+            "post /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(cb.method, "POST", "method must be uppercased, got `{}`", cb.method);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_callback_with_token_in_header_value_is_matched() {
+        // A blind SSRF callback might land with the token in a
+        // header (e.g. attacker-controlled User-Agent / X-Forwarded-For)
+        // not the path. Listener must scan all three (path, headers,
+        // body).
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let req = format!(
+            "GET /noise HTTP/1.1\r\nHost: x\r\nX-Callback: {token}\r\nContent-Length: 0\r\n\r\n"
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(
+            cb.matched_token.as_deref(),
+            Some(token.as_str()),
+            "header-value token should match"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_body_exactly_at_cap_is_not_marked_truncated() {
+        // Boundary case: body length == cap (8 KiB). Nothing should
+        // be truncated, truncated_bytes must be zero.
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let exact = 8 * 1024_usize;
+        // Body = token + padding to exactly the cap.
+        let pad = exact - token.len();
+        let body = format!("{token}{}", "x".repeat(pad));
+        assert_eq!(body.len(), exact);
+        let req = format!(
+            "POST /p HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(cb.body_preview.len(), exact);
+        assert_eq!(cb.body_truncated_bytes, 0, "exact-cap body must NOT truncate");
+        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_one_byte_above_cap_truncates_one_byte() {
+        // Boundary: body = cap + 1 byte. Truncated counter must be
+        // exactly 1, body_preview length must equal cap. Off-by-one
+        // bugs in the cap logic are caught here.
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let cap = 8 * 1024_usize;
+        let pad = (cap + 1) - token.len();
+        let body = format!("{token}{}", "y".repeat(pad));
+        assert_eq!(body.len(), cap + 1);
+        let req = format!(
+            "POST /p HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(cb.body_preview.len(), cap);
+        assert_eq!(
+            cb.body_truncated_bytes, 1,
+            "exactly one byte should be reported truncated"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_negative_content_length_does_not_crash() {
+        // Adversarial Content-Length: garbage value. Our parser
+        // falls back to 0 on parse-failure (already-have body bytes
+        // are still captured), and the listener must NOT crash or
+        // hang on the read loop.
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let req = format!(
+            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: -7\r\n\r\n"
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn end_to_end_huge_content_length_does_not_pre_allocate() {
+        // Adversarial: Content-Length: 9999999999 (10 GiB) with
+        // zero actual body bytes. The listener's Vec::with_capacity
+        // is clamped to `min(content_length, max_body)`, so this
+        // must NOT OOM us — and the connection EOFs immediately so
+        // we just see an empty body.
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let req = format!(
+            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 9999999999\r\n\r\n"
+        );
+        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
+        // We at least got the request line + headers parsed (token
+        // match in path proves it). Body is empty because the client
+        // never actually sent any bytes.
+        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+        assert!(
+            cb.body_preview.is_empty(),
+            "client sent zero body bytes; preview must be empty"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registered_tokens_persist_across_separate_mint_calls() {
+        // Registry::mint can be called multiple times; previously
+        // minted tokens must remain valid (the contract is "add to
+        // the set", not "replace").
+        let r = Registry::new();
+        let first_batch = r.mint(3).await;
+        let second_batch = r.mint(2).await;
+        let known = r.known_tokens().await;
+        assert_eq!(known.len(), 5);
+        for t in first_batch.iter().chain(second_batch.iter()) {
+            assert!(known.contains(t), "token {t} missing from registry");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registered_caller_supplied_token_can_match() {
+        // The `register()` API lets the caller supply their own
+        // token (instead of asking the registry to mint one). Useful
+        // when the scan side wants to embed a payload-shape hint in
+        // the token prefix. Verify the registered token is found
+        // by `match_token_in`.
+        let r = Registry::new();
+        r.register("ATTACKERSUPPLIEDABCDEFGHIJ").await;
+        assert_eq!(
+            r.match_token_in("/.well-known/ATTACKERSUPPLIEDABCDEFGHIJ")
+                .await
+                .as_deref(),
+            Some("ATTACKERSUPPLIEDABCDEFGHIJ")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_callbacks_log_is_in_arrival_order() {
+        // Sanity: pushing three callbacks in order keeps them in
+        // that order in `callbacks()` — needed so timeline
+        // reconstructions are correct.
+        let r = Registry::new();
+        for i in 0_u64..3 {
+            r.push(Callback {
+                received_at: i,
+                source: format!("127.0.0.1:{i}"),
+                method: "GET".into(),
+                path: format!("/p{i}"),
+                matched_token: None,
+                headers: vec![],
+                body_preview: String::new(),
+                body_truncated_bytes: 0,
+            })
+            .await;
+        }
+        let cbs = r.callbacks().await;
+        assert_eq!(cbs.len(), 3);
+        assert_eq!(cbs[0].path, "/p0");
+        assert_eq!(cbs[1].path, "/p1");
+        assert_eq!(cbs[2].path, "/p2");
+    }
+
+    #[test]
+    fn base32_encode_full_byte_input_is_correct_length() {
+        // 10 bytes = 80 bits / 5 = 16 base32 chars exactly. No
+        // padding (we always omit pad).
+        let bytes = [0xAB; 10];
+        assert_eq!(base32_encode(&bytes).len(), 16);
+    }
+
+    #[test]
+    fn base32_encode_handles_partial_last_quintet() {
+        // 1 byte = 8 bits → 2 base32 chars (10 bits including the
+        // 2 zero-padded). The current implementation pushes the
+        // remaining bits left-justified, so we get "VQ" for 0xAC.
+        let result = base32_encode(&[0xAC]);
+        assert_eq!(result.len(), 2, "1 byte -> 2 base32 chars");
+    }
 }

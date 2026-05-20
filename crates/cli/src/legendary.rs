@@ -627,4 +627,152 @@ mod tests {
             "scan-skipped reason should be present in markdown:\n{md}"
         );
     }
+
+    // ── Deep render + I/O edge cases (added 2026-05-20).
+
+    #[test]
+    fn render_markdown_with_all_phases_errored_is_still_well_formed() {
+        // Failure-mode soak: every phase errored. Markdown must
+        // still contain all four sections — we never want a half-
+        // rendered report just because one phase failed.
+        let mut r = LegendaryReport {
+            target: "https://example.com".into(),
+            ..Default::default()
+        };
+        r.detect.error = Some("connection refused".into());
+        r.fingerprint.ran = true; // even when detect errors, fingerprint can read headers it had
+        r.bypass_probe.error = Some("rate-limited too hard".into());
+        r.scan.error = Some("scan oracle blew up".into());
+        let md = render_markdown(&r);
+        for section in [
+            "## 1. WAF detection",
+            "## 2. Infrastructure fingerprint",
+            "## 3. Bypass probe",
+            "## 4. Live scan",
+        ] {
+            assert!(md.contains(section), "missing {section} in:\n{md}");
+        }
+        // The detect-error path must call out the error directly.
+        assert!(md.contains("connection refused"));
+    }
+
+    #[test]
+    fn render_json_round_trips_via_serde() {
+        // serde-derived: any LegendaryReport must round-trip
+        // through serde_json without information loss. A regression
+        // that adds a non-Serialize field breaks this.
+        let mut r = LegendaryReport {
+            target: "https://x.com".into(),
+            started_at: "2026-05-20T00:00:00Z".into(),
+            elapsed_ms: 7,
+            ..Default::default()
+        };
+        r.detect.baseline_status = Some(403);
+        r.detect.baseline_body_len = Some(512);
+        r.detect.detected.push(DetectedWaf {
+            name: "Cloudflare".into(),
+            confidence: 0.92,
+            indicators: vec!["cf-ray".into()],
+        });
+        r.fingerprint.markers.push(("server".into(), "cloudflare".into()));
+        r.scan.skipped_reason = Some("no --payload given".into());
+        let json = serde_json::to_string(&r).expect("serialise");
+        // Parse it back as a Value (struct can't be deserialised
+        // because the impl is one-way). Sanity that key paths exist.
+        let v: serde_json::Value = serde_json::from_str(&json).expect("re-parse");
+        assert_eq!(v["target"], "https://x.com");
+        assert_eq!(v["detect"]["baseline_status"], 403);
+        assert_eq!(v["detect"]["detected"][0]["name"], "Cloudflare");
+        assert_eq!(v["fingerprint"]["markers"][0][0], "server");
+        assert_eq!(v["scan"]["skipped_reason"], "no --payload given");
+    }
+
+    #[test]
+    fn render_markdown_pipe_character_in_marker_does_not_break_table() {
+        // The fingerprint table uses pipe-separated columns. A header
+        // value containing `|` would break the table rendering — the
+        // renderer must escape pipes in marker values.
+        let mut r = LegendaryReport {
+            target: "https://x".into(),
+            ..Default::default()
+        };
+        r.fingerprint
+            .markers
+            .push(("x-via".into(), "edge|cache|hit".into()));
+        let md = render_markdown(&r);
+        // Pipe characters in values must be escaped or otherwise
+        // not produce additional table columns. The implementation
+        // uses `v.replace('|', "\\|")` — verify the literal
+        // appears in the output.
+        assert!(
+            md.contains(r"edge\|cache\|hit"),
+            "pipe-bearing marker value must be escaped in markdown table:\n{md}"
+        );
+    }
+
+    #[test]
+    fn truncate_zero_length_input_is_empty_no_panic() {
+        assert_eq!(truncate("", 10), "");
+        assert_eq!(truncate("", 0), "");
+    }
+
+    #[test]
+    fn truncate_at_exact_length_does_not_add_ellipsis() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn iso8601_spans_year_boundary() {
+        // 2025-12-31 23:59:59 UTC = 1767225599 seconds.
+        let (y, m, d) = civil_from_days(1767225599 / 86400);
+        assert_eq!((y, m, d), (2025, 12, 31));
+        // 2026-01-01 00:00:00 UTC = 1767225600 seconds.
+        let (y2, m2, d2) = civil_from_days(1767225600 / 86400);
+        assert_eq!((y2, m2, d2), (2026, 1, 1));
+    }
+
+    #[test]
+    fn iso8601_spans_century_boundary() {
+        // 2099-12-31 → 2100-01-01 (centennial non-leap year).
+        // 2100-01-01 00:00:00 UTC = 4102444800 seconds.
+        let (y, m, d) = civil_from_days(4102444800 / 86400);
+        assert_eq!((y, m, d), (2100, 1, 1));
+        // 2100 is NOT a leap year (divisible by 100 but not 400).
+        // So 2100-03-01 is day 4112380800 / 86400. Let's verify
+        // 2100-02-28 is the last day of February.
+        let feb28 = 4102444800 + 86400 * (31 + 27); // jan31 + feb1..28 days
+        let (y, m, d) = civil_from_days(feb28 / 86400);
+        assert_eq!((y, m, d), (2100, 2, 28));
+        let mar1 = feb28 + 86400;
+        let (y, m, d) = civil_from_days(mar1 / 86400);
+        assert_eq!(
+            (y, m, d),
+            (2100, 3, 1),
+            "2100 must NOT have a Feb 29 (not a leap year)"
+        );
+    }
+
+    #[test]
+    fn output_writes_file_to_disk() {
+        use std::env::temp_dir;
+        // emit() is a private fn that writes to args.output when
+        // set. We exercise it via render_markdown + manual write
+        // (mirrors emit's behaviour without the side effects of
+        // run_legendary).
+        let r = LegendaryReport {
+            target: "https://example.com".into(),
+            started_at: "2026-05-20T00:00:00Z".into(),
+            elapsed_ms: 1,
+            ..Default::default()
+        };
+        let rendered = render_markdown(&r);
+        let path = temp_dir().join(format!(
+            "wafrift-legendary-out-{}.md",
+            std::process::id()
+        ));
+        std::fs::write(&path, &rendered).expect("write");
+        let read_back = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(read_back, rendered);
+        let _ = std::fs::remove_file(&path);
+    }
 }

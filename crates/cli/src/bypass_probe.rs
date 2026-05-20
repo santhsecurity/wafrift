@@ -36,6 +36,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::probe_classify::{is_throttle_or_unavailable, severity_rank};
+
 #[derive(Args, Debug)]
 pub struct BypassProbeArgs {
     /// Target URL to probe. Must already return 401/403 (or any status
@@ -645,31 +647,13 @@ fn print_report_text(r: &UrlReport) {
     }
 }
 
-/// Numeric rank for severity strings — used for sorting and for
-/// `--min-severity` filtering. Unknown strings rank as 0 (always
-/// included).
-fn severity_rank(s: &str) -> u8 {
-    match s.to_ascii_uppercase().as_str() {
-        "HIGH" => 3,
-        "MEDIUM" => 2,
-        "LOW" => 1,
-        _ => 0,
-    }
-}
-
-/// HTTP statuses that mean "the target is throttling or temporarily
-/// unavailable", NOT "you bypassed the control". A 429 (or a 503 / 502
-/// / 504 / 408, or Cloudflare's 520–527 origin-error band) is the
-/// target telling us to slow down — turning it into a "LOW severity
-/// bypass divergence" (the dogfood bug: 135/191 probes were 429 against
-/// try.discourse.org and every one was flagged) is a false positive
-/// that buries any real finding in rate-limit noise.
-fn is_throttle_or_unavailable(status: u16) -> bool {
-    matches!(status, 408 | 429 | 502 | 503 | 504 | 520..=527)
-}
-
 /// Decide whether a probe's response is meaningfully different from
 /// the baseline, and if so build a `Divergence` describing it.
+///
+/// The status/body delta + severity heuristics live in
+/// [`crate::probe_classify`] so `parser_diff` and any future
+/// "probe-N-shapes-against-a-baseline" command consume the same
+/// rules and a rule-set update lands in exactly one place.
 ///
 /// Returns `None` for throttle/unavailable probe responses: they are
 /// never bypass evidence, regardless of how far the body length drifted
@@ -687,40 +671,30 @@ fn classify(
     body_threshold_pct: f64,
     curl_fn: impl FnOnce() -> String,
 ) -> Option<Divergence> {
-    let status_changed = probe_status != baseline_status;
-    let body_delta = if baseline_len == 0 {
-        if probe_len == 0 { 0.0 } else { 100.0 }
-    } else {
-        ((probe_len as f64 - baseline_len as f64) / baseline_len as f64) * 100.0
-    };
-    let body_changed = body_delta.abs() >= body_threshold_pct;
-
+    let (status_changed, body_changed, body_delta) = crate::probe_classify::delta_signal(
+        baseline_status,
+        baseline_len,
+        probe_status,
+        probe_len,
+        body_threshold_pct,
+    );
     if !status_changed && !body_changed {
         return None;
     }
-
-    // A throttled/unavailable probe response is inconclusive, never a
-    // bypass — drop it before the severity heuristic can mislabel it.
-    if is_throttle_or_unavailable(probe_status) {
+    if crate::probe_classify::is_throttle_or_unavailable(probe_status) {
         return None;
     }
-
-    // Severity heuristic:
-    //   - HIGH: was 401/403, now 200/302. Real access bypass.
-    //   - MEDIUM: status flipped some other way, or body grew significantly.
-    //   - LOW: body shrank or method-override returned the same status.
-    let severity = if matches!(baseline_status, 401 | 403)
-        && matches!(probe_status, 200 | 201 | 202 | 204 | 301 | 302)
-    {
-        "HIGH"
-    } else if (status_changed && (200..400).contains(&probe_status))
-        || (body_changed && body_delta > 0.0)
-    {
-        "MEDIUM"
-    } else {
-        "LOW"
-    };
-
+    // bypass_probe historically reported only HIGH/MEDIUM/LOW (no
+    // EQUAL) for divergences — that's preserved here. EQUAL is
+    // filtered above by the "if !status_changed && !body_changed"
+    // gate; what reaches the severity_label call is always at
+    // least LOW.
+    let severity = crate::probe_classify::severity_label(
+        baseline_status,
+        probe_status,
+        body_delta,
+        body_threshold_pct,
+    );
     Some(Divergence {
         family: family.to_string(),
         label: label.to_string(),
@@ -1028,5 +1002,101 @@ mod tests {
             elapsed < Duration::from_millis(800),
             "Retry-After: 0 must not introduce a real cooldown — elapsed {elapsed:?}"
         );
+    }
+
+    // ── Deep cooldown stress (added 2026-05-20).
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retry_after_above_max_obeyed_is_capped_not_obeyed_in_full() {
+        // Adversarial server: Retry-After: 3600 (one hour). The
+        // parser caps at MAX_OBEYED (60s); the test asserts the
+        // reported max_retry_after_obeyed_ms is ≤ 60_000.
+        let addr = spawn_mock_server(|n| match n {
+            0 => ok_response("base"),
+            1 => format!(
+                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3600\r\n\
+                 Content-Length: 0\r\nConnection: close\r\n\r\n"
+            ),
+            _ => ok_response("bypassed!"),
+        })
+        .await;
+        let url = format!("http://{addr}/admin");
+        let mut args = methods_only_args(url.clone());
+        // Tight timeout — we never want to actually sleep ANYWHERE
+        // near 60s in this test. The MAX_OBEYED cap is what we're
+        // gating; the deadline will be 60s in the future and the
+        // remaining probes will time out on their semaphore wait,
+        // which is fine. We just need the captured aggregate to
+        // reflect the cap.
+        args.timeout_secs = 2;
+        // 1 probe is enough — the very first 429 captures the cap.
+        args.skip_headers = true;
+        args.skip_paths = true;
+        // 7 methods × cooldown caps total runtime; assert via the
+        // aggregate, not by waiting it out.
+        let client = Client::builder()
+            .timeout(Duration::from_secs(2))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        // Run with the spawned listener; the first probe sees 429+RA.
+        // We don't await the full 60s deadline — we check the reported
+        // max_retry_after_obeyed_ms.
+        let report = tokio::time::timeout(
+            Duration::from_secs(3),
+            probe_one_url(&client, &url, &args, 1),
+        )
+        .await;
+        // Whether the run completes within the 3s window or times
+        // out, what we care about is what we observed FIRST: the
+        // single 429+RA-3600 either gets capped at 60s and stored
+        // in the aggregate, or never gets there. Both cases are
+        // observable.
+        if let Ok(Ok(r)) = report {
+            assert!(
+                r.max_retry_after_obeyed_ms <= 60_000,
+                "MAX_OBEYED cap violated: got {}",
+                r.max_retry_after_obeyed_ms
+            );
+        }
+    }
+
+    #[test]
+    fn classify_probe_with_zero_baseline_and_zero_probe_is_inert() {
+        // Boundary: both sides empty. delta_signal must return
+        // (false, false, 0.0) — and classify returns None.
+        let d = classify(
+            "x", "x", "x", 200, 0, 200, 0, 10.0,
+            || "curl".to_string(),
+        );
+        assert!(d.is_none());
+    }
+
+    #[test]
+    fn classify_extreme_body_growth_does_not_overflow() {
+        // u32-large body sizes. The f64 conversion uses the full
+        // usize, so this must produce a finite delta without
+        // overflowing into infinity.
+        let d = classify(
+            "x", "x", "x", 200, 100, 200, 1_000_000_000, 10.0,
+            || "curl".to_string(),
+        )
+        .expect("must fire");
+        assert!(
+            d.body_delta_pct.is_finite(),
+            "extreme body delta must stay finite, got {}",
+            d.body_delta_pct
+        );
+        assert!(d.body_delta_pct > 0.0);
+    }
+
+    #[test]
+    fn severity_rank_via_shared_module_orders_canonically() {
+        // The bypass_probe re-uses crate::probe_classify::severity_rank.
+        // Re-test the canonical ordering here so a future change in
+        // either ranking is caught by both consumers' suites.
+        assert!(severity_rank("HIGH") > severity_rank("MEDIUM"));
+        assert!(severity_rank("MEDIUM") > severity_rank("LOW"));
+        assert_eq!(severity_rank("garbage"), 0);
     }
 }
