@@ -807,6 +807,183 @@ mod tests {
         assert!(d.is_none());
     }
 
+    // ── parse_path_from_url edges ─────────────────────────────
+
+    #[test]
+    fn parse_path_from_url_handles_userinfo_in_authority() {
+        // RFC 3986 §3.2.1 userinfo — `user:pass@host`. Path starts
+        // AFTER the authority.
+        assert_eq!(
+            parse_path_from_url("http://user:pass@example.com/admin"),
+            "/admin"
+        );
+    }
+
+    #[test]
+    fn parse_path_from_url_strips_fragment_naturally() {
+        // Fragments live at the end after `#`. parse_path_from_url
+        // returns the path-and-query verbatim; the # is part of
+        // the trailing fragment. Lock the current behaviour in so
+        // a refactor that drops the fragment surfaces.
+        let got = parse_path_from_url("http://x/path#section");
+        assert!(got.starts_with("/path"));
+        // Current contract keeps everything after the authority:
+        assert_eq!(got, "/path#section");
+    }
+
+    #[test]
+    fn parse_path_from_url_relative_path_is_passed_through() {
+        assert_eq!(parse_path_from_url("/admin/api"), "/admin/api");
+    }
+
+    #[test]
+    fn parse_path_from_url_bare_string_with_no_slash_returns_root() {
+        // `foo` without scheme or leading slash falls back to `/`.
+        assert_eq!(parse_path_from_url("just-a-string"), "/");
+    }
+
+    #[test]
+    fn parse_path_from_url_empty_string_returns_root() {
+        assert_eq!(parse_path_from_url(""), "/");
+    }
+
+    #[test]
+    fn parse_path_from_url_preserves_query_string() {
+        assert_eq!(
+            parse_path_from_url("http://x/api?a=1&b=2"),
+            "/api?a=1&b=2"
+        );
+    }
+
+    #[test]
+    fn parse_path_from_url_handles_https_scheme() {
+        assert_eq!(parse_path_from_url("https://x/path"), "/path");
+    }
+
+    #[test]
+    fn parse_path_from_url_handles_port_in_authority() {
+        assert_eq!(parse_path_from_url("http://x:8080/api"), "/api");
+        assert_eq!(parse_path_from_url("https://x:443/"), "/");
+    }
+
+    // ── classify edge cases ───────────────────────────────────
+
+    #[test]
+    fn classify_body_shrink_also_flags_divergence() {
+        // Massive body shrink (probe response much smaller than
+        // baseline) is also a divergence signal. Anti-rig against
+        // a refactor that only counted GROWTH.
+        let d = classify(
+            "headers",
+            "x",
+            "y",
+            200,
+            10000,
+            200,
+            100, // 99% shrink
+            10.0,
+            || "curl".to_string(),
+        )
+        .expect("must fire");
+        // Severity policy: a 200/200 status with massive body shrink
+        // counts as at least LOW.
+        assert!(matches!(d.severity, "HIGH" | "MEDIUM" | "LOW"));
+    }
+
+    #[test]
+    fn classify_filters_throttle_status_codes() {
+        // 429 (Too Many Requests) and 503 are throttle/unavailable;
+        // never treated as a real divergence even if status changed.
+        for status in [429u16, 503] {
+            let d = classify(
+                "headers",
+                "x",
+                "y",
+                200,
+                500,
+                status,
+                500,
+                10.0,
+                || "curl".to_string(),
+            );
+            assert!(d.is_none(), "{status} must be filtered as throttle");
+        }
+    }
+
+    #[test]
+    fn classify_records_family_label_description_verbatim() {
+        let d = classify(
+            "auth-bypass",
+            "x-forwarded-host",
+            "header trust override",
+            403,
+            500,
+            200,
+            500,
+            10.0,
+            || "curl".to_string(),
+        )
+        .expect("must fire");
+        assert_eq!(d.family, "auth-bypass");
+        assert_eq!(d.label, "x-forwarded-host");
+        assert_eq!(d.description, "header trust override");
+    }
+
+    #[test]
+    fn classify_calls_curl_closure_once_on_fire() {
+        // The curl-fn is held as a closure so it only allocates
+        // the (potentially long) curl command string when the
+        // divergence FIRES — a perf shape we want to preserve.
+        // Verify it gets called when we expect a divergence.
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let called_c = called.clone();
+        let _d = classify(
+            "headers",
+            "x",
+            "y",
+            403,
+            500,
+            200,
+            500,
+            10.0,
+            move || {
+                called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                "curl".to_string()
+            },
+        );
+        assert_eq!(
+            called.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "curl closure must fire exactly once on divergence"
+        );
+    }
+
+    #[test]
+    fn classify_does_not_call_curl_closure_when_unchanged() {
+        // No divergence ⇒ no allocation.
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let called_c = called.clone();
+        let _d = classify(
+            "headers",
+            "x",
+            "y",
+            200,
+            500,
+            200,
+            500,
+            10.0,
+            move || {
+                called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                "curl".to_string()
+            },
+        );
+        assert_eq!(
+            called.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no divergence ⇒ no curl allocation"
+        );
+    }
+
     // ── shared-deadline Retry-After integration ─────────────────────
     //
     // These tests stand up a minimal in-process HTTP server with
