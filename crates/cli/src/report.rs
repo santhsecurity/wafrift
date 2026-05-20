@@ -567,6 +567,7 @@ mod tests {
         assert_eq!(shell_escape("a'b"), "a'\\''b");
     }
 
+    #[cfg(unix)]
     #[test]
     fn shell_escape_roundtrips_through_bash() {
         // Every printable ASCII character plus some Unicode.
@@ -751,5 +752,191 @@ mod tests {
         // edge picked up Cloudflare from src since dst had no entry
         let edge = a.hosts.get("edge.example.com").unwrap();
         assert_eq!(edge.waf_name.as_deref(), Some("Cloudflare"));
+    }
+
+    // ── host_from_target ──────────────────────────────────────
+
+    #[test]
+    fn host_from_target_extracts_host_from_full_url() {
+        assert_eq!(host_from_target("http://example.com/api"), "example.com");
+        assert_eq!(host_from_target("https://api.example.com/"), "api.example.com");
+    }
+
+    #[test]
+    fn host_from_target_strips_port() {
+        assert_eq!(host_from_target("http://example.com:8080/api"), "example.com");
+        assert_eq!(host_from_target("https://example.com:443/"), "example.com");
+    }
+
+    #[test]
+    fn host_from_target_strips_userinfo() {
+        assert_eq!(
+            host_from_target("http://user:pass@example.com/admin"),
+            "example.com"
+        );
+    }
+
+    #[test]
+    fn host_from_target_lowercases_host() {
+        assert_eq!(
+            host_from_target("https://API.EXAMPLE.COM/path"),
+            "api.example.com"
+        );
+    }
+
+    #[test]
+    fn host_from_target_handles_no_scheme() {
+        assert_eq!(host_from_target("example.com/api"), "example.com");
+    }
+
+    #[test]
+    fn host_from_target_handles_query_string() {
+        assert_eq!(host_from_target("http://x.com/api?a=1"), "x.com");
+    }
+
+    #[test]
+    fn host_from_target_handles_fragment() {
+        assert_eq!(host_from_target("http://x.com/api#frag"), "x.com");
+    }
+
+    #[test]
+    fn host_from_target_empty_host_falls_back_to_unknown() {
+        assert_eq!(host_from_target(""), "unknown-host");
+        assert_eq!(host_from_target("http:///path"), "unknown-host");
+    }
+
+    // ── glob_match ────────────────────────────────────────────
+
+    #[test]
+    fn glob_match_literal_string_matches() {
+        assert!(glob_match("example.com", "example.com"));
+        assert!(!glob_match("example.com", "other.com"));
+    }
+
+    #[test]
+    fn glob_match_is_case_insensitive() {
+        assert!(glob_match("Example.Com", "example.COM"));
+    }
+
+    #[test]
+    fn glob_match_star_matches_zero_or_more_chars() {
+        assert!(glob_match("*.example.com", "api.example.com"));
+        assert!(glob_match("*.example.com", "deep.api.example.com"));
+        // Zero-char match.
+        assert!(glob_match("api*.example.com", "api.example.com"));
+    }
+
+    #[test]
+    fn glob_match_question_matches_exactly_one() {
+        assert!(glob_match("?", "a"));
+        assert!(!glob_match("?", ""));
+        assert!(!glob_match("?", "ab"));
+    }
+
+    #[test]
+    fn glob_match_double_star_collapses() {
+        // `**` should match anything (zero or more chars). The recurse
+        // logic handles this naturally — verify it doesn't blow up.
+        assert!(glob_match("**", "any.host.here"));
+        assert!(glob_match("a**b", "axxxxxxb"));
+    }
+
+    #[test]
+    fn glob_match_empty_pattern_only_matches_empty_string() {
+        assert!(glob_match("", ""));
+        assert!(!glob_match("", "x"));
+    }
+
+    #[test]
+    fn glob_match_no_partial_match() {
+        // The glob is anchored — no prefix/suffix match unless `*`.
+        assert!(!glob_match("api", "api.example.com"));
+        assert!(glob_match("api*", "api.example.com"));
+    }
+
+    // ── ingest_scan_json ──────────────────────────────────────
+
+    #[test]
+    fn ingest_scan_json_parses_bare_scan_object() {
+        let json = r#"{
+            "target": "http://example.com",
+            "waf": "ModSecurity",
+            "bypass_variants": [
+                {"techniques": ["EncodingUrl", "GrammarTautology"]}
+            ]
+        }"#;
+        let bank = ingest_scan_json(json, "stdin").unwrap();
+        let host = bank.hosts.get("example.com").expect("host present");
+        assert_eq!(host.proven_winners.len(), 2);
+        assert!(host.proven_winners.contains(&"EncodingUrl".to_string()));
+        assert_eq!(host.waf_name.as_deref(), Some("ModSecurity"));
+    }
+
+    #[test]
+    fn ingest_scan_json_unwraps_report_layers_envelope() {
+        // The `--report-layers` JSON nests the scan object under
+        // `"scan"`. ingest_scan_json should unwrap that.
+        let json = r#"{
+            "scan": {
+                "target": "http://example.com",
+                "waf": "ModSecurity",
+                "bypass_variants": []
+            }
+        }"#;
+        let bank = ingest_scan_json(json, "stdin").unwrap();
+        assert!(bank.hosts.contains_key("example.com"));
+    }
+
+    #[test]
+    fn ingest_scan_json_dedupes_repeated_techniques() {
+        let json = r#"{
+            "target": "http://example.com",
+            "bypass_variants": [
+                {"techniques": ["EncodingUrl", "EncodingUrl", "GrammarTautology"]},
+                {"techniques": ["GrammarTautology", "EncodingHex"]}
+            ]
+        }"#;
+        let bank = ingest_scan_json(json, "stdin").unwrap();
+        let host = bank.hosts.get("example.com").unwrap();
+        // EncodingUrl and GrammarTautology de-duped; total = 3 unique.
+        assert_eq!(host.proven_winners.len(), 3);
+        let mut sorted = host.proven_winners.clone();
+        sorted.sort();
+        assert_eq!(
+            sorted,
+            vec![
+                "EncodingHex".to_string(),
+                "EncodingUrl".to_string(),
+                "GrammarTautology".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ingest_scan_json_treats_waf_none_as_no_waf_name() {
+        // The scan JSON emits `"waf": "None"` when no WAF detected.
+        // ingest_scan_json should NOT set a waf_name in that case —
+        // matched waf_name: None.
+        let json = r#"{
+            "target": "http://example.com",
+            "waf": "None",
+            "bypass_variants": []
+        }"#;
+        let bank = ingest_scan_json(json, "stdin").unwrap();
+        let host = bank.hosts.get("example.com").unwrap();
+        assert!(host.waf_name.is_none());
+    }
+
+    #[test]
+    fn ingest_scan_json_rejects_input_without_target_field() {
+        let json = r#"{"bypass_variants": []}"#;
+        let err = ingest_scan_json(json, "stdin").unwrap_err();
+        assert!(err.contains("target"));
+    }
+
+    #[test]
+    fn ingest_scan_json_rejects_malformed_json() {
+        let err = ingest_scan_json("not json", "stdin").unwrap_err();
+        assert!(err.contains("parse"));
     }
 }
