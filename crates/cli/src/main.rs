@@ -23,7 +23,6 @@ mod helpers;
 mod import_curl;
 mod init_cmd;
 mod interactive;
-mod jwt_cmd;
 mod legendary;
 mod listener_cmd;
 mod man_cmd;
@@ -39,7 +38,6 @@ mod scan;
 mod seed;
 mod session_init;
 mod smuggle_cmd;
-mod takeover_cmd;
 mod target_context;
 mod technique_filter;
 mod wafmodel_cmd;
@@ -166,21 +164,6 @@ enum Commands {
     /// headline gap — many WAFs don't ship a brotli decompressor
     /// even though Chrome / nginx / Apache all do.
     Compress(compress_cmd::CompressArgs),
-    /// JWT weakness analyzer + forgery generator. Decodes the
-    /// token, identifies weak algorithms (none / HS* with cracked
-    /// secret), surfaces dangerous header surface (kid / jku /
-    /// jwk), flags time-claim issues, and emits forged variants
-    /// the operator pastes into Authorization: Bearer to test.
-    Jwt(jwt_cmd::JwtArgs),
-    /// Subdomain takeover detector — resolves the target, fetches
-    /// the HTTP response, and matches against a curated database
-    /// of vulnerable third-party services (Heroku, S3, GitHub
-    /// Pages, Fastly, Squarespace, etc.). A match means the
-    /// subdomain dangles at a service whose resource has been
-    /// deleted: an attacker who re-registers the resource serves
-    /// arbitrary content on the victim's subdomain. One of the
-    /// highest-impact, lowest-effort findings in bug bounty.
-    Takeover(takeover_cmd::TakeoverArgs),
     /// HTTP request smuggling probes (CL.TE / TE.CL / TE.TE /
     /// CL.0 / dual-CL / multi-value-CL). Subcommands:
     /// `detect` runs the SAFE timing-differential probes that
@@ -487,8 +470,6 @@ fn main() -> ExitCode {
             }
         },
         Some(Commands::Compress(args)) => compress_cmd::run_compress(args),
-        Some(Commands::Jwt(args)) => jwt_cmd::run_jwt(args),
-        Some(Commands::Takeover(args)) => takeover_cmd::run_takeover(args),
         Some(Commands::Smuggle(args)) => smuggle_cmd::run_smuggle(args),
     }
 }
