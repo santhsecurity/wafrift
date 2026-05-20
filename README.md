@@ -406,7 +406,13 @@ To replay a captured Burp request directly through wafrift's evasion pipeline (n
 ```bash
 # Burp → right-click request → Copy as cURL → save to /tmp/req.curl
 xclip -o > /tmp/req.curl
-wafrift import-curl /tmp/req.curl --evade --output /tmp/scan.json
+
+# Run wafrift's evasion engine against the captured request. Evasion
+# is implicit when --payload is given; --format json emits NDJSON
+# variant lines for piping into jq / a downstream scanner.
+wafrift import-curl --curl-file /tmp/req.curl \
+  --param id --payload "' OR 1=1--" \
+  --level heavy --format json > /tmp/scan.json
 ```
 
 CLI output is line-delimited JSON when `--quiet` is set, so it pipes cleanly into `jq`, `head`, `grep -m 1`, etc. (`SIGPIPE` is handled silently — no broken-pipe panics on `wafrift evade ... | head`.)
