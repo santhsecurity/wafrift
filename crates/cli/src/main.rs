@@ -10,6 +10,7 @@ mod bank_registry;
 mod bench_diff;
 mod bench_waf;
 mod bypass_probe;
+mod callback_token;
 mod config;
 mod detect_cmd;
 mod discover_cmd;
@@ -214,6 +215,17 @@ pub struct ScanArgs {
     /// scans benefit.
     #[arg(long, value_name = "CLASS")]
     pub payload_class: Option<String>,
+
+    /// Out-of-band callback URL — the base address of a `wafrift
+    /// listener` instance. When set, every occurrence of
+    /// `{{CALLBACK}}` in the payload is replaced per-variant with
+    /// `<URL>/<unique-token>`. The operator then correlates any
+    /// inbound callback at the listener back to a specific variant
+    /// by token — the oracle for blind SQLi (time-based), stored
+    /// XSS, blind SSRF, OOB command injection. The token is also
+    /// surfaced in each variant's scan report.
+    #[arg(long, value_name = "URL")]
+    pub callback_url: Option<String>,
 
     /// Evasion intensity.
     #[arg(long, value_enum, default_value_t = Level::Heavy)]
@@ -545,6 +557,7 @@ async fn run_scan_from_discovery(
             payload: args.payload.clone(),
             param: param.clone(),
             payload_class: args.payload_class.clone(),
+            callback_url: args.callback_url.clone(),
             level: args.level,
             encoding_only: args.encoding_only,
             delay_ms: args.delay_ms,

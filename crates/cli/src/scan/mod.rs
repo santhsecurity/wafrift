@@ -52,7 +52,7 @@ pub(crate) fn scan_url_with_param(target: &str, param: &str, value_encoded: &str
 
 /// Fire evasion variants against a live target and report bypass/block results.
 pub(crate) async fn run_scan(
-    args: ScanArgs,
+    mut args: ScanArgs,
     cancel: tokio_util::sync::CancellationToken,
 ) -> ExitCode {
     // `--from-discovery` expansion (handled in main.rs) always sets a
@@ -75,6 +75,35 @@ pub(crate) async fn run_scan(
             "Input error:".red().bold()
         );
         return ExitCode::from(1);
+    }
+
+    // OOB callback substitution: when --callback-url is set + the
+    // payload contains `{{CALLBACK}}`, mint a fresh token, substitute
+    // the placeholder, and surface the assigned callback URL so the
+    // operator can correlate any inbound hit at their listener back
+    // to this scan. Skipped silently when either side is absent —
+    // unchanged behaviour for scans that don't use OOB verification.
+    if let Some(ref base_url) = args.callback_url {
+        if let Some(sub) = crate::callback_token::substitute(&args.payload, base_url) {
+            if args.format == "text" {
+                eprintln!(
+                    "{} oob callback URL substituted into payload — token = {}",
+                    "[wafrift scan]".bright_cyan(),
+                    sub.token.bold().yellow()
+                );
+                eprintln!(
+                    "  watch your listener log for a hit at {}",
+                    sub.callback_url.bright_white()
+                );
+            }
+            args.payload = sub.payload;
+        } else if args.format == "text" {
+            eprintln!(
+                "{} --callback-url set but payload has no `{{{{CALLBACK}}}}` placeholder; \
+                 no substitution performed.",
+                "[wafrift scan]".bright_black()
+            );
+        }
     }
     let filter = match crate::technique_filter::TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,

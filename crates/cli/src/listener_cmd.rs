@@ -213,43 +213,12 @@ impl Registry {
     }
 }
 
-/// Generate one 128-bit base32 token. Suitable for embedding in URLs
-/// (RFC 4648 alphabet, no padding) so the operator can drop it
-/// straight into a payload without further encoding. Collision
-/// probability for N tokens is N²/2^129 — for any realistic N this
-/// is < the chance of CPU cosmic-ray flip.
-#[must_use]
-pub fn generate_token() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    base32_encode(&bytes)
-}
-
-/// RFC 4648 base32 (upper-case, no padding) — purposefully not
-/// pulling a crate for this since the alphabet is fixed and 16 bytes
-/// is the only input size we ever encode. Less code = less attack
-/// surface for the listener.
-fn base32_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    let mut out = String::with_capacity((bytes.len() * 8).div_ceil(5));
-    let mut buffer: u32 = 0;
-    let mut bits: u32 = 0;
-    for &b in bytes {
-        buffer = (buffer << 8) | u32::from(b);
-        bits += 8;
-        while bits >= 5 {
-            bits -= 5;
-            let idx = ((buffer >> bits) & 0x1F) as usize;
-            out.push(char::from(ALPHABET[idx]));
-        }
-    }
-    if bits > 0 {
-        let idx = ((buffer << (5 - bits)) & 0x1F) as usize;
-        out.push(char::from(ALPHABET[idx]));
-    }
-    out
-}
+// `generate_token` + `base32_encode` live in `crate::callback_token`
+// — shared with `crate::scan` so the receiver (listener) and the
+// sender (scan's payload substitution) use one source of truth for
+// the token format. Re-export at the local path so existing
+// listener-only call sites keep compiling.
+pub use crate::callback_token::generate_token;
 
 /// Entry point for `wafrift listener`. Blocks until SIGINT / SIGTERM.
 ///
@@ -516,56 +485,12 @@ fn find_double_crlf(buf: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
 
-    // ── token generation ──────────────────────────────────────────
-
-    #[test]
-    fn generated_token_is_base32_chars_only() {
-        for _ in 0..1000 {
-            let t = generate_token();
-            for c in t.chars() {
-                assert!(
-                    (c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7'),
-                    "token char `{c}` is not base32 (alphabet A-Z2-7): {t}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn generated_token_length_is_constant() {
-        // 16 bytes -> 128 bits / 5 = 25.6 -> 26 chars (rounded up).
-        for _ in 0..100 {
-            assert_eq!(
-                generate_token().len(),
-                26,
-                "base32 of 128 bits should be 26 chars"
-            );
-        }
-    }
-
-    #[test]
-    fn generated_tokens_do_not_collide_across_a_realistic_run() {
-        let mut seen = std::collections::HashSet::new();
-        for _ in 0..10_000 {
-            let t = generate_token();
-            assert!(
-                seen.insert(t.clone()),
-                "collision after {} tokens: {t}",
-                seen.len()
-            );
-        }
-    }
-
-    #[test]
-    fn base32_encode_known_vector() {
-        // RFC 4648 test vectors (selected): "" -> "", "f" -> "MY",
-        // "fo" -> "MZXQ", "foo" -> "MZXW6", "foobar" -> "MZXW6YTBOI".
-        assert_eq!(base32_encode(b""), "");
-        assert_eq!(base32_encode(b"f"), "MY");
-        assert_eq!(base32_encode(b"fo"), "MZXQ");
-        assert_eq!(base32_encode(b"foo"), "MZXW6");
-        assert_eq!(base32_encode(b"foobar"), "MZXW6YTBOI");
-    }
+    // Token-generation tests (alphabet, length, no-collision) and
+    // base32_encode round-trip tests live in
+    // `crate::callback_token::tests` — the functions themselves moved
+    // out of listener_cmd to be shared with scan's payload
+    // substitution. Duplicating them here would just guarantee one
+    // pair drifts.
 
     // ── registry ─────────────────────────────────────────────────
 
@@ -946,20 +871,6 @@ mod tests {
         assert_eq!(cbs[2].path, "/p2");
     }
 
-    #[test]
-    fn base32_encode_full_byte_input_is_correct_length() {
-        // 10 bytes = 80 bits / 5 = 16 base32 chars exactly. No
-        // padding (we always omit pad).
-        let bytes = [0xAB; 10];
-        assert_eq!(base32_encode(&bytes).len(), 16);
-    }
-
-    #[test]
-    fn base32_encode_handles_partial_last_quintet() {
-        // 1 byte = 8 bits → 2 base32 chars (10 bits including the
-        // 2 zero-padded). The current implementation pushes the
-        // remaining bits left-justified, so we get "VQ" for 0xAC.
-        let result = base32_encode(&[0xAC]);
-        assert_eq!(result.len(), 2, "1 byte -> 2 base32 chars");
-    }
+    // base32_encode byte-length tests live in
+    // `crate::callback_token::tests`.
 }

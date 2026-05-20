@@ -41,6 +41,7 @@
 pub mod challenge;
 mod client;
 mod response;
+pub mod session_coherence;
 pub mod signal;
 pub mod stealth;
 
