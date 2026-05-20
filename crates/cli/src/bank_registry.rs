@@ -763,4 +763,117 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    // ── pure helpers ──────────────────────────────────────────
+
+    #[test]
+    fn envelope_to_genome_wraps_bytes_under_envelope_v1_name() {
+        let bytes = br#"{"hosts":["api.example.com"]}"#;
+        let bundle = envelope_to_genome(bytes, "test-bundle");
+        // Exactly one genome — the v1 atomic-envelope shape.
+        assert_eq!(bundle.genomes.len(), 1);
+        let g = &bundle.genomes[0];
+        // The genome name is `<bundle_name>-envelope-v1`.
+        assert!(g.name.contains("envelope-v1"));
+        assert!(g.name.contains("test-bundle"));
+        // The payload is the envelope bytes as UTF-8.
+        assert!(g.payload.contains("api.example.com"));
+    }
+
+    #[test]
+    fn envelope_to_genome_handles_empty_envelope() {
+        let bundle = envelope_to_genome(b"", "empty");
+        assert_eq!(bundle.genomes.len(), 1);
+        assert!(bundle.genomes[0].payload.is_empty());
+    }
+
+    #[test]
+    fn envelope_to_genome_preserves_non_utf8_bytes_via_lossy_decode() {
+        // Non-UTF8 input survives via lossy decode (replacement chars
+        // appear). Anti-rig: we don't panic on hostile-shaped envelopes.
+        let bytes: Vec<u8> = vec![0xFF, b'a', 0xFE, b'b'];
+        let bundle = envelope_to_genome(&bytes, "bin");
+        assert_eq!(bundle.genomes.len(), 1);
+        // Replacement chars present.
+        assert!(bundle.genomes[0].payload.contains('\u{FFFD}'));
+        assert!(bundle.genomes[0].payload.contains('a'));
+        assert!(bundle.genomes[0].payload.contains('b'));
+    }
+
+    #[test]
+    fn write_secret_hex_writes_trailing_newline() {
+        // Operators inspect the file directly with `cat`; a trailing
+        // newline is the right cat-friendly shape and the file-format
+        // contract.
+        let dir = fresh_dir("hex-trail");
+        let path = dir.join("secret.hex");
+        write_secret_hex(&path, "deadbeef").unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.ends_with('\n'), "must end with newline: {raw:?}");
+        assert!(raw.starts_with("deadbeef"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_secret_hex_creates_parent_directories() {
+        // If the parent dir doesn't exist, create it. Operators pass
+        // `~/.wafrift/signing.hex` on a fresh box.
+        let dir = fresh_dir("hex-mkdir");
+        let nested = dir.join("a").join("b").join("c");
+        let path = nested.join("secret.hex");
+        write_secret_hex(&path, "feedface").unwrap();
+        assert!(path.exists());
+        assert!(nested.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_signing_key_round_trips_through_disk() {
+        let dir = fresh_dir("read-key");
+        let path = dir.join("signing.hex");
+        let key = SigningKey::generate();
+        let hex = key.secret_hex();
+        write_secret_hex(&path, &hex).unwrap();
+        let loaded = read_signing_key(&path).expect("must load");
+        assert_eq!(loaded.secret_hex(), hex);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_signing_key_strips_trailing_whitespace() {
+        // The file ends with `\n` from write_secret_hex; read_signing_key
+        // must `.trim()` before calling SigningKey::from_secret_hex,
+        // otherwise the from_secret_hex parser rejects the input.
+        let dir = fresh_dir("trim");
+        let path = dir.join("signing.hex");
+        let key = SigningKey::generate();
+        let hex = key.secret_hex();
+        std::fs::write(&path, format!("  {hex}\n\n  ")).unwrap();
+        let loaded = read_signing_key(&path).expect("trimming must succeed");
+        assert_eq!(loaded.secret_hex(), hex);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_signing_key_rejects_malformed_hex() {
+        let dir = fresh_dir("bad-hex");
+        let path = dir.join("signing.hex");
+        std::fs::write(&path, "not-real-hex").unwrap();
+        let err = read_signing_key(&path).expect_err("malformed must error");
+        // Error should describe what went wrong, not panic.
+        assert!(!err.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_signing_key_handles_missing_file() {
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-bank-registry-missing-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        // path intentionally not created.
+        let err = read_signing_key(&path).expect_err("missing must error");
+        assert!(err.contains("read") || err.to_lowercase().contains("system cannot"));
+    }
 }
