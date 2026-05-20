@@ -406,4 +406,87 @@ mod tests {
         args.payload_b64 = Some("not-base64!!!".into());
         assert!(resolve_payload(&args).is_err());
     }
+
+    #[test]
+    fn resolve_payload_b64_whitespace_only_rejects() {
+        // A b64 value of only whitespace decodes to empty bytes
+        // and is operator typo. resolve_payload trims & rejects.
+        let mut args = args_with_payload("");
+        args.payload = None;
+        args.payload_b64 = Some("   ".into());
+        assert!(resolve_payload(&args).is_err());
+    }
+
+    #[test]
+    fn resolve_payload_b64_decodes_to_unicode() {
+        use base64::Engine as _;
+        let raw = "café 中文";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(raw.as_bytes());
+        let mut args = args_with_payload("");
+        args.payload = None;
+        args.payload_b64 = Some(encoded);
+        assert_eq!(resolve_payload(&args).unwrap(), raw);
+    }
+
+    #[test]
+    fn resolve_payload_b64_decodes_to_bytes_with_control_chars() {
+        // Operators escape unprintable / NUL-laden binary payloads
+        // through --payload-b64 specifically because argv truncates
+        // at NUL. Confirm a NUL-containing decoded payload survives
+        // through string conversion (lossy where needed but never
+        // panic).
+        use base64::Engine as _;
+        let raw_bytes = b"a\x00b\x01c".to_vec();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
+        let mut args = args_with_payload("");
+        args.payload = None;
+        args.payload_b64 = Some(encoded);
+        let got = resolve_payload(&args).unwrap();
+        // String::from_utf8_lossy preserves valid UTF-8 bytes,
+        // including NUL — the NUL must round-trip.
+        assert!(got.contains('\0'));
+        assert!(got.starts_with('a'));
+        assert!(got.ends_with('c'));
+    }
+
+    #[test]
+    fn resolve_payload_b64_with_leading_trailing_whitespace_trims() {
+        // Multi-line paste — operators often have a stray
+        // newline at the end. The trim() in resolve_payload
+        // handles that.
+        let mut args = args_with_payload("");
+        args.payload = None;
+        args.payload_b64 = Some("  aGVsbG8=  \n".into());
+        assert_eq!(resolve_payload(&args).unwrap(), "hello");
+    }
+
+    #[test]
+    fn resolve_payload_no_source_set_returns_error() {
+        // None of --payload, --payload-b64, --stdin → error.
+        let mut args = args_with_payload("placeholder");
+        args.payload = None;
+        args.payload_b64 = None;
+        args.stdin = false;
+        let err = resolve_payload(&args).expect_err("no source");
+        assert!(
+            err.contains("no payload")
+                || err.contains("payload")
+                || err.contains("--stdin")
+                || err.contains("--payload-b64"),
+            "must list options: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_payload_preference_order_b64_over_payload() {
+        // If both --payload and --payload-b64 are set, --payload-b64
+        // wins (it's checked first in the resolve order). This is
+        // the contract; document via test.
+        use base64::Engine as _;
+        let mut args = args_with_payload("WRONG");
+        args.payload_b64 = Some(
+            base64::engine::general_purpose::STANDARD.encode(b"RIGHT"),
+        );
+        assert_eq!(resolve_payload(&args).unwrap(), "RIGHT");
+    }
 }
