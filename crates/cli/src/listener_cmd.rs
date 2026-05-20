@@ -296,9 +296,14 @@ pub fn run_listener(args: ListenerArgs) -> ExitCode {
             let registry_c = registry.clone();
             let format_c = format.clone();
             tokio::spawn(async move {
+                // handle_conn returns:
+                //   Err  — malformed request, drop it
+                //   Ok(None) — a `/_wafrift/...` management API hit,
+                //              already answered; do NOT log as callback
+                //   Ok(Some(cb)) — a real inbound, render + record
                 let cb = match handle_conn(sock, peer, &registry_c, max_body, read_timeout).await {
-                    Ok(cb) => cb,
-                    Err(_) => return,
+                    Ok(Some(cb)) => cb,
+                    Ok(None) | Err(_) => return,
                 };
                 render_callback(&cb, &format_c);
                 registry_c.push(cb).await;
@@ -333,13 +338,19 @@ fn render_callback(cb: &Callback, format: &str) {
 /// Read one HTTP request off the socket and translate to a Callback.
 /// Handles malformed requests by returning Err — the connection is
 /// closed and the listener loop moves on.
+///
+/// Returns `Ok(None)` when the request was handled as a MANAGEMENT
+/// API hit (the path begins with `/_wafrift/`) — those are answered
+/// inline with their own JSON response and intentionally NOT
+/// recorded in the registry's callbacks log (otherwise the operator
+/// polling the API would pollute their own evidence stream).
 async fn handle_conn(
     mut sock: tokio::net::TcpStream,
     peer: SocketAddr,
     registry: &Registry,
     max_body: usize,
     read_timeout: Duration,
-) -> Result<Callback, String> {
+) -> Result<Option<Callback>, String> {
     let mut buf = vec![0u8; 16 * 1024];
     // Cap total bytes read so a malicious client cannot keep us in
     // an infinite read loop without ever sending the header
@@ -425,6 +436,35 @@ async fn handle_conn(
     }
     body_truncated += already_have.saturating_sub(take);
 
+    // Management API: paths under `/_wafrift/` get answered inline
+    // and NOT recorded as callbacks. The check endpoint lets a
+    // scan-side caller (or the operator with curl) ask "has this
+    // token been received yet?" without spawning a polling proxy.
+    if let Some(rest) = path.strip_prefix("/_wafrift/check/") {
+        // Trim any trailing query string / slash; token alphabet is
+        // alnum only so anything past it is noise.
+        let token = rest.split(&['/', '?', '#'][..]).next().unwrap_or("").to_string();
+        let received = registry
+            .callbacks()
+            .await
+            .iter()
+            .any(|cb| cb.matched_token.as_deref() == Some(token.as_str()));
+        let body = serde_json::json!({
+            "received": received,
+            "token": token,
+        })
+        .to_string();
+        let status = if received { "200 OK" } else { "404 Not Found" };
+        let resp = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = sock.write_all(resp.as_bytes()).await;
+        let _ = sock.shutdown().await;
+        return Ok(None);
+    }
+
     // Reply with a tiny 200 so the upstream client gets a clean close.
     let _ = sock
         .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -457,7 +497,7 @@ async fn handle_conn(
         matched_token = registry.match_token_in(&body_str).await;
     }
 
-    Ok(Callback {
+    Ok(Some(Callback {
         received_at,
         source: peer.to_string(),
         method,
@@ -466,7 +506,7 @@ async fn handle_conn(
         headers,
         body_preview: String::from_utf8_lossy(&body).into_owned(),
         body_truncated_bytes: body_truncated,
-    })
+    }))
 }
 
 fn find_double_crlf(buf: &[u8]) -> Option<usize> {
@@ -578,9 +618,14 @@ mod tests {
             let registry = registry.clone();
             async move {
                 let (sock, peer) = listener.accept().await.expect("accept");
+                // The drive_one_callback helper is for the
+                // callback-recording path, so we always expect
+                // Some(Callback). Management-API tests use their
+                // own dedicated helper.
                 handle_conn(sock, peer, &registry, 8 * 1024, Duration::from_secs(5))
                     .await
-                    .expect("handle_conn")
+                    .expect("handle_conn ok")
+                    .expect("handle_conn returned a callback (not a management response)")
             }
         });
         // Tiny pause so the listener has time to be ready before we
@@ -691,6 +736,120 @@ mod tests {
         let _ = client.shutdown().await;
         let result = server.await.unwrap();
         assert!(result.is_err(), "malformed request must return Err");
+    }
+
+    // ── Management API: GET /_wafrift/check/<TOKEN> ─────────────
+    //
+    // Lets a scan-side caller (or the operator with curl) ask the
+    // running listener "has this token been received yet?" without
+    // polluting the callback log with their own queries.
+
+    /// Drive one /_wafrift/check/<token> request. Reads the raw
+    /// response off the socket so we can assert on the status line
+    /// + JSON body.
+    async fn drive_management_check(
+        registry: Arc<Registry>,
+        token: &str,
+    ) -> (String, String) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let registry_c = registry.clone();
+        let server = tokio::spawn(async move {
+            let (sock, peer) = listener.accept().await.expect("accept");
+            let _ = handle_conn(sock, peer, &registry_c, 8 * 1024, Duration::from_secs(3)).await;
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        let req = format!(
+            "GET /_wafrift/check/{token} HTTP/1.1\r\nHost: x\r\n\
+             Content-Length: 0\r\n\r\n"
+        );
+        client.write_all(req.as_bytes()).await.unwrap();
+        let mut resp_buf = Vec::new();
+        // Read until EOF.
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = client.read(&mut buf).await.unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            resp_buf.extend_from_slice(&buf[..n]);
+        }
+        let _ = client.shutdown().await;
+        let _ = server.await;
+        let resp = String::from_utf8_lossy(&resp_buf).into_owned();
+        // Split status line + body for the caller.
+        let (status_line, rest) = resp.split_once("\r\n").unwrap_or(("", ""));
+        let body = rest
+            .split("\r\n\r\n")
+            .nth(1)
+            .unwrap_or("")
+            .to_string();
+        (status_line.to_string(), body)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn management_check_unknown_token_returns_404_with_received_false() {
+        let registry = Arc::new(Registry::new());
+        let _ = registry.mint(1).await; // mint one so the registry is non-empty
+        let (status, body) =
+            drive_management_check(registry, "NEVERSEENABCDEFGHIJKLMNOPQ").await;
+        assert!(status.contains("404"), "status was: {status}");
+        assert!(body.contains("\"received\":false"), "body: {body}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn management_check_known_received_token_returns_200_received_true() {
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        // Record a callback for this token by going through the
+        // normal callback path.
+        let cb_req = format!(
+            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
+        );
+        let (cb, _) = drive_one_callback(registry.clone(), cb_req.as_bytes()).await;
+        registry.push(cb).await;
+        // Now ask the management endpoint.
+        let (status, body) = drive_management_check(registry, &token).await;
+        assert!(status.contains("200"), "status was: {status}");
+        assert!(body.contains("\"received\":true"), "body: {body}");
+        assert!(body.contains(&token), "body should include the token: {body}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn management_check_does_not_record_itself_as_a_callback() {
+        // Anti-rig: a poll for /_wafrift/check/X must NOT append a
+        // Callback to the registry (would pollute the evidence
+        // stream and could match later polls).
+        let registry = Arc::new(Registry::new());
+        let _ = registry.mint(1).await;
+        assert_eq!(registry.callbacks().await.len(), 0);
+        let (_status, _body) = drive_management_check(registry.clone(), "ANYTOKEN").await;
+        assert_eq!(
+            registry.callbacks().await.len(),
+            0,
+            "management API hit must not record a callback"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn management_check_path_with_trailing_slash_still_matches() {
+        // Resilience: a caller hitting /_wafrift/check/TOK/ (with
+        // trailing slash) must still get the right answer.
+        let registry = Arc::new(Registry::new());
+        let token = registry.mint(1).await.into_iter().next().unwrap();
+        let cb_req = format!(
+            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
+        );
+        let (cb, _) = drive_one_callback(registry.clone(), cb_req.as_bytes()).await;
+        registry.push(cb).await;
+        // Use a token with a trailing slash in the URL request.
+        let path_with_slash = format!("{token}/");
+        let (status, body) = drive_management_check(registry, &path_with_slash).await;
+        assert!(status.contains("200"));
+        assert!(body.contains("\"received\":true"));
     }
 
     // ── Deep edge-case sweep (added 2026-05-20 under the "deep
