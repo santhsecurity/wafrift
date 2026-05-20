@@ -109,8 +109,8 @@ Parser\-differential fingerprinter — fires URL\-shape variants that exercise k
 wafrift\-compress(1)
 Wrap a request body in one or more `Content\-Encoding` layers (gzip / deflate / brotli / chain). The compression\-confusion attack: WAFs that inspect raw bytes pass over the encoded body while the origin decompresses normally. Brotli is the headline gap — many WAFs don\*(Aqt ship a brotli decompressor even though Chrome / nginx / Apache all do
 .TP
-wafrift\-jwt(1)
-JWT weakness analyzer + forgery generator. Decodes the token, identifies weak algorithms (none / HS* with cracked secret), surfaces dangerous header surface (kid / jku / jwk), flags time\-claim issues, and emits forged variants the operator pastes into Authorization: Bearer to test
+wafrift\-smuggle(1)
+HTTP request smuggling probes (CL.TE / TE.CL / TE.TE / CL.0 / dual\-CL / multi\-value\-CL). Subcommands: `detect` runs the SAFE timing\-differential probes that can\*(Aqt poison the connection pool; `probe` fires the exploit\-grade payloads (requires `\-\-unsafe`); `dry\-run` renders the raw wire bytes without sending anything; `list` enumerates the variants. Built on the same engine powering the `wafrift\-smuggling` library, but exposed as a first\-class CLI surface so pentesters don\*(Aqt need to roll their own runner
 .TP
 wafrift\-help(1)
 Print this message or the help of the given subcommand(s)
