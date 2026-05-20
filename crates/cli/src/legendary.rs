@@ -31,7 +31,7 @@ use std::time::Instant;
 use wafrift_detect::waf_detect;
 
 use crate::bypass_probe::{BypassProbeArgs, run_bypass_probe};
-use crate::detect_cmd::{fetch_for_detect, infra_markers};
+use crate::detect_cmd::{fetch_differential, fetch_for_detect, infra_markers};
 
 #[derive(Args, Debug)]
 pub struct LegendaryArgs {
@@ -117,6 +117,12 @@ struct PhaseDetect {
     baseline_status: Option<u16>,
     baseline_body_len: Option<usize>,
     detected: Vec<DetectedWaf>,
+    /// Differential-probe verdict when the static-signature corpus
+    /// came back empty: `Some(reason)` when a benign vs attack
+    /// probe diverged enough to infer a WAF, `None` otherwise.
+    /// Skipped entirely when the static corpus DID identify a WAF
+    /// (no need to double-fire).
+    differential: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -203,6 +209,37 @@ pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
             "       baseline HTTP {status}, {} bytes; no WAF confidently identified",
             body.len()
         );
+        // Static-signature corpus came back empty. Auto-run the
+        // differential probe — legendary is the one-shot demo
+        // command, the operator expects it to do the right thing
+        // without flags. The differential probe sends an attack-
+        // shaped string (per Authorisation note at the bottom of
+        // the report), so it's documented and surfaced loudly.
+        match fetch_differential(&args.target, args.timeout_secs, args.insecure) {
+            Ok(Some(ev)) => {
+                eprintln!(
+                    "       {} {}",
+                    "differential probe: WAF INFERRED".bright_green(),
+                    ev.reasons.join("; ").yellow()
+                );
+                report.detect.differential = Some(format!(
+                    "WAF inferred via differential probe: {}",
+                    ev.reasons.join("; ")
+                ));
+            }
+            Ok(None) => {
+                eprintln!(
+                    "       {} differential probe: no significant divergence",
+                    "(also)".bright_black()
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "       {} differential probe error: {e}",
+                    "warn:".yellow()
+                );
+            }
+        }
     } else {
         let summary: Vec<_> = detected
             .iter()
@@ -376,6 +413,13 @@ fn render_markdown(r: &LegendaryReport) -> String {
         ));
         if r.detect.detected.is_empty() {
             out.push_str("- WAF: **none confidently identified** at the baseline. The target may be unprotected, behind a CDN that's not surfacing rule fires on benign GETs, or fingerprinted via response signals our 160+ rule corpus doesn't cover. The bypass-probe phase below still runs.\n\n");
+            // Differential probe verdict — the second-look that
+            // catches WAFs hiding behind a generic block page.
+            if let Some(diff) = r.detect.differential.as_ref() {
+                out.push_str(&format!(
+                    "- **{diff}** (signal-derived: status flip / server-header change / body-length swing on a benign vs attack probe — the WAF is intercepting even though its block page carries no vendor marker.)\n\n"
+                ));
+            }
         } else {
             out.push_str("- WAF candidate(s):\n");
             for d in &r.detect.detected {
