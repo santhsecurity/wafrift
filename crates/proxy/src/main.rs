@@ -7,6 +7,8 @@
 
 mod findings;
 mod gene_bank_io;
+mod request_helpers;
+mod warn_throttle;
 
 use clap::Parser;
 use futures_util::StreamExt;
@@ -14,7 +16,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::{Mutex, Semaphore};
 use tracing::{debug, error, info, trace, warn};
 
@@ -395,39 +397,8 @@ fn stealth() -> Option<&'static wafrift_transport::stealth::StealthClient> {
     STEALTH_CLIENT.get()
 }
 
-/// Simple per-key warning throttle so high-rate scanners (sqlmap,
-/// ffuf) don't flood the logs with identical messages.
-struct WarnThrottle {
-    cooldown: Duration,
-    last: std::sync::Mutex<HashMap<String, Instant>>,
-}
-
-impl WarnThrottle {
-    fn new(cooldown_secs: u64) -> Self {
-        Self {
-            cooldown: Duration::from_secs(cooldown_secs),
-            last: std::sync::Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Returns true if at least `cooldown` has elapsed since the last
-    /// warning with this key. The key should encode both the message
-    /// category and the host (or other dimension) being warned about.
-    fn should_warn(&self, key: &str) -> bool {
-        let mut map = match self.last.lock() {
-            Ok(g) => g,
-            Err(e) => e.into_inner(),
-        };
-        let now = Instant::now();
-        if let Some(last) = map.get(key)
-            && now.duration_since(*last) < self.cooldown
-        {
-            return false;
-        }
-        map.insert(key.to_string(), now);
-        true
-    }
-}
+// WarnThrottle lives in `crate::warn_throttle`.
+use crate::warn_throttle::WarnThrottle;
 
 /// Mutable proxy state shared across connections.
 #[derive(Default)]
@@ -1189,51 +1160,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-/// Build an error response without panicking.
-/// Split an absolute URL into `(scheme://authority, path?query)` for
-/// the `--mutate-url` hook so the URL-mutator only sees the path-and-
-/// query portion (it never touches scheme or authority).
-///
-/// Returns `None` for URLs without `://` (relative, malformed) — the
-/// caller leaves the URL alone in that case rather than risking a
-/// mutation that breaks routing.
-/// Convert a `HeaderValue` to `String`, logging a warning if the
-/// bytes are not valid UTF-8 (in which case the lossy replacement
-/// characters are preserved so the proxy can keep running).
-fn header_value_to_string(name: &str, value: &hyper::header::HeaderValue) -> String {
-    match String::from_utf8(value.as_bytes().to_vec()) {
-        Ok(s) => s,
-        Err(_) => {
-            let lossy = String::from_utf8_lossy(value.as_bytes()).to_string();
-            tracing::warn!(header = %name, "header value contains invalid UTF-8; using lossy conversion");
-            lossy
-        }
-    }
-}
-
-fn split_url_for_mutation(url: &str) -> Option<(String, String)> {
-    let scheme_end = url.find("://")?;
-    let after_scheme = &url[scheme_end + 3..];
-    let path_start = after_scheme.find('/')?;
-    let absolute_path_start = scheme_end + 3 + path_start;
-    Some((
-        url[..absolute_path_start].to_string(),
-        url[absolute_path_start..].to_string(),
-    ))
-}
-
-fn error_response(status: StatusCode, message: &str) -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(status)
-        .body(Full::new(Bytes::from(message.to_string())))
-        .unwrap_or_else(|_| {
-            // Infallible in practice — status and body are always valid.
-            // But if it somehow fails, return a minimal 500.
-            let mut resp = Response::new(Full::new(Bytes::from("internal error")));
-            *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            resp
-        })
-}
+// header_value_to_string, split_url_for_mutation, error_response
+// live in `crate::request_helpers` — each individually testable +
+// the inline tests in that module cover boundary cases (root path,
+// no path segment, relative URL, invalid UTF-8 byte, every common
+// StatusCode).
+use crate::request_helpers::{error_response, header_value_to_string, split_url_for_mutation};
 
 /// Wrap [`forward_wafrift_request`] with a retry loop. The first attempt
 /// runs the standard pipeline. If the WAF blocks (HTTP 403/406), each
