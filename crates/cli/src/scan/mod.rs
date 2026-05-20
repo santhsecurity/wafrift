@@ -9,7 +9,9 @@
 //! - [`state`] — `ScanState` (mutable counters) and `ScanConfig` (immutable args)
 //! - this module (`mod.rs`) — the `run_scan` orchestrator and step functions
 
+pub(crate) mod baseline;
 pub(crate) mod callback_poll;
+pub(crate) mod session_init_plug;
 pub(crate) mod state;
 
 use colored::Colorize;
@@ -257,39 +259,17 @@ pub(crate) async fn run_scan(
         args.delay_ms
     );
 
-    // Step 0: Stateful chain — when --session-init is set, fire the
-    // operator's curl-format auth request FIRST and capture the
-    // resulting cookies + Authorization header. The scan-loop client
-    // then carries these on every subsequent variant, so the WAF
-    // sees AUTHENTICATED traffic — typically the looser of the two
-    // inspection tiers most WAFs run.
-    let session_state: Option<crate::session_init::SessionState> = if let Some(ref path) = args.session_init {
-        if scan_text {
-            println!("{}", "[0/3] Establishing session...".bold().cyan());
-        }
-        match crate::session_init::establish_from_file(
-            path,
-            Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS),
-            args.insecure,
-        )
-        .await
-        {
-            Ok(state) => {
-                if scan_text {
-                    println!("  {} {}", "✓".green(), state.summary.bright_white());
-                }
-                Some(state)
-            }
-            Err(e) => {
-                eprintln!(
-                    "  {} {e}",
-                    "✗ session-init failed:".red().bold()
-                );
-                return ExitCode::from(1);
-            }
-        }
-    } else {
-        None
+    // Step 0: Stateful chain — see `session_init_plug` module.
+    let session_state = match session_init_plug::run(
+        args.session_init.as_deref(),
+        args.insecure,
+        scan_text,
+        Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS),
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(code) => return code,
     };
 
     // Step 1: WAF detection — fetch target and identify WAF.
@@ -451,56 +431,15 @@ pub(crate) async fn run_scan(
         }
     }
 
-    // Step 2: Baseline — confirm raw payload gets blocked.
-    if scan_text {
-        println!(
-            "\n{}",
-            "[2/7] Testing baseline (raw payload)...".bold().cyan()
-        );
-    }
-    let raw_url = scan_url_with_param(target, &args.param, &urlencoding::encode(&args.payload));
-    let (raw_status, raw_blocked, raw_transport_ok) = match http.get(&raw_url).send().await {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let body = resp.bytes().await.unwrap_or_default();
-            let blocked = is_waf_block(status, &body);
-            (status, blocked, true)
-        }
-        Err(e) => {
-            eprintln!(
-                "  {} {}",
-                "✗ Baseline request failed (transport):".red().bold(),
-                e
-            );
-            (0u16, false, false)
-        }
-    };
-    if !raw_transport_ok {
-        if scan_text {
-            println!(
-                "  {}",
-                "⚠ Baseline inconclusive — fix connectivity and re-run"
-                    .yellow()
-                    .bold()
-            );
-        }
-    } else if raw_blocked {
-        if scan_text {
-            println!(
-                "  {} (HTTP {})",
-                "✓ Raw payload BLOCKED — WAF is active".green().bold(),
-                raw_status
-            );
-        }
-    } else if scan_text {
-        println!(
-            "  {} (HTTP {})",
-            "⚠ Raw payload PASSED — WAF may not inspect this parameter"
-                .yellow()
-                .bold(),
-            raw_status
-        );
-    }
+    // Step 2: Baseline — see `baseline` module.
+    let baseline_outcome =
+        baseline::run(&http, target, &args.param, &args.payload, scan_text).await;
+    let raw_status = baseline_outcome.status;
+    let raw_blocked = baseline_outcome.blocked;
+    // Note: baseline_outcome.transport_ok was used downstream; preserved as
+    // baseline_outcome.transport_ok for any later phase that needs
+    // it (today none read it, but the baseline state is observable
+    // via baseline_outcome.transport_ok if needed).
 
     // Step 2b: Differential probing — isolate WAF trigger patterns.
     let mut intel_loop = IntelligenceLoop::new(20);
@@ -1999,7 +1938,7 @@ pub(crate) async fn run_scan(
             "exploit_variants": total_fired.saturating_sub(variants.len()),
             "winning_strategies": winning_strategies.iter().cloned().collect::<Vec<_>>(),
             "requests_completed": requests_completed,
-            "baseline_transport_ok": raw_transport_ok,
+            "baseline_transport_ok": baseline_outcome.transport_ok,
             "bypassed": bypassed,
             "blocked": blocked,
             "errors": errors,
@@ -2044,7 +1983,7 @@ pub(crate) async fn run_scan(
                     "baseline_probe": {
                         "raw_get_status": raw_status,
                         "treated_as_blocked": raw_blocked,
-                        "transport_ok": raw_transport_ok,
+                        "transport_ok": baseline_outcome.transport_ok,
                     },
                     "evasion_campaign": {
                         "variants_generated": total_fired,
