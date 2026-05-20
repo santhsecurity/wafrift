@@ -279,7 +279,13 @@ async fn probe_one_url(
         Err(e) => return Err(format!("baseline GET {url} failed: {e}")),
     };
     let baseline_status = baseline.status().as_u16();
-    let baseline_body = baseline.bytes().await.unwrap_or_default();
+    // Bounded read — decompression-bomb defence on the baseline.
+    let baseline_body = crate::safe_body::read_bounded(
+        baseline,
+        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+    )
+    .await
+    .unwrap_or_default();
     let baseline_len = baseline_body.len();
 
     if !args.quiet {
@@ -526,7 +532,7 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = resp.bytes().await.unwrap_or_default();
+            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
             classify(
                 "headers",
                 probe.label,
@@ -556,7 +562,7 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = resp.bytes().await.unwrap_or_default();
+            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
             classify(
                 "paths",
                 "path-routing",
@@ -577,7 +583,7 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = resp.bytes().await.unwrap_or_default();
+            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
             classify(
                 "methods",
                 &m,

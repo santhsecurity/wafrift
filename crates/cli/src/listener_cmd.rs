@@ -135,6 +135,14 @@ pub struct Callback {
 // only sees the call sites in `run_listener` + the tests, which exercise
 // every public method, but rustc's reachability analysis on `--bin`
 // targets does not always connect them. The library surface IS used.
+/// Hard cap on the listener's callback log. Past this, the
+/// OLDEST callback gets dropped (FIFO eviction) so the listener
+/// can run for an unbounded duration without RAM growth. 100k
+/// callbacks is roughly 100 MiB at the typical ~1 KiB payload
+/// shape — generous for an authentic pentest run, but bounded so
+/// a flood doesn't ramp into a DoS.
+pub const MAX_CALLBACK_LOG: usize = 100_000;
+
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct Registry {
@@ -208,8 +216,18 @@ impl Registry {
     /// Append one observed callback. The matched_token field is
     /// populated by the listener loop before push (so the registry
     /// stays a pure store).
+    ///
+    /// Cap: the log holds at most [`MAX_CALLBACK_LOG`] entries. When
+    /// the cap is hit, the OLDEST callback is dropped. The cap is a
+    /// DoS defence — an attacker that learns ONE valid token (e.g.
+    /// by observing a real callback) could otherwise flood the
+    /// listener with requests carrying that token and balloon RAM.
     async fn push(&self, cb: Callback) {
-        self.callbacks.write().await.push(cb);
+        let mut cbs = self.callbacks.write().await;
+        if cbs.len() >= MAX_CALLBACK_LOG {
+            cbs.remove(0);
+        }
+        cbs.push(cb);
     }
 }
 
@@ -578,6 +596,64 @@ mod tests {
             r.match_token_in("abcdefghijklmnopqrstuvwxy2").await,
             None
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_push_caps_callback_log_at_max() {
+        // DoS defence: an attacker who learns one token could otherwise
+        // flood the log and balloon RAM. The cap keeps the log bounded
+        // (FIFO eviction).
+        let r = Registry::new();
+        let total = MAX_CALLBACK_LOG + 50;
+        for i in 0..total {
+            let cb = Callback {
+                received_at: i as u64,
+                source: "127.0.0.1:0".into(),
+                method: "GET".into(),
+                path: format!("/p/{i}"),
+                matched_token: Some("TOK".into()),
+                headers: vec![],
+                body_preview: String::new(),
+                body_truncated_bytes: 0,
+            };
+            r.push(cb).await;
+        }
+        let cbs = r.callbacks.read().await;
+        assert_eq!(cbs.len(), MAX_CALLBACK_LOG, "log must be capped");
+        // First 50 entries (oldest) evicted; remaining start at 50.
+        assert_eq!(cbs.first().unwrap().received_at, 50);
+        assert_eq!(cbs.last().unwrap().received_at, (total - 1) as u64);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_push_preserves_log_when_under_cap() {
+        let r = Registry::new();
+        for i in 0..10 {
+            let cb = Callback {
+                received_at: i as u64,
+                source: "127.0.0.1:0".into(),
+                method: "GET".into(),
+                path: "/".into(),
+                matched_token: None,
+                headers: vec![],
+                body_preview: String::new(),
+                body_truncated_bytes: 0,
+            };
+            r.push(cb).await;
+        }
+        let cbs = r.callbacks.read().await;
+        assert_eq!(cbs.len(), 10);
+        assert_eq!(cbs.first().unwrap().received_at, 0);
+    }
+
+    #[test]
+    fn callback_log_cap_is_at_least_one_thousand() {
+        // Floor: a refactor that accidentally set MAX_CALLBACK_LOG=10
+        // would drop legitimate callbacks during real engagements
+        // (which routinely produce hundreds of callbacks). Lock the
+        // floor at 1k — well above what any honest run needs to
+        // start dropping at.
+        assert!(MAX_CALLBACK_LOG >= 1_000);
     }
 
     // ── header parsing ───────────────────────────────────────────

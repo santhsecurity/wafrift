@@ -287,7 +287,13 @@ pub async fn send(
     builder = builder.timeout(std::time::Duration::from_secs(timeout_secs));
     let resp = builder.send().await.map_err(|e| e.to_string())?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| e.to_string())?;
+    // Bounded read — decompression-bomb defence on the WAF response.
+    let body = crate::safe_body::read_bounded(
+        resp,
+        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     let blocked = is_waf_block(status, &body);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok((status, blocked, elapsed_ms))

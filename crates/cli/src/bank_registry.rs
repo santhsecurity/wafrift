@@ -527,7 +527,18 @@ fn http_get_blocking(url: &str, timeout_secs: u64) -> Result<String, String> {
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
         }
-        resp.text().await.map_err(|e| format!("body: {e}"))
+        // Bounded read — even an operator-controlled registry can
+        // have a bug; cap at the headroom limit (64 MiB), much
+        // larger than any sane gene-bank export but still bounded.
+        match crate::safe_body::read_bounded_text(
+            resp,
+            crate::safe_body::HEADROOM_MAX_RESPONSE_BYTES,
+        )
+        .await
+        {
+            Ok(t) => Ok(t),
+            Err(e) => Err(format!("body: {e}")),
+        }
     })
 }
 
@@ -549,7 +560,13 @@ fn http_post_blocking(url: &str, body: &str, timeout_secs: u64) -> Result<String
             .await
             .map_err(|e| format!("send: {e}"))?;
         let status = resp.status();
-        let txt = resp.text().await.unwrap_or_default();
+        // Bounded read on the registry's POST response.
+        let txt = crate::safe_body::read_bounded_text(
+            resp,
+            crate::safe_body::HEADROOM_MAX_RESPONSE_BYTES,
+        )
+        .await
+        .unwrap_or_default();
         if !status.is_success() {
             return Err(format!("HTTP {status} {txt}"));
         }

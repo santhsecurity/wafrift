@@ -48,7 +48,13 @@ pub async fn run(
         let was_blocked = match http.get(&probe_url).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let body = resp.bytes().await.unwrap_or_default();
+                // Bounded read against decompression-bomb DoS.
+                let body = crate::safe_body::read_bounded(
+                    resp,
+                    crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                )
+                .await
+                .unwrap_or_default();
                 is_waf_block(status, &body)
             }
             Err(_) => false,
