@@ -23,6 +23,7 @@ mod helpers;
 mod import_curl;
 mod init_cmd;
 mod interactive;
+mod jwt_cmd;
 mod legendary;
 mod listener_cmd;
 mod man_cmd;
@@ -163,6 +164,12 @@ enum Commands {
     /// headline gap — many WAFs don't ship a brotli decompressor
     /// even though Chrome / nginx / Apache all do.
     Compress(compress_cmd::CompressArgs),
+    /// JWT weakness analyzer + forgery generator. Decodes the
+    /// token, identifies weak algorithms (none / HS* with cracked
+    /// secret), surfaces dangerous header surface (kid / jku /
+    /// jwk), flags time-claim issues, and emits forged variants
+    /// the operator pastes into Authorization: Bearer to test.
+    Jwt(jwt_cmd::JwtArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -458,6 +465,7 @@ fn main() -> ExitCode {
             }
         },
         Some(Commands::Compress(args)) => compress_cmd::run_compress(args),
+        Some(Commands::Jwt(args)) => jwt_cmd::run_jwt(args),
     }
 }
 

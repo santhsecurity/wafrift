@@ -49,6 +49,12 @@ base64 = { workspace = true }
 # Retry-After header parsing (RFC 9110 §10.2.3): integer delta-seconds
 # OR IMF-fixdate HTTP-date. Already in the workspace lock via hyper.
 httpdate = "1.0"
+# JWT command (`wafrift jwt`) — HS256/HS384/HS512 signature
+# verification + weak-secret brute. Same crypto stack the rest
+# of the workspace pulls transitively; explicit here so the
+# JWT module has a typed dep.
+sha2 = "0.10"
+hmac = "0.12"
 
 # SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
 # instead of panicking.
