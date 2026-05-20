@@ -1027,6 +1027,20 @@ mod tests {
         Client::builder().build().expect("client")
     }
 
+    /// Test-only client with a tight `connect_timeout` so the
+    /// dead-target loop tests (e.g. `run_phase_*`) don't bleed
+    /// 1-2 s of OS connect-refused retry per vector. With ~40
+    /// vectors and a real Windows ECONNREFUSED delay, the
+    /// non-timeout client made unit-tests take >90 s for a
+    /// single test case.
+    fn fast_fail_http() -> Client {
+        Client::builder()
+            .connect_timeout(Duration::from_millis(50))
+            .timeout(Duration::from_millis(100))
+            .build()
+            .expect("client")
+    }
+
     #[test]
     fn vector_catalogue_is_unique_by_name() {
         // Anti-rig: a duplicate vector name would silently fire
@@ -1228,7 +1242,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_phase_with_empty_payloads_returns_zero_deltas() {
-        let h = http();
+        let h = fast_fail_http();
         let cancel = CancellationToken::new();
         let outcome = run_phase(PhaseInput {
             http: &h,
@@ -1412,7 +1426,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_phase_exits_immediately_when_cancelled() {
-        let h = http();
+        let h = fast_fail_http();
         let cancel = CancellationToken::new();
         cancel.cancel();
         let outcome = run_phase(PhaseInput {
@@ -1958,7 +1972,7 @@ mod tests {
         // against a dead target so we can't assert on bypass
         // outcomes; the rescue tagging code runs at variant-build
         // time so it surfaces in the per-vector outcomes regardless.
-        let h = http();
+        let h = fast_fail_http();
         let cancel = CancellationToken::new();
         let _outcome = run_phase(PhaseInput {
             http: &h,
