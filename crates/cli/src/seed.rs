@@ -345,4 +345,152 @@ mod tests {
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn seed_host_with_no_techniques_creates_empty_host_entry() {
+        // Edge case: operator passes an empty technique list.
+        // We should still write the host entry — defensive default.
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-seed-test-empty-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bank_path = dir.join("gene-bank.json");
+        let code = seed_host("api.example.com", &[], Some(&bank_path), false);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        // Bank file still gets created with the host entry, even
+        // with zero techniques.
+        assert!(bank_path.exists());
+        let bank: PersistedGeneBank =
+            serde_json::from_str(&std::fs::read_to_string(&bank_path).unwrap()).unwrap();
+        assert!(bank.hosts.contains_key("api.example.com"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seed_host_dry_run_emits_path_in_log() {
+        // The dry-run log line includes the resolved path so
+        // operators see exactly where the bank lives before they
+        // confirm the write. The log goes to stderr; we don't
+        // capture it here but the return code must still be SUCCESS.
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-seed-dry-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bank_path = dir.join("gene-bank.json");
+        let code = seed_host("h", &["X".into()], Some(&bank_path), true);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert!(!bank_path.exists(), "dry-run MUST NOT write");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seed_host_rejects_malformed_existing_bank() {
+        // If the gene-bank file at the target path is corrupted JSON,
+        // seed_host must fail loudly — silently overwriting could
+        // destroy real bypass history.
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-seed-mal-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bank_path = dir.join("gene-bank.json");
+        std::fs::write(&bank_path, "not json at all").unwrap();
+        let code = seed_host("h", &["X".into()], Some(&bank_path), false);
+        assert_ne!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::SUCCESS),
+            "malformed bank must NOT silently overwrite"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seed_host_multiple_hosts_coexist_in_same_bank() {
+        // Two separate seed_host calls against the same bank path
+        // must end with both hosts present.
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-seed-multi-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bank_path = dir.join("gene-bank.json");
+        seed_host("api.a.com", &["EncodingUrl".into()], Some(&bank_path), false);
+        seed_host(
+            "api.b.com",
+            &["GrammarTautology".into()],
+            Some(&bank_path),
+            false,
+        );
+        let bank: PersistedGeneBank =
+            serde_json::from_str(&std::fs::read_to_string(&bank_path).unwrap()).unwrap();
+        assert_eq!(bank.hosts.len(), 2);
+        assert!(bank.hosts.contains_key("api.a.com"));
+        assert!(bank.hosts.contains_key("api.b.com"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seed_host_preserves_existing_host_techniques_when_appending() {
+        // A second seed against the same host must EXTEND, not
+        // REPLACE, the technique list. Already covered by the
+        // dedupe test above, but this case is the more general
+        // contract: the OLD techniques remain in place.
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-seed-extend-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bank_path = dir.join("gene-bank.json");
+        seed_host(
+            "h",
+            &["TechniqueA".into(), "TechniqueB".into()],
+            Some(&bank_path),
+            false,
+        );
+        seed_host("h", &["TechniqueC".into()], Some(&bank_path), false);
+        let bank: PersistedGeneBank =
+            serde_json::from_str(&std::fs::read_to_string(&bank_path).unwrap()).unwrap();
+        let entry = bank.hosts.get("h").unwrap();
+        // All three present.
+        assert!(entry.proven_winners.contains(&"TechniqueA".to_string()));
+        assert!(entry.proven_winners.contains(&"TechniqueB".to_string()));
+        assert!(entry.proven_winners.contains(&"TechniqueC".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seed_host_idempotent_against_identical_repeat_seed() {
+        // Run the same seed twice — the bank must look the same as
+        // after one run (dedupe). Anti-rig against a refactor that
+        // appended without dedup-checking.
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-seed-idem-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bank_path = dir.join("gene-bank.json");
+        let techs = ["X".to_string(), "Y".to_string()];
+        seed_host("h", &techs, Some(&bank_path), false);
+        seed_host("h", &techs, Some(&bank_path), false);
+        let bank: PersistedGeneBank =
+            serde_json::from_str(&std::fs::read_to_string(&bank_path).unwrap()).unwrap();
+        let entry = bank.hosts.get("h").unwrap();
+        // No duplication — same list as after a single seed.
+        assert_eq!(entry.proven_winners.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
