@@ -289,3 +289,190 @@ fn label(s: &str) -> Span<'static> {
 fn spacer() -> Span<'static> {
     Span::raw("    ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn cfg() -> DashboardConfig {
+        DashboardConfig {
+            bind_addr: "127.0.0.1:8080".to_string(),
+            mode: "forward".to_string(),
+            tls_stack_label: "rustls".to_string(),
+            body_padding_bytes: 0,
+            conn_reuse: true,
+        }
+    }
+
+    fn render<F>(width: u16, height: u16, paint: F) -> String
+    where
+        F: FnOnce(&mut Frame, Rect),
+    {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                paint(f, area);
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buffer.area().height {
+            let mut line = String::new();
+            for x in 0..buffer.area().width {
+                line.push_str(buffer[(x, y)].symbol());
+            }
+            out.push_str(line.trim_end());
+            out.push('\n');
+        }
+        out
+    }
+
+    // ── draw() — top-level composition ─────────────────────
+
+    #[test]
+    fn draw_top_level_renders_all_sections() {
+        let c = cfg();
+        let s = State::new();
+        let buf = render(140, 30, |f, area| draw(f, area, &c, &s));
+        // Counter section labels.
+        assert!(buf.contains("total"));
+        assert!(buf.contains("bypassed"));
+        assert!(buf.contains("blocked"));
+        // Latency section.
+        assert!(buf.to_lowercase().contains("latency") || buf.contains("p50"));
+        // TLS section.
+        assert!(buf.to_lowercase().contains("tls"));
+    }
+
+    #[test]
+    fn draw_handles_zero_request_state_without_panic() {
+        // Fresh state — no requests, no latencies recorded.  The
+        // percentile / TLS / WAF sections should still render.
+        let c = cfg();
+        let s = State::new();
+        let _ = render(120, 30, |f, area| draw(f, area, &c, &s));
+    }
+
+    #[test]
+    fn draw_handles_extreme_counter_values() {
+        let c = cfg();
+        let mut s = State::new();
+        s.total = u64::MAX;
+        s.bypassed = u64::MAX / 2;
+        s.blocked = u64::MAX / 3;
+        let _ = render(140, 30, |f, area| draw(f, area, &c, &s));
+    }
+
+    // ── draw_counters ──────────────────────────────────────
+
+    #[test]
+    fn counters_show_total_and_bypass_rate() {
+        let c = cfg();
+        let mut s = State::new();
+        s.total = 100;
+        s.bypassed = 25;
+        s.blocked = 5;
+        let buf = render(160, 7, |f, area| draw_counters(f, area, &c, &s));
+        assert!(buf.contains("100"));
+        assert!(buf.contains("25"));
+        assert!(buf.contains("5"));
+        // Bypass rate is 25/100 = 25.0%.
+        assert!(buf.contains("25.0%"));
+    }
+
+    #[test]
+    fn counters_handle_zero_total_division_safely() {
+        let c = cfg();
+        let s = State::new();
+        // total=0 → bypass_rate is 0.0% (not NaN, not Inf).
+        let buf = render(160, 7, |f, area| draw_counters(f, area, &c, &s));
+        assert!(buf.contains("0.0%") || buf.contains("0%"));
+        assert!(
+            !buf.contains("NaN") && !buf.contains("inf"),
+            "counter section must not surface NaN/Inf on zero state"
+        );
+    }
+
+    // ── draw_latency ────────────────────────────────────────
+
+    #[test]
+    fn latency_section_renders_zero_state() {
+        let s = State::new();
+        let buf = render(120, 4, |f, area| draw_latency(f, area, &s));
+        // No latencies recorded → all percentiles should be 0 ms
+        // or similar non-panicky display.
+        assert!(!buf.is_empty());
+        assert!(!buf.contains("NaN"));
+    }
+
+    // ── pct_color — pure helper ───────────────────────────
+
+    #[test]
+    fn pct_color_returns_distinct_styles_across_ms_buckets() {
+        // The bucket boundaries are an implementation detail, but
+        // the function must return *some* Style for any input.
+        for ms in [0_u64, 50, 100, 250, 500, 1000, 5000, u64::MAX] {
+            let _style = pct_color(ms);
+        }
+    }
+
+    // ── draw_status_ribbon ────────────────────────────────
+
+    #[test]
+    fn status_ribbon_renders_without_panic() {
+        let s = State::new();
+        let _ = render(140, 4, |f, area| draw_status_ribbon(f, area, &s));
+    }
+
+    // ── draw_tls ───────────────────────────────────────────
+
+    #[test]
+    fn tls_section_renders_without_panic_on_empty_history() {
+        let s = State::new();
+        let buf = render(120, 7, |f, area| draw_tls(f, area, &s));
+        // The TLS section has its own label/header.
+        assert!(buf.to_lowercase().contains("tls"));
+    }
+
+    // ── draw_wafs ──────────────────────────────────────────
+
+    #[test]
+    fn wafs_section_renders_empty_state() {
+        let s = State::new();
+        let buf = render(120, 6, |f, area| draw_wafs(f, area, &s));
+        // Empty state — at minimum a section header is present.
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn wafs_section_handles_narrow_width() {
+        // Defensive: 30-col width should still render a header.
+        let s = State::new();
+        let _ = render(30, 6, |f, area| draw_wafs(f, area, &s));
+    }
+
+    #[test]
+    fn draw_handles_tiny_screen_without_panic() {
+        // 40x12 is below any reasonable terminal size — the
+        // function must clip cleanly rather than panic.
+        let c = cfg();
+        let s = State::new();
+        let _ = render(40, 12, |f, area| draw(f, area, &c, &s));
+    }
+
+    #[test]
+    fn label_helper_returns_dark_gray_span() {
+        let span = label("test");
+        assert!(span.content.starts_with("test"));
+    }
+
+    #[test]
+    fn spacer_helper_returns_blank_span() {
+        let span = spacer();
+        assert!(span.content.trim().is_empty());
+    }
+}

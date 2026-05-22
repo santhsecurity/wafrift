@@ -80,7 +80,7 @@ thiserror = "2"
 anyhow = "1"
 
 # HTTP
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream", "json", "http2"] }
 # Browser-impersonating HTTP client for the optional `tls-impersonate`
 # feature. Closes the JA3 / h2 SETTINGS gap vs EvilWAF — Chrome /
 # Firefox / Safari / Edge ClientHello bytes-for-bytes via BoringSSL.
@@ -106,6 +106,13 @@ bytes = "1"
 # Crypto / TLS
 rustls = "0.23"
 tokio-rustls = "0.26"
+
+# DNS resolver for CNAME-chain fingerprinting (detect crate).
+# WAF/CDN providers leak their identity in DNS CNAME chains even when
+# the origin strips every HTTP header — `www.ebay.com → akamaiedge.net`
+# is the canonical example. Resolution happens once per `wafrift detect`
+# probe, in parallel with the HTTP fetch, so the latency cost is hidden.
+hickory-resolver = { version = "0.24", default-features = false, features = ["tokio-runtime", "system-config"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

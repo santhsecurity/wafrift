@@ -23,24 +23,112 @@ pub struct Variant {
     pub confidence: f64,
 }
 
+/// Split a single `Name: Value` header line on the first colon and
+/// trim surrounding whitespace. Accepts empty values per RFC 9110
+/// §5.5 — the WAF / origin server decides whether an empty value is
+/// meaningful, not this parser. Rejects missing colon and empty name.
+///
+/// Returns a short error fragment ("missing ':' separator", "empty
+/// name") so callers can compose their own context — `"invalid
+/// header \`{raw}\`; <frag>"` for [`parse_headers`], `"-H/--header
+/// {raw:?} <frag>"` for [`crate::scan::pentest_client::parse_header`].
+pub fn parse_header_pair(raw: &str) -> Result<(String, String), String> {
+    let (name, value) = raw
+        .split_once(':')
+        .ok_or_else(|| "missing ':' separator".to_string())?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("empty name".to_string());
+    }
+    Ok((name.to_string(), value.trim().to_string()))
+}
+
 pub(crate) fn parse_headers(raw_headers: &[String]) -> Result<Vec<(String, String)>, String> {
     raw_headers
         .iter()
         .map(|header| {
-            let Some((key, value)) = header.split_once(':') else {
+            if !header.contains(':') {
                 return Err(format!("invalid header `{header}`; expected `key: value`"));
-            };
-            let key = key.trim();
-            let value = value.trim();
-            if key.is_empty() {
-                return Err(format!("invalid header `{header}`; empty key"));
             }
-            if value.is_empty() {
-                return Err(format!("invalid header `{header}`; empty value"));
-            }
-            Ok((key.to_string(), value.to_string()))
+            parse_header_pair(header).map_err(|frag| format!("invalid header `{header}`; {frag}"))
         })
         .collect()
+}
+
+/// Walk a `reqwest::Error`'s cause chain and return a string that includes
+/// every level, joined by " — caused by: ".
+///
+/// reqwest's own `Display` is famously short — "error sending request" —
+/// without the underlying DNS / TCP / TLS cause.  This helper, first
+/// extracted during dogfood pass 5 (2026-05), surfaces the full chain
+/// (e.g. "dns error — caused by: No such host is known. (os error 11001)")
+/// so operators never have to guess whether the failure is NXDOMAIN,
+/// connection refused, TLS handshake failure, or something else.
+///
+/// `detect_cmd::fetch_for_detect` was the first site to walk the chain;
+/// `bypass_probe::run_async` and `bank_registry::http_get_blocking` /
+/// `http_post_blocking` were fixed in the same pass.
+pub(crate) fn walk_reqwest_error(e: &reqwest::Error) -> String {
+    let mut detail = format!("{e}");
+    let mut src: Option<&dyn std::error::Error> = std::error::Error::source(e);
+    while let Some(s) = src {
+        detail.push_str(" — caused by: ");
+        detail.push_str(&s.to_string());
+        src = std::error::Error::source(s);
+    }
+    detail
+}
+
+/// Single-quote a string for safe interpolation into a Bourne-shell
+/// command. Returns the FULLY wrapped form `'…'` so callers do not
+/// add their own quotes. A literal `'` inside the input becomes
+/// `'\''` (close-quote, escape, open-quote); every other byte rides
+/// verbatim.
+///
+/// This is the canonical shell escape used by the curl reproducer in
+/// [`crate::raw_request::RawRequest::to_curl`] and the `wafrift replay`
+/// reproducer in `report::render_*`. Centralised so a single
+/// round-trip-through-bash test exercises every caller.
+pub fn shell_single_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// Build the canonical `curl -G --data-urlencode` reproducer for a
+/// URL-query bypass. The non-raw scan loop emits `bypass_variants`
+/// with `payload` but historically NOT a `repro_curl` field — making
+/// the JSON twin of the raw-runner output incomplete. Operators
+/// pasting bypass_variants into a pentest report had to re-construct
+/// the curl by hand, which both wastes time and risks under-escaping
+/// shell metacharacters in the payload.
+///
+/// Uses `shell_single_quote` for both the param=value pair and the
+/// target URL — the same primitive every other curl emitter in this
+/// crate uses, so a single round-trip-through-bash test exercises
+/// every caller.
+#[must_use]
+pub fn url_query_repro_curl(target: &str, param: &str, payload: &str) -> String {
+    // `--data-urlencode <param>=<value>` is the wire-correct way to
+    // express "this exact byte sequence in this exact param" without
+    // letting the shell or curl re-encode anything. -G promotes
+    // the data to the query string, matching `wafrift scan`'s actual
+    // probe shape. The whole `param=payload` literal becomes one
+    // single-quoted shell token so an embedded `&` or `=` in the
+    // payload doesn't terminate the argument early.
+    format!(
+        "curl -G --data-urlencode {arg} {target}",
+        arg = shell_single_quote(&format!("{param}={payload}")),
+        target = shell_single_quote(target),
+    )
 }
 
 pub fn strategies_for_level(level: Level) -> Vec<Strategy> {
@@ -608,5 +696,325 @@ mod tests {
         // A `: value` line is malformed — key half is empty.
         let r = parse_headers(&[": value".into()]);
         assert!(r.is_err(), "empty key must be rejected");
+    }
+
+    // ── parse_header_pair (shared primitive) ──────────────────
+
+    #[test]
+    fn parse_header_pair_splits_on_first_colon() {
+        let (n, v) = parse_header_pair("X-Custom: hello").unwrap();
+        assert_eq!(n, "X-Custom");
+        assert_eq!(v, "hello");
+    }
+
+    #[test]
+    fn parse_header_pair_trims_both_halves() {
+        let (n, v) = parse_header_pair("  X  :   Bearer abc   ").unwrap();
+        assert_eq!(n, "X");
+        assert_eq!(v, "Bearer abc");
+    }
+
+    #[test]
+    fn parse_header_pair_preserves_value_internal_colons() {
+        // Bearer tokens / dates / URLs may contain `:` — the FIRST
+        // colon is the separator, everything after stays in the value.
+        let (_, v) = parse_header_pair("X-Time: 12:34:56").unwrap();
+        assert_eq!(v, "12:34:56");
+    }
+
+    #[test]
+    fn parse_header_pair_accepts_empty_value_per_rfc_9110() {
+        // RFC 9110 §5.5 permits empty header values; curl accepts
+        // them. We follow suit.
+        let (n, v) = parse_header_pair("X-Empty:").unwrap();
+        assert_eq!(n, "X-Empty");
+        assert_eq!(v, "");
+    }
+
+    #[test]
+    fn parse_header_pair_rejects_missing_colon() {
+        let err = parse_header_pair("nocolon").unwrap_err();
+        assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_header_pair_rejects_empty_name() {
+        let err = parse_header_pair(": value").unwrap_err();
+        assert!(err.contains("empty"), "got: {err}");
+    }
+
+    // ── shell_single_quote ────────────────────────────────────
+
+    #[test]
+    fn shell_single_quote_wraps_safe_string_in_quotes() {
+        assert_eq!(shell_single_quote("hello"), "'hello'");
+    }
+
+    #[test]
+    fn shell_single_quote_escapes_internal_apostrophes() {
+        // Bourne escape: 'don'\''t'
+        assert_eq!(shell_single_quote("don't"), "'don'\\''t'");
+    }
+
+    #[test]
+    fn shell_single_quote_handles_empty_string() {
+        assert_eq!(shell_single_quote(""), "''");
+    }
+
+    #[test]
+    fn shell_single_quote_passes_dangerous_metacharacters_verbatim() {
+        // Single-quoting means metacharacters lose meaning — `$`, `;`,
+        // backticks, parens all ride through as bytes.
+        assert_eq!(
+            shell_single_quote("$(rm -rf /); `whoami`"),
+            "'$(rm -rf /); `whoami`'"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_single_quote_round_trips_through_bash() {
+        // Single canonical shell escape — round-tripped through bash
+        // to confirm both halves (wrap + apostrophe escape) are wire-
+        // compatible. Replaces the bash round-trip previously in
+        // report.rs (one source of truth for the escape).
+        let inputs = [
+            "hello world",
+            "it's working",
+            "'\''",
+            "foo;bar|baz",
+            "$(danger)",
+            "`backtick`",
+            "emoji: 🚀",
+        ];
+        for raw in &inputs {
+            let escaped = shell_single_quote(raw);
+            let script = format!("echo {escaped}");
+            let output = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&script)
+                .output()
+                .expect("bash must be available");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(
+                stdout.trim_end(),
+                *raw,
+                "shell_single_quote round-trip failed for {raw:?}: script={script:?}"
+            );
+        }
+    }
+
+    // ── Bug 8 regression: bypass_probe shell_single_quote with apostrophe ─
+    //
+    // PRE-FIX BUG: the curl reproducer lines in bypass_probe were built with
+    // raw string interpolation using bare single-quote delimiters:
+    //   `curl -s -H '{}' '{}'`  (no escaping of ' inside the value)
+    // A probe value containing `'` (e.g. X-Original-URL: /admin';DROP) or a
+    // URL path with `'` produced a curl_cmd that was syntactically broken
+    // shell — the practitioner couldn't copy-paste it to reproduce the finding.
+    //
+    // POST-FIX: every argument in the curl reproducer passes through
+    // `shell_single_quote()`, which converts internal `'` → `'\''` (close,
+    // escape, open). The resulting command is always valid Bourne shell.
+    //
+    // We test `shell_single_quote` directly because that's the deduped
+    // primitive — all three probe kinds (header, path, method) now route
+    // through it.
+
+    #[test]
+    fn shell_single_quote_with_apostrophe_in_url_path_is_valid_shell() {
+        // A URL path containing a single quote: `/admin'path`
+        // Pre-fix: this would appear as `'/admin'path'` which is syntactically
+        // broken (the third `'` is an unclosed string). Post-fix: `'/admin'\''path'`.
+        let url = "http://target.example.com/admin'path?id=1";
+        let quoted = shell_single_quote(url);
+
+        // The output must start and end with a single quote.
+        assert!(quoted.starts_with('\''), "must be single-quoted: {quoted}");
+        assert!(quoted.ends_with('\''), "must be single-quoted: {quoted}");
+
+        // The interior must not contain a bare `'` (only the escaped form `'\''`).
+        // Strip the outer quotes and check:
+        let inner = &quoted[1..quoted.len() - 1];
+        // Bare `'` in the interior means the quoting is broken.
+        // The only allowed `'` sequences in a correctly Bourne-escaped
+        // string interior are `'\''` (or empty). We check that
+        // there's no isolated `'` that doesn't form `'\''`.
+        let mut i = 0;
+        let chars: Vec<char> = inner.chars().collect();
+        while i < chars.len() {
+            if chars[i] == '\'' {
+                // A `'` in the interior must be followed by `\''` — that's
+                // the close-escape-reopen sequence.
+                assert!(
+                    i + 3 < chars.len()
+                        && chars[i + 1] == '\\'
+                        && chars[i + 2] == '\''
+                        && chars[i + 3] == '\'',
+                    "bare apostrophe in shell_single_quote output interior \
+                     — should be '\\''  (the standard Bourne escape).\n\
+                     input={url:?}\noutput={quoted:?}\nposition={i}"
+                );
+                i += 4;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn shell_single_quote_header_value_with_apostrophe_is_valid() {
+        // X-Original-URL probe value: `/path?q=it's`
+        // Pre-fix: curl reproducer `'X-Original-URL: /path?q=it's'` is broken.
+        // Post-fix: `'X-Original-URL: /path?q=it'\''s'`.
+        let header_val = "X-Original-URL: /path?q=it's";
+        let quoted = shell_single_quote(header_val);
+
+        // Round-trip: splitting on `'\''` and reassembling gives back the original.
+        // Simplified check: the quoted form, when unescaped by the Bourne rules,
+        // yields the original string. We implement that manually.
+        let reconstructed = quoted
+            .trim_matches('\'')
+            .replace("'\\''", "'");
+        assert_eq!(
+            reconstructed, header_val,
+            "shell_single_quote must round-trip: input={header_val:?}, \
+             quoted={quoted:?}, reconstructed={reconstructed:?}"
+        );
+    }
+
+    // ── Bug 13 regression: walk_reqwest_error chain depth ────────────────
+    //
+    // PRE-FIX BUG: detect_cmd, bank_registry, and bypass_probe called
+    // `format!("{e}")` on reqwest::Error, which only shows the top-level
+    // description ("error sending request for url ...") — not the underlying
+    // DNS / TCP / TLS cause. Operators saw uninformative one-liners.
+    //
+    // POST-FIX: `walk_reqwest_error` was extracted and now walks
+    // `std::error::Error::source` until it returns None, joining each level
+    // with " — caused by: ".
+    //
+    // We test the walker with a mock error chain using a std::error::Error
+    // implementation — this is a pure unit test that doesn't need reqwest.
+
+    #[derive(Debug)]
+    struct ChainedError {
+        msg: &'static str,
+        cause: Option<Box<dyn std::error::Error + Send + Sync>>,
+    }
+    impl std::fmt::Display for ChainedError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.msg)
+        }
+    }
+    impl std::error::Error for ChainedError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.cause.as_ref().map(|b| b.as_ref() as &_)
+        }
+    }
+
+    /// A shallow clone of `walk_reqwest_error`'s algorithm applied to any
+    /// `std::error::Error` chain, so we can test the chain-walk logic without
+    /// needing a real `reqwest::Error` (which is hard to construct in tests).
+    fn walk_std_error(e: &dyn std::error::Error) -> String {
+        let mut detail = e.to_string();
+        let mut src = e.source();
+        while let Some(s) = src {
+            detail.push_str(" — caused by: ");
+            detail.push_str(&s.to_string());
+            src = s.source();
+        }
+        detail
+    }
+
+    #[test]
+    fn walk_error_surfaces_single_level() {
+        // PRE-FIX: `format!("{e}")` returns only the top-level message.
+        // POST-FIX: the walker also surfaces it (no regression for 1-level chain).
+        let e = ChainedError { msg: "outer error", cause: None };
+        let walked = walk_std_error(&e);
+        assert_eq!(walked, "outer error");
+    }
+
+    #[test]
+    fn walk_error_surfaces_deep_cause_chain() {
+        // PRE-FIX: `format!("{e}")` → "outer error" only.
+        // POST-FIX: walk_reqwest_error joins every level.
+        let root = ChainedError {
+            msg: "connection refused",
+            cause: None,
+        };
+        let mid = ChainedError {
+            msg: "tcp connect failed",
+            cause: Some(Box::new(root)),
+        };
+        let top = ChainedError {
+            msg: "error sending request",
+            cause: Some(Box::new(mid)),
+        };
+        let walked = walk_std_error(&top);
+        assert_eq!(
+            walked,
+            "error sending request — caused by: tcp connect failed — caused by: connection refused",
+            "walk_std_error must join every level of the cause chain"
+        );
+        // Anti-regression: the result must NOT be just the top-level string.
+        assert_ne!(walked, "error sending request",
+            "bare top-level message means the cause chain was not walked");
+    }
+
+    // ── url_query_repro_curl ──────────────────────────────────────
+
+    #[test]
+    fn url_query_repro_curl_wraps_param_value_pair_in_single_quotes() {
+        let curl = url_query_repro_curl("https://x/y", "q", "abc");
+        assert!(curl.starts_with("curl -G --data-urlencode "));
+        assert!(curl.contains("'q=abc'"));
+        assert!(curl.contains("'https://x/y'"));
+    }
+
+    #[test]
+    fn url_query_repro_curl_protects_metacharacters_in_payload() {
+        // `$(rm -rf /)` is the classic shell-injection canary. After
+        // single-quoting it must appear verbatim, no expansion.
+        let curl = url_query_repro_curl(
+            "https://target",
+            "q",
+            "$(rm -rf /); `whoami`",
+        );
+        assert!(curl.contains("'q=$(rm -rf /); `whoami`'"));
+    }
+
+    #[test]
+    fn url_query_repro_curl_handles_apostrophe_in_payload() {
+        // The canonical SQLi `' OR 1=1--` contains the same quote
+        // character we use to wrap the arg. shell_single_quote
+        // escapes it via '\'' — the curl must still be parseable
+        // by bash.
+        let curl = url_query_repro_curl("https://x", "q", "' OR 1=1--");
+        // Resulting form: 'q='\'' OR 1=1--' — the '\'' is the close-
+        // escape-open sequence.
+        assert!(curl.contains("'\\''"), "apostrophe not escaped: {curl}");
+        // The literal payload bytes must appear unmangled across
+        // the escape boundary.
+        assert!(curl.contains("OR 1=1--"));
+    }
+
+    #[test]
+    fn url_query_repro_curl_handles_empty_payload() {
+        let curl = url_query_repro_curl("https://x", "q", "");
+        // 'q=' is the right wire form for an empty value.
+        assert!(curl.contains("'q='"));
+    }
+
+    #[test]
+    fn url_query_repro_curl_handles_ampersand_in_payload_without_breaking_arg() {
+        // & inside the payload must NOT split into a second curl
+        // argument — single-quoting protects it.
+        let curl = url_query_repro_curl("https://x", "q", "a&b=c");
+        assert!(
+            curl.contains("'q=a&b=c'"),
+            "ampersand split arg or was re-encoded: {curl}"
+        );
     }
 }

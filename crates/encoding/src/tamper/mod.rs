@@ -65,6 +65,16 @@ const DEFAULT_NAMES: &[&str] = &[
     "overlong_utf8",
     "base64",
     "hex_encode",
+    // ── Frontier 2025-2026 additions ─────────────────────────
+    "zero_width_inject",
+    "postgres_dollar_quote",
+    "mysql_versioned_comment_wrap",
+    "bracket_confusable",
+    "hex_literal_keyword",
+    "bell_separator",
+    "mxss_namespace_wrap",
+    "json_dup_key",
+    "ct_starvation",
 ];
 
 impl TamperRegistry {
@@ -94,6 +104,21 @@ impl TamperRegistry {
                 "overlong_utf8" => registry.register(Box::new(OverlongUtf8Tamper)),
                 "base64" => registry.register(Box::new(Base64Tamper)),
                 "hex_encode" => registry.register(Box::new(HexEncodeTamper)),
+                "zero_width_inject" => registry.register(Box::new(ZeroWidthInjectTamper)),
+                "postgres_dollar_quote" => {
+                    registry.register(Box::new(PostgresDollarQuoteTamper));
+                }
+                "mysql_versioned_comment_wrap" => {
+                    registry.register(Box::new(MysqlVersionedCommentWrapTamper));
+                }
+                "bracket_confusable" => registry.register(Box::new(BracketConfusableTamper)),
+                "hex_literal_keyword" => registry.register(Box::new(HexLiteralKeywordTamper)),
+                "bell_separator" => registry.register(Box::new(BellSeparatorTamper)),
+                "mxss_namespace_wrap" => {
+                    registry.register(Box::new(MxssNamespaceWrapTamper));
+                }
+                "json_dup_key" => registry.register(Box::new(JsonDupKeyTamper)),
+                "ct_starvation" => registry.register(Box::new(CtStarvationTamper)),
                 _ => {}
             }
         }

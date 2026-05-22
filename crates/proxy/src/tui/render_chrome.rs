@@ -259,3 +259,248 @@ fn key_hint(key: &str, label: &str) -> Span<'static> {
         Style::default().fg(Color::Black).bg(Color::DarkGray),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn cfg() -> DashboardConfig {
+        DashboardConfig {
+            bind_addr: "127.0.0.1:8080".to_string(),
+            mode: "forward".to_string(),
+            tls_stack_label: "rustls".to_string(),
+            body_padding_bytes: 0,
+            conn_reuse: true,
+        }
+    }
+
+    fn render_to_buffer<F>(width: u16, height: u16, draw: F) -> String
+    where
+        F: FnOnce(&mut Frame, Rect),
+    {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("backend init");
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                draw(f, area);
+            })
+            .expect("draw");
+        // Concatenate buffer lines into a single string for substring
+        // assertions.  Trailing whitespace on each row is dropped so
+        // golden strings don't need to track padding.
+        let mut out = String::new();
+        let buffer = terminal.backend().buffer().clone();
+        for y in 0..buffer.area().height {
+            let mut line = String::new();
+            for x in 0..buffer.area().width {
+                line.push_str(buffer[(x, y)].symbol());
+            }
+            out.push_str(line.trim_end());
+            out.push('\n');
+        }
+        out
+    }
+
+    // ── draw_header ─────────────────────────────────────────
+
+    #[test]
+    fn header_includes_bind_addr_and_uptime() {
+        let c = cfg();
+        let s = State::new();
+        let buf = render_to_buffer(120, 3, |f, area| draw_header(f, area, &c, &s));
+        assert!(buf.contains("wafrift"));
+        assert!(buf.contains("127.0.0.1:8080"));
+        assert!(buf.contains("uptime"));
+    }
+
+    #[test]
+    fn header_shows_follow_chip_when_following() {
+        let c = cfg();
+        let mut s = State::new();
+        s.follow = true;
+        let buf = render_to_buffer(140, 3, |f, area| draw_header(f, area, &c, &s));
+        assert!(buf.contains("FOLLOW"));
+        assert!(!buf.contains("PAUSED"));
+    }
+
+    #[test]
+    fn header_shows_paused_chip_when_not_following() {
+        let c = cfg();
+        let mut s = State::new();
+        s.follow = false;
+        let buf = render_to_buffer(140, 3, |f, area| draw_header(f, area, &c, &s));
+        assert!(buf.contains("PAUSED"));
+        assert!(!buf.contains("FOLLOW"));
+    }
+
+    #[test]
+    fn header_outcome_filter_visible_when_set() {
+        let c = cfg();
+        let mut s = State::new();
+        s.outcome_filter = OutcomeFilter::BypassOnly;
+        let buf = render_to_buffer(160, 3, |f, area| draw_header(f, area, &c, &s));
+        assert!(buf.contains("BYPASS"));
+    }
+
+    #[test]
+    fn header_outcome_filter_hidden_when_all() {
+        let c = cfg();
+        let mut s = State::new();
+        s.outcome_filter = OutcomeFilter::All;
+        let buf = render_to_buffer(160, 3, |f, area| draw_header(f, area, &c, &s));
+        // "ALL" chip is suppressed when filter is the default.
+        // Any other text containing "all" (the meta_label `meta`,
+        // for example) must not produce a false hit.
+        assert!(!buf.to_uppercase().contains(" ALL "));
+    }
+
+    #[test]
+    fn header_filter_chip_visible_when_query_set() {
+        let c = cfg();
+        let mut s = State::new();
+        s.filter_query = "host=foo".to_string();
+        let buf = render_to_buffer(160, 3, |f, area| draw_header(f, area, &c, &s));
+        assert!(buf.contains("host=foo"));
+    }
+
+    #[test]
+    fn header_toast_visible_when_present() {
+        let c = cfg();
+        let mut s = State::new();
+        s.toast = Some(super::super::state::Toast::new("yanked!", ToastKind::Ok));
+        let buf = render_to_buffer(160, 3, |f, area| draw_header(f, area, &c, &s));
+        assert!(buf.contains("yanked!"));
+    }
+
+    #[test]
+    fn header_renders_without_panic_on_narrow_width() {
+        // Defensive: a 20-col terminal should not crash the draw
+        // even though most spans get clipped.
+        let c = cfg();
+        let s = State::new();
+        let _ = render_to_buffer(20, 3, |f, area| draw_header(f, area, &c, &s));
+    }
+
+    // ── draw_tabs ───────────────────────────────────────────
+
+    #[test]
+    fn tabs_show_all_known_tabs() {
+        let s = State::new();
+        let buf = render_to_buffer(120, 1, |f, area| draw_tabs(f, area, &s));
+        for t in Tab::ORDER {
+            assert!(
+                buf.to_lowercase().contains(&t.label().to_lowercase()),
+                "tab label `{}` missing from rendered output: `{buf}`",
+                t.label()
+            );
+        }
+    }
+
+    #[test]
+    fn tabs_highlight_active_tab_via_numeric_index() {
+        let mut s = State::new();
+        s.tab = Tab::ORDER[0];
+        let buf = render_to_buffer(120, 1, |f, area| draw_tabs(f, area, &s));
+        // The active tab label appears at index "1" (1-indexed).
+        let first_label = Tab::ORDER[0].label();
+        assert!(buf.contains(&format!("1 {first_label}")));
+    }
+
+    // ── draw_footer ─────────────────────────────────────────
+
+    #[test]
+    fn footer_includes_quit_key_hint() {
+        let s = State::new();
+        let buf = render_to_buffer(160, 1, |f, area| draw_footer(f, area, &s));
+        assert!(buf.contains("quit"));
+        assert!(buf.contains("switch"));
+    }
+
+    #[test]
+    fn footer_flow_tab_shows_filter_outcome_keys() {
+        let mut s = State::new();
+        s.tab = Tab::Flow;
+        let buf = render_to_buffer(180, 1, |f, area| draw_footer(f, area, &s));
+        assert!(buf.contains("filter"));
+        assert!(buf.contains("outcome"));
+        assert!(buf.contains("yank curl"));
+    }
+
+    #[test]
+    fn footer_intercept_tab_shows_release_kill_keys() {
+        let mut s = State::new();
+        s.tab = Tab::Intercept;
+        let buf = render_to_buffer(160, 1, |f, area| draw_footer(f, area, &s));
+        assert!(buf.contains("release"));
+        assert!(buf.contains("kill"));
+    }
+
+    #[test]
+    fn footer_filter_edit_mode_shows_input_with_cursor() {
+        let mut s = State::new();
+        s.input_mode = InputMode::FilterEdit;
+        s.filter_query = "abc".to_string();
+        let buf = render_to_buffer(120, 1, |f, area| draw_footer(f, area, &s));
+        assert!(buf.contains("filter"));
+        assert!(buf.contains("abc"));
+        // Cursor block (█) is visible in filter-edit mode.
+        assert!(buf.contains('█'));
+    }
+
+    #[test]
+    fn footer_shows_request_counters() {
+        let mut s = State::new();
+        // Switch to a non-Flow tab so the footer doesn't fill its
+        // width with Flow-specific hints — keeps the counter span
+        // inside a 200-col render area.
+        s.tab = Tab::Intercept;
+        s.total = 42;
+        s.attempts_sum = 7;
+        let buf = render_to_buffer(200, 1, |f, area| draw_footer(f, area, &s));
+        // The counters appear at the right edge in the form
+        // "(42 reqs · 7 retries)".
+        assert!(
+            buf.contains("42 reqs"),
+            "footer must surface request count.  Got: {buf:?}"
+        );
+        assert!(
+            buf.contains("7 retries"),
+            "footer must surface retries count. Got: {buf:?}"
+        );
+    }
+
+    // ── Local style helpers (pure functions) ──────────────
+
+    #[test]
+    fn outcome_chip_labels_match_filter() {
+        // outcome_chip is private — exercise through draw_header
+        // by setting each filter mode.
+        for (filter, expected) in [
+            (OutcomeFilter::BypassOnly, "BYPASS"),
+            (OutcomeFilter::BlockOnly, "BLOCK"),
+            (OutcomeFilter::PassOnly, "PASS"),
+        ] {
+            let c = cfg();
+            let mut s = State::new();
+            s.outcome_filter = filter;
+            let buf = render_to_buffer(160, 3, |f, area| draw_header(f, area, &c, &s));
+            assert!(
+                buf.contains(expected),
+                "filter {filter:?} should render `{expected}`. Got: `{buf}`"
+            );
+        }
+    }
+
+    #[test]
+    fn header_renders_high_volume_counters_without_overflow() {
+        let c = cfg();
+        let mut s = State::new();
+        s.total = u64::MAX;
+        s.attempts_sum = u64::MAX;
+        // Should not panic on integer-overflow style arithmetic.
+        let _ = render_to_buffer(200, 3, |f, area| draw_header(f, area, &c, &s));
+    }
+}

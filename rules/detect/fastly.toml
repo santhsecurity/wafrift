@@ -3,12 +3,28 @@ name = "Fastly"
 vendor = "Fastly CDN"
 confidence_threshold = 0.3
 evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
-source = "WAFW00F:fastly"
+source = "WAFW00F:fastly + 2026-05-21 live dogfood"
 [[waf.signature]]
   header_name = "x-fastly-request-id"
   header_regex = "\\w+"
   weight = 0.5
 [[waf.signature]]
+  # Fastly's POP-named cache tags. Multi-hop responses join CSV-
+  # style (`cache-a, cache-b, cache-c`); the regex matches anywhere
+  # in the value, not just the start, so all hops register.
   header_name = "x-served-by"
-  header_regex = "^cache-[a-z]{3}\\d+-[A-Z]{3}"
+  header_regex = "cache-[a-z]{3}[0-9]+-[A-Z]{3}"
+  weight = 0.5
+[[waf.signature]]
+  # `Server: Artisanal bits` is Fastly's signature server banner —
+  # set on every fastly.com-style cache response. Live-dogfood
+  # captured on https://www.fastly.com/ on 2026-05-21.
+  header_name = "server"
+  header_regex = "(?i)Artisanal bits"
+  weight = 0.7
+[[waf.signature]]
+  # X-Timer header (Varnish-style `S...,VS0,VE1`) is uniquely
+  # emitted by Varnish-based Fastly POPs.
+  header_name = "x-timer"
+  header_regex = "S[0-9.]+,VS[0-9]+,VE[0-9]+"
   weight = 0.5

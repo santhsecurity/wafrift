@@ -50,6 +50,15 @@ base64 = { workspace = true }
 # Retry-After header parsing (RFC 9110 §10.2.3): integer delta-seconds
 # OR IMF-fixdate HTTP-date. Already in the workspace lock via hyper.
 httpdate = "1.0"
+# Structured tracing — RUST_LOG=wafrift=debug wires through to every
+# subcommand. Already in the workspace lock via transitive deps; listed
+# explicitly so `use tracing::*` compiles in crate code without
+# relying on re-export luck from an upstream dep.
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+# Raw TLS socket I/O for trailer-diff (reqwest can't emit chunked trailers).
+tokio-rustls = { workspace = true }
+webpki-roots = { workspace = true }
 
 # SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
 # instead of panicking.
@@ -61,6 +70,15 @@ proptest = { workspace = true }
 # Used by safe_body's gzip-bomb integration test — proves the
 # bounded-reader defence actually defeats a real-world bomb.
 flate2 = "1"
+# Cross-binary localhost serialisation. Each *_e2e.rs file spawns
+# a mock TCP listener AND invokes the `wafrift` binary as a
+# subprocess; under default cargo-test parallelism (one test
+# binary per file, running concurrently) Windows runs out of
+# localhost ephemeral ports + slow TIME_WAIT reuse leaks
+# spurious "connection refused" baseline failures. `serial_test`
+# adds a file-scoped lock so the wafrift-binary-spawning tests
+# run one-at-a-time across the workspace.
+serial_test = "3"
 
 [features]
 # proxy-pool (HTTP/SOCKS proxy rotation via wafrift-pool) is on by default
@@ -70,6 +88,12 @@ default = ["proxy-pool"]
 gossan-integration = ["origin-bypass"]
 origin-bypass = ["wafrift-transport/origin-bypass"]
 proxy-pool = ["wafrift-transport/proxy-pool"]
+# `tls-impersonate` unlocks the `wafrift ja3-diff` subcommand (and any
+# future stealth-client CLI surface). It pulls in rquest + BoringSSL,
+# which adds ~30–60 s to first-time builds — gated explicitly so the
+# default `cargo install wafrift` stays lean. Build with
+# `cargo install wafrift --features tls-impersonate` to enable.
+tls-impersonate = ["wafrift-transport/tls-impersonate"]
 
 [lints]
 workspace = true

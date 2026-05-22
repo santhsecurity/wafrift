@@ -4,6 +4,955 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Fixed — 6 duplicate corpus case IDs across 4 files
+
+Sonnet stress-test pass found cross-file duplicates that would
+silently drop entries in any ID-keyed merge (gene-bank dedup,
+scoreboard rollup, bench-diff regression checks). Renamed the
+later occurrences:
+
+- `cmdi/{encoding_evasion,shell_unix}.toml` — `backtick_id`
+- `xss/{event_handler,modern_event_handlers}.toml` — `object_onerror`, `embed_onerror`
+- `cve_pocs/{2024_2025,real_world_2026}.toml` — `cve_2024_4577_php_cgi_arg_injection`
+- `ssti/{ruby_dotnet_php,twig_freemarker_velocity}.toml` — `smarty_php_block`, `erb_eval`
+
+New `crates/cli/tests/bench_corpus_stress.rs` (9 tests) pins the
+unique-ID invariant + builds every request + asserts non-empty
+wire bytes for all 817 corpus cases.
+
+### Added — 53 stress / proptest / soak tests across the workspace
+
+Sonnet sweep added (all green on first run):
+
+- `crates/encoding/tests/tamper_proptest.rs` (29) — proptest fuzz
+  of all 19 builtin `TamperStrategy` impls covering arbitrary
+  UTF-8, ASCII controls, multi-byte, 512 KB random blobs, UTF-8
+  boundary codepoints, and idempotency properties.
+- `crates/strategy/tests/gene_bank_soak.rs` (4) — `WafGenome`
+  round-tripped 10,000× through serde_json with zero drift.
+- `crates/cli/tests/bench_corpus_stress.rs` (9) — corpus soak.
+- `crates/proxy/tests/proxy_concurrency_stress.rs` (1) — 200
+  concurrent clients × 50 requests each, no hangs, no panics.
+- `crates/cli/src/raw_request.rs` (10 unit tests) — adversarial
+  inputs (1 MB single line, 100K `§§` markers, embedded NULs,
+  missing Host, port 0, 256 KB header values).
+
+### Added — `tracing-subscriber` instrumentation across the CLI
+
+Pre-fix every wafrift command had zero `tracing::*` calls; the
+operator's `RUST_LOG` knob was completely inert. Now:
+
+- `main()` initialises `tracing_subscriber::fmt` with an
+  `EnvFilter` (default `warn`, idempotent, stderr).
+- `scan`, `smuggle`, `bypass-probe` instrumented with key
+  decision-point events under their respective targets
+  (`wafrift::scan`, `wafrift::smuggle`, `wafrift::bypass_probe`).
+  `RUST_LOG=wafrift=info` surfaces bypass-found + WAF-detect +
+  rate-limit-abort events; `=debug` adds per-probe metrics.
+
+### Added — `mxss_namespace_wrap` tamper (DOMPurify mXSS via MathML namespace)
+
+CVE-2025-26791 class: wraps an HTML payload in the MathML
+text-integration-point harness that DOMPurify ≤3.2.4 fails to
+neutralise. The wire bytes contain NO `<script` token, so WAFs
+pattern-matching the raw input pass it through; the dangerous DOM
+is created by the browser AFTER WAF inspection when re-serialising
+across XML namespaces. Wired into `TamperRegistry::with_defaults()`.
+
+### Added — 3 new WAF detect rules
+
+- **ngrok WAF** (`crates/detect/rules/detect/ngrok.toml`) — Coraza
+  + CRS under the hood; fingerprinted by `ngrok-error-code` header
+  + `ERR_NGROK_3200` body marker.
+- **Akamai Adaptive Security Engine** (`crates/detect/rules/detect/akamai_ase.toml`)
+  — Kona Rule Set's 2025 successor; fingerprinted by
+  `x-akamai-request-id` + the new `Reference #` block-page format
+  distinct from KRS.
+- **Microsoft Defender for Cloud Apps** (`crates/detect/rules/detect/msdefender_cloud.toml`)
+  — formerly MCAS; fingerprinted by `x-ms-cpim-*` headers and
+  redirects to `*.mcas.ms` / `*.access.mcas.ms`.
+
+Detect corpus is now 165 rules (was 162).
+
+### Added — `wafrift ja3-diff` per-browser TLS-fingerprint differential scanner
+
+Gated behind the `tls-impersonate` cargo feature (pulls in
+BoringSSL). Sends the same probe through N browser-emulating
+TLS clients (Chrome 120/131, Firefox 133, Safari 17.5/18,
+Edge 131, OkHttp 5) plus a reqwest baseline, then flags any
+profile whose status / body diverges — direct evidence the WAF
+in front of the target JA3/JA4-fingerprints the ClientHello.
+
+Build with `cargo install wafrift-cli --features tls-impersonate`.
+Wires the previously-dead `wafrift_fingerprint::tls_fingerprint`
+module (8 pub fns whose only consumer used to be its own tests).
+
+### Fixed — proxy SSRF bypass via HTTP-redirect to bogon IP
+
+P0 found by Sonnet dogfood pass 2 (2026-05): the proxy's upstream
+reqwest client had no redirect policy, so it followed up to 10
+redirects by default. An attacker controlling any public origin
+the proxy was allowed to reach could return `Location: http://
+169.254.169.254/...` (or any RFC1918 / loopback / link-local) and
+the proxy would silently follow — bypassing both
+`assert_forward_url_allowed` (called on the original URL only) and
+`BogonFilteringResolver` (DNS-only). Now: `Policy::none()` — the
+downstream client follows redirects itself, its policies apply.
+
+### Added — honest config wiring across `wafrift scan`
+
+`.wafrift.toml` had four fields parsed-and-ignored
+(`output.report_layers`, `output.quiet`, `scan.concurrency`,
+`http.timeout_secs`, `http.user_agent`). All now flow through:
+
+- `--concurrency N` (overrides the dynamic 8/4 default)
+- `--timeout-secs N` (overrides `DEFAULT_REQUEST_TIMEOUT_SECS`)
+- `--quiet` (suppresses startup banner in addition to body)
+- `--report-layers` (existing flag — now also reads from config)
+- `--callback-timeout-secs N` (OOB callback wait, default 5 s)
+- `--exploit-cap N` (max exploit-chain fires, default 500)
+- `--adaptive-pause-secs N` (bench-waf throttle pause, default 2 s)
+
+`http.user_agent` now flows through every command's HTTP client via
+a shared `crate::config::shared_user_agent()` helper (10 cmd files
+de-duplicated).
+
+### Added — `wafrift detect` accepts positional URL
+
+`wafrift detect <URL>` (the modern form every other wafrift cmd
+uses) now works alongside `wafrift detect --url <URL>` (kept for
+backwards-compat). The "No WAF confidently detected" output also
+gains a `hint: --differential` line.
+
+### Fixed — `wafrift scan --from-discovery --format json` invalid JSON
+
+Each sub-job wrote its own top-level JSON object to stdout, so N
+endpoints produced N back-to-back root objects (`jq .` errored at
+the second). Now: per-job JSON is collected via tmpfiles and emitted
+as a single `{"discovery_scan": {"jobs": [...]}}` envelope.
+
+### Fixed — `wafrift scan --format json` emitted stray newlines
+
+A `println!("\n")` after the intel-phase rendering was outside the
+`if scan_text {}` guard, so `--format json` mode prefixed the JSON
+blob with blank lines — `jq .` rejected the input.
+
+### Fixed — `iis_unicode_encode` malformed for non-BMP code points
+
+`iis_unicode_encode("😀")` emitted `%u1F600` (5 hex digits — invalid
+IIS `%u` encoding; IIS rejects it). Now emits the UTF-16 surrogate
+pair `%uD83D%uDE00` like real IIS does. Silent correctness bug:
+prior output looked encoded but bypassed nothing.
+
+### Fixed — silent IO error swallowing in proxy NDJSON audit logger
+
+`writeln!()` + `flush()` failures in `RequestLogger::log_entry`
+were dropped via `let _ = ...`. If disk filled up the audit trail
+silently lost entries while the proxy reported healthy. Now: every
+IO error surfaces through a throttled `warn!`.
+
+### Fixed — bench-waf `record_feedback` errors silently discarded
+
+`engine.record_feedback(idx, ...)` returns `EvolutionError` variants
+(`InvalidChromosomeIndex`, `TargetHealthCritical`) that were both
+swallowed via `let _ = ...`. Now: errors print a warn line with
+case id + strategy + chromosome index so operators see the bias
+source.
+
+### Fixed — proxy gene-bank flush task could die silently on panic
+
+A serializer panic in `save_gene_bank` killed the periodic-flush
+task, the JoinHandle was dropped, and the proxy stopped flushing —
+operator-invisible slow degradation. Now: each flush iteration
+runs under `catch_unwind` with `warn!` on panic; loop continues.
+
+### Fixed — `bench-waf` healthcheck ignored `--timeout-secs`
+
+The healthcheck always used a hardcoded 10 s timeout, so an
+operator setting `--timeout-secs 30` for a slow origin still got a
+false "healthcheck failed" if the origin took 10–30 s. Now: uses
+`max(args.timeout_secs, 5)` so the operator's setting takes effect
+while keeping a sane floor.
+
+### Fixed — `bypass-probe` curl reproducers broke on quoted input
+
+Three curl-line format strings in `bypass_probe.rs` interpolated
+header values and URLs into bare single-quote delimiters without
+escaping — any `'` in the operator's URL or rewrite-probe value
+produced an unparseable curl line. Now uses the shared
+`helpers::shell_single_quote`.
+
+### Fixed — integer overflow in `HostState::bump_success_for_technique`
+
+Plain `stat.1 += 1` on u32 counters would panic in debug or
+silently wrap to 0 in release after 2^32 successes — a long-running
+proxy session could quietly reset technique stats. Now uses
+`saturating_add` to match the already-fixed block-path. Regression
+tests pin both paths at `u32::MAX - 1` + multiple bumps.
+
+### Fixed — log injection via client-controlled Host header in proxy
+
+CONNECT request's `inner` host header was written to `warn!` via
+`%inner` without control-character filtering. An attacker could
+send `Host: evil\nFAKE_LOG_ENTRY` to inject arbitrary log lines.
+Now strips control chars before logging.
+
+### Fixed — `wafrift evade --format json` was the only command emitting NDJSON
+
+P1 found by Sonnet dogfood pass 4 (2026-05): every other wafrift
+command produces a top-level JSON object on `--format json`, but
+`evade` emitted one object per line (NDJSON), then a trailing
+`{"explain": [...]}` object.  Scripts doing the natural `wafrift
+evade --format json | jq .field` got nothing back and quietly
+broke.  Enterprise evaluators with downstream pipelines saw the
+inconsistency as a blocker.
+
+Now:
+- `--format json` produces a SINGLE top-level object:
+  `{"variants": [...], "explain": {...}}`.  Matches every other
+  command — `jq .variants[]` works.
+- `--format jsonl` is the new opt-in for the legacy NDJSON form
+  (streams variants line-by-line for large runs that don't fit in
+  memory).
+- `--quiet` still works and now aliases to `--format json` (the
+  wrapped form).
+
+Pre-2026-05 scripts that depended on `--quiet` producing NDJSON
+need to switch to `--format jsonl`.
+
+### Fixed — `wafrift evade` exit 1 on no-variants broke CI pipelines
+
+P2 from the same dogfood pass: when an operator selected a
+tamper that's not applicable to their payload shape (e.g.
+`--only tamper/postgres_dollar_quote` on a payload with no `'`),
+`evade` exited 1 with "No variants generated" — treating a
+LEGITIMATE no-op outcome as an error.  CI pipelines that watched
+for non-zero exit codes would fail every such run.
+
+Now: no-variants exits 0 with an empty `variants` array and an
+explanatory `note` field.  Pipelines treat the outcome as a
+benign "this tamper didn't apply" rather than a failure.
+
+### Improved — `wafrift detect` error chain now walks the reqwest source tree
+
+P3 from Sonnet dogfood pass 4: `detect --url <invalid-host>`
+previously reported just `request to X failed: error sending
+request` — the actual DNS / TCP / TLS cause was buried in
+reqwest's source chain and never surfaced.  Sysadmins reading
+the error had to guess whether it was NXDOMAIN, TCP-refused, or
+cert validation.
+
+`fetch_for_detect` now walks `e.source()` recursively and
+appends ` — caused by: ...` for each layer.  A typical NXDOMAIN
+on Windows now reads:
+
+```
+Probe error: request to http://nonexistent.invalid.local/ failed: \
+  error sending request for url (http://nonexistent.invalid.local/) — \
+  caused by: client error (Connect) — \
+  caused by: dns error — \
+  caused by: No such host is known. (os error 11001)
+```
+
+Two regression tests guard the source-chain walk
+(`fetch_for_detect_connection_refused_error_walks_source_chain`,
+`fetch_for_detect_nxdomain_surfaces_dns_layer_cause`).
+
+### Fixed — `wafrift attack` silently dropped its h2-diff sub-probe
+
+P0 found by Sonnet dogfood pass 3 (2026-05): `attack` passed
+`--concurrency N` (plus `--proxy`, `-H/--header`) to every
+sub-probe via `push_common_flags`, but `h2-diff` doesn't accept
+those flags.  Clap exited h2-diff with code 2 on every invocation
+and the orchestrator catalogued the error as `{ "error":
+"subprobe h2-diff exited 2 ..." }` and continued — silently
+losing the H1/H2 differential probe on EVERY `wafrift attack`
+run since the command was added.
+
+New `push_h2_flags` helper carries only the flags h2-diff
+actually accepts (`--format`, `--delay-ms`, `--timeout-secs`,
+`--insecure`).  Six regression-guard tests in
+`attack_cmd::tests::subprobe_args_h2_*` lock the contract.
+
+### Added — `--url` alias for `discover` and `--body` alias for `body-diff`
+
+CLI consistency fixes from the same dogfood pass:
+
+- `wafrift discover --target <URL>` was the only command using
+  `--target` while every other command used `--url`.  Added
+  `--url` as a clap alias on the `target` arg so both forms work.
+- `wafrift body-diff --baseline-body '<...>'` now also accepts
+  `--body '<...>'` as a shorter alias — the natural form every
+  pentester reaches for first.
+
+### Improved — `compress --input` error message points to `--stdin`
+
+P1: `wafrift compress --input "test"` previously gave the raw OS
+error `open test: The system cannot find the file specified`
+with no hint that `--input` expected a PATH (not a payload
+string).  Now appends:
+`Hint: '--input' expects a PATH to a file. For inline payloads
+use 'echo "X" | wafrift compress --stdin'.`
+
+### Added — Bench corpus expansion (+63 cases, hard real-world)
+
+Two new corpus files targeting the upgraded confidence bar:
+
+**`wafrift-bench/corpus/sql/frontier_tamper_2026.toml`** (28 cases):
+Manual SQLi payload forms of the 6 frontier 2026 tampers —
+zero-width Unicode injection, Postgres dollar-quote (with
+arbitrary tag / Unicode tag / long-tag variants), MySQL
+version-gated comment wrap (single + nested + version-specific
+keywords), hex-literal keyword (in WHERE / OR / UNION /
+long-string contexts), BEL separator (mixed with tab), and
+combined-tamper compositions (zero-width inside dollar-quote;
+hex literal inside version-gated comment).
+
+**`wafrift-bench/corpus/xss/frontier_tamper_2026.toml`** (11
+cases): Fullwidth bracket confusables (script / img / svg /
+iframe / meta-refresh), zero-width injection inside attribute
+values + URI schemes (`javascript:`), and bracket-confusable +
+zero-width compositions.
+
+**`wafrift-bench/corpus/cve_pocs/real_world_2026.toml`** (24
+cases): Live CVE PoCs and 2024-2026 WAF bypass research —
+CVE-2024-7593 (Ivanti vTM), CVE-2024-4577 (PHP CGI with
+soft-hyphen variant), ProxyShell-style `@` smuggling, UTF-16LE
+XXE with BOM, parameter-entity billion-laughs, CL.0 smuggling
+with chunk extensions, TE.TE obs-fold, GraphQL aliasing,
+modern SSTI (Jinja2 sandbox escape + FreeMarker), Log4Shell
+with nested `${env:}` and `${sys:}` lookups, DOM-clobbering
+XSS, mXSS via `<noscript>` reparse, second-order SQLi, gopher
+SSRF to Redis, nip.io DNS-rebinding, overlong-UTF-8 path
+traversal, cache-deception via static-extension routing, and
+userinfo-smuggling open-redirect.
+
+Corpus-integrity gate (`cargo test -p wafrift-cli --test
+bench_corpus_integrity`) verifies the new files pass the
+class-matches-directory invariant.
+
+### Fixed — PowerShell pipe injects UTF-8 BOM that corrupts tamper outputs
+
+`Write-Output "x" | wafrift evade --stdin` on PowerShell silently
+prepends a UTF-8 BOM (`\xEF\xBB\xBF`) to stdin.  Without
+stripping it, the BOM travels through every tamper output as an
+invisible 3-byte prefix and the operator wonders why their
+payload looks subtly wrong on Windows.
+
+`resolve_payload` now strips a leading BOM from stdin
+unconditionally — cmd, bash, zsh, and PowerShell pipes all
+converge on the same byte stream.
+
+### Added — `--explain` trace now surfaces tamper outcomes
+
+When the operator runs `wafrift evade --only tamper --explain`,
+the trace previously listed only the encoding strategies — every
+tamper's invocation was invisible.  The explain output now adds
+a per-tamper line with one of three outcome statuses:
+
+- ✓ **Applied** — the tamper transformed the payload into a new
+  unique variant.
+- · **Idempotent** — the tamper produced byte-identical output
+  (e.g. `postgres_dollar_quote` on a payload without `'`,
+  `bracket_confusable` on a payload without `<>`).
+- · **Duplicate of existing** — the tamper output collided with
+  an already-produced variant.
+
+JSON output follows the same shape: `{ "technique":
+"tamper/zero_width_inject", "status": "applied", "detail": {} }`.
+
+New `TamperExplainEntry` + `TamperOutcome` types in
+`crates/cli/src/explain.rs` with 11 tests covering record /
+fold / multi-outcome / JSON shape.
+
+### Fixed — vendor ranking: ASN-named CDN now wins over header-derived component
+
+`wafrift detect` previously surfaced "CacheWall" (the wafw00f
+Varnish rule) as the primary vendor on Fastly-fronted sites
+(reddit.com, nytimes.com) because the Varnish header scored
+higher than the Fastly CNAME/ASN signal in the sort.  Varnish is
+Fastly's underlying tech — the CacheWall hit is a Fastly
+artefact, not an independent vendor.
+
+New subsumption table in `detect_cmd::run_detect`: when a
+DNS-derived parent vendor (Fastly via CNAME/PTR/ASN) co-exists
+with its header-derived child (CacheWall via Varnish header),
+the child's confidence rolls into the parent and the child row
+drops out.  Result:
+
+- `reddit.com` now shows **Fastly @ 1.0** (was "CacheWall @ 0.4")
+- `nytimes.com` shows **Envoy + Fastly** (correct stack)
+- `spotify.com` shows **Fastly + Envoy + GCP App Armor**
+
+### Fixed — evade text output now escapes invisible byte transforms
+
+Tampers like `bell_separator` (BEL 0x07), `null_byte` (NUL),
+`zero_width_inject` (U+200B / U+200C / U+200D / U+FEFF) produce
+real byte-level transforms that the terminal silently swallows.
+Operator running `wafrift evade --only tamper/bell_separator`
+saw `Payload: UNIONSELECT1` and concluded nothing changed (the
+BEL bytes were invisible).
+
+New `visualize_invisible_bytes` helper escapes:
+- ASCII control bytes → `\xNN` (BEL, NUL, DEL, etc.)
+- Common zero-width Unicode → `\u{200B}` / `\u{200C}` / etc.
+
+Result: `UNION\x07SELECT\x071` and
+`S\u{200B}E\u{200C}L\u{200D}E\u{FEFF}CT` are now visible in text
+mode.  JSON output is unaffected (serde already escapes these).
+
+### Removed — `keyword_comment_split` tamper (broken)
+
+Inserted `/**/` between every pair of adjacent ASCII letters
+(`SELECT` → `S/**/E/**/L/**/E/**/C/**/T`) on the assumption
+MySQL strips C-style comments before tokenisation.  That's
+wrong: MySQL treats `/* */` as WHITESPACE, so the result lexes
+as six separate identifiers — `S`, `E`, `L`, `E`, `C`, `T`.
+The tamper would have broken every real query it touched.
+
+Regression guard test added so the broken tamper can't
+accidentally come back.
+
+### Added — `wafrift evade --only tamper/...` wiring
+
+The 6 frontier 2026 tampers existed only in the `TamperRegistry`
+and only ran inside `wafrift scan`.  `wafrift evade` produced
+ZERO variants for `--only tamper/zero_width_inject`.
+
+Closed the wiring: when an `evade --only` selector matches a
+`tamper/*` path, evade now invokes the tamper registry directly
+and appends one tamper variant per allowed tamper to the output
+list.  Default-mode evade (no `--only`) still doesn't fire
+tampers — they remain opt-in to preserve backwards
+compatibility of the default 12 variants per medium-level run.
+
+### Added — 6 frontier 2026 tamper strategies
+
+`crates/encoding/src/tamper/builtins.rs`:
+
+- **`zero_width_inject`** — interleaves U+200B / U+200C / U+200D
+  / U+FEFF between alphabetic chars.
+- **`postgres_dollar_quote`** — wraps single-quoted SQL string
+  literals in `$tag$ ... $tag$`.
+- **`mysql_versioned_comment_wrap`** — wraps payload in
+  `/*!50000 ... */`.
+- **`bracket_confusable`** — replaces `<` / `>` with U+FF1C /
+  U+FF1E fullwidth confusables.
+- **`hex_literal_keyword`** — converts `'admin'` to
+  `0x61646d696e`.
+- **`bell_separator`** — replaces ASCII space with BEL (U+0007).
+
+Each ships with 5+ tests covering empty input, multibyte input,
+idempotency, cross-tamper invariants.
+
+### Added — `tamper/*` selectors in `wafrift techniques list`
+
+The CLI's technique filter previously knew only `encoding/*` and
+`grammar` families.  Added `tamper` as a third family so
+`techniques list` surfaces all 18 registered tampers and
+`--only tamper/<name>` / `--exclude tamper/<name>` selectors
+validate at parse time.
+
+### Added — DNS-layer detection module modularization
+
+`crates/detect/src/dns_fingerprint.rs` (964 lines) split into
+the canonical 4-way module dir:
+- `mod.rs` — public API + re-exports.
+- `types.rs` — `DnsProbe`, `CnameHop`, `AsnInfo`, `DnsProbeError`.
+- `probe.rs` — async `probe_cname_chain` + `lookup_asn`.
+- `rules.rs` — `CnameRuleEngine` + TOML parsing.
+- `tests.rs` — 11 new tests added on top of the existing 17.
+
+### Added — TUI test density ramp
+
+`crates/proxy/src/tui/`:
+- `render_chrome.rs`: 0 → 17 tests (TestBackend, header / tabs /
+  footer / key hints rendering).
+- `render_overview.rs`: 0 → 14 tests (counters, latency
+  percentiles, status ribbon, TLS section, narrow-width safety).
+- `render_hosts.rs`: 1 → 12 tests (table headers, truncation,
+  bypass-rate formatting, top-N capping).
+- `render_intercept.rs`: 2 → 11 tests (empty-state hints, mode
+  banner, waiting color bands).
+
+Plus ~60 new tests across `encoding::tamper`, `target_context`,
+`technique_filter`, `detect::dns_fingerprint`, `evade_cmd`,
+`grammar::sql::tautology`.  Workspace count: 1917 → 2066, all
+green.
+
+### Added — BGP ASN-origin lookup (the final detection axis)
+
+After CNAME chain + PTR, `wafrift detect` now resolves the BGP
+origin AS of the leaf IP via cymru.com's `origin.asn.cymru.com`
+DNS service.  The ASN organisation name (e.g. `AMAZON-02`,
+`CLOUDFLARENET`, `STRIPE-AS`) is the LAST signal an origin can
+strip — it lives at L4 in the public BGP table, controlled by the
+RIR not the application owner.  Catches what every other axis
+misses:
+
+- **Stripe** (`stripe.com`): bare `Server: nginx`, no CNAME, no
+  PTR.  ASN reveals `AMAZON-02 - Amazon.com, Inc., US` (AS 16509)
+  — Stripe is AWS-hosted.
+- **Dropbox** (`dropbox.com`): `Server: envoy`, custom
+  `dropbox-dns.com` CNAME, no PTR.  ASN reveals
+  `DROPBOX - Dropbox, Inc., US` (AS 19679).
+- **Slack**: quadruple-confirmed AWS (CNAME + PTR + ASN + Envoy).
+- **Harvard**: ASN `AUTOMATTIC` confirms the WordPress VIP CNAME
+  detection.
+
+Catalog: 9 new ASN-anchored rules in `rules/detect/cname/cname.toml`
+(Amazon, Cloudflare, Fastly, Akamai, Google, Microsoft, Dropbox,
+Imperva, GitHub).  Stripe's existing rule was extended to match
+the `STRIPE-AS` ASN tag in addition to the `s.stripe.com` PTR.
+
+Implementation:
+- `dns_fingerprint::lookup_asn` does a two-stage TXT lookup:
+  `<reverse-octet>.origin.asn.cymru.com` returns the ASN number;
+  `AS<number>.asn.cymru.com` returns the org name.  Both bounded
+  to the same per-query timeout as the CNAME and PTR resolvers.
+- `DnsProbe` gains an `asn: Option<AsnInfo>` field carrying
+  `{ number, name }`.  The org name is a first-class participant
+  in `all_hosts()` / `tagged_hosts()` so any rule pattern fires on
+  it the same way as on a hostname.
+- Indicator strings now carry source attribution: `cname:` /
+  `ptr:` / `asn:` prefixes so the operator can see WHICH layer
+  produced each detection.
+- 24-site coverage: 28/29 sites detect at least one vendor (was
+  27/29 — Stripe was the holdout).  Only network-error sites
+  (bestbuy.com refusing reqwest's TLS handshake) remain undetected.
+
+### Fixed — DNS PTR detection swallowed when forward chain empty
+
+`run_detect` gated CNAME-rule matching on `!probe.chain.is_empty()`,
+which meant origin-direct hosts (Slack, Stripe, Dropbox) had their
+PTR record captured but never matched against the catalog.  Result:
+Slack's `ec2-35-81-85-251.us-west-2.compute.amazonaws.com` PTR was
+visible in JSON output but never produced an AWS detection.  Now
+detection runs whenever ANY DNS signal exists — forward chain OR
+PTR.
+
+### Added — DNS PTR (reverse-DNS) detection axis
+
+After resolving the forward CNAME chain, `wafrift detect` now also
+issues a reverse-DNS lookup on the leaf IP and matches the
+returned PTR record against the same CNAME rule catalog.  PTR is
+the only vendor anchor available for sites that:
+
+1. Strip every HTTP-layer banner (Server, Via, X-Cache, …).
+2. Run origin-direct with no public CNAME chain.
+
+eBay's PTR (live capture, 2026-05-21):
+`23.209.84.185 → a23-209-84-185.deploy.static.akamaitechnologies.com`
+— fires the new `Akamai (PTR)` rule, so eBay's Akamai backing is
+identified TWICE (once via CNAME chain, once via PTR), giving the
+operator two independent confirmations.
+
+Catalogue additions (7 new PTR-anchored rules in
+`rules/detect/cname/cname.toml`):
+- `Stripe (origin-direct)` matches `*.s.stripe.com` PTR.  Stripe
+  strips PTR on most of its anycast IPs, but the few that leak
+  surface here.
+- `Akamai (PTR)` matches `*.deploy.static.akamaitechnologies.com`.
+- `Cloudflare (PTR)` matches `*.r.cloudflare.com` (PoP names).
+- `AWS EC2 / NLB` matches `*.compute-N.amazonaws.com` and
+  `ec2-N-N-N-N.*` forms.
+- `Google Cloud (PTR)` matches `*.bc.googleusercontent.com`.
+
+Output exposure:
+- JSON: `dns.final_ptr` carries the resolved PTR, `null` when the
+  IP has no reverse record (Stripe's main IPs).
+- Text: "CNAME chain:" tree gains a `PTR → <name>` line.
+
+Test coverage: PTR-only detection path, PTR-missing fallback,
+real-world eBay PTR canary.
+
+### Added — DNS-CNAME chain detection (new orthogonal detection axis)
+
+`wafrift detect --url <X>` now resolves the target's full CNAME
+chain via `hickory-resolver` (1.1.1.1 anycast) and matches every
+hop against a 17-vendor catalog under `rules/detect/cname/`.  The
+chain is reported in JSON output under `dns.chain[]` and rendered
+as a tree under the "CNAME chain:" header in text mode.
+
+Why this is a new detection axis, not just a rule expansion:
+
+- HTTP-level detection fails when the origin strips every CDN /
+  WAF marker header.  eBay returned only `Server: ebay-proxy-server`
+  with no other clue.  Its DNS chain ends at
+  `e88167.a.akamaiedge.net` — Akamai was hiding behind an in-house
+  proxy banner all along.
+- Same pattern on Netflix (`Server: envoy` → DNS reveals `*.elb.us-west-2.amazonaws.com`,
+  AWS NLB), Airbnb (`Server: nginx` → Akamai), PayPal (CacheWall
+  header → DNS reveals `*.map.fastly.net`, so the Varnish is actually
+  Fastly).
+- DNS is at L4, well below the application layer — the origin can't
+  rewrite the CNAME chain the same way it can rewrite the Server
+  header.
+
+24-site real-world dogfood, before vs after:
+- eBay: `Envoy` only → `Akamai + Envoy`
+- Airbnb: `Envoy` only → `Akamai + Envoy`
+- Netflix: `Envoy` only → `AWS ELB + Envoy`
+- PayPal: `CacheWall` (Varnish) only → `Fastly + CacheWall`
+- Microsoft / Salesforce / Tesla: Kona only → `Akamai + Kona SiteDefender`
+- Reddit / NYT / Spotify: Fastly now confirmed via BOTH headers AND
+  CNAME chain (with the chain rendered showing the 3-hop path).
+- Stripe / Dropbox remain uncovered — origin truly direct or
+  internally-routed DNS with no public CDN signal.
+
+Architecture:
+
+- `wafrift_detect::dns_fingerprint::probe_cname_chain` resolves the
+  chain bounded to 12 hops + 8s per query.  Cycle-safe (HashSet
+  guard) and timeout-safe (`tokio::time::timeout` per lookup).
+- `wafrift_detect::dns_fingerprint::CnameRuleEngine` mirrors the
+  HTTP detection engine's TOML schema (rules under
+  `rules/detect/cname/`).  Auto-(?i) wrap on every host regex —
+  same case-insensitivity invariant as the HTTP layer.
+- `crate::detect_cmd::fetch_cname_chain` runs the resolver inside a
+  one-shot tokio runtime so the sync `run_detect` flow doesn't
+  need to become async end-to-end.
+- CNAME-derived hits are MERGED into the existing `detected[]`
+  vector when the rule name canonicalises onto an existing entry
+  (e.g. `Fastly (CNAME)` → `Fastly`), or appended as a new entry
+  when the CNAME identifies a different vendor than what the
+  headers showed (e.g. eBay's `Envoy` header + Akamai CNAME).
+
+Tests (15 new, all green):
+- Pattern matching: CSV-joined chain, intermediate-hop match,
+  case-insensitive host names, multi-vendor chain layering.
+- Catalogue invariants: every embedded rule compiles + the canonical
+  Fastly / Akamai / Cloudfront CNAMEs fire.
+- Error surfaces: malformed TOML, broken regex, empty chain.
+
+### Fixed — detection: case-insensitive matching enforced by default
+
+`classifier::detect` (the public CLI entry point) has historically
+lowercased every header VALUE and the response body before handing
+them to the rule engine for matching.  Meanwhile the catalog under
+`rules/detect/*.toml` is mostly authored as literal vendor banners
+in canonical case (`Cloudflare`, `BinarySec`, `KEMP-LM`, the
+Fastly POP-code regex `[A-Z]{3}`).  The two layers disagreed, so
+any rule with an uppercase character class or capitalized literal
+silently failed to match real traffic.  Most visibly: Fastly went
+undetected on every multi-hop site (nytimes, Spotify, etc.) because
+the cache-tag regex required `[A-Z]{3}` but received the
+lowercased value.
+
+The fix forces case-insensitive compilation for every detection
+regex via a new `compile_ci_regex` helper that prepends `(?i)`
+unless the author already declared an outer case flag (`(?i)`,
+`(?-i)`, `(?i-`, `(?-i-`).  Rule authors can opt out via `(?-i)`,
+preserved verbatim.  The catalog had no such opt-outs, so this is
+universally safe.
+
+Verified end-to-end:
+- nytimes.com now surfaces BOTH `Envoy` AND `Fastly` at 1.0
+  confidence (was missing Fastly entirely).
+- Spotify surfaces THREE layers: Envoy + Fastly + Google Cloud App
+  Armor.
+- Salesforce / Tesla / Microsoft (AkamaiGHost banner) now fire
+  Kona SiteDefender (banner casing was the blocker).
+- 24-site dogfood sweep: 20/24 detect a WAF; the four
+  non-detections (stripe, dropbox, ebay, reddit) genuinely hide
+  behind a generic `nginx` / `envoy` / `snooserv` / custom proxy
+  banner with no vendor signal in the response.
+
+Tests covering the fix and its blast radius:
+- `ci_wrapper_*` (9 tests) — explicit-flag opt-out, multi-flag
+  groups, anchored patterns, escaped metacharacters, Unicode
+  metaclasses, empty alternation, broken patterns.
+- `every_embedded_rule_compiles` / `every_header_regex_in_catalog_is_case_insensitive`
+  — catalog-wide invariants that prove no future rule can quietly
+  reintroduce the bug class.
+- `every_literal_header_rule_in_catalog_matches_capitalized_value`
+  / `lowercase_input_must_match_uppercase_pattern_for_every_rule`
+  — synthesise inputs FROM the rules themselves (no hardcoded
+  vendor names), so any new rule whose literal value doesn't fire
+  via the public API breaks the build.
+- Real-traffic shape regressions (`csv_joined_multi_hop_header_value_*`,
+  `multi_waf_chain_returns_every_layer_not_just_the_top`,
+  `detection_is_stable_under_random_header_casing`,
+  `unknown_vendor_banner_does_not_false_positive`).
+- Edge-case panic-safety: non-ASCII bytes, empty inputs, 100 KiB
+  header values, repeated header names.
+
+### Added — bench corpus expansion (+111 cases, 607 → 718)
+
+Seven new corpus files filling gaps surfaced during dogfooding:
+
+- `corpus/ldap/encoding_evasion.toml` (+12 cases) — URL-encoded,
+  double-URL-encoded, RFC 4515 hex-escape, whitespace-folded,
+  extensible-match-OID, fullwidth-Unicode LDAP variants.
+- `corpus/xxe/encoding_evasion.toml` (+12 cases) — UTF-16/EBCDIC
+  encoding declarations, DOCTYPE whitespace + comment +
+  case-folded variants, parameter-entity OOB exfil chains, jar:/
+  netdoc:/expect: scheme abuse, Unicode entity-name evasion.
+- `corpus/log4shell/nested_lookups.toml` (+13 cases) — ${lower:}/
+  ${upper:}/${env:}/${sys:}/${date:'j'} nested lookups, RMI/LDAPS/
+  CORBA/DNS protocols, decimal/hex/octal IP host encodings,
+  userinfo `@` decoy hosts.
+- `corpus/nosql/advanced_operators.toml` (+10 cases) — $regex
+  extraction, $where JS, $expr/$strLenCP, $or/$and nesting,
+  CouchDB Mango selectors.
+- `corpus/cmdi/encoding_evasion.toml` (+15 cases) — $IFS variable
+  expansion, brace-expansion, backslash-newline, quoted-empty-string
+  obfuscation, backtick command-sub, hex-via-printf, tab/CR
+  separators, pure-glob attacks.
+- `corpus/cve_pocs/2024_2025.toml` (+11 cases) — Jenkins Args4j
+  (CVE-2024-23897), runc (CVE-2024-21626), xz-backdoor
+  (CVE-2024-3094), PHP CGI argument injection (CVE-2024-4577),
+  regreSSHion (CVE-2024-6387), ScreenConnect (CVE-2024-1709),
+  Ivanti vTM (CVE-2024-7593), Gladinet (CVE-2025-30406), Cleo Harmony
+  (CVE-2024-50623), Rejetto HFS (CVE-2024-23692), CrushFTP
+  (CVE-2024-4040).
+- `corpus/ssti/ruby_dotnet_php.toml` (+19 cases) — ERB (Ruby) RCE
+  via backtick / system / IO.popen / eval, Slim, Razor (.NET)
+  reflective Process.Start, Smarty {php} block + static-method
+  abuse, Twig filter chain + sandbox escape, Handlebars constructor-
+  walking, Velocity reflective Runtime.exec.
+
+Additional cases appended to `corpus/ssrf/cloud_metadata.toml`
+(+14): IMDSv2 token endpoint, decimal/hex/octal IP encodings of
+169.254.169.254, Hetzner / Oracle OCI metadata, localhost service
+probes (Redis, Elasticsearch, Docker socket, Consul, etcd), DNS-
+rebinding hostname tricks (nip.io, xip.io).
+
+- `corpus/xss/modern_event_handlers.toml` (+21 cases) — Pointer
+  Events (onpointer{move,down,enter}, ongotpointercapture), media
+  events (onloadstart, onplay+autoplay, oncanplay, onstalled),
+  lazy-loading image errors, <object>/<iframe srcdoc>/<embed>
+  carriers, drag-and-drop (ondragstart/ondrop), HTML invokers
+  (onbeforetoggle/ontoggle/oncancel), modern scroll/animation
+  (onscrollend, onanimationend with inline keyframes), web-
+  components (onslotchange).
+- `corpus/sql/dialect_quirks.toml` (+19 cases) — PostgreSQL
+  $tag$-quoted strings + E'' escape, MSSQL bracket identifiers +
+  N'' Unicode literals + WAITFOR DELAY + xp_dirtree OOB, SQLite
+  ATTACH + load_extension, Oracle DUAL + UTL_HTTP OOB + CHR
+  concat, MySQL hex/binary literals + NATURAL JOIN, Unicode +
+  smart-quote variants.
+
+**Total: 607 → 758 cases (+151) across 9 new files.** All
+`bench_corpus_integrity` tests pass (5/5).
+
+### Fixed — dogfood findings (real-world WAF detection)
+
+- **`wafrift detect --format json`** now works. Previously fell back
+  to the legacy `--quiet` flag (which emitted JSON as a side
+  effect); operators expecting the uniform `--format` flag (used
+  by every other subcommand) got an "unexpected argument" error.
+  Fixed by accepting `--format json` as a synonym for `--quiet`'s
+  JSON path. Found during real-target dogfood against
+  `https://httpbin.org/get`.
+
+- **Fastly detection** — previously zero hits on
+  `https://www.fastly.com/` because the existing rule required
+  either `X-Fastly-Request-ID` or a `^cache-`-anchored
+  `X-Served-By`. Real Fastly responses commonly send `X-Served-By`
+  as a multi-hop CSV (`cache-sjc10026-SJC, cache-...`) where the
+  anchored regex fails. Added: un-anchored cache-tag match, the
+  signature `Server: Artisanal bits` banner (weight 0.7), and the
+  Varnish `X-Timer: S...,VS0,VE1` shape.
+
+- **Akamai detection** — previously zero hits on
+  `https://www.akamai.com/` 403 because the existing rule only
+  matched `Server: AkamaiGHost` / `X-Akamai-Transformed`. Akamai's
+  own marketing site has rotated to a newer header set:
+  `X-Akam-SW-Version`, `Akamai-GRN`, `Server-Timing: ak_p`,
+  `Report-To: go-mpulse.net`. Added all five tells.
+  `Server: AkamaiNetStorage` added (weight 0.4) to catch
+  Akamai-fronted static-asset CDNs (`microsoft.com` is one).
+
+- **F5 Distributed Cloud (Volterra)** — entirely new rule file
+  `f5_distributed_cloud.toml`. F5's modern WAF/CDN serves with
+  `Server: volt-adc` and `X-Volterra-*` headers; wafrift's older
+  `f5bigip{asm,ltm}` rules never fire on Distributed Cloud.
+  Captured live on `https://www.f5.com/`.
+
+After fixes (2026-05-21): cloudflare.com → Cloudflare (1.0),
+aws.amazon.com → CloudFront (1.0), akamai.com → Kona SiteDefender
+(1.0, 6 indicators), fastly.com → Fastly (0.7), imperva.com →
+Incapsula (1.0), f5.com → F5 Distributed Cloud (1.0), discord.com
+→ Cloudflare (1.0), shopify.com → Cloudflare (1.0), microsoft.com
+→ Kona SiteDefender via AkamaiNetStorage (0.4). 9/9 known-WAF
+public sites detected correctly.
+
+### Added — three more parser-diff family members
+
+- **`wafrift method-diff <URL>`** — 15 HTTP method variants (POST/
+  PUT/DELETE/PATCH, HEAD/OPTIONS/TRACE, WebDAV PROPFIND/MKCOL/
+  MOVE/COPY/LOCK, custom token, lowercase `get`, H2 preface `PRI`).
+- **`wafrift gql-diff <URL>`** — 10 GraphQL parser / cost-limit
+  probes (introspection-full, introspection-type, alias bombing,
+  batched operations, mutation-as-query, field duplication,
+  fragment nesting, alt-content-type, GET-shaped query,
+  operation-name spoof).
+- **`wafrift jwt-diff <URL> --token <jwt>`** — 11 JWT validation
+  probes (alg:none case-family x4, empty-sig-original-alg, kid
+  traversal, kid SQL injection, jku attacker-URL, expired exp,
+  future nbf, role elevation).
+- **`wafrift cors-diff <URL>`** — 10 CORS misconfiguration probes
+  (arbitrary-origin reflection, null origin, suffix/prefix
+  confusion, trailing-dot host, http downgrade, userinfo `@`
+  injection, wildcard reflection, preflight arbitrary-header,
+  preflight DELETE).
+
+### Added — orchestrator extended
+
+- `wafrift attack` now runs ALL SEVEN parser-diff family probes
+  concurrently (added method-diff alongside the original url-path,
+  headers, body, query, cache, h2). gql-diff and jwt-diff stay
+  out of the default orchestrator (GraphQL- and JWT-specific —
+  call directly).
+
+### Added — bench_waf modularization
+
+- Test block extracted from `crates/cli/src/bench_waf.rs` into
+  `crates/cli/src/bench_waf_tests.rs` (607 lines moved); main
+  file shrinks 2494 → 1891. Production code unchanged.
+
+### Added — endless dogfood harness
+
+- `crates/cli/tests/dogfood_session.rs` (11 tests) drives every
+  new subcommand through a header/body/query/cache-aware mock via
+  the real `wafrift` binary. Verified flake-free over 5 back-to-
+  back iterations.
+- `wafrift-bench/scripts/dogfood-public.sh` — loop script that
+  exercises every command against safe public targets (httpbin.org
+  + countries-graphql) every 60s. Useful as a continuous-uptime
+  smoke alarm.
+
+### Real-world dogfood results
+
+- **httpbin.org**: `cors-diff` found 10 high-severity CORS misconfigs
+  (reflects every Origin into ACAO + sets ACAC:true on every probe
+  — textbook credentials leak). `method-diff` found 9 high
+  divergences (multiple methods produce distinct body shapes).
+  `attack` orchestrator found 17 divergences across families.
+- **countries.trevorblades.com/graphql**: `gql-diff` found
+  alias-bombing produces +164% body delta (one of the canonical
+  cost-limit evasion patterns).
+
+### Added — parser-disagreement family (the WAFFLE-2024 frontier line)
+
+Five new subcommands that find WAF↔origin / WAF↔cache parser
+disagreements, exposing bypass seams that don't require any payload
+mutation. Each has a curated probe catalogue, JSON output for piping
+into report tooling, and a `curl -i` reproducer per finding.
+
+- **`wafrift parser-diff <URL>`** (already existed; sibling commands
+  below are new). URL-path parser disagreements (semicolon-strip,
+  backslash-as-separator, NUL truncation, double-URL-decode,
+  fullwidth slash, dot-segment, percent-case, empty-segment,
+  trailing-dot).
+- **`wafrift header-diff <URL>`** — 17 request-header probes
+  (dup-XFF, dup-Authorization, header-name case mix, Host
+  smuggling, X-Original-Host rebind, X-Rewrite-URL, X-Real-IP
+  localhost spoof, IP-spoof family, trailing-whitespace,
+  NUL truncation, X-HTTP-Method-Override).
+- **`wafrift body-diff <URL>`** — 8 request-body probes (JSON
+  dup-key first/last wins, BOM-prefix, UTF-7 charset smuggling,
+  form-urlencoded HPP, JSON-as-form, form-as-JSON, JSONC
+  comments, multipart boundary collision).
+- **`wafrift query-diff <URL>`** — 11 query-string probes (HPP
+  first/last, array bracket notation, comma split, empty-value
+  HPP, missing-value, percent-encoded keys, NUL truncation,
+  semicolon separator, encoded `#`, trailing-dot keys).
+- **`wafrift cache-diff <URL>`** — cache-key confusion / poisoning
+  surface (Host header case, X-Forwarded-Host injection, trailing
+  slash, query parameter order, param name case, UTM tracker
+  strip, fragment leak, Cookie variation). Compares FNV-1a body
+  hashes + `Age`/`X-Cache`/`CF-Cache-Status` headers to detect
+  cache-key collisions.
+- **`wafrift h2-diff <URL>`** — HTTP/1.1 vs HTTP/2 differential
+  scanner. Fires the same logical request via both protocols
+  (4 probes: baseline, payload-in-query, dup-param, long-query)
+  and reports response divergence. Catches the common pattern of
+  WAF rule corpus authored against H1 wire format + H2→H1
+  downgrade translation bugs. Required adding the `http2` feature
+  to workspace reqwest.
+- **`wafrift method-diff <URL>`** — HTTP method parser-disagreement
+  scanner. 15 method variants (POST/PUT/DELETE/PATCH, HEAD/OPTIONS/
+  TRACE, WebDAV PROPFIND/MKCOL/MOVE/COPY/LOCK, custom token, lower-
+  case `get`, H2 preface `PRI`). Catches WAF rules that only fire
+  on GET/POST while the origin routes the unusual verb somewhere
+  meaningful.
+- **`wafrift gql-diff <URL>`** — GraphQL parser / cost-limit
+  disagreement scanner. 10 probes covering introspection-full,
+  introspection-type, alias bombing, batched operations, mutation-
+  as-query, field duplication, fragment nesting, alt-content-type,
+  GET-shaped query, operation-name spoof. Targets `/graphql`-style
+  endpoints where REST WAFs see only `POST /graphql` and miss the
+  structure inside.
+- **`wafrift attack <URL>`** — unified orchestrator. Spawns ALL
+  seven parser-diff family probes (url-path, headers, body, query,
+  cache, h2, method) concurrently as subprocesses, merges their
+  JSON into one structured report with per-family + cross-family
+  divergence totals. The end-to-end pentester command — one call,
+  every parser-disagreement seam surfaced. (`gql-diff` is excluded
+  from the default `attack` orchestrator because it's GraphQL-
+  specific; run it directly against `/graphql` endpoints.)
+
+### Added — adversarial distillation (Zeller ddmin)
+
+- **`wafrift distill <URL> --payload "<bypass>"`** — minimum-edit-
+  distance reducer for known-working bypass payloads. Runs Zeller's
+  ddmin recursively (subset-pass + complement-pass + granularity
+  doubling) to find the smallest substring that STILL bypasses.
+  Useful for pentest reports — shorter payloads are easier for
+  clients to reproduce and reveal which payload features the WAF
+  actually objected to vs. were noise. Capped at `--max-fires`
+  for rate-limit defence.
+
+### Added — Burp raw-request scan mode
+
+- **`wafrift scan -r <FILE> --payload "<x>"`** — load a Burp-saved
+  raw HTTP request (Copy → Save raw → File), substitute `§§`
+  marker with each variant payload, fire through pentest pivot
+  (`--proxy` / `-H`), emit JSON with `bypass_variants[i].repro_curl`
+  per finding.
+- **`--auto-distill`** flag on `wafrift scan` (raw mode) — after
+  finding bypasses, automatically run ddmin per bypass; emits
+  `minimal_payload` + `minimal_repro_curl` per bypass entry.
+
+### Added — `repro_curl` in report findings
+
+- `wafrift report` JSON / markdown output now includes a
+  `curl -i` reproducer per finding alongside the existing
+  `wafrift replay` invocation. Schema version bumped 1 → 2.
+
+### Refactored — single source of truth
+
+- `helpers::shell_single_quote` — canonical Bourne shell quote;
+  `report.rs` + `raw_request.rs` + `header_diff_cmd` +
+  `body_diff_cmd` + `cache_diff_cmd` + `query_diff_cmd` all route
+  through it (one bash round-trip test exercises every caller).
+- `helpers::parse_header_pair` — canonical colon-split + trim
+  primitive shared by `helpers::parse_headers` (slice form) and
+  `scan::pentest_client::parse_header` (typed
+  HeaderName/HeaderValue form).
+- `parser_diff_common` — canonical `body_delta_pct`, `severity_of`,
+  `status_class`; consumed by every member of the parser-diff
+  family (one classification rule change reaches every
+  sub-command in one edit).
+
+### Removed — doc + dead-code clutter
+
+- Deleted `docs/archive/` (4 files, ~2699 lines of stale planning
+  docs).
+- Deleted retracted `wafrift-bench/results/SUMMARY.md` (numbers
+  were rigged — explicitly flagged at the top of the file).
+- Deleted stale `wafrift-bench/results/v022-*/SUMMARY.md` +
+  `BENCH_021_NOTES.md` (~234 lines of ancient bench summaries).
+- Deleted `scan/state.rs` (100-line scaffold, never constructed).
+- Deleted `detect_cmd::_ensure_arc_in_scope` + stale `Arc` import.
+- Deleted `smuggle_cmd::_ASSERT_VARIANT_LINKAGE` doc-link hack.
+- Narrowed `listener_cmd` `#[allow(dead_code)]` to `#[cfg(test)]`
+  on the three Registry methods only used in tests.
+- Trimmed `raw_request.rs` module-level `#![allow(dead_code)]`
+  (the parse side now has a real caller: `scan -r` mode).
+
 ## [0.2.17] — 2026-05-18
 
 ### Added

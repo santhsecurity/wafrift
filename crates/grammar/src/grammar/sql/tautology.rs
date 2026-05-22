@@ -78,80 +78,6 @@ pub(crate) fn replace_tautology(payload: &str, replacement: &str) -> Option<Stri
     None
 }
 
-/// Get a random tautology for mutation purposes.
-#[must_use]
-#[allow(dead_code)]
-pub(crate) fn random_tautology() -> &'static str {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    TAUTOLOGIES[rng.gen_range(0..TAUTOLOGIES.len())]
-}
-
-/// Get all tautologies matching a specific category.
-#[must_use]
-#[allow(dead_code)]
-pub(crate) fn tautologies_by_category(category: TautologyCategory) -> &'static [&'static str] {
-    match category {
-        TautologyCategory::Numeric => &[
-            "1=1",
-            "2>1",
-            "1<2",
-            "1 BETWEEN 0 AND 2",
-            "1 IN(1)",
-            "1 IN(1,2,3)",
-            "1 IS NOT NULL",
-            "NOT 1=0",
-            "0x1=0x1",
-            "1.0=1.0",
-            "1e0=1e0",
-            "1&1=1",
-            "NOT NOT 1",
-            "ISNULL(NULL,1)=1",
-            "COS(0)=1",
-            "POWER(1,1)=1",
-        ],
-        TautologyCategory::String => &["'a'='a'", "'a' LIKE 'a'", "N'a'=N'a'", "CHAR(49)=CHAR(49)"],
-        TautologyCategory::Function => &[
-            "IF(1,1,0)",
-            "IIF(1=1,1,0)",
-            "ISNULL(NULL,1)=1",
-            "COS(0)=1",
-            "POWER(1,1)=1",
-            "CHAR(49)=CHAR(49)",
-            "CASE WHEN 1 THEN 1 END",
-            "(CASE 1 WHEN 1 THEN 1 ELSE 0 END)",
-        ],
-        TautologyCategory::Operator => &[
-            "1=1",
-            "1 LIKE 1",
-            "2>1",
-            "1<2",
-            "1 BETWEEN 0 AND 2",
-            "1 IS NOT NULL",
-            "NOT 1=0",
-            "1&1=1",
-            "NOT NOT 1",
-        ],
-        TautologyCategory::All => TAUTOLOGIES,
-    }
-}
-
-/// Categories of tautologies for targeted selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub(crate) enum TautologyCategory {
-    /// Numeric comparisons (1=1, 2>1, etc.)
-    Numeric,
-    /// String comparisons ('a'='a', etc.)
-    String,
-    /// Function-based tautologies (IF, CASE, etc.)
-    Function,
-    /// Operator-based tautologies (=, LIKE, etc.)
-    Operator,
-    /// All tautologies
-    All,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,30 +170,72 @@ mod tests {
     }
 
     #[test]
-    fn tautologies_by_category_returns_valid() {
-        assert!(!tautologies_by_category(TautologyCategory::Numeric).is_empty());
-        assert!(!tautologies_by_category(TautologyCategory::String).is_empty());
-        assert!(!tautologies_by_category(TautologyCategory::Function).is_empty());
-        assert!(!tautologies_by_category(TautologyCategory::Operator).is_empty());
-        assert_eq!(
-            tautologies_by_category(TautologyCategory::All).len(),
-            TAUTOLOGIES.len()
-        );
+    fn replace_with_complex_tautology_inserts_correctly() {
+        // Replace with a string-form tautology — verifies the
+        // replacement path handles quoted-string patterns
+        // alongside numeric ones.
+        let result = replace_tautology("' OR 1=1--", "'a'='a'");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "' OR 'a'='a'--");
     }
 
     #[test]
-    fn all_category_tautologies_exist_in_main_array() {
-        for &tautology in tautologies_by_category(TautologyCategory::Numeric) {
-            assert!(TAUTOLOGIES.contains(&tautology), "Missing: {tautology}");
-        }
-        for &tautology in tautologies_by_category(TautologyCategory::String) {
-            assert!(TAUTOLOGIES.contains(&tautology), "Missing: {tautology}");
-        }
-        for &tautology in tautologies_by_category(TautologyCategory::Function) {
-            assert!(TAUTOLOGIES.contains(&tautology), "Missing: {tautology}");
-        }
-        for &tautology in tautologies_by_category(TautologyCategory::Operator) {
-            assert!(TAUTOLOGIES.contains(&tautology), "Missing: {tautology}");
-        }
+    fn detects_function_based_tautology() {
+        assert!(contains_tautology("' OR IF(1,1,0)--"));
+        assert!(contains_tautology("' OR CHAR(49)=CHAR(49)--"));
+    }
+
+    #[test]
+    fn detects_unicode_string_tautology() {
+        assert!(contains_tautology("' OR N'a'=N'a'--"));
+    }
+
+    #[test]
+    fn detects_hex_literal_tautology() {
+        assert!(contains_tautology("' OR 0x1=0x1--"));
+    }
+
+    #[test]
+    fn detects_scientific_notation_tautology() {
+        assert!(contains_tautology("' OR 1e0=1e0--"));
+    }
+
+    #[test]
+    fn empty_input_is_not_a_tautology() {
+        assert!(!contains_tautology(""));
+    }
+
+    #[test]
+    fn whitespace_only_is_not_a_tautology() {
+        assert!(!contains_tautology("   "));
+    }
+
+    #[test]
+    fn replace_preserves_payload_around_tautology() {
+        // Property: the prefix and suffix on either side of the
+        // matched tautology are preserved byte-for-byte.
+        let prefix = "admin' AND ";
+        let suffix = " -- comment";
+        let original = format!("{prefix}1=1{suffix}");
+        let replaced = replace_tautology(&original, "0=0").expect("replaces");
+        assert!(replaced.starts_with(prefix));
+        assert!(replaced.ends_with(suffix));
+        assert!(replaced.contains("0=0"));
+    }
+
+    #[test]
+    fn detects_tautology_in_mixed_case() {
+        // The detector lowercases first — UPPERCASE tautologies
+        // should still register.
+        assert!(contains_tautology("' OR 'A' LIKE 'A'--"));
+        assert!(contains_tautology("' OR ISNULL(NULL,1)=1--"));
+    }
+
+    #[test]
+    fn replace_no_change_when_replacement_equals_original() {
+        // Idempotency boundary: replacing `1=1` with `1=1` returns
+        // the original payload exactly.
+        let result = replace_tautology("' OR 1=1--", "1=1").expect("replaces");
+        assert_eq!(result, "' OR 1=1--");
     }
 }

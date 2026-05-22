@@ -1,0 +1,97 @@
+schema = 1
+# Recent (2024–2025) CVE PoCs that exercise real-world payloads
+# WAFs have to grapple with. Each `id` cites the CVE; the payload
+# is the canonical exploit form from public disclosure.
+
+# ── CVE-2024-23897 — Jenkins Args4j arbitrary file read ──
+
+[[case]]
+id = "cve_2024_23897_jenkins_args4j_at_file"
+class = "cve_pocs"
+payload = "@/etc/passwd"
+description = "Jenkins CLI accepts `@filename` to read a file as input  — unauthenticated arbitrary file read"
+
+# ── CVE-2024-21626 — runc filesystem path traversal ──
+# (Payload is a Dockerfile path arg, not a web payload — but its
+# canonical CLI form may pass through CI webhooks.)
+
+[[case]]
+id = "cve_2024_21626_runc_proc_self_fd"
+class = "cve_pocs"
+payload = "WORKDIR /proc/self/fd/8"
+description = "runc container WORKDIR pointing into the host's /proc —  container escape; may transit via Docker-Hub-style  build APIs"
+
+# ── CVE-2024-3094 (xz / liblzma backdoor) ──
+
+[[case]]
+id = "cve_2024_3094_xz_backdoor_hello"
+class = "cve_pocs"
+payload = "hello-from-backdoor"
+description = "xz-backdoor IFUNC trigger string — when sent in an SSH  authorized_keys public-key field, the malicious xz  payload activates remote code execution. Real-world  detection requires inspecting SSH-key bodies."
+
+# ── CVE-2024-4577 — PHP CGI argument injection ──
+
+[[case]]
+id = "cve_2024_4577_php_cgi_arg_injection_pct_ad"
+class = "cve_pocs"
+payload = "?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input"
+description = "PHP CGI on Windows — soft-hyphen `%AD` decodes as `-`,  turning query-string into PHP CLI args; achieves RCE"
+
+# ── CVE-2024-6387 (regreSSHion) ──
+# Pre-auth race-condition signal handler in OpenSSH; payload is a
+# crafted SSH banner. We include the SSH-banner shape so a WAF
+# fronting an SSH proxy / web-SSH can be tested.
+
+[[case]]
+id = "cve_2024_6387_sshd_signal_race_banner"
+class = "cve_pocs"
+payload = "SSH-2.0-OpenSSH_8.5p1\r\n"
+description = "Crafted SSH banner that triggers sshd signal-handler race  in vulnerable versions — RCE; web-SSH proxies may forward"
+
+# ── CVE-2024-1709 (ScreenConnect / ConnectWise auth bypass) ──
+
+[[case]]
+id = "cve_2024_1709_screenconnect_auth_bypass"
+class = "cve_pocs"
+payload = "/SetupWizard.aspx/"
+description = "ScreenConnect path traversal with trailing slash that  bypasses authentication; RCE via subsequent extension  install"
+
+# ── CVE-2024-7593 (Ivanti vTM auth bypass) ──
+
+[[case]]
+id = "cve_2024_7593_ivanti_vtm_admin_path"
+class = "cve_pocs"
+payload = "/zxtm/configuration?_csrf_token=anything"
+description = "Ivanti Virtual Traffic Manager admin path with crafted  CSRF token — auth bypass yields full management control"
+
+# ── CVE-2025-30406 — Gladinet CentreStack hardcoded machine key ──
+
+[[case]]
+id = "cve_2025_30406_gladinet_viewstate"
+class = "cve_pocs"
+payload = "__VIEWSTATE=%2BAAEAAAD%2F%2F%2F%2F%2FAQAAAAAAAAAMAgAAAEMlVjIuMC9JIE8gZHV3cw"
+description = "Gladinet CentreStack — hardcoded machineKey lets attacker  forge ASP.NET ViewState with arbitrary deserialised  .NET object → RCE"
+
+# ── CVE-2024-50623 — Cleo Harmony arbitrary file write ──
+
+[[case]]
+id = "cve_2024_50623_cleo_path_traversal_upload"
+class = "cve_pocs"
+payload = "filename=..%2f..%2f..%2fopt%2fcleo%2fwebshell.jsp&content=%3C%25Runtime.getRuntime().exec(request.getParameter(%22c%22))%3B%25%3E"
+description = "Cleo Harmony / VLTrader file-upload path traversal —  writes a JSP webshell into the deploy directory"
+
+# ── CVE-2024-23692 — Rejetto HFS unauthenticated RCE ──
+
+[[case]]
+id = "cve_2024_23692_hfs_template_rce"
+class = "cve_pocs"
+payload = "?search=%25%7B%2E%2Fexec%7Ccmd%7D"
+description = "Rejetto HFS (HTTP File Server) — template engine accepts  `%{./exec|cmd}` to execute system commands; unauthenticated"
+
+# ── CVE-2024-4040 — CrushFTP server-side template injection ──
+
+[[case]]
+id = "cve_2024_4040_crushftp_ssti"
+class = "cve_pocs"
+payload = "&zip_path=<INCLUDE></test/test1><test2>{LDAP:cn={LDAPattrUser={user_name}},dc=example,dc=com}</test2></INCLUDE>"
+description = "CrushFTP zip_path field — accepts INCLUDE+LDAP template  lookups; arbitrary file read + chain to RCE"

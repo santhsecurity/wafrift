@@ -87,12 +87,12 @@ class = "xss"
 payload = "<iframe src=x onerror=alert(1)>"
 
 [[case]]
-id = "object_onerror"
+id = "object_onerror_v1"
 class = "xss"
 payload = "<object data=x onerror=alert(1)></object>"
 
 [[case]]
-id = "embed_onerror"
+id = "embed_onerror_v1"
 class = "xss"
 payload = "<embed src=x onerror=alert(1)>"
 

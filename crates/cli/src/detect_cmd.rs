@@ -24,26 +24,37 @@ use colored::Colorize;
 use serde_json::json;
 use std::process::ExitCode;
 use std::time::Duration;
+use wafrift_detect::dns_fingerprint::{CnameRuleEngine, DnsProbe};
 use wafrift_detect::waf_detect;
 
 use crate::helpers::parse_headers;
 
 #[derive(clap::Args, Debug)]
 pub struct DetectArgs {
+    /// Target URL to detect against, as the FIRST positional argument
+    /// — matches every other wafrift subcommand
+    /// (`wafrift scan <URL>`, `wafrift header-diff <URL>`, etc.)
+    /// so operator muscle memory works across the toolkit.
+    /// Equivalent to `--url <URL>`; pass either form, not both.
+    #[arg(value_name = "URL", conflicts_with_all = ["url", "status", "headers"])]
+    pub url_positional: Option<String>,
+
     /// Fetch the target URL directly and run detection on the live
     /// response — no manual `curl` + `--status`/`--headers` round-trip.
     /// `wafrift detect --url https://target.com`. Mutually exclusive
-    /// with `--status`/`--headers`.
-    #[arg(long, conflicts_with_all = ["status", "headers"])]
+    /// with `--status`/`--headers` and the positional form above.
+    /// Kept on equal footing for backwards-compatibility.
+    #[arg(long, conflicts_with_all = ["status", "headers", "url_positional"])]
     pub url: Option<String>,
 
-    /// HTTP status code (100–599). Required unless `--url` is given.
-    #[arg(long, value_parser = parse_http_status, required_unless_present = "url")]
+    /// HTTP status code (100–599). Required unless a URL is given
+    /// (either positional or via `--url`).
+    #[arg(long, value_parser = parse_http_status, required_unless_present_any = ["url", "url_positional"])]
     pub status: Option<u16>,
 
-    /// Repeated "key: value" header arguments. Required unless `--url`
-    /// is given.
-    #[arg(long, required_unless_present = "url")]
+    /// Repeated "key: value" header arguments. Required unless a URL
+    /// is given (either positional or via `--url`).
+    #[arg(long, required_unless_present_any = ["url", "url_positional"])]
     pub headers: Vec<String>,
 
     /// Response body fragment.
@@ -68,6 +79,23 @@ pub struct DetectArgs {
     /// against targets you own / are authorized to test.
     #[arg(long, default_value_t = false)]
     pub differential: bool,
+
+    /// Output format: `text` (default, colored summary) or `json`
+    /// (machine-readable; downstream tools can parse the detected
+    /// WAF name + confidence + indicators).
+    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    pub format: String,
+}
+
+impl DetectArgs {
+    /// Resolved target URL: prefers the positional form (modern,
+    /// matches every other wafrift cmd) and falls back to the long
+    /// `--url` flag (backwards-compatible). `None` when the operator
+    /// supplied the `--status` / `--headers` triple instead.
+    #[must_use]
+    pub fn resolved_url(&self) -> Option<&str> {
+        self.url_positional.as_deref().or(self.url.as_deref())
+    }
 }
 
 /// clap value-parser for an HTTP status code. RFC 9110 status codes are
@@ -102,10 +130,7 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs.clamp(1, 120)))
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent(
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
-             (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        );
+        .user_agent(crate::config::shared_user_agent());
     if insecure {
         builder = builder.danger_accept_invalid_certs(true);
     }
@@ -121,7 +146,16 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
             .get(url)
             .send()
             .await
-            .map_err(|e| format!("request to {url} failed: {e}"))?;
+            .map_err(|e| {
+                // reqwest::Error's Display often shows only "error
+                // sending request" without the underlying DNS / TCP cause.
+                // walk_reqwest_error (helpers.rs) surfaces the full chain
+                // (NXDOMAIN, connection refused, TLS, etc.).
+                format!(
+                    "request to {url} failed: {}",
+                    crate::helpers::walk_reqwest_error(&e)
+                )
+            })?;
         let status = resp.status().as_u16();
         let headers: Vec<(String, String)> = resp
             .headers()
@@ -151,6 +185,67 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
         let body = bytes[..bytes.len().min(64 * 1024)].to_vec();
         Ok((status, headers, body))
     })
+}
+
+/// Extract the bare host (no scheme, port, path, fragment, or query)
+/// from a URL string.  Used by `fetch_cname_chain` — we don't pull
+/// in the `url` crate here because the parsing is trivial and the
+/// dep would propagate through every CLI consumer.
+pub(crate) fn host_from_url(url: &str) -> Option<&str> {
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    let host_with_port = after_scheme.split(['/', '?', '#']).next()?;
+    // IPv6 literal: `[::1]:8080` — keep the bracketed form.
+    let host = if let Some(stripped) = host_with_port.strip_prefix('[') {
+        let end = stripped.find(']')?;
+        &stripped[..end]
+    } else {
+        host_with_port.split(':').next()?
+    };
+    if host.is_empty() { None } else { Some(host) }
+}
+
+/// Resolve a URL's CNAME chain to a `DnsProbe`.  Synchronous wrapper
+/// around the async resolver — builds a one-shot tokio runtime so
+/// the rest of `run_detect` can stay synchronous and easy to read.
+/// Returns `None` on any error (resolver init, timeout, NXDOMAIN);
+/// callers fall back to header-only detection.  We log the failure
+/// via `tracing::debug!` so dogfooding can pin down WHY DNS dropped
+/// out without making the CLI noisy by default. Resolves through
+/// `tracing::debug!` (under the `wafrift::detect` target) — the
+/// CLI's `tracing-subscriber` is wired with an `EnvFilter` so
+/// `RUST_LOG=wafrift=debug` surfaces the failure detail.
+pub(crate) fn fetch_cname_chain(url: &str) -> Option<DnsProbe> {
+    let host = host_from_url(url)?;
+    // Multi-thread runtime with two workers because hickory-resolver
+    // spawns its background task for the UDP socket and a separate
+    // task for the response decoder; on a current-thread runtime
+    // those two tasks compete for the same scheduler slot and we
+    // see frequent timeouts under cold-start conditions.  Two
+    // workers eliminate the contention without measurable cost.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .ok()?;
+    match rt.block_on(wafrift_detect::probe_cname_chain(host)) {
+        Ok(probe) => Some(probe),
+        Err(e) => {
+            // Tracing-subscriber is initialised in main() with
+            // EnvFilter — `RUST_LOG=wafrift=debug` surfaces this
+            // line, default `warn` filter hides it. Pre-fix the
+            // doc comment promised `tracing::debug!` but the code
+            // used a hand-rolled RUST_LOG-env check + eprintln; the
+            // structured form is consistent with the rest of the
+            // CLI's instrumentation (sonnet 5 pass).
+            tracing::debug!(
+                target: "wafrift::detect",
+                host = %host,
+                error = %e,
+                "DNS CNAME probe failed"
+            );
+            None
+        }
+    }
 }
 
 /// Evidence of a WAF inferred from differential probing — a benign
@@ -304,14 +399,28 @@ pub(crate) fn infra_markers(headers: &[(String, String)]) -> Vec<(String, String
         "x-iinfo",
         "x-cdn-provider",
     ];
-    headers
-        .iter()
-        .filter(|(k, _)| {
-            let lk = k.to_ascii_lowercase();
-            KEYS.contains(&lk.as_str())
-        })
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect()
+    // Last-wins dedup on the lowercased header name: an upstream
+    // proxy sandwich (Python's BaseHTTPServer adding its own
+    // `Server: BaseHTTP/...` on top of a backend's `Server:
+    // cloudflare`) used to surface BOTH as separate rows in the
+    // legendary markdown table, which read as a rendering bug.
+    // Last-wins because the OUTERMOST proxy is the one the operator
+    // is interacting with — its identity is more informative for
+    // the report than the buried backend's.
+    let mut seen: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for (k, v) in headers {
+        let lk = k.to_ascii_lowercase();
+        if !KEYS.contains(&lk.as_str()) {
+            continue;
+        }
+        if !seen.contains_key(&lk) {
+            order.push(lk.clone());
+        }
+        seen.insert(lk, (k.clone(), v.clone()));
+    }
+    order.into_iter().filter_map(|k| seen.remove(&k)).collect()
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -320,8 +429,9 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // `--status`/`--headers`/`--body` triple. clap's
     // `required_unless_present`/`conflicts_with_all` guarantees exactly
     // one mode is selected.
+    let resolved_url = args.resolved_url().map(str::to_owned);
     let (status, headers, body): (u16, Vec<(String, String)>, Vec<u8>) =
-        if let Some(ref url) = args.url {
+        if let Some(ref url) = resolved_url {
             match fetch_for_detect(url, args.timeout_secs, args.insecure) {
                 Ok((s, h, b)) => {
                     if !quiet {
@@ -361,8 +471,8 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // a WAF is intercepting — even if its block page is generic
     // (Apache stock 403, etc.).
     let differential_evidence: Option<DifferentialEvidence> =
-        if args.differential && args.url.is_some() {
-            let url = args.url.as_deref().expect("differential gated on Some(url)");
+        if args.differential && resolved_url.is_some() {
+            let url = resolved_url.as_deref().expect("differential gated on Some(url)");
             match fetch_differential(url, args.timeout_secs, args.insecure) {
                 Ok(ev) => ev,
                 Err(e) => {
@@ -379,8 +489,163 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
             None
         };
 
-    let detected = waf_detect::detect(status, &headers, &body);
-    if quiet {
+    let mut detected = waf_detect::detect(status, &headers, &body);
+
+    // CNAME-chain detection: catches origins that strip every CDN /
+    // WAF marker header but can't hide their delivery chain at the
+    // DNS layer (Stripe, Dropbox, eBay-via-Akamai).  Runs only when
+    // we have a URL to resolve — manual --status/--headers mode
+    // skips DNS (no host to look up).
+    let cname_probe: Option<DnsProbe> = resolved_url.as_deref().and_then(fetch_cname_chain);
+    // Trigger CNAME-rule detection whenever we have ANY DNS signal —
+    // the chain (forward CNAME hops), a PTR record on the leaf IP,
+    // or an ASN org name.  Gating only on the chain swallowed the
+    // PTR axis; gating only on chain+PTR swallowed the ASN axis
+    // (which is the last-resort vendor signal for origins like
+    // Stripe that strip everything else).
+    if let Some(ref probe) = cname_probe
+        && (!probe.chain.is_empty() || probe.final_ptr.is_some() || probe.asn.is_some())
+    {
+        let cname_engine = CnameRuleEngine::load_embedded().unwrap_or_default();
+        let cname_hits = cname_engine.detect(probe);
+        // ── Vendor subsumption ─────────────────────────────
+        //
+        // Some HTTP-layer rules identify a TECH STACK (Varnish,
+        // Envoy) that is downstream-OF a CDN vendor.  When the DNS
+        // layer authoritatively names the CDN (Fastly uses Varnish
+        // underneath; the Varnish header is a Fastly artefact, not
+        // an independent vendor), the CDN name should win the
+        // primary slot AND absorb the component's confidence
+        // rather than competing with it.
+        //
+        // Subsumption table: `child` is the header-derived
+        // component, `parent` is the CDN vendor.  When both fire
+        // and the parent was DNS-derived (any of cname / ptr /
+        // asn), the child gets dropped and its confidence rolls
+        // into the parent (clamped to 1.0).
+        fn subsumes(parent: &str) -> &'static [&'static str] {
+            match parent {
+                "Fastly" | "Fastly (CNAME)" | "Fastly (ASN)" => &["CacheWall"],
+                _ => &[],
+            }
+        }
+        fn is_dns_derived(detected_entry: &waf_detect::DetectedWaf) -> bool {
+            // Heuristic: CNAME/PTR/ASN-derived entries carry
+            // indicators tagged with `cname:` / `ptr:` / `asn:`.
+            // Header-derived entries use `header N: V` form.
+            detected_entry.indicators.iter().any(|ind| {
+                ind.starts_with("cname: ")
+                    || ind.starts_with("ptr: ")
+                    || ind.starts_with("asn: ")
+            })
+        }
+
+        // Merge CNAME hits into detected[], deduping by name.  When
+        // both layers agree (header-AND-cname say "Fastly"), keep
+        // the header-side hit (higher-confidence indicators) and
+        // append the CNAME hop as one more indicator on it.
+        for hit in cname_hits {
+            // Strip "(CNAME)" / "(PTR)" suffixes on the rule name
+            // so the three signals (HTTP header + CNAME hop + PTR
+            // record) collapse onto a single vendor entry per
+            // company.  Each independent signal becomes one more
+            // indicator on the same row, not a duplicate row.
+            let canonical = hit
+                .name
+                .strip_suffix(" (CNAME)")
+                .or_else(|| hit.name.strip_suffix(" (PTR)"))
+                .unwrap_or(&hit.name)
+                .to_string();
+            if let Some(existing) = detected
+                .iter_mut()
+                .find(|d| d.name == canonical || d.name == hit.name)
+            {
+                for ind in &hit.indicators {
+                    if !existing.indicators.contains(ind) {
+                        existing.indicators.push(ind.clone());
+                    }
+                }
+                existing.confidence = existing.confidence.max(hit.confidence);
+            } else {
+                let mut renamed = hit.clone();
+                renamed.name = canonical;
+                detected.push(renamed);
+            }
+        }
+        // Apply vendor-subsumption: when a DNS-derived parent
+        // (Fastly, etc.) co-exists with its header-derived child
+        // (Varnish/CacheWall), absorb the child's confidence
+        // into the parent and drop the child row.  Without this,
+        // reddit.com / nytimes.com would surface "CacheWall" as
+        // the primary vendor — technically true (Varnish IS in
+        // path) but the CDN-level name Fastly is what an
+        // operator actually wants to see.
+        let parent_names: Vec<String> = detected
+            .iter()
+            .filter(|d| is_dns_derived(d))
+            .map(|d| {
+                d.name
+                    .strip_suffix(" (CNAME)")
+                    .or_else(|| d.name.strip_suffix(" (PTR)"))
+                    .or_else(|| d.name.strip_suffix(" (ASN)"))
+                    .unwrap_or(&d.name)
+                    .to_string()
+            })
+            .collect();
+        for parent in &parent_names {
+            let children = subsumes(parent);
+            if children.is_empty() {
+                continue;
+            }
+            let mut absorbed_confidence = 0.0;
+            let mut absorbed_indicators: Vec<String> = Vec::new();
+            detected.retain(|d| {
+                if children.iter().any(|c| d.name == *c) {
+                    absorbed_confidence += d.confidence;
+                    for ind in &d.indicators {
+                        absorbed_indicators.push(ind.clone());
+                    }
+                    false
+                } else {
+                    true
+                }
+            });
+            if absorbed_confidence > 0.0
+                && let Some(parent_entry) = detected.iter_mut().find(|d| {
+                    d.name == *parent
+                        || d.name == format!("{parent} (CNAME)")
+                        || d.name == format!("{parent} (PTR)")
+                        || d.name == format!("{parent} (ASN)")
+                })
+            {
+                // Absorbed confidence boosts the parent at half
+                // weight (so two independent signals add up but
+                // don't double-count) — clamped to 1.0.
+                parent_entry.confidence =
+                    (parent_entry.confidence + absorbed_confidence * 0.5).min(1.0);
+                for ind in absorbed_indicators {
+                    if !parent_entry.indicators.contains(&ind) {
+                        parent_entry.indicators.push(ind);
+                    }
+                }
+            }
+        }
+
+        // Sort by confidence descending for deterministic output.
+        detected.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+    }
+
+    // JSON output is selected by either `--quiet` (legacy) OR the
+    // newer `--format json` (uniform with every other subcommand —
+    // closes the dogfood bug where `wafrift detect --url X --format
+    // json` failed with "unexpected argument").
+    let emit_json = quiet || args.format == "json";
+    if emit_json {
         let results: Vec<_> = detected
             .iter()
             .map(|r| {
@@ -395,9 +660,50 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
             .into_iter()
             .map(|(k, v)| json!({ "header": k, "value": v }))
             .collect();
+        let dns_json = cname_probe.as_ref().map(|p| {
+            let hops: Vec<_> = p
+                .chain
+                .iter()
+                .map(|h| json!({ "query": h.query, "target": h.target }))
+                .collect();
+            let asn = p.asn.as_ref().map(|a| {
+                json!({ "number": a.number, "name": a.name })
+            });
+            json!({
+                "chain": hops,
+                "final_ip": p.first_a.map(|i| i.to_string()),
+                "final_ptr": p.final_ptr,
+                "asn": asn,
+            })
+        });
+        // Dogfood sonnet 3 (2026-05): pre-fix the JSON envelope was
+        // identical with and without `--differential`. The text mode
+        // surfaced "WAF inferred via differential probe: status
+        // flipped 200 → 403, body shifted 336%" but downstream
+        // jq pipelines saw zero signal. Now: serialise the
+        // differential evidence so a `wafrift detect --differential
+        // --format json | jq .differential.reasons` reports the same
+        // verdict the text mode does.
+        let differential_json = differential_evidence.as_ref().map(|ev| {
+            json!({
+                "baseline_status": ev.baseline_status,
+                "attack_status": ev.attack_status,
+                "baseline_server": ev.baseline_server,
+                "attack_server": ev.attack_server,
+                "baseline_body_len": ev.baseline_body_len,
+                "attack_body_len": ev.attack_body_len,
+                "reasons": ev.reasons,
+            })
+        });
         println!(
             "{}",
-            json!({ "status": status, "detected": results, "infrastructure": infra })
+            json!({
+                "status": status,
+                "detected": results,
+                "infrastructure": infra,
+                "dns": dns_json,
+                "differential": differential_json,
+            })
         );
         ExitCode::SUCCESS
     } else if let Some(result) = detected.first() {
@@ -411,9 +717,73 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
         for indicator in &result.indicators {
             println!("  {} {}", "-".bright_black(), indicator.yellow());
         }
+        // Other layers in the WAF chain (Envoy sidecar + Fastly
+        // origin, Cloudflare in front of Cloudfront, etc.) get
+        // condensed under "Also detected" so the operator sees the
+        // whole stack at a glance.
+        if detected.len() > 1 {
+            println!();
+            println!("{}", "Also detected:".bold().cyan());
+            for r in &detected[1..] {
+                println!(
+                    "  {} {} ({:.0}%)",
+                    "-".bright_black(),
+                    r.name.yellow(),
+                    (r.confidence * 100.0).round()
+                );
+            }
+        }
+        if let Some(ref p) = cname_probe
+            && (!p.chain.is_empty() || p.final_ptr.is_some() || p.asn.is_some())
+        {
+            println!();
+            println!("{}", "DNS lookup:".bold().cyan());
+            for hop in &p.chain {
+                println!(
+                    "  {} {} {} {}",
+                    "-".bright_black(),
+                    hop.query.bright_white(),
+                    "→".bright_black(),
+                    hop.target.yellow()
+                );
+            }
+            if let Some(ref ptr) = p.final_ptr {
+                println!(
+                    "  {} PTR {} {}",
+                    "-".bright_black(),
+                    "→".bright_black(),
+                    ptr.yellow()
+                );
+            }
+            if let Some(ref asn) = p.asn {
+                println!(
+                    "  {} ASN {} {} {}",
+                    "-".bright_black(),
+                    "→".bright_black(),
+                    format!("AS{}", asn.number).bright_white(),
+                    asn.name.yellow()
+                );
+            }
+        }
         ExitCode::SUCCESS
     } else {
         println!("{}", "No WAF confidently detected.".yellow().bold());
+        // Hint operators that the static rule corpus may have missed a
+        // WAF that strips its own marker headers — try the active
+        // differential probe (only fires a second request when
+        // --differential is set; that's why we suggest it, not silently
+        // run it). Found during pentest dogfood 2026-05: against any
+        // target with a server-header proxy in front (gunicorn behind
+        // nginx, BaseHTTP test server, etc.) the static corpus is silent
+        // but `--differential` immediately catches a 200→403 swing.
+        if resolved_url.is_some() && !args.differential {
+            println!(
+                "  {} pass {} to actively probe with an attack-shaped \
+                 string — catches WAFs in 'block but don't fingerprint' mode.",
+                "hint:".bright_cyan().bold(),
+                "--differential".bright_white(),
+            );
+        }
         let infra = infra_markers(&headers);
         if infra.is_empty() {
             println!(
@@ -441,6 +811,42 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                  a WAF may still be present in monitor-only mode."
                     .bright_black()
             );
+        }
+        // CNAME chain — even when headers are clean, the DNS layer
+        // often gives away the CDN / WAF (Stripe / Dropbox / eBay
+        // case study).  Surfacing the chain lets the operator see
+        // exactly which delivery network is in front of the origin.
+        if let Some(ref p) = cname_probe
+            && (!p.chain.is_empty() || p.final_ptr.is_some() || p.asn.is_some())
+        {
+            println!();
+            println!("{}", "DNS lookup:".bold().cyan());
+            for hop in &p.chain {
+                println!(
+                    "  {} {} {} {}",
+                    "-".bright_black(),
+                    hop.query.bright_white(),
+                    "→".bright_black(),
+                    hop.target.yellow()
+                );
+            }
+            if let Some(ref ptr) = p.final_ptr {
+                println!(
+                    "  {} PTR {} {}",
+                    "-".bright_black(),
+                    "→".bright_black(),
+                    ptr.yellow()
+                );
+            }
+            if let Some(ref asn) = p.asn {
+                println!(
+                    "  {} ASN {} {} {}",
+                    "-".bright_black(),
+                    "→".bright_black(),
+                    format!("AS{}", asn.number).bright_white(),
+                    asn.name.yellow()
+                );
+            }
         }
         // Differential evidence — even when the static-corpus came
         // back empty, a differing response on a benign vs attack
@@ -520,7 +926,6 @@ mod tests {
 
     // ── Live --url path against a mock server (added 2026-05-20).
 
-    use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn spawn_mock(body: &'static str, status: u16) -> std::net::SocketAddr {
@@ -554,6 +959,7 @@ mod tests {
     /// `fetch_for_detect` builds its own tokio runtime — we drive it
     /// from a sync `#[test]` (no `#[tokio::test]`) so the nested
     /// runtime panic doesn't trip.
+    #[serial_test::serial]
     #[test]
     fn fetch_for_detect_against_local_mock_returns_status_and_headers() {
         // Run the mock from a worker tokio runtime, then call the
@@ -579,6 +985,7 @@ mod tests {
         assert!(has_cf, "CF-Ray header should be present");
     }
 
+    #[serial_test::serial]
     #[test]
     fn fetch_for_detect_caps_body_at_64_kib() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -600,6 +1007,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[test]
     fn fetch_for_detect_passes_through_403_status() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -630,9 +1038,52 @@ mod tests {
         assert!(result.is_err(), "unparseable URL must return Err");
     }
 
-    // Suppress dead_code warnings on the test-only helper.
-    #[allow(dead_code)]
-    fn _ensure_arc_in_scope(_: Arc<u8>) {}
+    #[test]
+    fn fetch_for_detect_connection_refused_error_walks_source_chain() {
+        // Regression guard for the "swallowed error chain" UX bug
+        // (P3 from sonnet dogfood pass 4, 2026-05).  Prior to the
+        // fix, the error message just said "error sending request"
+        // with no DNS/TCP cause attached.  Now the source chain is
+        // walked and surfaced via " — caused by: ..." appends.
+        let err = fetch_for_detect("http://127.0.0.1:1/", 2, false)
+            .expect_err("connect-refused must Err");
+        assert!(
+            err.contains("caused by:"),
+            "error must walk the source chain — got: {err}"
+        );
+        // The URL must still appear in the top-level message so the
+        // operator can grep their command log.
+        assert!(
+            err.contains("127.0.0.1:1"),
+            "error must include the URL that failed: {err}"
+        );
+    }
+
+    #[test]
+    fn fetch_for_detect_nxdomain_surfaces_dns_layer_cause() {
+        // Stress: hit a guaranteed-NXDOMAIN host.  `.invalid` is
+        // RFC 6761 reserved → DNS resolvers MUST return NXDOMAIN.
+        // We rely on the source chain walker exposing the dns-layer
+        // cause so a sysadmin reading the error sees "DNS" not just
+        // a generic "request failed".
+        let err = fetch_for_detect("http://nonexistent.invalid/", 2, false);
+        match err {
+            Ok(_) => panic!("invalid TLD must NXDOMAIN"),
+            Err(msg) => {
+                // The exact phrasing depends on the resolver (Windows
+                // says "No such host is known", Unix typically
+                // surfaces "Name or service not known") but every
+                // platform's reqwest chain includes "dns" or "Connect"
+                // in the chain.
+                assert!(
+                    msg.to_lowercase().contains("dns")
+                        || msg.to_lowercase().contains("connect")
+                        || msg.contains("caused by:"),
+                    "NXDOMAIN error must surface DNS / Connect layer: {msg}"
+                );
+            }
+        }
+    }
 
     // ── classify_differential ────────────────────────────────────
     //

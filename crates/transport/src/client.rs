@@ -5,94 +5,10 @@ use std::sync::Mutex;
 
 use wafrift_strategy::HostState;
 use wafrift_strategy::strategy::evade;
-use wafrift_types::{EvasionConfig, Request};
+use wafrift_types::{EvasionConfig, Request, ip_addr_is_bogon};
 
 use crate::response::EvasionResponse;
 use crate::signal::{BlockClass, ResponseProfileDb, ResponseSignal};
-
-/// Reject upstream targets that fall in the bogon set.
-///
-/// Duplicated from wafrift-proxy because wafrift-transport sits below
-/// wafrift-proxy in the dependency graph. Keep in sync — the
-/// canonical version (with regression tests) is in
-/// `wafrift_proxy::upstream_policy::ip_addr_is_bogon`.
-fn is_bogon_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
-    match ip {
-        IpAddr::V4(v) => {
-            if v.is_private()
-                || v.is_loopback()
-                || v.is_link_local()
-                || v.is_broadcast()
-                || v.is_documentation()
-                || v.is_unspecified()
-            {
-                return true;
-            }
-            // Audit additions (2026-05-10):
-            //   100.64.0.0/10  — Carrier-Grade NAT (RFC 6598)
-            //   192.0.0.0/24   — IETF protocol assignments (RFC 6890)
-            //   198.18.0.0/15  — benchmark testing (RFC 2544)
-            let octets = v.octets();
-            if octets[0] == 100 && (octets[1] & 0xc0) == 0x40 {
-                return true; // 100.64.0.0/10
-            }
-            if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
-                return true; // 192.0.0.0/24
-            }
-            if octets[0] == 198 && (octets[1] & 0xfe) == 18 {
-                return true; // 198.18.0.0/15
-            }
-            false
-        }
-        IpAddr::V6(v) => {
-            // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) would otherwise sneak
-            // past the V6 bogon checks. Re-check the embedded V4 explicitly.
-            if let Some(mapped) = v.to_ipv4_mapped() {
-                return is_bogon_ip(IpAddr::V4(mapped));
-            }
-            // IPv4-compatible (deprecated) form.
-            if let Some(compat) = v.to_ipv4() {
-                return is_bogon_ip(IpAddr::V4(compat));
-            }
-            // 6to4 (RFC 3056) embeds an IPv4 in `2002:WWXX:YYZZ::/48`.
-            // If the embedded V4 is a bogon, the V6 transitively is.
-            let segs = v.segments();
-            if segs[0] == 0x2002 {
-                let v4 = std::net::Ipv4Addr::new(
-                    (segs[1] >> 8) as u8,
-                    (segs[1] & 0xff) as u8,
-                    (segs[2] >> 8) as u8,
-                    (segs[2] & 0xff) as u8,
-                );
-                if is_bogon_ip(IpAddr::V4(v4)) {
-                    return true;
-                }
-            }
-            // RFC 3849 documentation prefix.
-            if segs[0] == 0x2001 && segs[1] == 0x0db8 {
-                return true;
-            }
-            // 2001:0::/32 — Teredo tunneling (RFC 4380).
-            // 2001:20::/28 — ORCHIDv2 (RFC 7343).
-            // 100::/64 — discard-only address block (RFC 6666).
-            if segs[0] == 0x2001 && segs[1] == 0x0000 {
-                return true; // Teredo
-            }
-            if segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020 {
-                return true; // ORCHIDv2
-            }
-            if segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 {
-                return true; // 100::/64 discard
-            }
-            v.is_loopback()
-                || v.is_multicast()
-                || v.is_unspecified()
-                || v.is_unique_local()
-                || v.is_unicast_link_local()
-        }
-    }
-}
 
 /// Maximum body size to read for WAF detection (100KB).
 /// WAF block pages are typically small; large responses are likely legitimate downloads.
@@ -236,7 +152,7 @@ impl EvasionClient {
             && let Ok(parsed) = reqwest::Url::parse(&request.url)
             && let Some(host) = parsed.host_str()
             && let Ok(ip) = host.parse::<std::net::IpAddr>()
-            && is_bogon_ip(ip)
+            && ip_addr_is_bogon(ip)
         {
             return Err(EvasionError::InvalidUrl(format!(
                 "EvasionClient refuses literal-IP upstream {ip} (private/loopback/CGN/Teredo). \
@@ -803,42 +719,42 @@ mod tests {
 
     #[test]
     fn bogon_v4_loopback() {
-        assert!(is_bogon_ip("127.0.0.1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("127.0.0.1".parse().unwrap()));
     }
 
     #[test]
     fn bogon_v4_public_ok() {
-        assert!(!is_bogon_ip("8.8.8.8".parse().unwrap()));
+        assert!(!ip_addr_is_bogon("8.8.8.8".parse().unwrap()));
     }
 
     #[test]
     fn bogon_v4_cgnat() {
-        assert!(is_bogon_ip("100.64.0.1".parse().unwrap()));
-        assert!(is_bogon_ip("100.127.255.255".parse().unwrap()));
-        assert!(!is_bogon_ip("100.63.0.1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("100.64.0.1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("100.127.255.255".parse().unwrap()));
+        assert!(!ip_addr_is_bogon("100.63.0.1".parse().unwrap()));
     }
 
     #[test]
     fn bogon_v6_loopback_mapped() {
-        assert!(is_bogon_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("::ffff:127.0.0.1".parse().unwrap()));
     }
 
     #[test]
     fn bogon_v6_6to4_embeds_private_v4() {
         // 6to4 encodes 127.0.0.1 => 2002:7f00:1:: — MUST be rejected.
-        assert!(is_bogon_ip("2002:7f00:1::".parse().unwrap()));
-        assert!(is_bogon_ip("2002:c0a8:101::".parse().unwrap())); // 192.168.1.1
-        assert!(!is_bogon_ip("2002:808:808::".parse().unwrap())); // 8.8.8.8
+        assert!(ip_addr_is_bogon("2002:7f00:1::".parse().unwrap()));
+        assert!(ip_addr_is_bogon("2002:c0a8:101::".parse().unwrap())); // 192.168.1.1
+        assert!(!ip_addr_is_bogon("2002:808:808::".parse().unwrap())); // 8.8.8.8
     }
 
     #[test]
     fn bogon_v6_teredo() {
-        assert!(is_bogon_ip("2001::1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("2001::1".parse().unwrap()));
     }
 
     #[test]
     fn bogon_v6_discard() {
-        assert!(is_bogon_ip("0100::1".parse().unwrap()));
+        assert!(ip_addr_is_bogon("0100::1".parse().unwrap()));
     }
 
     // TEST 16-25: EvasionClient configuration and state

@@ -16,5 +16,8 @@ reqwest = { workspace = true }
 thiserror = { workspace = true }
 url = "2"
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lints]
 workspace = true

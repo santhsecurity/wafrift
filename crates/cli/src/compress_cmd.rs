@@ -71,11 +71,11 @@ pub struct CompressArgs {
 
 /// Entry point.
 ///
-/// # Errors
-/// Returns `ExitCode::from(1)` for: unrecognised algorithm name,
-/// I/O failure (input read, output write), compression-chain
-/// failure (e.g. chain depth above the safety cap), or no input
-/// source supplied.
+/// # Exit codes
+/// - `ExitCode::from(2)` — bad user input: unrecognised algorithm name.
+/// - `ExitCode::from(1)` — I/O failure (input read, output write),
+///   compression-chain failure (e.g. chain depth above the safety cap),
+///   or no input source supplied.
 pub fn run_compress(args: CompressArgs) -> ExitCode {
     let algos = match parse_algorithms(&args.algos) {
         Ok(v) => v,
@@ -173,7 +173,18 @@ fn read_bounded_stdin(max_bytes: usize) -> Result<Vec<u8>, String> {
 /// `--input /dev/zero` style operator typos AND symlink-to-large-
 /// file traps.
 fn read_bounded_file(path: &std::path::Path, max_bytes: usize) -> Result<Vec<u8>, String> {
-    let mut f = std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    let mut f = std::fs::File::open(path).map_err(|e| {
+        // Operator footgun: many users assume `--input PAYLOAD` is
+        // the payload string itself, not a file path.  When the
+        // "file" doesn't exist, point them at the correct flag —
+        // `--stdin` for inline strings (the only argv-NUL-safe
+        // path) or `echo 'X' | wafrift compress --stdin`.
+        format!(
+            "open {}: {e}\n  Hint: `--input` expects a PATH to a file. \
+            For inline payloads use `echo 'X' | wafrift compress --stdin`.",
+            path.display()
+        )
+    })?;
     let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
     let mut chunk = [0u8; 64 * 1024];
     loop {

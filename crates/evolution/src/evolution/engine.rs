@@ -155,21 +155,23 @@ impl EvolutionEngine {
             population[0] = baseline_chromosome(&gene_pool);
         }
 
+        // Pre-fix this constructor double-initialised the algorithm:
+        // built `population` with a cloned RNG, called `algorithm.
+        // initialize(population, ..., &mut engine.rng.clone())`, then
+        // re-generated `population2` with the engine's now-moved RNG
+        // and called `initialize` again. Because `with_algorithm`
+        // doesn't advance the RNG, `population` and `population2`
+        // were IDENTICAL chromosomes — and every `initialize` impl
+        // is last-call-wins (HillClimbing overwrites current/best,
+        // MapElites .clear()s the grid, NoveltySearch overwrites
+        // self.population). Net effect: 2× chromosome generation +
+        // 2× initialize calls for the same final state. Fixed by
+        // single-shot init using the engine's owned RNG.
         let mut engine = Self::with_algorithm("hill_climbing", gene_pool, rng, Budget::default())
             .expect("hill_climbing is built-in");
         engine
             .algorithm
-            .initialize(population, &engine.gene_pool, &mut engine.rng.clone());
-        // Re-initialize with the same RNG to avoid double-use
-        let mut population2: Vec<Chromosome> = (0..population_size)
-            .map(|_| random_chromosome(&engine.gene_pool, &mut engine.rng))
-            .collect();
-        if population_size > 0 {
-            population2[0] = baseline_chromosome(&engine.gene_pool);
-        }
-        engine
-            .algorithm
-            .initialize(population2, &engine.gene_pool, &mut engine.rng);
+            .initialize(population, &engine.gene_pool, &mut engine.rng);
         engine
     }
 

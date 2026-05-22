@@ -30,12 +30,15 @@
 //! real on this stack.
 
 use clap::Args;
+use colored::Colorize;
 use reqwest::{Client, Method};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 
+use crate::helpers::shell_single_quote;
 use crate::probe_classify::{is_throttle_or_unavailable, severity_rank};
 
 #[derive(Args, Debug)]
@@ -76,6 +79,14 @@ pub struct BypassProbeArgs {
     /// Output format.
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
+
+    /// Write JSON output to a file instead of stdout. Only honoured
+    /// when `--format json` is set; ignored otherwise. Used by
+    /// `wafrift legendary` to capture probe findings for the
+    /// markdown report without scrolling past the operator's
+    /// terminal — the same pattern `wafrift scan --output` follows.
+    #[arg(long, short)]
+    pub output: Option<std::path::PathBuf>,
 
     /// Skip the auth-bypass-header probe family.
     #[arg(long)]
@@ -185,7 +196,18 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
 
     if args.format == "json" {
         let out = serde_json::json!({ "results": all_results });
-        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+        let rendered = serde_json::to_string_pretty(&out).unwrap_or_default();
+        if let Some(ref path) = args.output {
+            if let Err(e) = std::fs::write(path, &rendered) {
+                return Err(format!(
+                    "write bypass-probe JSON to {}: {e}",
+                    path.display()
+                ));
+            }
+            eprintln!("bypass-probe JSON written to {}", path.display());
+        } else {
+            println!("{rendered}");
+        }
     } else {
         for report in &all_results {
             print_report_text(report);
@@ -240,12 +262,48 @@ struct UrlReport {
 /// Build the final probe-target list from `args.url` + optional
 /// `--paths-file`. The single-URL case yields one entry; the paths-
 /// file case yields one URL per non-blank, non-`#` line.
+///
+/// When `--paths-file` is set, only the SCHEME + AUTHORITY of
+/// `args.url` is used as the base — any path component on `args.url`
+/// is stripped. Pre-fix `wafrift bypass-probe https://t/admin
+/// --paths-file paths.txt` with `paths.txt` line `/login` silently
+/// constructed `https://t/admin/login` (the operator-supplied path
+/// `/admin` was concatenated with the file's `/login`). Pentesters
+/// got divergence reports against the wrong path with no warning.
+/// Dogfood sonnet 3 (2026-05) caught this.
 fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
     let Some(ref pf) = args.paths_file else {
         return Ok(vec![args.url.clone()]);
     };
     let body = std::fs::read_to_string(pf).map_err(|e| format!("read {pf}: {e}"))?;
-    let base = args.url.trim_end_matches('/');
+    // Strip any path component on the base URL — `--paths-file`
+    // entries are absolute paths or `scheme://host` overrides, and
+    // the only meaningful "base" is the authority.
+    let parsed = reqwest::Url::parse(&args.url)
+        .map_err(|e| format!("--url is not a valid URL: {e}"))?;
+    let authority_only = match parsed.port() {
+        Some(p) => format!(
+            "{}://{}:{}",
+            parsed.scheme(),
+            parsed.host_str().unwrap_or(""),
+            p
+        ),
+        None => format!(
+            "{}://{}",
+            parsed.scheme(),
+            parsed.host_str().unwrap_or("")
+        ),
+    };
+    if !matches!(parsed.path(), "" | "/") {
+        eprintln!(
+            "  {} `--paths-file` is set, so the path on the base URL ({}) \
+             is ignored — using authority-only base {}.",
+            "note:".bright_cyan().bold(),
+            parsed.path(),
+            authority_only
+        );
+    }
+    let base = authority_only;
     let mut out = Vec::new();
     for raw in body.lines() {
         let line = raw.trim();
@@ -284,7 +342,12 @@ async fn probe_one_url(
     // sequentially — the rest of the run depends on it.
     let baseline = match client.get(url).send().await {
         Ok(r) => r,
-        Err(e) => return Err(format!("baseline GET {url} failed: {e}")),
+        Err(e) => {
+                return Err(format!(
+                    "baseline GET {url} failed: {}",
+                    crate::helpers::walk_reqwest_error(&e)
+                ))
+            }
     };
     let baseline_status = baseline.status().as_u16();
     // Bounded read — decompression-bomb defence on the baseline.
@@ -296,6 +359,15 @@ async fn probe_one_url(
     .unwrap_or_default();
     let baseline_len = baseline_body.len();
 
+    // TRACING: baseline captured — confirms what the probe run considers
+    // "normal" so divergences make sense in context.
+    debug!(
+        target: "wafrift::bypass_probe",
+        target = %url,
+        baseline_status,
+        baseline_body_bytes = baseline_len,
+        "baseline captured"
+    );
     if !args.quiet {
         eprintln!("baseline: GET {url} → HTTP {baseline_status}, {baseline_len} bytes");
     }
@@ -328,6 +400,18 @@ async fn probe_one_url(
         }
     }
 
+    // TRACING: probe set built — at info level so operators see the scope
+    // without needing debug verbosity.
+    info!(
+        target: "wafrift::bypass_probe",
+        target = %url,
+        total_probes = work.len(),
+        skip_headers = args.skip_headers,
+        skip_paths = args.skip_paths,
+        skip_methods = args.skip_methods,
+        concurrency,
+        "probe set ready"
+    );
     if !args.quiet {
         eprintln!(
             "firing {} probes (concurrency={concurrency}, delay={}ms)",
@@ -419,12 +503,36 @@ async fn probe_one_url(
     let mut divergences = Vec::new();
     for h in handles {
         if let Ok(Some(div)) = h.await {
+            // TRACING: divergence found — the load-bearing bypass signal.
+            // Label and severity give the operator a triage hint at info level
+            // without scrolling through text output. Curl command is omitted
+            // from the trace (it contains the full target URL which is already
+            // in the target field; no secret exposure).
+            info!(
+                target: "wafrift::bypass_probe",
+                family = %div.family,
+                label = %div.label,
+                baseline_status = div.baseline_status,
+                probe_status = div.probe_status,
+                body_delta_pct = div.body_delta_pct,
+                severity = %div.severity,
+                "divergence found"
+            );
             divergences.push(div);
         }
     }
     let rate_limited_probes = rate_limited.load(Ordering::Relaxed);
     let retry_after_responses_n = retry_after_responses.load(Ordering::Relaxed);
     let max_retry_after_obeyed_ms_n = max_retry_after_obeyed_ms.load(Ordering::Relaxed);
+    if rate_limited_probes > 0 {
+        warn!(
+            target: "wafrift::bypass_probe",
+            target = %url,
+            rate_limited = rate_limited_probes,
+            total_probes = probes_fired,
+            "probes rate-limited — run may be degraded"
+        );
+    }
     if rate_limited_probes > 0 && !args.quiet {
         let pct = f64::from(rate_limited_probes) / probes_fired.max(1) as f64 * 100.0;
         eprintln!(
@@ -553,7 +661,21 @@ async fn run_probe_job(
                 status,
                 body.len(),
                 body_thresh,
-                || format!("curl -s -H '{}: {}' '{url}'", probe.header, probe.value),
+                || {
+                    // Pre-fix: `'{}: {}' '{url}'` raw-interpolated header,
+                    // value, and url with bare single-quote delimiters —
+                    // any `'` in the URL path or the rewrite-probe
+                    // value (probe.value carries the operator's path
+                    // for X-Original-URL / X-Rewrite-URL probes)
+                    // produced a curl line that wouldn't parse, leaving
+                    // the practitioner unable to reproduce the finding.
+                    let header = format!("{}: {}", probe.header, probe.value);
+                    format!(
+                        "curl -s -H {} {}",
+                        shell_single_quote(&header),
+                        shell_single_quote(url)
+                    )
+                },
             )
         }
         ProbeJob::Path(v) => {
@@ -580,7 +702,7 @@ async fn run_probe_job(
                 status,
                 body.len(),
                 body_thresh,
-                || format!("curl -s '{probe_url}'"),
+                || format!("curl -s {}", shell_single_quote(&probe_url)),
             )
         }
         ProbeJob::Method(m) => {
@@ -601,7 +723,7 @@ async fn run_probe_job(
                 status,
                 body.len(),
                 body_thresh,
-                || format!("curl -s -X {m} '{url}'"),
+                || format!("curl -s -X {m} {}", shell_single_quote(url)),
             )
         }
     }
@@ -1061,6 +1183,7 @@ mod tests {
             concurrency: 4,
             insecure: false,
             format: "text".into(),
+            output: None,
             skip_headers: true,
             skip_paths: true,
             skip_methods: false,
@@ -1070,6 +1193,7 @@ mod tests {
         }
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn retry_after_extends_cooldown_across_subsequent_probes() {
         // Server: baseline 200, next 2 probes return 429 + Retry-After:1,
@@ -1115,6 +1239,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn no_retry_after_header_means_no_obeyed_counter_bump() {
         // Anti-rig: a target that throttles without a Retry-After must
@@ -1157,6 +1282,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn retry_after_zero_is_not_a_spurious_sleep() {
         // RFC permits `Retry-After: 0` and we honour it as "no wait"

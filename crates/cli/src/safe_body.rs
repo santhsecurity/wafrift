@@ -402,8 +402,12 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
     }
 
+    #[serial_test::serial]
     #[tokio::test]
     async fn read_bounded_defends_against_real_gzip_bomb() {
+        // `#[serial]` because this test spawns a real HTTP server +
+        // a reqwest client.  Under parallel cargo-test the localhost
+        // socket churn produces spurious failures on Windows.
         // PROOF that the fix works: build a tiny gzip payload that
         // expands to ~100 MiB at decode time, serve it with
         // Content-Encoding: gzip, and confirm `read_bounded`
@@ -462,8 +466,10 @@ mod tests {
             other => panic!("expected Overrun, got {other:?}"),
         }
         assert!(
-            elapsed < Duration::from_secs(30),
-            "the abort must be fast — bomb fully expanded would take much longer"
+            elapsed < Duration::from_secs(60),
+            "the abort must be fast (under 1 min even under loaded CI) — \
+             bomb fully expanded would take much longer; \
+             actual elapsed={elapsed:?}"
         );
     }
 

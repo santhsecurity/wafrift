@@ -250,7 +250,16 @@ impl Sfa {
                 return *t;
             }
         }
-        unreachable!("totality invariant guarantees a transition for every byte")
+        debug_assert!(
+            false,
+            "SFA totality invariant broken: no transition for byte {b} in state {s}"
+        );
+        tracing::error!(
+            state = s,
+            byte = b,
+            "SFA missing transition; treating as non-progress (reject path)"
+        );
+        s
     }
 
     /// Does the automaton accept `word`?

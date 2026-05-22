@@ -22,10 +22,24 @@ impl fmt::Display for DetectedWaf {
     }
 }
 
-/// Detects WAFs from a response status, headers, and body.
+/// Maximum body bytes considered by the classifier when matching
+/// body-regex signatures.
 ///
-/// The body is truncated to the first 4 KiB before matching to keep the
-/// classifier predictable and inexpensive.
+/// WAF block pages, EULA-style "powered by" footers, and CDN
+/// branding strings often live well past the first kilobyte —
+/// Imperva's `imperva_incident_id` line was the most-cited
+/// historical miss when this cap was 4 KiB.  The bench corpus's
+/// largest interesting body is ~24 KiB; 64 KiB matches the cap
+/// applied by `fetch_for_detect` upstream, so no truncation
+/// happens in the common path.
+///
+/// `RegexSet` body scanning is `O(n)` in body length regardless of
+/// pattern count, so paying the extra bytes is cheap (low single-
+/// digit microseconds on a workstation for the full 60-pattern
+/// catalog at 64 KiB).
+const BODY_SCAN_MAX_BYTES: usize = 65_536;
+
+/// Detects WAFs from a response status, headers, and body.
 ///
 /// Returns a `Vec<DetectedWaf>` sorted by confidence descending, then by
 /// WAF name ascending when scores tie (deterministic ordering).
@@ -38,7 +52,8 @@ pub fn detect(status: u16, headers: &[(String, String)], body: &[u8]) -> Vec<Det
         .iter()
         .map(|(key, value)| (key.to_ascii_lowercase(), value.to_ascii_lowercase()))
         .collect();
-    let body_str = String::from_utf8_lossy(&body[..body.len().min(4096)]).to_ascii_lowercase();
+    let body_str =
+        String::from_utf8_lossy(&body[..body.len().min(BODY_SCAN_MAX_BYTES)]).to_ascii_lowercase();
 
     rules::detect_with_config(status, &lower_headers, &body_str, DetectConfig::default())
 }

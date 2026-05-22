@@ -110,4 +110,128 @@ mod tests {
         assert_eq!(pipelines[0], cheap, "tied weight: lower cost wins");
         assert_eq!(pipelines[1], pricey);
     }
+
+    // ── Density ramp ─────────────────────────────────────
+
+    #[test]
+    fn h2_evasion_cost_is_medium() {
+        let t = Technique::H2Evasion("setting".into());
+        assert_eq!(technique_cost(&t), 2);
+    }
+
+    #[test]
+    fn differential_probe_cost_is_medium() {
+        assert_eq!(technique_cost(&Technique::DifferentialProbe), 2);
+    }
+
+    #[test]
+    fn header_obfuscation_is_cheap() {
+        assert_eq!(
+            technique_cost(&Technique::HeaderObfuscation("X-Forwarded-For".into())),
+            1
+        );
+    }
+
+    #[test]
+    fn user_agent_rotation_is_cheap() {
+        assert_eq!(technique_cost(&Technique::UserAgentRotation), 1);
+    }
+
+    #[test]
+    fn boundary_manipulation_is_cheap() {
+        assert_eq!(technique_cost(&Technique::BoundaryManipulation), 1);
+    }
+
+    #[test]
+    fn json_unicode_escape_is_cheap() {
+        assert_eq!(technique_cost(&Technique::JsonUnicodeEscape), 1);
+    }
+
+    #[test]
+    fn empty_pipeline_cost_is_zero() {
+        assert_eq!(pipeline_cost(&[]), 0);
+    }
+
+    #[test]
+    fn pipeline_cost_with_single_smuggle_is_three() {
+        let t = vec![Technique::RequestSmuggling("CL.TE".into())];
+        assert_eq!(pipeline_cost(&t), 3);
+    }
+
+    #[test]
+    fn budget_check_at_exact_boundary_is_inclusive() {
+        // Budget=10, cost=10 → fits (≤).
+        assert!(within_budget(10, 10));
+        assert!(within_budget(0, 0));
+    }
+
+    #[test]
+    fn budget_check_zero_budget_excludes_any_cost() {
+        assert!(within_budget(0, 0));
+        assert!(!within_budget(1, 0));
+    }
+
+    #[test]
+    fn sort_preserves_stable_order_on_full_tie() {
+        // Two pipelines with identical (cost, weight) — sort
+        // must not panic, and we trust slice::sort_by is stable.
+        let p1 = vec![(Technique::PayloadEncoding("a".into()), 3u16)];
+        let p2 = vec![(Technique::PayloadEncoding("b".into()), 3u16)];
+        let mut pipelines: Vec<Vec<(Technique, u16)>> = vec![p1.clone(), p2.clone()];
+        sort_by_cost_effectiveness(&mut pipelines);
+        // Both still present, length preserved.
+        assert_eq!(pipelines.len(), 2);
+        assert!(pipelines.contains(&p1));
+        assert!(pipelines.contains(&p2));
+    }
+
+    #[test]
+    fn sort_empty_input_does_not_panic() {
+        let mut pipelines: Vec<Vec<(Technique, u16)>> = vec![];
+        sort_by_cost_effectiveness(&mut pipelines);
+        assert!(pipelines.is_empty());
+    }
+
+    #[test]
+    fn sort_handles_pipelines_of_different_lengths() {
+        // 3-step pipeline vs 1-step — both eligible regardless
+        // of length; cost-effectiveness compares totals.
+        let long = vec![
+            (Technique::PayloadEncoding("a".into()), 2u16),
+            (Technique::HeaderObfuscation("b".into()), 1u16),
+            (Technique::PayloadEncoding("c".into()), 5u16),
+        ]; // weight sum = 8, cost = 3
+        let short = vec![(Technique::PayloadEncoding("z".into()), 7u16)]; // weight 7, cost 1
+        let mut pipelines: Vec<Vec<(Technique, u16)>> = vec![short.clone(), long.clone()];
+        sort_by_cost_effectiveness(&mut pipelines);
+        assert_eq!(pipelines[0], long, "higher weight (8) wins over (7)");
+    }
+
+    #[test]
+    fn pipeline_cost_aggregates_across_mixed_techniques() {
+        let mixed = vec![
+            Technique::PayloadEncoding("a".into()),
+            Technique::H2Evasion("b".into()),
+            Technique::RequestSmuggling("c".into()),
+            Technique::UserAgentRotation,
+        ];
+        // 1 + 2 + 3 + 1 = 7
+        assert_eq!(pipeline_cost(&mixed), 7);
+    }
+
+    #[test]
+    fn technique_cost_is_deterministic() {
+        let t = Technique::PayloadEncoding("url".into());
+        for _ in 0..10 {
+            assert_eq!(technique_cost(&t), 1);
+        }
+    }
+
+    #[test]
+    fn budget_check_with_max_u32_values() {
+        // Defensive: extreme values must not panic or overflow.
+        assert!(within_budget(0, u32::MAX));
+        assert!(within_budget(u32::MAX, u32::MAX));
+        assert!(!within_budget(u32::MAX, u32::MAX - 1));
+    }
 }

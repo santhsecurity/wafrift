@@ -245,9 +245,16 @@ pub async fn establish_from_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    // All tests in this module bind a fresh `127.0.0.1:0` TCP
+    // listener.  On Windows under default cargo-test parallelism
+    // the ephemeral-port + slow TIME_WAIT recycle path leaks
+    // spurious `connection refused` failures.  `#[serial]` (from
+    // serial_test) serialises the file's tests so only one
+    // listener exists at a time.
 
     async fn spawn_session_server<F>(handler: F) -> std::net::SocketAddr
     where
@@ -297,6 +304,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_captures_set_cookie_from_response() {
         let addr = spawn_session_server(|_| {
@@ -316,6 +324,7 @@ mod tests {
         assert!(s.contains("csrf=xyz"));
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_carries_curl_cookie_forward() {
         // Curl-supplied cookies that the server does NOT echo back via
@@ -332,6 +341,7 @@ mod tests {
         assert!(cookie.contains("persistent=keep"));
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_set_cookie_overrides_curl_supplied_value_by_name() {
         // Mirrors browser cookie-jar semantics: a server Set-Cookie
@@ -351,6 +361,7 @@ mod tests {
         assert!(!cookie.contains("session=OLD"), "stale cookie must be evicted: {cookie}");
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_carries_authorization_header_forward() {
         // Bearer tokens / basic-auth on the init curl must replay on
@@ -373,6 +384,7 @@ mod tests {
         assert_eq!(auth, "Bearer abc.def.ghi");
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_strips_setcookie_attributes_keeps_only_name_value() {
         // The Cookie request header carries only the name=value pair;
@@ -391,6 +403,7 @@ mod tests {
         assert_eq!(cookie, "k=v");
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_returns_no_url_error_when_curl_missing_url() {
         let parsed = ParsedCurl::default();
@@ -403,6 +416,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_summary_names_status_and_cookie_count() {
         let addr = spawn_session_server(|_| {
@@ -441,6 +455,7 @@ mod tests {
         path
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_from_file_full_e2e_with_real_disk_curl_file() {
         let addr = spawn_session_server(|_| {
@@ -478,6 +493,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_from_file_missing_file_returns_read_file_error() {
         let missing = std::env::temp_dir()
@@ -493,6 +509,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_from_file_with_malformed_curl_returns_typed_error() {
         // Anti-rig: malformed curl input must produce a TYPED error
@@ -512,6 +529,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_from_file_with_empty_curl_file_returns_no_url_error() {
         let path = write_curl_to_temp("");

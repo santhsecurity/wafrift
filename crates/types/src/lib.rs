@@ -4,6 +4,7 @@
 //! crate depends on: HTTP request representation, evasion technique
 //! identifiers, result types, configuration, and error handling.
 
+pub mod bogon;
 pub mod calibration;
 pub mod config;
 pub mod discovery;
@@ -43,6 +44,7 @@ pub const DEFAULT_MAX_REDIRECTS: usize = 5;
 //  Public re-exports
 // ──────────────────────────────────────────────
 
+pub use bogon::ip_addr_is_bogon;
 pub use calibration::CalibrationResult;
 pub use config::EvasionConfig;
 pub use error::{Result, WafRiftError};

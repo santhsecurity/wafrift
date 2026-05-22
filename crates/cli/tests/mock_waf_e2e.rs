@@ -1031,6 +1031,136 @@ async fn mock_modsec_origin_header_payload_bypasses() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_ndjson_body_bypasses() {
+    // POST-ndjson vector. application/x-ndjson is outside the
+    // mock's routed-body CT set, so it falls to raw-bytes scan,
+    // whose marker set excludes SQL UNION. Decoy doc on line 1,
+    // attack on line 2 — a real WAF parsing only the first
+    // top-level JSON misses the attack entirely.
+    let (addr, _) = spawn_mock_modsec().await;
+    let body = "{\"q\":\"harmless\"}\n{\"q\":\"' OR 1=1--\"}\n";
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/x-ndjson")
+        .body(body)
+        .send()
+        .await
+        .expect("post ndjson");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "NDJSON SQLi MUST bypass the mock (no NDJSON processor)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_multipart_qp_sqli_bypasses() {
+    // POST-multipart-qp vector. Payload is quoted-printable
+    // encoded inside a multipart part; mock's raw-bytes scan
+    // sees only the encoded text (' becomes =27, space becomes
+    // =20, = becomes =3D), so the literal `' or 1=1` marker
+    // never appears.
+    let (addr, _) = spawn_mock_modsec().await;
+    let boundary = "----WafRiftMockQpTestBoundary";
+    // Hand-encoded QP of "' OR 1=1--":
+    //   '  → =27
+    //   space → =20
+    //   O,R → verbatim
+    //   space → =20
+    //   1 → verbatim
+    //   = → =3D
+    //   1 → verbatim
+    //   - → verbatim
+    //   - → verbatim
+    let encoded = "=27=20OR=201=3D1--";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"q\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n{encoded}\r\n--{boundary}--\r\n"
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("post multipart qp");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "multipart quoted-printable SQLi MUST bypass the mock"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_json5_comment_is_blocked_by_naive_walker() {
+    // POST-json5-comment vector. Documents the mock's limitation
+    // honestly — the JSON walker is comment-unaware and extracts
+    // the post-comment key/value just like any plain JSON. A real
+    // strict-JSON WAF (ModSec rejects on the `/*` parse error and
+    // skips body inspection) would let this through; the mock
+    // walks the byte stream regardless and still finds the SQLi.
+    let (addr, _) = spawn_mock_modsec().await;
+    let body = r#"{"decoy":"x",/* q="safe" */"q":"' OR 1=1--"}"#;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .expect("post json5 comment");
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "Mock's naive walker ignores comments and still finds the SQLi; documents \
+         the difference vs a real strict-JSON WAF that skips on parse error."
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mock_modsec_json_as_form_is_blocked_by_lowercase_substring_scan() {
+    // POST-json-as-form vector. Mock's form-body path lowercases
+    // the entire decoded body and substring-matches attack markers
+    // — so a JSON body with form Content-Type still trips on the
+    // raw `' or 1=1` substring. A real WAF's form processor would
+    // scan for key=value form pairs, find none, and skip body
+    // inspection. This control test documents the gap so a fix to
+    // the mock's behaviour (or a real-bench delta) is visible.
+    let (addr, _) = spawn_mock_modsec().await;
+    let body = r#"{"q":"' OR 1=1--"}"#;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let resp = client
+        .post(format!("http://{addr}/post"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .expect("post json-as-form");
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "Mock's form path substring-scans the raw body, so JSON-as-form is \
+         caught here even though real WAFs (form processor only) would miss it."
+    );
+}
+
 // Test-only harness module that re-exports the internal cli
 // surfaces we want to drive in these tests. Lives inline as a
 // submodule of the test file so the integration test still

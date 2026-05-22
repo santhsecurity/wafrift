@@ -20,7 +20,9 @@ use wafrift_types::discovery::DiscoveredEndpoint;
 pub struct DiscoverArgs {
     /// Target URL (used by --introspect and --mine-params).
     /// Required when either of those modes is enabled. Ignored by --spec.
-    #[arg(long)]
+    /// Accepts `--url` as an alias for consistency with every other
+    /// command (`detect --url`, `scan --target`, `attack --url` …).
+    #[arg(long, alias = "url")]
     pub target: Option<String>,
 
     /// Path to an `OpenAPI` 2.0 (Swagger) or 3.x JSON spec file. The

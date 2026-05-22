@@ -1,0 +1,531 @@
+# CNAME-chain detection rules.
+#
+# Every signature matches against ANY hop in the CNAME chain (the
+# original query name, intermediate aliases, and the final target).
+# Detection composes with header-based detection: when both layers
+# agree, confidence converges to 1.0; when they disagree (e.g. CNAME
+# says Akamai but Server: header says nginx) the operator can see
+# the divergence in the indicators list.
+#
+# Source legend:
+#   * "live-dns 2026-05-21" — first-hand resolver capture
+#   * vendor docs / SOA registrar — public reference
+#
+# Adding a new vendor: register one [[cname]] block per vendor.
+# Each [[cname.signature]] gets a host-pattern regex (matched
+# case-insensitively, auto-anchored to no specific position) and a
+# weight in [0, 1].  Sum across signatures must exceed
+# `confidence_threshold` to fire.
+
+[[cname]]
+name = "Fastly (CNAME)"
+vendor = "Fastly"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "live-dns 2026-05-21 — reddit.map.fastly.net, nytimes.map.fastly.net"
+[[cname.signature]]
+  # Customer-routing alias (most common Fastly pattern).
+  host_regex = "\\.map\\.fastly\\.net$"
+  weight = 0.7
+[[cname.signature]]
+  # Anycast-pool root.  Lower weight because some non-Fastly
+  # tenants of the same network occasionally surface here.
+  host_regex = "\\.fastly\\.net$"
+  weight = 0.4
+[[cname.signature]]
+  # Fastly's secondary edge domain — used for cert-coordinated
+  # services and apex-flattening setups.
+  host_regex = "\\.fastlylb\\.net$"
+  weight = 0.5
+
+[[cname]]
+name = "Akamai (CNAME)"
+vendor = "Akamai"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "live-dns 2026-05-21 — www.ebay.com → e88167.a.akamaiedge.net"
+[[cname.signature]]
+  # Modern Akamai edge alias — primary delivery domain.
+  host_regex = "\\.akamaiedge\\.net$"
+  weight = 0.7
+[[cname.signature]]
+  # Legacy delivery aliases.
+  host_regex = "\\.akamai\\.net$"
+  weight = 0.6
+[[cname.signature]]
+  host_regex = "\\.akamaihd\\.net$"
+  weight = 0.5
+[[cname.signature]]
+  # NetStorage object-store endpoints.
+  host_regex = "\\.akamaitechnologies\\.com$"
+  weight = 0.5
+[[cname.signature]]
+  # Edge-Suite (legacy CDN) — still in production at Microsoft,
+  # Dropbox, and historical Akamai tenants.
+  host_regex = "\\.edgesuite\\.net$"
+  weight = 0.6
+[[cname.signature]]
+  # Edgekey (secure-content variant of EdgeSuite).
+  host_regex = "\\.edgekey\\.net$"
+  weight = 0.6
+[[cname.signature]]
+  # mPulse RUM endpoints — implies Akamai is in the path even
+  # when the leaf hop is a customer-branded alias.
+  host_regex = "\\.akadns\\.net$"
+  weight = 0.5
+
+[[cname]]
+name = "Cloudfront (CNAME)"
+vendor = "Amazon"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "live-dns 2026-05-21 — aws.amazon.com → dr49lng3n1n2s.cloudfront.net"
+[[cname.signature]]
+  # Every Cloudfront distribution gets a *.cloudfront.net leaf.
+  host_regex = "\\.cloudfront\\.net$"
+  weight = 0.8
+
+[[cname]]
+name = "Cloudflare (CNAME)"
+vendor = "Cloudflare"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "vendor docs + live-dns sample"
+[[cname.signature]]
+  # Cloudflare proxied tenants get *.cdn.cloudflare.net.
+  host_regex = "\\.cdn\\.cloudflare\\.net$"
+  weight = 0.8
+[[cname.signature]]
+  # Workers / Pages frontends.
+  host_regex = "\\.workers\\.dev$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.pages\\.dev$"
+  weight = 0.7
+
+[[cname]]
+name = "AWS ELB"
+vendor = "Amazon"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "AWS public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.elb\\.amazonaws\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.elb\\.[a-z0-9-]+\\.amazonaws\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.compute\\.amazonaws\\.com$"
+  weight = 0.4
+[[cname.signature]]
+  host_regex = "\\.amazonaws\\.com$"
+  weight = 0.3
+
+[[cname]]
+name = "Azure Front Door / CDN"
+vendor = "Microsoft"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "Azure public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.azureedge\\.net$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.msedge\\.net$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.azurefd\\.net$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.trafficmanager\\.net$"
+  weight = 0.5
+
+[[cname]]
+name = "Google Cloud Load Balancer"
+vendor = "Google"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "Google Cloud public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.googleusercontent\\.com$"
+  weight = 0.6
+[[cname.signature]]
+  host_regex = "\\.appspot\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.run\\.app$"
+  weight = 0.7
+[[cname.signature]]
+  # Google's CDN/anycast alias used by GLB front-ends.
+  host_regex = "\\.googlehosted\\.com$"
+  weight = 0.5
+
+[[cname]]
+name = "Netlify"
+vendor = "Netlify"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "Netlify public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.netlify\\.app$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.netlify\\.com$"
+  weight = 0.6
+
+[[cname]]
+name = "Vercel"
+vendor = "Vercel"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "Vercel public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.vercel-dns\\.com$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.vercel\\.app$"
+  weight = 0.7
+
+[[cname]]
+name = "Heroku"
+vendor = "Salesforce"
+confidence_threshold = 0.5
+source = "Heroku public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.herokudns\\.com$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.herokuapp\\.com$"
+  weight = 0.7
+
+[[cname]]
+name = "Imperva (CNAME)"
+vendor = "Imperva Inc."
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "Imperva (Incapsula) public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.incapdns\\.net$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.imperva\\.com$"
+  weight = 0.5
+
+[[cname]]
+name = "Sucuri (CNAME)"
+vendor = "Sucuri"
+confidence_threshold = 0.5
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "Sucuri public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.sucuri\\.net$"
+  weight = 0.8
+
+[[cname]]
+name = "StackPath / MaxCDN"
+vendor = "StackPath"
+confidence_threshold = 0.5
+source = "vendor docs"
+[[cname.signature]]
+  host_regex = "\\.stackpathdns\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.stackpathcdn\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.netdna-ssl\\.com$"
+  weight = 0.5
+
+[[cname]]
+name = "BunnyCDN"
+vendor = "Bunny.net"
+confidence_threshold = 0.5
+source = "vendor docs"
+[[cname.signature]]
+  host_regex = "\\.b-cdn\\.net$"
+  weight = 0.8
+
+[[cname]]
+name = "KeyCDN (CNAME)"
+vendor = "KeyCDN"
+confidence_threshold = 0.5
+source = "vendor docs"
+[[cname.signature]]
+  host_regex = "\\.kxcdn\\.com$"
+  weight = 0.8
+
+[[cname]]
+name = "Limelight / Edgio"
+vendor = "Edgio"
+confidence_threshold = 0.5
+source = "vendor docs"
+[[cname.signature]]
+  host_regex = "\\.llnwd\\.net$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.edgio\\.net$"
+  weight = 0.7
+
+[[cname]]
+name = "Section.io"
+vendor = "Section"
+confidence_threshold = 0.5
+source = "vendor docs"
+[[cname.signature]]
+  host_regex = "\\.squixa\\.net$"
+  weight = 0.8
+
+[[cname]]
+name = "Fly.io"
+vendor = "Fly"
+confidence_threshold = 0.5
+source = "vendor docs"
+[[cname.signature]]
+  host_regex = "\\.fly\\.dev$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.flycast\\.net$"
+  weight = 0.6
+
+# ── PTR (reverse-DNS) signatures ─────────────────────────────────
+#
+# These fire when the forward CNAME chain is opaque (origin-direct
+# or customer-private DNS) but the leaf IP's reverse-DNS name
+# carries vendor identity.  PTR works for origins that strip every
+# HTTP banner — Stripe being the canonical example.
+
+[[cname]]
+name = "Stripe (origin-direct)"
+vendor = "Stripe"
+confidence_threshold = 0.5
+source = "live-dns 2026-05-21 — 198.137.150.111 PTR → *.s.stripe.com; ASN 395812 STRIPE-AS"
+[[cname.signature]]
+  host_regex = "\\.s\\.stripe\\.com$"
+  weight = 0.8
+[[cname.signature]]
+  # cymru.com ASN name lookup returns this string verbatim for any
+  # IP allocated to Stripe's ASN (395812).  This is the catch for
+  # Stripe's main IPs which strip PTR — `cymru` is the layer below.
+  host_regex = "^STRIPE-AS"
+  weight = 0.8
+
+# ── BGP / ASN catch-all rules ────────────────────────────────────
+#
+# Cymru's `origin.asn.cymru.com` TXT lookup returns the ASN
+# organisation name registered with the RIR.  These rules fire on
+# the AS name string when every other signal is stripped.
+
+[[cname]]
+name = "Amazon (ASN)"
+vendor = "Amazon"
+confidence_threshold = 0.5
+source = "cymru ASN — Amazon's main ASNs (16509, 14618, etc.)"
+[[cname.signature]]
+  host_regex = "^AMAZON-"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "^AMAZON,"
+  weight = 0.8
+
+[[cname]]
+name = "Cloudflare (ASN)"
+vendor = "Cloudflare"
+confidence_threshold = 0.5
+source = "cymru ASN 13335 CLOUDFLARENET"
+[[cname.signature]]
+  host_regex = "^CLOUDFLARENET"
+  weight = 0.8
+
+[[cname]]
+name = "Fastly (ASN)"
+vendor = "Fastly"
+confidence_threshold = 0.5
+source = "cymru ASN 54113 FASTLY"
+[[cname.signature]]
+  host_regex = "^FASTLY,"
+  weight = 0.8
+
+[[cname]]
+name = "Akamai (ASN)"
+vendor = "Akamai"
+confidence_threshold = 0.5
+source = "cymru ASN — Akamai's main ASNs (16625, 20940, etc.)"
+[[cname.signature]]
+  host_regex = "^AKAMAI-"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "^AKAMAI ,"
+  weight = 0.8
+
+[[cname]]
+name = "Google (ASN)"
+vendor = "Google"
+confidence_threshold = 0.5
+source = "cymru ASN 15169 GOOGLE"
+[[cname.signature]]
+  host_regex = "^GOOGLE,"
+  weight = 0.8
+
+[[cname]]
+name = "Microsoft (ASN)"
+vendor = "Microsoft"
+confidence_threshold = 0.5
+source = "cymru ASN 8075 MICROSOFT-CORP-MSN-AS-BLOCK"
+[[cname.signature]]
+  host_regex = "^MICROSOFT-"
+  weight = 0.8
+
+[[cname]]
+name = "Dropbox (ASN)"
+vendor = "Dropbox"
+confidence_threshold = 0.5
+source = "cymru ASN 19679 — `DROPBOX - Dropbox, Inc., US`"
+[[cname.signature]]
+  # Cymru sometimes returns the full org name (`DROPBOX -
+  # Dropbox, Inc., US`), other times the short tag.  Match the
+  # `DROPBOX` prefix followed by whitespace or comma.
+  host_regex = "^DROPBOX[\\s,]"
+  weight = 0.8
+
+[[cname]]
+name = "Imperva (ASN)"
+vendor = "Imperva Inc."
+confidence_threshold = 0.5
+source = "cymru ASN 19551 INCAPSULA"
+[[cname.signature]]
+  host_regex = "^INCAPSULA"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "^IMPERVA-"
+  weight = 0.8
+
+[[cname]]
+name = "GitHub (ASN)"
+vendor = "GitHub"
+confidence_threshold = 0.5
+source = "cymru ASN 36459 GITHUB"
+[[cname.signature]]
+  host_regex = "^GITHUB,"
+  weight = 0.8
+
+[[cname]]
+name = "Akamai (PTR)"
+vendor = "Akamai"
+confidence_threshold = 0.5
+source = "Akamai PTR allocation"
+[[cname.signature]]
+  host_regex = "\\.deploy\\.static\\.akamaitechnologies\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.deploy\\.akamaitechnologies\\.com$"
+  weight = 0.7
+
+[[cname]]
+name = "Cloudflare (PTR)"
+vendor = "Cloudflare"
+confidence_threshold = 0.5
+source = "Cloudflare PoP allocation"
+[[cname.signature]]
+  # `*.cloudflare.com` PTRs are the typical PoP name (`lhr08.r.cloudflare.com`,
+  # numeric variants). The trailing dot pattern catches the canonical
+  # multi-label PTR form without false-positive on cloudflare.com itself.
+  host_regex = "\\.r\\.cloudflare\\.com$"
+  weight = 0.8
+
+[[cname]]
+name = "AWS EC2 / NLB"
+vendor = "Amazon"
+confidence_threshold = 0.5
+source = "AWS PTR allocation"
+[[cname.signature]]
+  # Modern region-named form: `ec2-X-X-X-X.us-west-2.compute.amazonaws.com`
+  # (Slack, Netflix-internal services, many AWS-fronted apps).
+  host_regex = "\\.compute\\.amazonaws\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  # Legacy numbered form: `ec2-X-X-X-X.compute-1.amazonaws.com`.
+  host_regex = "\\.compute-[0-9]+\\.amazonaws\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  # PTR leaf prefix — `ec2-N-N-N-N.` — additive when the regional
+  # part matches one of the patterns above.
+  host_regex = "^ec2-[0-9-]+\\."
+  weight = 0.3
+
+[[cname]]
+name = "Google Cloud (PTR)"
+vendor = "Google"
+confidence_threshold = 0.5
+source = "GCP PTR allocation"
+[[cname.signature]]
+  host_regex = "\\.bc\\.googleusercontent\\.com$"
+  weight = 0.7
+
+# GitHub runs its own anycast LBs.  PTR exposes them via
+# `lb-X-X-X-X-<region>.github.com` (live capture, 2026-05-21).
+# Identifying GitHub explicitly is useful because GH's edge applies
+# its own DDoS / abuse rules even though no public CDN sits in front.
+[[cname]]
+name = "WordPress VIP"
+vendor = "Automattic"
+confidence_threshold = 0.5
+source = "live-dns 2026-05-21 — harvard.edu → harvard-edu.go-vip.net"
+[[cname.signature]]
+  host_regex = "\\.go-vip\\.net$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.wpvip\\.com$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.vip\\.wordpress\\.com$"
+  weight = 0.6
+
+[[cname]]
+name = "GitHub Edge"
+vendor = "GitHub"
+confidence_threshold = 0.5
+source = "live-dns 2026-05-21 — github.com PTR → lb-*.github.com"
+[[cname.signature]]
+  host_regex = "^lb-[0-9-]+-[a-z]+\\.github\\.com$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.githubusercontent\\.com$"
+  weight = 0.6
+
+# DigitalOcean — `*.cloud.digitalocean.com` or `do.co.cdn.cloudflare.net`.
+[[cname]]
+name = "DigitalOcean"
+vendor = "DigitalOcean"
+confidence_threshold = 0.5
+source = "DigitalOcean public DNS schema"
+[[cname.signature]]
+  host_regex = "\\.digitaloceanspaces\\.com$"
+  weight = 0.8
+[[cname.signature]]
+  host_regex = "\\.ondigitalocean\\.app$"
+  weight = 0.7
+
+# Hetzner — most-common European hoster, identifies via PTR
+# `static.X.X.X.X.clients.your-server.de`.
+[[cname]]
+name = "Hetzner"
+vendor = "Hetzner"
+confidence_threshold = 0.5
+source = "Hetzner PTR schema"
+[[cname.signature]]
+  host_regex = "\\.your-server\\.de$"
+  weight = 0.8
+
+# OVH — `*.ovh.net` or `vps-X.ovh.net` PTRs.
+[[cname]]
+name = "OVH"
+vendor = "OVH"
+confidence_threshold = 0.5
+source = "OVH PTR schema"
+[[cname.signature]]
+  host_regex = "\\.ovh\\.net$"
+  weight = 0.7
+[[cname.signature]]
+  host_regex = "\\.kimsufi\\.com$"
+  weight = 0.6

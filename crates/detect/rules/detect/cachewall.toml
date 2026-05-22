@@ -12,6 +12,15 @@ source = "WAFW00F:cachewall"
   header_name = "x-varnish"
   header_regex = ".+"
   weight = 0.5
+# `Via: 1.1 varnish` is RFC 7230 §5.7 standard form — Varnish ALWAYS
+# emits this on cached responses even when the front-end LB rewrites
+# the Server header to its own brand (Reddit's snooserv, PayPal's
+# branded LB, etc.).  Lower weight because some custom proxies also
+# add a Via line.
+[[waf.signature]]
+  header_name = "via"
+  header_regex = "\\bvarnish\\b"
+  weight = 0.4
 [[waf.signature]]
   header_name = "x-cachewall-action"
   header_regex = ".+?"

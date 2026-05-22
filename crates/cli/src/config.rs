@@ -8,6 +8,56 @@
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// Default User-Agent used by every wafrift HTTP client when the
+/// operator hasn't set one in `.wafrift.toml`. Browser-shaped because
+/// most WAF Core Rule Set bundles block non-browser UAs (ModSecurity
+/// PL2+ fires rule 913100/913110 on `reqwest/*`, `curl/*`,
+/// `python-requests/*` before any payload-inspection ever runs).
+pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+/// Operator-configured UA installed once at startup by `main()` from
+/// `WafRiftConfig::http.user_agent`. `None` means "use the default";
+/// `Some(String)` is the operator's override. Read via
+/// [`shared_user_agent`] from every command's HTTP-client builder so
+/// the config flag actually changes the wire bytes — the field used
+/// to be parsed-and-ignored.
+static CONFIGURED_USER_AGENT: OnceLock<Option<String>> = OnceLock::new();
+
+/// Install the operator's configured User-Agent at startup.
+/// Idempotent — subsequent calls are no-ops. `None` means "use the
+/// browser default"; `Some(s)` overrides it for every wafrift
+/// HTTP-client builder.
+pub fn install_user_agent(ua: Option<String>) {
+    let _ = CONFIGURED_USER_AGENT.set(ua);
+}
+
+/// Pure resolver: configured override wins, default otherwise.
+/// Factored out from [`shared_user_agent`] so unit tests can
+/// exercise the resolution logic without touching the process-wide
+/// OnceLock (which is order-dependent across tests in the same
+/// binary — a test contract bug we hit on the first commit of
+/// this wiring). The runtime path stays thin: `shared_user_agent`
+/// is one OnceLock lookup + this resolver.
+#[must_use]
+pub(crate) fn resolve_user_agent(configured: Option<&str>) -> String {
+    configured
+        .map(str::to_owned)
+        .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string())
+}
+
+/// Resolve the User-Agent every wafrift HTTP client should send.
+/// Pulls the operator-configured value (set by `main()` from
+/// `.wafrift.toml`'s `http.user_agent`) and falls back to
+/// [`DEFAULT_USER_AGENT`] otherwise. Returns an owned String because
+/// `reqwest::ClientBuilder::user_agent` takes anything convertible to
+/// a HeaderValue and we want the configured-string path to not require
+/// `Box::leak` for `&'static str`.
+#[must_use]
+pub fn shared_user_agent() -> String {
+    resolve_user_agent(CONFIGURED_USER_AGENT.get().and_then(|o| o.as_deref()))
+}
 
 /// Map a config `scan.level` string onto the CLI `Level` enum. Unknown
 /// values return `None` (keep the existing value) rather than silently
@@ -177,6 +227,32 @@ impl WafRiftConfig {
         if from_default("stealth_browser") && args.stealth_browser.is_none() {
             args.stealth_browser.clone_from(&self.http.stealth_browser);
         }
+        // The clap arg name uses kebab-case (`report-layers`) but
+        // ValueSource lookups always go through the underlying field
+        // name — match `ScanArgs.report_layers`. Pre-fix this field was
+        // documented and parsed but never applied; a user setting
+        // `output.report_layers = true` in `.wafrift.toml` got no
+        // layer-report in their JSON. Honest behaviour now matches
+        // the docs.
+        if from_default("report_layers") {
+            args.report_layers = self.output.report_layers;
+        }
+        // `scan.concurrency`, `http.timeout_secs`, `output.quiet` were
+        // documented config fields with no apply path — operators set
+        // them in `.wafrift.toml` and got no effect. Now wired to the
+        // matching ScanArgs flags (added 2026-05). 0 = scan-side
+        // dynamic default (keeps every pre-flag invocation behaving
+        // identically), so an unset config field keeps the existing
+        // behaviour.
+        if from_default("concurrency") {
+            args.concurrency = self.scan.concurrency;
+        }
+        if from_default("timeout_secs") {
+            args.timeout_secs = self.http.timeout_secs;
+        }
+        if from_default("quiet") {
+            args.quiet = self.output.quiet;
+        }
         args
     }
 
@@ -271,5 +347,120 @@ delay_ms = 200
     fn load_nonexistent_file_errors() {
         let result = WafRiftConfig::load_from(std::path::Path::new("/nonexistent/config.toml"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_user_agent_defaults_when_none() {
+        assert_eq!(resolve_user_agent(None), DEFAULT_USER_AGENT);
+    }
+
+    #[test]
+    fn resolve_user_agent_uses_configured_when_some() {
+        let got = resolve_user_agent(Some("WafRift-Test/9.9"));
+        assert_eq!(got, "WafRift-Test/9.9");
+        // And critically NOT the default — would prove an off-by-one
+        // in `unwrap_or_else` that flipped Some/None branches.
+        assert_ne!(got, DEFAULT_USER_AGENT);
+    }
+
+    #[test]
+    fn default_user_agent_is_browser_shaped() {
+        // CRS PL2+ blocks non-browser UAs (`reqwest/*`, `curl/*`,
+        // `python-requests/*` trigger rule 913100/913110) before any
+        // payload inspection. Pin a browser-signature substring so
+        // an accidental "Wafrift/1.0" baked into the default would
+        // fail CI rather than silently get every default install
+        // blocked at PL2.
+        assert!(
+            DEFAULT_USER_AGENT.contains("Mozilla"),
+            "DEFAULT_USER_AGENT must be browser-shaped: got {DEFAULT_USER_AGENT:?}"
+        );
+        assert!(
+            DEFAULT_USER_AGENT.contains("Chrome") || DEFAULT_USER_AGENT.contains("Safari"),
+            "DEFAULT_USER_AGENT must look like a real browser, not a generic Mozilla token"
+        );
+    }
+
+    // ── ScanArgs config-wiring contract gates ──
+    // Each `[output] / [scan] / [http]` field documented in the
+    // README must have an apply path. Before 2026-05 the wiring was
+    // partial: `report_layers`, `concurrency`, `timeout_secs`, and
+    // `quiet` were parsed-and-ignored. These tests pin the wiring so
+    // the contract can't regress silently again.
+
+    fn default_scan_args() -> crate::ScanArgs {
+        crate::ScanArgs {
+            target_positional: None,
+            target: None,
+            from_discovery: None,
+            payload: "x".into(),
+            param: "q".into(),
+            payload_class: None,
+            callback_url: None,
+            session_init: None,
+            level: crate::Level::Heavy,
+            encoding_only: false,
+            delay_ms: 50,
+            format: "text".into(),
+            stealth_browser: None,
+            insecure: false,
+            report_layers: false,
+            only: Vec::new(),
+            exclude: Vec::new(),
+            output: None,
+            proxy: None,
+            header: Vec::new(),
+            raw_request: None,
+            raw_request_scheme: "http".into(),
+            auto_distill: false,
+            auto_distill_max_fires: 200,
+            concurrency: 0,
+            timeout_secs: 0,
+            quiet: false,
+            callback_timeout_secs: 5,
+            exploit_cap: 500,
+            variants_cap: 0,
+        }
+    }
+
+    #[test]
+    fn apply_to_scan_wires_report_layers() {
+        let mut cfg = WafRiftConfig::default();
+        cfg.output.report_layers = true;
+        let args = cfg.apply_to_scan(default_scan_args(), None);
+        assert!(
+            args.report_layers,
+            "output.report_layers must flow to ScanArgs.report_layers"
+        );
+    }
+
+    #[test]
+    fn apply_to_scan_wires_concurrency() {
+        let mut cfg = WafRiftConfig::default();
+        cfg.scan.concurrency = 16;
+        let args = cfg.apply_to_scan(default_scan_args(), None);
+        assert_eq!(
+            args.concurrency, 16,
+            "scan.concurrency must flow to ScanArgs.concurrency"
+        );
+    }
+
+    #[test]
+    fn apply_to_scan_wires_timeout_secs() {
+        let mut cfg = WafRiftConfig::default();
+        cfg.http.timeout_secs = 120;
+        let args = cfg.apply_to_scan(default_scan_args(), None);
+        assert_eq!(
+            args.timeout_secs, 120,
+            "http.timeout_secs must flow to ScanArgs.timeout_secs"
+        );
+    }
+
+    #[test]
+    fn apply_to_scan_wires_quiet() {
+        let mut cfg = WafRiftConfig::default();
+        cfg.output.quiet = true;
+        let args = cfg.apply_to_scan(default_scan_args(), None);
+        assert!(args.quiet, "output.quiet must flow to ScanArgs.quiet");
     }
 }

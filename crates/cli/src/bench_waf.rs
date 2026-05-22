@@ -149,10 +149,20 @@ pub struct BenchWafArgs {
     pub skip_healthcheck: bool,
 
     /// Adaptive throttle: if this many consecutive sends fail at the
-    /// connection level (target is overwhelmed), pause for 2s and continue
-    /// at half-speed. 0 disables. Default 50.
+    /// connection level (target is overwhelmed), pause for
+    /// `--adaptive-pause-secs` and continue at half-speed. 0 disables.
+    /// Default 50.
     #[arg(long, default_value_t = 50)]
     pub adaptive_pause_after_errors: u32,
+
+    /// Pause duration in seconds when the adaptive throttle trips.
+    /// Pre-flag this was hardcoded `2`; against cloud WAFs with longer
+    /// lockout windows (Akamai's 60 s, some Cloudflare custom rules),
+    /// 2 s is too short and the bench falls right back into the
+    /// throttled regime. Raise to match the WAF's published cooldown.
+    /// Default 2 s preserves the prior behaviour.
+    #[arg(long, default_value_t = 2)]
+    pub adaptive_pause_secs: u64,
 
     /// Just validate the corpus and exit — load every TOML, check every
     /// case has a unique id + non-empty payload + a known class, then
@@ -175,9 +185,10 @@ pub struct BenchWafArgs {
 
 #[derive(Debug, Deserialize)]
 struct CorpusFile {
-    #[allow(dead_code)]
-    #[serde(default = "default_schema")]
-    schema: u32,
+    // Corpus YAML/JSON may carry a `schema:` key for forward compat
+    // — serde drops unknown fields by default, so it rides through
+    // silently. When a real consumer (e.g. format-version gating)
+    // appears, re-add the field then.
     #[serde(default, rename = "case")]
     cases: Vec<BenchCase>,
 }
@@ -191,14 +202,13 @@ struct BenchCase {
     /// body `q=<urlenc payload>`). Alternatives: `url_query_q`, `raw_body`.
     #[serde(default = "default_mode")]
     mode: String,
+    /// Free-form one-line documentation of what the case exercises —
+    /// rides through to the per-case [`CaseResult`] output so an
+    /// operator scanning bench results sees WHY the case exists.
     #[serde(default)]
-    #[allow(dead_code)]
     description: String,
 }
 
-fn default_schema() -> u32 {
-    1
-}
 fn default_mode() -> String {
     "body_form_q".into()
 }
@@ -207,6 +217,12 @@ fn default_mode() -> String {
 struct CaseResult {
     id: String,
     class: String,
+    /// Mirror of [`BenchCase::description`] — surfaces in the JSON
+    /// bench output so an operator inspecting `case_id` knows what
+    /// the case was MEANT to test (regression-context for a future
+    /// debugger).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    description: String,
     raw_blocked: bool,
     raw_status: u16,
     raw_latency_ms: f64,
@@ -596,21 +612,30 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
 
     // Healthcheck: make sure the target is even reachable before we
     // queue 30k probes that would all "fail" with connection errors.
+    //
+    // Use the operator's `--timeout-secs` (clamped to a hard floor of
+    // 5 s so a pathologically-low operator setting can't shorten the
+    // healthcheck below useful — many slow-starting WAF stacks need
+    // at least that). Pre-fix the timeout was hardcoded `10` and
+    // ignored `--timeout-secs`, producing false "healthcheck failed"
+    // on slow stacks the operator had legitimately budgeted for.
     if !args.skip_healthcheck {
         let probe_url = format!("{}/get", base_url.trim_end_matches('/'));
+        let healthcheck_timeout = std::time::Duration::from_secs(args.timeout_secs.max(5));
         match client
             .get(&probe_url)
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(healthcheck_timeout)
             .send()
             .await
         {
             Ok(_) => {}
             Err(e) => {
                 return Err(format!(
-                    "healthcheck failed: cannot reach {probe_url}: {e}\n\
+                    "healthcheck failed: cannot reach {probe_url} within {}s: {e}\n\
                      Hint: bring the WAF stack up first. \
                      For the bundled stacks, e.g. `wafrift-bench/scripts/up.sh modsec-pl1`. \
-                     Pass --skip-healthcheck to override."
+                     Pass --skip-healthcheck to override, or raise --timeout-secs.",
+                    healthcheck_timeout.as_secs()
                 ));
             }
         }
@@ -652,7 +677,8 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
                         "warn: {n} consecutive connection errors — pausing 2s and \
                              doubling per-request delay (target may be choked)"
                     );
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(args.adaptive_pause_secs))
+                        .await;
                     let prev = extra_delay_ms.load(Ordering::Relaxed);
                     extra_delay_ms.store(prev.max(50) + args.delay_ms, Ordering::Relaxed);
                     consecutive_errors.store(0, Ordering::Relaxed);
@@ -670,6 +696,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
         results.push(CaseResult {
             id: case.id.clone(),
             class: case.class.clone(),
+            description: case.description.clone(),
             raw_blocked,
             raw_status,
             raw_latency_ms,
@@ -698,7 +725,8 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
 
     // Exit code:
     //   0 — clean run
-    //   2 — wafrift achieved zero bypasses on any case (in --evade mode only)
+    //   2 — wafrift achieved zero bypasses across ALL cases (in --evade mode only)
+    //       i.e. not a single variant bypassed the WAF on any of the corpus cases.
     let code = if args.evade
         && results
             .iter()
@@ -1250,11 +1278,25 @@ async fn run_evolution_strategy(
             Ok((s, blocked, _l)) => (s, blocked),
             Err(e) => {
                 eprintln!("warn: {} ({strat}) send: {e}", case.id);
-                let _ = engine.record_feedback(idx, false);
+                if let Err(fe) = engine.record_feedback(idx, false) {
+                    // InvalidChromosomeIndex would silently bias the
+                    // evolution loop; TargetHealthCritical means the
+                    // target is so unhealthy the engine wants to stop.
+                    // Either way the operator needs to see it.
+                    eprintln!(
+                        "warn: {} ({strat}) record_feedback (failed-send branch) idx={idx}: {fe:?}",
+                        case.id
+                    );
+                }
                 continue;
             }
         };
-        let _ = engine.record_feedback(idx, !blocked_actual);
+        if let Err(fe) = engine.record_feedback(idx, !blocked_actual) {
+            eprintln!(
+                "warn: {} ({strat}) record_feedback idx={idx}: {fe:?}",
+                case.id
+            );
+        }
         if verified_bypass(
             &case.class,
             &case.payload,
@@ -1878,610 +1920,7 @@ fn truncate(s: &str, n: usize) -> String {
     format!("{}…", &s[..end])
 }
 
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-    // Pinned anti-rig tests exercise the single-source oracle/escaper
-    // directly (non-test bench code reaches them only via
-    // `verified_bypass`); imported here, not at module scope.
-    use crate::equiv_engine::{json_escape, oracle_valid, request_reached_app};
-    use wafrift_types::Method;
-
-    // ───────── anti-rig invariants (pinned forever) ─────────
-    //
-    // These freeze the definition of "bypass" so the headline can
-    // never silently re-inflate the way it did before: count every
-    // non-403 (incl. mangled 400s and destroyed payloads) as a win.
-
-    #[test]
-    fn request_reached_app_rejects_non_executed_requests() {
-        // WAF blocks / transport / malformed-evasion: NOT a reached app.
-        for s in [403u16, 406, 503, 400, 413, 414, 421, 431, 502, 504, 0, 100] {
-            assert!(
-                !request_reached_app(s),
-                "status {s} must NOT count as the app processing the attack"
-            );
-        }
-        // The app actually saw and processed it (200/redirect/app-error,
-        // and 500 — a SQL error page is positive injection evidence).
-        for s in [200u16, 201, 204, 301, 302, 304, 401, 404, 405, 422, 500] {
-            assert!(
-                request_reached_app(s),
-                "status {s} must count as the app processing the request"
-            );
-        }
-    }
-
-    #[test]
-    fn verified_bypass_requires_all_three_gates() {
-        // The SQL oracle splices into a NUMERIC context
-        // (`WHERE id = <frag>`), so use a numeric-context injection
-        // whose oracle verdict is known (their own unit test asserts
-        // `1 OR 1=1 --` parses). This test pins the 3-gate AND
-        // composition, not the oracle's context policy.
-        let ok = "1 OR 1=1 --"; // oracle-VALID in numeric context
-        let junk = ")) not sql at all (("; // oracle-INVALID (won't parse)
-
-        // 1. All gates pass → real bypass.
-        assert!(
-            verified_bypass("sql", ok, ok, false, 200),
-            "valid attack + WAF passed + app processed = bypass"
-        );
-        // 2. WAF blocked → never.
-        assert!(!verified_bypass("sql", ok, ok, true, 200), "WAF-blocked");
-        // 3. Not blocked but 400 (evasion broke the request, attack
-        //    never executed) — the residual rig. Must not count.
-        assert!(
-            !verified_bypass("sql", ok, ok, false, 400),
-            "400 malformed is NOT a bypass"
-        );
-        // 4. Not blocked, reached app, but payload is not a valid
-        //    attack — the ORIGINAL oracle rig. Must not count.
-        assert!(
-            !verified_bypass("sql", ok, junk, false, 200),
-            "non-attack that slipped past is NOT a bypass"
-        );
-        // 5. Upstream failure.
-        assert!(
-            !verified_bypass("sql", ok, ok, false, 502),
-            "502 upstream-down is NOT a bypass"
-        );
-    }
-
-    #[test]
-    fn oracle_gate_is_not_a_no_op() {
-        // If this returns true for both, the oracle is neutered and the
-        // bench is rigged again.
-        assert!(
-            oracle_valid("sql", "1 OR 1=1", "1 OR 1=1"),
-            "a valid numeric-context tautology must pass the SQL oracle"
-        );
-        assert!(
-            !oracle_valid("sql", "1 OR 1=1", ")) not sql at all (("),
-            "unparseable noise is not a valid SQL injection"
-        );
-    }
-
-    #[test]
-    fn class_probes_sql_has_keywords_and_baseline() {
-        let probes = class_probes("sql");
-        assert!(!probes.is_empty(), "sql class must have probes");
-        assert!(
-            probes
-                .iter()
-                .any(|p| matches!(p.tests, ProbeTarget::SqlKeyword(_))),
-            "sql probes must include keyword family"
-        );
-        assert!(
-            probes
-                .iter()
-                .any(|p| matches!(p.tests, ProbeTarget::Baseline)),
-            "every class probe set must include a baseline so unblock=baseline-passes is recorded"
-        );
-        // Negative — sql probe set must NOT contain xss or cmd probes.
-        assert!(
-            !probes.iter().any(|p| matches!(
-                p.tests,
-                ProbeTarget::XssTag(_) | ProbeTarget::CmdSeparator(_)
-            )),
-            "sql probe set must not bleed xss/cmd families"
-        );
-    }
-
-    #[test]
-    fn class_probes_xss_only_returns_xss_family() {
-        let probes = class_probes("xss");
-        assert!(!probes.is_empty());
-        for p in &probes {
-            assert!(
-                matches!(
-                    p.tests,
-                    ProbeTarget::XssTag(_)
-                        | ProbeTarget::XssEvent(_)
-                        | ProbeTarget::XssExecFunction(_)
-                        | ProbeTarget::Baseline
-                ),
-                "xss probes must be xss-family + baseline only, got {:?}",
-                p.tests
-            );
-        }
-    }
-
-    #[test]
-    fn all_strategies_constant_includes_every_dispatched_arm() {
-        // If a new strategy is added to the dispatch match in `run_evade`
-        // but not to `ALL_STRATEGIES`, `--strategies all` would silently
-        // omit it. This guards that.
-        for required in &[
-            "heavy",
-            "mcts",
-            "smuggling",
-            "content-type",
-            "redos",
-            "hill-climb",
-            "sim-anneal",
-            "tabu",
-            "novelty",
-            "map-elites",
-            "differential",
-            "equiv",
-            "equiv-adaptive",
-            "equiv-cegis",
-        ] {
-            assert!(
-                ALL_STRATEGIES.contains(required),
-                "ALL_STRATEGIES is missing {required:?} — `--strategies all` would skip it"
-            );
-        }
-    }
-
-    #[test]
-    fn json_escape_is_safe() {
-        assert_eq!(json_escape(r#"a"b\c"#), r#"a\"b\\c"#);
-        assert_eq!(json_escape("x\ny\tz"), "x\\ny\\tz");
-        assert_eq!(json_escape("\u{0001}"), "\\u0001");
-    }
-
-    #[test]
-    fn delivery_shapes_build_correct_requests() {
-        use grammar::equiv::DeliveryShape as D;
-        let p = "1' OR '1'='1";
-
-        let q = build_request_for_delivery("http://h", &D::Query { param: "q".into() }, p);
-        assert_eq!(q.method, Method::Get);
-        assert!(q.url.starts_with("http://h/get?q="), "{}", q.url);
-        assert!(!q.url.contains('\''), "query not url-encoded: {}", q.url);
-
-        let f = build_request_for_delivery("http://h", &D::FormBody { param: "q".into() }, p);
-        assert_eq!(f.method, Method::Post);
-        assert!(f.url.ends_with("/post"));
-        assert!(
-            f.headers
-                .iter()
-                .any(|(k, v)| k == "content-type" && v == "application/x-www-form-urlencoded")
-        );
-        assert!(String::from_utf8_lossy(f.body.as_ref().unwrap()).starts_with("q="));
-
-        let j = build_request_for_delivery(
-            "http://h",
-            &D::JsonBody {
-                param: "q".into(),
-                content_type: None,
-            },
-            p,
-        );
-        assert!(
-            !j.headers.iter().any(|(k, _)| k == "content-type"),
-            "JsonBody None must omit Content-Type (the CRS-blind shape)"
-        );
-        assert_eq!(
-            String::from_utf8_lossy(j.body.as_ref().unwrap()),
-            r#"{"q":"1' OR '1'='1"}"#
-        );
-
-        let jc = build_request_for_delivery(
-            "http://h",
-            &D::JsonBody {
-                param: "q".into(),
-                content_type: Some("application/json".into()),
-            },
-            p,
-        );
-        assert!(
-            jc.headers
-                .iter()
-                .any(|(k, v)| k == "content-type" && v == "application/json")
-        );
-
-        let mf = build_request_for_delivery(
-            "http://h",
-            &D::MultipartFile {
-                name: "q".into(),
-                filename: "a.txt".into(),
-                part_ct: "application/octet-stream".into(),
-            },
-            p,
-        );
-        let mb = String::from_utf8_lossy(mf.body.as_ref().unwrap());
-        assert!(mb.contains("filename=\"a.txt\""));
-        assert!(mb.contains("Content-Type: application/octet-stream"));
-        assert!(mb.contains(p), "file part must carry the exploit verbatim");
-        assert!(
-            mf.headers.iter().any(
-                |(k, v)| k == "content-type" && v.starts_with("multipart/form-data; boundary=")
-            )
-        );
-
-        let ps = build_request_for_delivery("http://h", &D::PathSegment, p);
-        assert_eq!(ps.method, Method::Get);
-        assert!(ps.url.starts_with("http://h/anything/"));
-        assert!(!ps.url.contains('\''), "path seg not encoded: {}", ps.url);
-        assert!(
-            !ps.url
-                .trim_start_matches("http://h/anything/")
-                .contains('?'),
-            "payload must stay one path segment"
-        );
-
-        let hpp = build_request_for_delivery(
-            "http://h",
-            &D::HppSplit {
-                param: "q".into(),
-                parts: 2,
-            },
-            p,
-        );
-        // parts = decoy count; total = decoys + 1 (the FULL payload),
-        // and the payload must be the LAST occurrence (last-wins
-        // backend binds the whole attack — never a split fragment).
-        assert_eq!(
-            hpp.url.matches("q=").count(),
-            3,
-            "HPP must be 2 decoys + full payload: {}",
-            hpp.url
-        );
-        let last = hpp.url.rsplit("q=").next().unwrap();
-        assert_eq!(
-            last,
-            urlencoding::encode(p),
-            "the final HPP param must carry the full attack verbatim"
-        );
-        assert!(
-            !hpp.url.contains("q=v0&q=v1")
-                || hpp.url.ends_with(&urlencoding::encode(p).to_string()),
-            "decoys must precede the payload"
-        );
-
-        // Raw reflected channels → httpbin echo endpoints, rendered
-        // through the single-source `to_request` (smuggle-guarded).
-        let hv = build_request_for_delivery(
-            "http://h",
-            &D::HeaderValue {
-                name: "X-Forwarded-Host".into(),
-            },
-            p,
-        );
-        assert_eq!(hv.method, Method::Get);
-        assert_eq!(hv.url, "http://h/headers", "header shape hits /headers");
-        assert_eq!(
-            hv.get_header("X-Forwarded-Host"),
-            Some(p),
-            "header carries the exact payload bytes"
-        );
-
-        let ck = build_request_for_delivery("http://h", &D::Cookie { name: "q".into() }, p);
-        assert_eq!(ck.method, Method::Get);
-        assert_eq!(ck.url, "http://h/cookies", "cookie shape hits /cookies");
-        assert_eq!(
-            ck.get_header("cookie"),
-            Some(format!("q={p}").as_str()),
-            "cookie carries name=payload (p has no ';'/CRLF to strip)"
-        );
-    }
-
-    #[test]
-    fn equiv_strategy_is_dispatched_and_listed() {
-        // Wiring guard: the strategy name resolves in ALL_STRATEGIES
-        // (so `--strategies all` runs it) and is SQL-gated.
-        assert!(ALL_STRATEGIES.contains(&"equiv"));
-        let mut st = StrategyStat::default();
-        // non-sql class ⇒ no members emitted (anti-rig: no model).
-        let c = case("x", "xss", "<script>alert(1)</script>");
-        assert_eq!(c.class, "xss");
-        let _ = &mut st;
-    }
-
-    fn case(id: &str, class: &str, payload: &str) -> BenchCase {
-        BenchCase {
-            id: id.into(),
-            class: class.into(),
-            payload: payload.into(),
-            mode: "body_form_q".into(),
-            description: String::new(),
-        }
-    }
-
-    #[test]
-    fn validate_corpus_flags_duplicate_id() {
-        let cases = vec![case("a", "sql", "1=1"), case("a", "xss", "<script>")];
-        let code = validate_corpus_and_exit(&cases).unwrap();
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
-    }
-
-    #[test]
-    fn validate_corpus_flags_unknown_class() {
-        let cases = vec![case("a", "definitelynot", "x")];
-        let code = validate_corpus_and_exit(&cases).unwrap();
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
-    }
-
-    #[test]
-    fn validate_corpus_flags_empty_payload() {
-        let cases = vec![case("a", "sql", "")];
-        let code = validate_corpus_and_exit(&cases).unwrap();
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
-    }
-
-    #[test]
-    fn validate_corpus_passes_clean_set() {
-        let cases = vec![
-            case("a", "sql", "1=1"),
-            case("b", "xss", "<script>"),
-            case("c", "log4shell", "${jndi:ldap://x}"),
-        ];
-        let code = validate_corpus_and_exit(&cases).unwrap();
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
-    }
-
-    #[test]
-    fn class_probes_unknown_class_yields_only_baseline() {
-        // Classes with no rule-fingerprint family (xxe / log4shell / ssrf)
-        // should fall through to baseline-only — never zero, so the
-        // strategy doesn't divide-by-zero downstream.
-        let probes = class_probes("log4shell");
-        assert!(
-            probes
-                .iter()
-                .all(|p| matches!(p.tests, ProbeTarget::Baseline)),
-            "unknown classes must yield only baseline probes"
-        );
-    }
-
-    // ── pure helpers ──────────────────────────────────────────
-
-    #[test]
-    fn truncate_short_input_passes_through_unchanged() {
-        assert_eq!(truncate("abc", 10), "abc");
-        assert_eq!(truncate("", 0), "");
-        assert_eq!(truncate("x", 1), "x");
-    }
-
-    #[test]
-    fn truncate_long_input_emits_ellipsis_suffix() {
-        let got = truncate("abcdefghij", 5);
-        assert!(got.ends_with('…'));
-        assert!(got.starts_with("abcd"));
-    }
-
-    #[test]
-    fn truncate_multibyte_does_not_panic_at_codepoint_boundary() {
-        // Regression: the previous impl sliced `&s[..n.saturating_sub(1)]`
-        // which panicked when the byte index landed mid-codepoint.
-        // "café" is 5 bytes (é = 2 bytes); truncate to 5 used to
-        // slice 4 bytes — splitting é. Must NOT panic.
-        let got = truncate("café-payload", 5);
-        // Result is the largest char-boundary prefix ≤ 4 bytes
-        // plus ellipsis.
-        assert!(got.ends_with('…'));
-        assert!(got.starts_with("caf") || got.starts_with("café"));
-    }
-
-    #[test]
-    fn truncate_chinese_chars_do_not_panic() {
-        // Three-byte UTF-8 chars stress the boundary walker even
-        // more.
-        let got = truncate("中文测试", 5);
-        assert!(got.ends_with('…'));
-    }
-
-    #[test]
-    fn truncate_zero_n_emits_ellipsis_only_for_non_empty_input() {
-        // n = 0 → saturating_sub(1) = 0 → empty prefix + ellipsis.
-        // Empty input passes through unchanged (covered above).
-        let got = truncate("abc", 0);
-        assert_eq!(got, "…");
-    }
-
-    // ── pick_level ────────────────────────────────────────────
-
-    #[test]
-    fn pick_level_recognises_canonical_tokens() {
-        assert!(matches!(pick_level("light"), Some(Level::Light)));
-        assert!(matches!(pick_level("medium"), Some(Level::Medium)));
-        assert!(matches!(pick_level("heavy"), Some(Level::Heavy)));
-    }
-
-    #[test]
-    fn pick_level_rejects_unknown_tokens() {
-        assert!(pick_level("").is_none());
-        assert!(pick_level("LIGHT").is_none(), "must be case-sensitive");
-        assert!(pick_level("turbo").is_none());
-    }
-
-    // ── class_to_payload_type ─────────────────────────────────
-
-    #[test]
-    fn class_to_payload_type_maps_every_known_class() {
-        // Anti-rig: every class accepted by KNOWN_CLASSES that has
-        // a wafrift mutator must map to a distinct non-Unknown
-        // PayloadType. A future class addition that's left at
-        // Unknown silently regresses mutator richness.
-        for class in ["sql", "xss", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql"] {
-            let pt = class_to_payload_type(class);
-            assert!(
-                !matches!(pt, PayloadType::Unknown),
-                "{class} must not map to Unknown"
-            );
-        }
-    }
-
-    #[test]
-    fn class_to_payload_type_unknown_class_falls_back_to_unknown() {
-        // log4shell / xxe / cve_pocs have no wafrift mutator yet
-        // — they fall back to Unknown by design (encoding-only
-        // mutations). Lock this contract in.
-        for class in ["log4shell", "xxe", "cve_pocs", "totally-bogus"] {
-            assert!(matches!(class_to_payload_type(class), PayloadType::Unknown));
-        }
-    }
-
-    // ── resolve_base_url ──────────────────────────────────────
-
-    #[test]
-    fn resolve_base_url_returns_arg_when_set() {
-        let args = BenchWafArgs {
-            base_url: Some("http://test.example/".into()),
-            ..default_bench_args_for_tests()
-        };
-        assert_eq!(resolve_base_url(&args), "http://test.example/");
-    }
-
-    #[test]
-    fn resolve_base_url_explicit_argument_overrides_any_env() {
-        // Even with env vars set, an explicit `--base-url` wins.
-        // Skipping the env-mutation path (parallel-test-unsafe);
-        // the explicit-arg branch is the contract that matters.
-        let args = BenchWafArgs {
-            base_url: Some("http://explicit.example/".into()),
-            ..default_bench_args_for_tests()
-        };
-        assert_eq!(resolve_base_url(&args), "http://explicit.example/");
-    }
-
-    /// Helper that materializes a BenchWafArgs with sane defaults
-    /// for the unit-test paths that don't actually fire requests.
-    /// Lets test cases override only the fields they care about.
-    fn default_bench_args_for_tests() -> BenchWafArgs {
-        BenchWafArgs {
-            base_url: None,
-            corpus: PathBuf::from("wafrift-bench/corpus"),
-            class: Vec::new(),
-            evade: false,
-            variants: 5,
-            strategies: vec!["heavy".into()],
-            oracle_gate: false,
-            delay_ms: 25,
-            timeout_secs: 15,
-            insecure: false,
-            format: "text".into(),
-            output: None,
-            summary_only: false,
-            skip_healthcheck: true,
-            adaptive_pause_after_errors: 50,
-            validate_only: false,
-            lineage_output: None,
-        }
-    }
-
-    // ── build_request shapes ──────────────────────────────────
-
-    #[test]
-    fn build_request_url_query_mode_emits_get_with_encoded_param() {
-        let case = BenchCase {
-            id: "t1".into(),
-            class: "sql".into(),
-            mode: "url_query_q".into(),
-            payload: "a&b=c".into(),
-            description: String::new(),
-        };
-        let r = build_request("http://h", &case);
-        assert_eq!(r.method, Method::Get);
-        assert!(r.url.starts_with("http://h/get?q="), "url={}", r.url);
-        // `&` and `=` MUST be percent-encoded.
-        assert!(r.url.contains("%26"));
-        assert!(r.url.contains("%3D"));
-    }
-
-    #[test]
-    fn build_request_raw_body_mode_emits_post_with_text_plain() {
-        let case = BenchCase {
-            id: "t2".into(),
-            class: "xss".into(),
-            mode: "raw_body".into(),
-            payload: "<script>alert(1)</script>".into(),
-            description: String::new(),
-        };
-        let r = build_request("http://h", &case);
-        assert_eq!(r.method, Method::Post);
-        assert!(r.url.ends_with("/post"));
-        assert!(
-            r.headers.iter().any(|(k, v)| k == "content-type" && v == "text/plain"),
-            "must set text/plain on raw_body"
-        );
-        // Body is the raw payload bytes.
-        let body = r.body.as_ref().unwrap();
-        assert_eq!(String::from_utf8_lossy(body), "<script>alert(1)</script>");
-    }
-
-    #[test]
-    fn build_request_default_mode_is_form_body() {
-        // Any unrecognised mode string falls through to form-body.
-        let case = BenchCase {
-            id: "t3".into(),
-            class: "sql".into(),
-            mode: "made_up_mode".into(),
-            payload: "x".into(),
-            description: String::new(),
-        };
-        let r = build_request("http://h", &case);
-        assert_eq!(r.method, Method::Post);
-        assert!(
-            r.headers
-                .iter()
-                .any(|(k, v)| k == "content-type" && v == "application/x-www-form-urlencoded")
-        );
-    }
-
-    #[test]
-    fn build_request_trims_trailing_slash_from_base_url() {
-        // Anti-rig: missing trim would emit `http://h//get?...`
-        // which routes the same on most servers but is ugly and
-        // some routers reject it.
-        let case = BenchCase {
-            id: "t4".into(),
-            class: "sql".into(),
-            mode: "url_query_q".into(),
-            payload: "x".into(),
-            description: String::new(),
-        };
-        let r = build_request("http://h/", &case);
-        assert!(!r.url.contains("//get"), "url={}", r.url);
-    }
-
-    // Note: `validate_corpus_flags_unknown_class`,
-    // `validate_corpus_flags_empty_payload`, and
-    // `validate_corpus_passes_clean_set` already exist above using
-    // the `case()` shorthand. Only the duplicate-ids case is new.
-
-    #[test]
-    fn validate_corpus_flags_duplicate_ids() {
-        let cases = vec![
-            BenchCase {
-                id: "dup".into(),
-                class: "sql".into(),
-                mode: "url_query_q".into(),
-                payload: "x".into(),
-                description: String::new(),
-            },
-            BenchCase {
-                id: "dup".into(),
-                class: "sql".into(),
-                mode: "url_query_q".into(),
-                payload: "y".into(),
-                description: String::new(),
-            },
-        ];
-        let code = validate_corpus_and_exit(&cases).unwrap();
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
-    }
-}
+#[path = "bench_waf_tests.rs"]
+mod tests;

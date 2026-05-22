@@ -12,96 +12,8 @@ pub struct UpstreamPolicy {
     pub insecure_open_upstream: bool,
 }
 
-/// True if this IP should be blocked when `allow_private_upstream` is false.
-#[must_use]
-pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v) => {
-            if v.is_private()
-                || v.is_loopback()
-                || v.is_link_local()
-                || v.is_broadcast()
-                || v.is_documentation()
-                || v.is_unspecified()
-            {
-                return true;
-            }
-            // Audit additions (2026-05-10):
-            //   100.64.0.0/10  — Carrier-Grade NAT (RFC 6598)
-            //   192.0.0.0/24   — IETF protocol assignments (RFC 6890)
-            //   198.18.0.0/15  — benchmark testing (RFC 2544)
-            // These are not "private" per std::net::Ipv4Addr but
-            // routing them upstream from a security tool would still
-            // exfiltrate to attacker-side infra in many topologies.
-            let octets = v.octets();
-            if octets[0] == 100 && (octets[1] & 0xc0) == 0x40 {
-                return true; // 100.64.0.0/10
-            }
-            if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
-                return true; // 192.0.0.0/24
-            }
-            if octets[0] == 198 && (octets[1] & 0xfe) == 18 {
-                return true; // 198.18.0.0/15
-            }
-            false
-        }
-        IpAddr::V6(v) => {
-            // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1, ::ffff:169.254.169.254)
-            // would otherwise sneak past the V6 bogon checks because
-            // is_loopback / is_unique_local return false for the mapped form.
-            // Re-check the embedded V4 explicitly. Same for IPv4-compatible
-            // (deprecated) form.
-            if let Some(mapped) = v.to_ipv4_mapped() {
-                return ip_addr_is_bogon(IpAddr::V4(mapped));
-            }
-            if let Some(compat) = v.to_ipv4() {
-                return ip_addr_is_bogon(IpAddr::V4(compat));
-            }
-            // 6to4 (RFC 3056) embeds an IPv4 in `2002:WWXX:YYZZ::/48`.
-            // If the embedded V4 is a bogon, the V6 transitively is —
-            // an attacker that controls a 6to4 gateway could otherwise
-            // route us to RFC1918 space.
-            let segs = v.segments();
-            if segs[0] == 0x2002 {
-                let v4 = std::net::Ipv4Addr::new(
-                    (segs[1] >> 8) as u8,
-                    (segs[1] & 0xff) as u8,
-                    (segs[2] >> 8) as u8,
-                    (segs[2] & 0xff) as u8,
-                );
-                if ip_addr_is_bogon(IpAddr::V4(v4)) {
-                    return true;
-                }
-            }
-            // RFC 3849 documentation prefix.
-            if segs[0] == 0x2001 && segs[1] == 0x0db8 {
-                return true;
-            }
-            // Audit additions (2026-05-10):
-            //   2001:0::/32 — Teredo tunneling (RFC 4380). Embeds an
-            //     attacker-controlled IPv4 server *and* exposes the
-            //     client's IPv4 — never a legitimate origin endpoint.
-            //   2001:20::/28 — ORCHIDv2 (RFC 7343). Pure cryptographic
-            //     identifiers; not routable as upstream targets.
-            //   2002::/16 with private V4 — handled above.
-            //   100::/64 — discard-only address block (RFC 6666).
-            if segs[0] == 0x2001 && segs[1] == 0x0000 {
-                return true; // Teredo
-            }
-            if segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020 {
-                return true; // ORCHIDv2 2001:20::/28
-            }
-            if segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 {
-                return true; // 100::/64 discard
-            }
-            v.is_loopback()
-                || v.is_multicast()
-                || v.is_unspecified()
-                || v.is_unique_local()
-                || v.is_unicast_link_local()
-        }
-    }
-}
+/// Re-export the workspace-canonical bogon classifier.
+pub use wafrift_types::ip_addr_is_bogon;
 
 /// Block forwarding when the URL host is a literal bogon IP.
 #[must_use]
@@ -161,7 +73,66 @@ pub async fn assert_forward_url_allowed(url: &str, policy: &UpstreamPolicy) -> R
         return Ok(());
     }
     let port = u.port_or_known_default().unwrap_or(80);
-    resolve_host_all_public(host, port).await
+    resolve_host_all_public(host, port).await?;
+    Ok(())
+}
+
+/// Resolve a forward URL to validated public socket addresses.
+///
+/// Callers (especially the stealth TLS path) must use these pinned
+/// addresses instead of re-resolving DNS after an intercept wait, which
+/// would reopen a DNS-rebinding TOCTOU window.
+pub async fn resolve_forward_url_pinned(
+    url: &str,
+    policy: &UpstreamPolicy,
+) -> Result<Vec<SocketAddr>, String> {
+    if policy.insecure_open_upstream || policy.allow_private_upstream {
+        let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
+        let host = u.host_str().ok_or_else(|| "upstream URL has no host".to_string())?;
+        let port = u.port_or_known_default().unwrap_or(80);
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Ok(vec![SocketAddr::new(ip, port)]);
+        }
+        let lookups = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
+        let v: Vec<SocketAddr> = lookups.collect();
+        if v.is_empty() {
+            return Err(format!("refusing upstream: no addresses for {host}"));
+        }
+        return Ok(v);
+    }
+    if upstream_literal_ip_forbidden(url) {
+        return Err(format!(
+            "upstream URL uses a disallowed literal IP (private / loopback / link-local / RFC1918): {url}"
+        ));
+    }
+    let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
+    let host = u.host_str().ok_or_else(|| "upstream URL has no host".to_string())?;
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(vec![SocketAddr::new(
+            ip,
+            u.port_or_known_default().unwrap_or(80),
+        )]);
+    }
+    let port = u.port_or_known_default().unwrap_or(80);
+    let mut filtered = Vec::new();
+    let lookups = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
+    for sa in lookups {
+        if ip_addr_is_bogon(sa.ip()) {
+            return Err(format!(
+                "refusing upstream: DNS for {host} includes non-public address {}",
+                sa.ip()
+            ));
+        }
+        filtered.push(sa);
+    }
+    if filtered.is_empty() {
+        return Err(format!("refusing upstream: no addresses for {host}"));
+    }
+    Ok(filtered)
 }
 
 /// Validate `CONNECT` authority `host:port` before tunnel/MITM.

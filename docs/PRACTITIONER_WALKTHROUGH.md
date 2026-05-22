@@ -7,7 +7,7 @@ WAF default deployment). Backend: `kennethreitz/httpbin`. Probe target:
 `http://127.0.0.1:18084/get?q=<payload>`.
 
 > **Snapshot note.** The numbers and commands captured here come from
-> v0.2.1 — the current release is v0.2.12. Every command in this
+> v0.2.1 — the current release is v0.2.17. Every command in this
 > walkthrough still works (the CLI surface is stable since 0.2.0); the
 > bypass rates have only improved since (see the README's "Measured
 > bypass rates" table for the current corpus run).

@@ -145,11 +145,11 @@ fn every_case_has_id_class_and_payload_fields() {
             let mut current_id: Option<String> = None;
             let mut current_class: Option<String> = None;
             let mut current_payload: Option<String> = None;
-            let mut flush = |id: &Option<String>,
-                             cls: &Option<String>,
-                             payload: &Option<String>,
-                             path: &std::path::Path,
-                             violations: &mut Vec<String>| {
+            let flush = |id: &Option<String>,
+                         cls: &Option<String>,
+                         payload: &Option<String>,
+                         path: &std::path::Path,
+                         violations: &mut Vec<String>| {
                 if id.is_none() && cls.is_none() && payload.is_none() {
                     return;
                 }
@@ -291,5 +291,51 @@ fn corpus_total_is_in_a_sensible_range() {
         total >= 300,
         "corpus total {total} is below the sensible floor of 300 — bulk \
          deletion regression?"
+    );
+}
+
+#[test]
+fn every_corpus_toml_file_parses_via_serde() {
+    // Real serde parse on every corpus file. The hand-rolled
+    // line-walker tests above only check that the *fields we look at*
+    // are present — they cheerfully accept files whose TOML is invalid
+    // (e.g. backslash-line-continuation inside single-line basic
+    // strings) because the bench runner is the thing that ultimately
+    // calls `toml::from_str`. That gap shipped 17 broken files in
+    // 2026-05; this test closes it. If a file can't be parsed by the
+    // canonical `toml` crate, the bench harness can't load it, and we
+    // want CI to fail on the PR — not the production scoreboard.
+    let root = corpus_root();
+    let mut violations: Vec<String> = Vec::new();
+    for class in REQUIRED_CLASSES {
+        let dir = root.join(class);
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+                continue;
+            }
+            let body = match fs::read_to_string(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.push(format!("read {}: {e}", path.display()));
+                    continue;
+                }
+            };
+            if let Err(e) = toml::from_str::<toml::Value>(&body) {
+                violations.push(format!(
+                    "{}: invalid TOML — {e}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "corpus TOML parse failures (file by file):\n{}",
+        violations.join("\n")
     );
 }

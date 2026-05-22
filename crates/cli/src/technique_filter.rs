@@ -57,7 +57,13 @@ pub fn strategy_path(strategy: Strategy) -> &'static str {
 }
 
 /// Family-level paths that the v0.1 filter recognizes.
-const KNOWN_FAMILIES: &[&str] = &["encoding", "grammar"];
+///
+/// `tamper/*` is recognised so `wafrift evade --only tamper/<name>`
+/// validates instead of error-exiting on an unknown selector.  The
+/// underlying tamper application currently runs only inside
+/// `wafrift scan` (Step 3b — "Tamper probing"); a future revision
+/// will fan tampers into `evade` as well.
+const KNOWN_FAMILIES: &[&str] = &["encoding", "grammar", "tamper"];
 
 /// Parsed filter built from comma-separated `--only` / `--exclude` lists.
 #[derive(Debug, Default, Clone)]
@@ -151,7 +157,41 @@ fn all_known_paths() -> Vec<&'static str> {
     for &s in wafrift_encoding::encoding::all_strategies() {
         paths.push(strategy_path(s));
     }
+    // Tamper family — every registered tamper exposes a
+    // `tamper/<name>` selector.  Names come from the
+    // `wafrift_encoding::tamper::all_tamper_names()` static list
+    // so adding a tamper is a one-line change in the registry; the
+    // filter picks it up automatically and the renderer surfaces
+    // it under `wafrift techniques list`.
+    for name in wafrift_encoding::tamper::all_tamper_names() {
+        paths.push(tamper_path_static(name));
+    }
     paths
+}
+
+/// Returns a `'static` slash-prefixed path for a tamper name.
+/// The tamper-name list is itself `&'static [&'static str]`, so
+/// the prefix concatenation reduces to interning the result via
+/// a one-time `Box::leak`.  Used only at filter parse time, so
+/// the leak is bounded to one allocation per tamper per process
+/// lifetime.
+fn tamper_path_static(name: &'static str) -> &'static str {
+    // SAFETY-FREE: cache results in a single OnceLock so the
+    // leaked memory grows linearly with the number of tampers
+    // (one entry each) and never per call.  Tampers are static so
+    // the `&'static str` lifetime is honest.
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<
+        std::sync::Mutex<std::collections::HashMap<&'static str, &'static str>>,
+    > = OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut guard = cache.lock().expect("tamper-path cache poisoned");
+    if let Some(&path) = guard.get(name) {
+        return path;
+    }
+    let leaked: &'static str = Box::leak(format!("tamper/{name}").into_boxed_str());
+    guard.insert(name, leaked);
+    leaked
 }
 
 fn is_known(selector: &str, known: &[&'static str]) -> bool {
@@ -175,6 +215,20 @@ pub fn render_tree() -> String {
     for p in paths {
         out.push_str("  ");
         out.push_str(p);
+        out.push('\n');
+    }
+    // Tamper family — surfaced for visibility under `techniques
+    // list` even though the tamper application currently runs
+    // only inside `wafrift scan`.
+    out.push_str("tamper                         (scan-only payload tampers)\n");
+    let mut tamper_paths: Vec<String> = wafrift_encoding::tamper::all_tamper_names()
+        .iter()
+        .map(|n| format!("tamper/{n}"))
+        .collect();
+    tamper_paths.sort();
+    for p in tamper_paths {
+        out.push_str("  ");
+        out.push_str(&p);
         out.push('\n');
     }
     out
@@ -263,5 +317,104 @@ mod tests {
             .collect();
         let unique: HashSet<&&str> = paths.iter().collect();
         assert_eq!(paths.len(), unique.len(), "duplicate path detected");
+    }
+
+    // ── Tamper-path wiring (added 2026-05) ─────────────────
+
+    #[test]
+    fn tamper_family_selector_is_recognized() {
+        // `tamper` as a bare family must be a valid selector — it
+        // shouldn't error out with "unknown selector".
+        let f = TechniqueFilter::parse(&["tamper".into()], &[]).expect("parses tamper");
+        assert!(!f.is_default());
+    }
+
+    #[test]
+    fn tamper_leaf_selector_is_recognized() {
+        // Every registered tamper produces a `tamper/<name>`
+        // selector that must validate.
+        for &name in wafrift_encoding::tamper::all_tamper_names() {
+            let selector = format!("tamper/{name}");
+            let f = TechniqueFilter::parse(&[selector.clone()], &[])
+                .unwrap_or_else(|e| panic!("tamper selector `{selector}` rejected: {e}"));
+            assert!(!f.is_default(), "filter must register the selector");
+        }
+    }
+
+    #[test]
+    fn unknown_tamper_leaf_still_fails_fast() {
+        // A typo'd selector under the tamper family should still
+        // error out rather than silently match nothing.
+        let r = TechniqueFilter::parse(&["tamper/nonexistent_tamper".into()], &[]);
+        assert!(r.is_err(), "unknown tamper leaf must fail fast");
+    }
+
+    #[test]
+    fn render_tree_includes_tamper_section() {
+        let out = render_tree();
+        assert!(out.contains("tamper"), "render_tree must include tamper family header");
+        // Every registered tamper must appear in the rendered output.
+        for &name in wafrift_encoding::tamper::all_tamper_names() {
+            let needle = format!("tamper/{name}");
+            assert!(
+                out.contains(&needle),
+                "render_tree output must list `{needle}`"
+            );
+        }
+    }
+
+    #[test]
+    fn render_tree_groups_have_distinct_headers() {
+        let out = render_tree();
+        assert!(out.contains("grammar"));
+        assert!(out.contains("encoding"));
+        assert!(out.contains("tamper"));
+        // No accidental duplicate family headers.
+        assert_eq!(out.matches("(scan-only payload tampers)").count(), 1);
+    }
+
+    #[test]
+    fn tamper_paths_are_unique_across_known_set() {
+        use std::collections::HashSet;
+        let known = all_known_paths();
+        let unique: HashSet<&&str> = known.iter().collect();
+        assert_eq!(
+            known.len(),
+            unique.len(),
+            "duplicate paths in known set: {known:?}"
+        );
+    }
+
+    #[test]
+    fn frontier_2026_tampers_are_recognised() {
+        // Specific guard for the SIX frontier-2026 tampers shipped
+        // in this release (keyword_comment_split was removed —
+        // see encoding::tamper::tests::obsolete_keyword_comment_split_tamper_was_removed
+        // for the parser-correctness rationale).
+        for name in [
+            "zero_width_inject",
+            "postgres_dollar_quote",
+            "mysql_versioned_comment_wrap",
+            "bracket_confusable",
+            "hex_literal_keyword",
+            "bell_separator",
+        ] {
+            let selector = format!("tamper/{name}");
+            let f = TechniqueFilter::parse(&[selector.clone()], &[]);
+            assert!(
+                f.is_ok(),
+                "frontier 2026 tamper `{selector}` is no longer registered"
+            );
+        }
+    }
+
+    #[test]
+    fn tamper_path_static_caches_lookups() {
+        // Internal property: calling tamper_path_static twice with
+        // the same name returns the exact same `&'static str` (no
+        // re-leak per call).  This keeps the leak bounded.
+        let a = tamper_path_static("zero_width_inject");
+        let b = tamper_path_static("zero_width_inject");
+        assert_eq!(a.as_ptr(), b.as_ptr(), "tamper-path cache leaked twice");
     }
 }

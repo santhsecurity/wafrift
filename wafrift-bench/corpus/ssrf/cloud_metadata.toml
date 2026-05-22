@@ -70,3 +70,83 @@ payload = "http://127.0.0.1:10255/pods"
 id = "kubernetes_api_self"
 class = "ssrf"
 payload = "https://kubernetes.default.svc/api/v1/namespaces/default/pods"
+
+# ── IP-encoding obfuscation for 169.254.169.254 ──
+
+[[case]]
+id = "aws_imds_decimal_ip"
+class = "ssrf"
+payload = "http://2852039166/latest/meta-data/"
+
+[[case]]
+id = "aws_imds_hex_ip"
+class = "ssrf"
+payload = "http://0xa9fea9fe/latest/meta-data/"
+
+[[case]]
+id = "aws_imds_octal_ip"
+class = "ssrf"
+payload = "http://0251.0376.0251.0376/latest/meta-data/"
+
+# ── AWS IMDSv2 (token-required path) ──
+
+[[case]]
+id = "aws_imdsv2_token_endpoint"
+class = "ssrf"
+payload = "http://169.254.169.254/latest/api/token"
+
+# ── More cloud providers ──
+
+[[case]]
+id = "hetzner_cloud_metadata"
+class = "ssrf"
+payload = "http://169.254.169.254/hetzner/v1/metadata"
+
+[[case]]
+id = "oracle_oci_instance"
+class = "ssrf"
+payload = "http://169.254.169.254/opc/v1/instance/"
+
+# ── Localhost internal-service probes ──
+
+[[case]]
+id = "localhost_redis_default"
+class = "ssrf"
+payload = "http://127.0.0.1:6379/"
+
+[[case]]
+id = "localhost_elasticsearch_default"
+class = "ssrf"
+payload = "http://127.0.0.1:9200/_cat/indices?v"
+
+[[case]]
+id = "localhost_docker_socket_tcp"
+class = "ssrf"
+payload = "http://127.0.0.1:2375/version"
+
+[[case]]
+id = "localhost_consul_default"
+class = "ssrf"
+payload = "http://127.0.0.1:8500/v1/catalog/services"
+
+[[case]]
+id = "localhost_etcd_default"
+class = "ssrf"
+payload = "http://127.0.0.1:2379/v2/keys/?recursive=true"
+
+# ── DNS-rebinding hostname tricks ──
+
+[[case]]
+id = "dns_rebind_nip_io_127"
+class = "ssrf"
+payload = "http://127.0.0.1.nip.io/"
+
+[[case]]
+id = "dns_rebind_nip_io_metadata"
+class = "ssrf"
+payload = "http://169.254.169.254.nip.io/latest/meta-data/"
+
+[[case]]
+id = "dns_rebind_xip_io_127"
+class = "ssrf"
+payload = "http://127.0.0.1.xip.io/"

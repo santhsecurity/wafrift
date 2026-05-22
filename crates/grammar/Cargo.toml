@@ -28,6 +28,7 @@ toml = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 serde_json = { workspace = true }
+wafrift-oracle = { workspace = true }
 
 [lints]
 workspace = true

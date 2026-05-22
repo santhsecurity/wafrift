@@ -51,6 +51,8 @@ pub mod render_intercept;
 pub mod render_overview;
 pub mod render_techniques;
 pub mod state;
+#[cfg(test)]
+mod state_coverage;
 pub mod yank;
 
 pub use state::{Event, MAX_BODY_EXCERPT};

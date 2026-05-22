@@ -71,10 +71,15 @@ pub async fn run(
             }
         }
         Err(e) => {
+            // walk_reqwest_error surfaces the deepest cause chain
+            // (NXDOMAIN, connection refused, TLS handshake, etc.).
+            // Pre-fix the operator saw "error sending request" with
+            // no actionable detail — a "fix connectivity" hint with
+            // no idea what was actually wrong.
             eprintln!(
                 "  {} {}",
                 "✗ Baseline request failed (transport):".red().bold(),
-                e
+                crate::helpers::walk_reqwest_error(&e)
             );
             BaselineOutcome {
                 status: 0,

@@ -11,7 +11,7 @@ WAF evasion toolkit — run without arguments for interactive mode.
 Exit codes (CI\-friendly):
 0  success
 1  generic error (bad input, IO, etc.)
-2  bench\-waf: zero bypasses on any case in \-\-evade mode
+2  bench\-waf: zero bypasses across ALL corpus cases in \-\-evade mode
 2  replay:    saved bypass got blocked (regression signal)
 3  bench\-diff: regression vs baseline (see \-\-bypass\-drop\-pp)
 4  bench\-waf \-\-validate\-only: corpus integrity errors
@@ -35,7 +35,7 @@ wafrift\-evade(1)
 Transform a payload with evasion techniques
 .TP
 wafrift\-detect(1)
-Identify a WAF from response metadata
+Identify a WAF / CDN / origin\-infrastructure from response metadata
 .TP
 wafrift\-probe(1)
 Generate differential analysis probes
@@ -111,6 +111,42 @@ Wrap a request body in one or more `Content\-Encoding` layers (gzip / deflate / 
 .TP
 wafrift\-smuggle(1)
 HTTP request smuggling probes (CL.TE / TE.CL / TE.TE / CL.0 / dual\-CL / multi\-value\-CL). Subcommands: `detect` runs the SAFE timing\-differential probes that can\*(Aqt poison the connection pool; `probe` fires the exploit\-grade payloads (requires `\-\-unsafe`); `dry\-run` renders the raw wire bytes without sending anything; `list` enumerates the variants. Built on the same engine powering the `wafrift\-smuggling` library, but exposed as a first\-class CLI surface so pentesters don\*(Aqt need to roll their own runner
+.TP
+wafrift\-distill(1)
+Adversarial distillation via Zeller\*(Aqs ddmin: take a KNOWN\- working bypass payload and find the minimum\-edit\-distance subset that STILL bypasses. Useful for pentest reports — shorter payloads are easier for clients to reproduce, and the reduction reveals which payload features the WAF actually objected to vs. which were noise. Typically chained from `wafrift scan \-\-format json | jq .bypass_variants[0].payload`
+.TP
+wafrift\-header\-diff(1)
+Header parser\-disagreement scanner — sister to `parser\-diff` (which probes URL\-path disagreements). Fires variants of the request header block that exercise known WAF↔origin parser disagreements (dup\-header dispatch, X\-Forwarded\-For chain spoof, Authorization case\-mix, X\-HTTP\-Method\-Override, X\-Original\-Host rebind, X\-Rewrite\-URL, X\-Real\-IP localhost spoof, trailing\-whitespace + NUL truncation in values). A divergence from baseline is evidence the WAF and origin disagree on what the header block means — exploit the seam without any payload mutation
+.TP
+wafrift\-body\-diff(1)
+Body parser\-disagreement scanner — third in the parser\-diff family. Fires variant request BODIES that exercise known WAF↔origin parser disagreements (JSON dup\-key precedence, JSONC/JSON5 comment tolerance, UTF\-7 charset smuggling, BOM\-prefixed JSON, form\-urlencoded HPP in body, JSON\-as\-form, form\-as\-JSON, multipart boundary collision). The body\-level seam — disagreements here let an attacker pass content the WAF declines to parse, that the origin nonetheless processes
+.TP
+wafrift\-query\-diff(1)
+Query\-string parser\-disagreement scanner — fourth in the parser\-diff family. Fires variant URL QUERIES that exercise known WAF↔origin parser disagreements (HPP first\-vs\-last, array bracket notation, comma split, empty\-value HPP, missing\-value, percent\-encoded keys, NUL truncation, semicolon separator, encoded `#`, trailing\-dot keys). The canonical place pentesters reach for first — every protected route the WAF gates by URL query is fair game
+.TP
+wafrift\-attack(1)
+Unified parser\-disagreement orchestrator — runs ALL seven parser\-diff family probes (URL path, headers, body, query, cache, h2, HTTP\-method) against one target concurrently and merges the results into one structured report. The end\-to\-end pentester command — one invocation, one report, every parser\-disagreement seam surfaced
+.TP
+wafrift\-cache\-diff(1)
+Cache\-key confusion / cache\-poisoning surface scanner. Sends semantically\-equivalent variants of the baseline request (Host header case, query parameter order, trailing slash, param case, fragment leak, X\-Forwarded\-Host, cookie variation, tracker\-param strip) and reports which variants hit the same cache entry. Same\-cache\-entry = poisoning surface: attacker can poison via the variant, victims fetching the baseline get the poisoned response
+.TP
+wafrift\-h2\-diff(1)
+HTTP/1.1 vs HTTP/2 differential scanner. Fires the same logical request via both protocols and reports any response divergence — evidence the WAF or origin treats H1 and H2 differently. Catches the common pattern of WAF rule corpus authored against H1 wire format + H2\-to\-H1 downgrade translation bugs
+.TP
+wafrift\-method\-diff(1)
+HTTP method parser\-disagreement scanner. Fires the same URL with N HTTP method variants (POST/PUT/DELETE/PATCH, HEAD/OPTIONS/TRACE, WebDAV PROPFIND/MKCOL/MOVE/COPY/LOCK, custom token like BANANA, lowercase `get`, H2 preface `PRI`) and reports response divergence — evidence a WAF rule only fires on GET/POST while the origin routes the unusual verb somewhere meaningful
+.TP
+wafrift\-gql\-diff(1)
+GraphQL parser / cost\-limit disagreement scanner. Probes introspection leaks, alias bombing, batched operations, operation\-name spoofing, mutation\-as\-query confusion, field duplication, fragment nesting, `application/graphql` content\-type, GET\-shaped queries. Targets `/graphql`\-style endpoints where most REST WAFs see only `POST /graphql` and miss the structure inside
+.TP
+wafrift\-jwt\-diff(1)
+JWT signature / claim validation scanner. Takes a KNOWN\- valid bearer token (operator just logged in and captured it) and fires N mutations: alg:none case\-family, kid traversal / SQL injection, jku attacker\-URL, expired exp, future nbf, role elevation, empty signature with preserved alg. Any mutation accepted by the target = a JWT validation bug
+.TP
+wafrift\-cors\-diff(1)
+CORS misconfiguration scanner. Probes 10 known Access\-Control\-Allow\-Origin validation pitfalls (arbitrary origin reflection, null origin, subdomain prefix/suffix confusion, trailing\-dot host, http downgrade, userinfo `@` injection, wildcard reflection, preflight allow\-arbitrary\- header, preflight DELETE permission). Reflection + ACAC:true = cookie\-stealing credential leak
+.TP
+wafrift\-trailer\-diff(1)
+HTTP/1.1 chunked\-trailer field injection scanner. WAFs typically inspect the initial header block but NOT trailing headers (the trailer fields after the final chunk in chunked Transfer\-Encoding). This command fires two raw chunked POSTs — one baseline (no trailer sent) and one attack (payload injected as a trailer field) — and reports any response divergence. A divergence is evidence the backend processed the trailer while the WAF did not
 .TP
 wafrift\-help(1)
 Print this message or the help of the given subcommand(s)

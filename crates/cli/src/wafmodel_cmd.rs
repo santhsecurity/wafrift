@@ -25,8 +25,11 @@ pub struct AuditArgs {
     /// Tier-B ruleset TOML to audit. Default: the embedded CRS core.
     #[arg(long)]
     pub ruleset: Option<String>,
-    /// Attack class: `xss`, `sqli`, or `all`.
-    #[arg(long, default_value = "all")]
+    /// Attack class: `xss`, `sqli`, or `all`. Restricted by clap
+    /// so a typo (`--class xxs`) fails with an actionable error at
+    /// parse time rather than silently falling back to `all` and
+    /// producing a report the operator can't reproduce.
+    #[arg(long, default_value = "all", value_parser = ["xss", "sqli", "all"])]
     pub class: String,
 }
 
@@ -35,8 +38,11 @@ pub struct HardenArgs {
     /// Tier-B ruleset TOML to harden. Default: the embedded CRS core.
     #[arg(long)]
     pub ruleset: Option<String>,
-    /// Attack class: `xss`, `sqli`, or `all`.
-    #[arg(long, default_value = "all")]
+    /// Attack class: `xss`, `sqli`, or `all`. Restricted by clap
+    /// so a typo (`--class xxs`) fails with an actionable error at
+    /// parse time rather than silently falling back to `all` and
+    /// producing a report the operator can't reproduce.
+    #[arg(long, default_value = "all", value_parser = ["xss", "sqli", "all"])]
     pub class: String,
 }
 
@@ -101,6 +107,14 @@ fn case_flip(s: &str) -> String {
 /// Every candidate delivery of one canonical attack: raw, full-case-
 /// flipped, and the decode-mismatch encodings (double-URL / JSON /
 /// HTML-entity preimages from the equiv bridge).
+fn classify_pass(waf: &mut impl WafOracle, req: &Request) -> Result<bool, String> {
+    match waf.classify(req) {
+        Ok(Outcome::Pass) => Ok(true),
+        Ok(Outcome::Block) => Ok(false),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn candidates(attack: &str) -> Vec<(String, String)> {
     let mut v = vec![
         ("raw".to_string(), attack.to_string()),
@@ -130,7 +144,13 @@ pub fn run_audit(args: AuditArgs) -> ExitCode {
         println!("== class: {class} ==");
         for atk in attacks {
             for (label, cand) in candidates(atk) {
-                let passed = matches!(waf.classify(&body(cand.as_bytes())).unwrap(), Outcome::Pass);
+                let passed = match classify_pass(&mut waf, &body(cand.as_bytes())) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("  classify error [{label}]: {e}");
+                        continue;
+                    }
+                };
                 if passed {
                     total_holes += 1;
                     println!("  HOLE [{label:<26}] {atk}");
@@ -177,7 +197,7 @@ pub fn run_harden(args: HardenArgs) -> ExitCode {
         let holes_before: usize = attacks
             .iter()
             .flat_map(|a| candidates(a))
-            .filter(|(_, c)| matches!(pre.classify(&body(c.as_bytes())).unwrap(), Outcome::Pass))
+            .filter(|(_, c)| classify_pass(&mut pre, &body(c.as_bytes())).unwrap_or(false))
             .count();
 
         // Two CRS-normalized rules per token: one single-decode (closes
@@ -217,20 +237,14 @@ pub fn run_harden(args: HardenArgs) -> ExitCode {
             .iter()
             .flat_map(|a| candidates(a))
             .filter(|(_, c)| {
-                matches!(
-                    hardened.classify(&body(c.as_bytes())).unwrap(),
-                    Outcome::Pass
-                )
+                classify_pass(&mut hardened, &body(c.as_bytes())).unwrap_or(false)
             })
             .count();
         let fp: usize = benign
             .iter()
             .filter(|b| {
-                matches!(pre.classify(&body(b.as_bytes())).unwrap(), Outcome::Pass)
-                    && matches!(
-                        hardened.classify(&body(b.as_bytes())).unwrap(),
-                        Outcome::Block
-                    )
+                classify_pass(&mut pre, &body(b.as_bytes())).unwrap_or(false)
+                    && classify_pass(&mut hardened, &body(b.as_bytes())) == Ok(false)
             })
             .count();
         let proven = holes_after == 0 && fp == 0;

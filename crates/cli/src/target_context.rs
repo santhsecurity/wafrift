@@ -108,4 +108,150 @@ mod tests {
         assert!(context_applicability(Strategy::NullByte, TargetContext::Header).is_err());
         assert!(context_applicability(Strategy::NullByte, TargetContext::Body).is_ok());
     }
+
+    // ── Density ramp ────────────────────────────────────────
+
+    #[test]
+    fn chunked_split_blocked_in_every_text_context() {
+        for ctx in [
+            TargetContext::Header,
+            TargetContext::Cookie,
+            TargetContext::QueryParam,
+        ] {
+            assert!(
+                context_applicability(Strategy::ChunkedSplit, ctx).is_err(),
+                "ChunkedSplit must be blocked in {ctx:?}"
+            );
+        }
+        // Body is the legitimate carrier — must be OK.
+        assert!(context_applicability(Strategy::ChunkedSplit, TargetContext::Body).is_ok());
+    }
+
+    #[test]
+    fn deflate_encode_blocked_in_text_contexts() {
+        // Symmetric with gzip: HTTP text contexts can't carry
+        // raw binary compression output.
+        assert!(context_applicability(Strategy::DeflateEncode, TargetContext::Header).is_err());
+        assert!(context_applicability(Strategy::DeflateEncode, TargetContext::Cookie).is_err());
+        assert!(
+            context_applicability(Strategy::DeflateEncode, TargetContext::QueryParam).is_err()
+        );
+        assert!(context_applicability(Strategy::DeflateEncode, TargetContext::Body).is_ok());
+    }
+
+    #[test]
+    fn url_encode_applicable_in_every_context() {
+        for ctx in [
+            TargetContext::Header,
+            TargetContext::Cookie,
+            TargetContext::QueryParam,
+            TargetContext::Body,
+        ] {
+            assert!(
+                context_applicability(Strategy::UrlEncode, ctx).is_ok(),
+                "url-encode must be applicable in {ctx:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_encode_applicable_in_every_context() {
+        for ctx in [
+            TargetContext::Header,
+            TargetContext::Cookie,
+            TargetContext::QueryParam,
+            TargetContext::Body,
+        ] {
+            assert!(context_applicability(Strategy::UnicodeEncode, ctx).is_ok());
+        }
+    }
+
+    #[test]
+    fn hex_encode_applicable_in_every_context() {
+        for ctx in [
+            TargetContext::Header,
+            TargetContext::Cookie,
+            TargetContext::QueryParam,
+            TargetContext::Body,
+        ] {
+            assert!(context_applicability(Strategy::HexEncode, ctx).is_ok());
+        }
+    }
+
+    #[test]
+    fn applicability_error_message_is_human_readable() {
+        // Operator-facing strings must be specific — no `Err(())`
+        // tuples or opaque codes.
+        let err = context_applicability(Strategy::GzipEncode, TargetContext::Header).unwrap_err();
+        assert!(err.contains("compression"));
+        assert!(err.len() > 20);
+    }
+
+    #[test]
+    fn applicability_error_mentions_recovery_path_when_possible() {
+        // The compression error tells the user where compression IS
+        // applicable (the body via Content-Encoding) — operator
+        // doesn't have to guess what to do next.
+        let err = context_applicability(Strategy::GzipEncode, TargetContext::Cookie).unwrap_err();
+        assert!(
+            err.contains("body") || err.contains("Content-Encoding"),
+            "error should mention the supported context: {err}"
+        );
+    }
+
+    #[test]
+    fn target_context_labels_are_lowercase_kebab() {
+        // Match clap's `rename_all = kebab-case`.
+        for ctx in [
+            TargetContext::Header,
+            TargetContext::Body,
+            TargetContext::QueryParam,
+            TargetContext::Cookie,
+        ] {
+            let label = ctx.label();
+            assert!(
+                label.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "label `{label}` must be lowercase-kebab"
+            );
+            assert!(!label.is_empty());
+            assert!(!label.starts_with('-'));
+            assert!(!label.ends_with('-'));
+        }
+    }
+
+    #[test]
+    fn query_param_label_uses_hyphen_not_underscore() {
+        assert_eq!(TargetContext::QueryParam.label(), "query-param");
+    }
+
+    #[test]
+    fn target_context_copy_is_cheap() {
+        // TargetContext is `Copy`; passing by value should be the
+        // norm.  This compile-test guards against accidentally
+        // adding a non-Copy field.
+        fn takes_by_value(ctx: TargetContext) -> bool {
+            matches!(ctx, TargetContext::Header)
+        }
+        let ctx = TargetContext::Header;
+        assert!(takes_by_value(ctx));
+        // ctx is still usable after the call — proving Copy.
+        let _ = ctx.label();
+    }
+
+    #[test]
+    fn applicability_is_deterministic_across_invocations() {
+        // Same input → same output, every time (no global state /
+        // randomness in the rule check).
+        for _ in 0..10 {
+            assert!(context_applicability(Strategy::GzipEncode, TargetContext::Header).is_err());
+            assert!(context_applicability(Strategy::Base64Encode, TargetContext::Header).is_ok());
+        }
+    }
+
+    #[test]
+    fn parameter_pollution_message_explains_syntax_mismatch() {
+        let err =
+            context_applicability(Strategy::ParameterPollution, TargetContext::Header).unwrap_err();
+        assert!(err.contains("key=val") || err.contains("parameter pollution"));
+    }
 }

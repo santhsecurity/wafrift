@@ -16,10 +16,11 @@
 
 - **`wafrift evade`** — offline payload mutator. Pipe a payload in, get N bypass variants out. Every encoding strategy and grammar dialect is addressable as a path (`encoding/url/triple`, `grammar/sql/tautology`) for `--only` / `--exclude`.
 - **`wafrift scan`** — fire variants at a live target, classify each response with a multi-signal oracle (block / bypass / challenge / rate-limit), respect server `Retry-After`, surface winning chains. `--session-init <CURL_FILE>` runs an auth-phase request first and replays the resulting cookies on every variant — the **stateful chain mode** real exploits use. `--callback-url URL` substitutes `{{CALLBACK}}` in the payload with a per-variant token to verify blind/stored vulns at a `wafrift listener`. `--payload-class CLASS` warm-starts the per-class gene-bank winners.
-- **`wafrift detect`** — fingerprint the WAF in front of a target (160+ vendors via TOML rules derived from wafw00f + identYwaf + locally researched additions).
+- **`wafrift detect`** — fingerprint the WAF / CDN / origin on four independent axes that each survive when the layer above is stripped: HTTP response headers + body (160+ vendor rules), DNS CNAME chain resolution (29 vendor rules), reverse-DNS (PTR) on the leaf IP, and BGP origin-ASN lookup via cymru's DNS service.  Multi-vendor chains surface every layer — nytimes.com gets Envoy + Fastly, eBay's CNAME chain reveals Akamai under their custom proxy banner, Stripe's `Server: nginx` is finally outed as AWS-hosted via the ASN axis.  See [CHANGELOG.md](CHANGELOG.md) for the detection catalog.
 - **`wafrift discover`** — parse OpenAPI / GraphQL introspection / parameter-mine a single endpoint into a deduplicated `DiscoveredEndpoint` list with `ParameterLocation` + `InjectionContext` — feed straight into `scan`.
 - **`wafrift bypass-probe`** — Tsai-class differential auth/path/method bypass scanner. 136 auth-bypass header probes, full path-routing-disagreement family, method overrides. Sorted divergence report with reproduce-it `curl` commands.
-- **`wafrift parser-diff`** — URL-shape variants exercising known WAF↔origin parser disagreements (semicolon-strip, backslash-as-separator, NUL truncation, double-URL-decode, fullwidth slash, dot-segment, percent case, empty-segment collapse, trailing dot). A divergence is evidence the WAF and origin disagree on what the URL means — exploit the seam without any payload mutation.
+- **`wafrift attack`** — end-to-end parser-disagreement orchestrator. One call, every parser-disagreement seam surfaced: URL-path, headers, request body, query-string, cache-key, HTTP/1.1-vs-HTTP/2. Runs the six individual sub-probes (`parser-diff`, `header-diff`, `body-diff`, `query-diff`, `cache-diff`, `h2-diff`) concurrently and merges into one structured report. See `wafrift --help` for the individual sub-commands; [CHANGELOG.md](CHANGELOG.md) describes each probe family.
+- **`wafrift distill`** — adversarial distillation via Zeller's ddmin. Take a KNOWN-working bypass payload, find the minimum-edit-distance subset that STILL bypasses. Shorter payloads ship cleaner reports.
 - **`wafrift compress`** — wrap a request body in `Content-Encoding: gzip` / `deflate` / `br` (or chain them). Compression-confusion attack: most WAFs inspect raw bytes; brotli especially is widely unsupported in WAF decompressors while every modern origin handles it. Operator pipes a body in, gets compressed bytes + the matching header out.
 - **`wafrift listener`** — OOB callback receiver. Pre-mints 128-bit base32 tokens; any inbound HTTP request containing a token is logged. The oracle for blind SQLi (time-based), stored XSS, blind SSRF, OOB cmdi — vuln classes that never echo a verdict on the same response.
 - **`wafrift legendary`** — one-shot demo command. Runs detect → fingerprint → bypass-probe (and optionally scan) against a single target, stitches the results into one polished markdown writeup. The fastest way to show what wafrift does.
@@ -37,8 +38,17 @@ sudo mv wafrift wafrift-proxy /usr/local/bin/
 
 # From crates.io
 cargo install wafrift-cli
-cargo install wafrift-proxy --features tls-impersonate     # optional: BoringSSL impersonation
+cargo install wafrift-cli   --features tls-impersonate     # optional: enables `wafrift ja3-diff` (BoringSSL — Linux/macOS only)
+cargo install wafrift-proxy --features tls-impersonate     # optional: BoringSSL impersonation  (Linux/macOS only)
 ```
+
+**Note**: The `tls-impersonate` feature compiles BoringSSL via cmake.
+On Windows you'll need a working cmake + MSVC build toolchain (the
+Microsoft C++ Build Tools); `wafrift ja3-diff` and the proxy's
+`--tls-impersonate` flag are unavailable on Windows hosts that lack
+those build prerequisites. Every other wafrift surface (scan, detect,
+attack, parser-diff family, bench-waf, smuggle, listener, ...) works
+on Windows out of the box.
 
 macOS: `wafrift-aarch64-apple-darwin.tar.gz`. Windows: `.zip` of the same name. Full asset list under [Releases](https://github.com/santhsecurity/wafrift/releases). From source: `cargo install --path crates/cli`.
 

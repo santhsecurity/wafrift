@@ -1,16 +1,22 @@
 [[waf]]
 name = "ThreatX"
 vendor = "A10 Networks"
-confidence_threshold = 0.3
+confidence_threshold = 0.5
 evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
-source = "WAFW00F:threatx"
+source = "WAFW00F:threatx + 2026-05-21 false-positive tighten"
+# `X-Request-Id` is FAR too generic to fire on its own — Heroku,
+# Kubernetes, FastAPI, every modern app server uses it.  Live
+# dogfood on wikipedia.org (Apache Traffic Server, no ThreatX in
+# the path) was false-positiving as ThreatX because the rule
+# triggered on any X-Request-Id presence. Now require a SECOND
+# signal (block-page body OR status 403) to fire.
 [[waf.signature]]
   header_name = "x-request-id"
   header_regex = ".*"
-  weight = 0.5
+  weight = 0.2
 [[waf.signature]]
   body_regex = "^Forbidden - ID: ([a-fA-F0-9]{32})$"
-  weight = 0.4
+  weight = 0.5
 [[waf.signature]]
   status_code = 403
-  weight = 0.2
+  weight = 0.3

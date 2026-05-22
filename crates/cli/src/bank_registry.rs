@@ -523,7 +523,7 @@ fn http_get_blocking(url: &str, timeout_secs: u64) -> Result<String, String> {
             .get(url)
             .send()
             .await
-            .map_err(|e| format!("send: {e}"))?;
+            .map_err(|e| crate::helpers::walk_reqwest_error(&e))?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
         }
@@ -558,7 +558,7 @@ fn http_post_blocking(url: &str, body: &str, timeout_secs: u64) -> Result<String
             .body(body.to_string())
             .send()
             .await
-            .map_err(|e| format!("send: {e}"))?;
+            .map_err(|e| crate::helpers::walk_reqwest_error(&e))?;
         let status = resp.status();
         // Bounded read on the registry's POST response.
         let txt = crate::safe_body::read_bounded_text(

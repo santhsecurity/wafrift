@@ -1,0 +1,35 @@
+[[waf]]
+name = "Akamai Adaptive Security Engine"
+vendor = "Akamai"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "ContentTypeSwitch", "JsonUnicodeEscape", "SqlCommentInsertion"]
+source = "frontier-2026:akamai-ase-blog"
+
+# Akamai's new generation (announced 2025) replacing Kona Rule Set.
+# Existing wafrift rules pin `Server: AkamaiGHost` (Kona-era) but
+# miss the ASE-specific markers — block pages now carry a unique
+# Reference-# format and the response carries the ASE delivery
+# trace headers below.
+
+[[waf.signature]]
+  header_name = "x-akamai-request-id"
+  header_regex = ".+"
+  weight = 0.7
+
+[[waf.signature]]
+  body_regex = "Reference\\s*&#35;[0-9a-fA-F]+\\.[0-9a-fA-F]+"
+  weight = 0.6
+
+[[waf.signature]]
+  body_regex = "Reference\\s*#[0-9a-fA-F]+\\.[0-9a-fA-F]+"
+  weight = 0.6
+
+[[waf.signature]]
+  header_name = "x-check-cacheable"
+  header_regex = ".+"
+  weight = 0.4
+
+[[waf.signature]]
+  header_name = "akamai-cache-status"
+  header_regex = ".+"
+  weight = 0.3

@@ -44,18 +44,26 @@ pub fn run_interactive() -> ExitCode {
     }
 
     // Set up terminal.
-    let Ok(()) = enable_raw_mode() else {
-        eprintln!("Failed to enable raw mode — try using a subcommand instead.");
+    if let Err(e) = enable_raw_mode() {
+        eprintln!(
+            "Failed to enable raw mode: {e} — try using a subcommand directly (`wafrift --help`)."
+        );
         return ExitCode::from(1);
-    };
+    }
     let mut stdout = io::stdout();
     let _ = execute!(stdout, EnterAlternateScreen);
     let backend = CrosstermBackend::new(stdout);
-    let Ok(mut terminal) = Terminal::new(backend) else {
-        let _ = disable_raw_mode();
-        eprintln!("Failed to create terminal.");
-        return ExitCode::from(1);
+    let terminal = match Terminal::new(backend) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = disable_raw_mode();
+            eprintln!(
+                "Failed to create terminal: {e} — try using a subcommand directly (`wafrift --help`)."
+            );
+            return ExitCode::from(1);
+        }
     };
+    let mut terminal = terminal;
 
     // State.
     let mut selected_menu = 0_usize;

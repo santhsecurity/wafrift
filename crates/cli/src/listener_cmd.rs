@@ -143,18 +143,12 @@ pub struct Callback {
 /// a flood doesn't ramp into a DoS.
 pub const MAX_CALLBACK_LOG: usize = 100_000;
 
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct Registry {
     tokens: RwLock<HashMap<String, ()>>,
     callbacks: RwLock<Vec<Callback>>,
 }
 
-// See the comment on `Registry` for why these methods are marked
-// `dead_code`-allowed: the unit tests exercise them, but rustc's
-// reachability analysis on the binary's `main.rs` doesn't trace
-// through the test cfg-gated paths. They are real public API.
-#[allow(dead_code)]
 impl Registry {
     /// New empty registry.
     #[must_use]
@@ -174,26 +168,35 @@ impl Registry {
         out
     }
 
-    /// Register an already-generated token. Useful when the caller
-    /// wants control over token generation (e.g. embedding a
-    /// payload-shape hint in the token prefix).
+    /// Register an already-generated token. Test-only: production
+    /// callers always go through [`Registry::mint`] for randomness.
+    /// Gated so the production binary surface does not advertise an
+    /// API with no production consumer (LAW 1 — no dead public API).
+    #[cfg(test)]
     pub async fn register(&self, token: impl Into<String>) {
         self.tokens.write().await.insert(token.into(), ());
     }
 
-    /// Snapshot of currently registered tokens.
+    /// Snapshot of currently registered tokens — test-only mirror of
+    /// the value [`Registry::mint`] already returns. Gated #[cfg(test)]
+    /// for the same reason as [`Registry::register`].
+    #[cfg(test)]
     pub async fn known_tokens(&self) -> Vec<String> {
         self.tokens.read().await.keys().cloned().collect()
     }
 
-    /// Snapshot of all recorded callbacks.
+    /// Snapshot of all recorded callbacks. Used in production by the
+    /// `/_wafrift/check/<token>` management endpoint to answer the
+    /// scan-side oracle's poll, "has this token been received yet?"
     pub async fn callbacks(&self) -> Vec<Callback> {
         self.callbacks.read().await.clone()
     }
 
-    /// Count of callbacks that matched a registered token. The
-    /// scan-side oracle gates on this: zero matched callbacks for a
-    /// given payload = no echo-back = no blind bypass.
+    /// Count of callbacks that matched a registered token. Test-only
+    /// summary — production callers iterate [`Registry::callbacks`]
+    /// directly. Gated #[cfg(test)] for the same reason as
+    /// [`Registry::register`].
+    #[cfg(test)]
     pub async fn matched_count(&self) -> usize {
         self.callbacks
             .read()
@@ -552,6 +555,7 @@ mod tests {
 
     // ── registry ─────────────────────────────────────────────────
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registry_mint_returns_n_distinct_tokens() {
         let r = Registry::new();
@@ -566,6 +570,7 @@ mod tests {
         assert_eq!(known.len(), 8);
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registry_match_token_in_finds_substring() {
         let r = Registry::new();
@@ -586,6 +591,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registry_match_token_in_is_case_sensitive() {
         // Tokens are base32 upper-case; a lowercase substring should
@@ -598,6 +604,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registry_push_caps_callback_log_at_max() {
         // DoS defence: an attacker who learns one token could otherwise
@@ -625,6 +632,7 @@ mod tests {
         assert_eq!(cbs.last().unwrap().received_at, (total - 1) as u64);
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registry_push_preserves_log_when_under_cap() {
         let r = Registry::new();
@@ -707,13 +715,32 @@ mod tests {
         // Tiny pause so the listener has time to be ready before we
         // connect.
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        // Connect with a short retry loop — Windows TCP under
+        // parallel test load occasionally returns OS error 10060
+        // (timed out) on the first connect even though the listener
+        // is bound. We retry up to 5× with a 100ms backoff; total
+        // wait stays well under the 30s integration-test budget.
+        let mut client = None;
+        for attempt in 0..5 {
+            match tokio::net::TcpStream::connect(addr).await {
+                Ok(s) => {
+                    client = Some(s);
+                    break;
+                }
+                Err(_e) if attempt < 4 => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => panic!("connect after 5 attempts: {e}"),
+            }
+        }
+        let mut client = client.expect("connected");
         client.write_all(&req).await.expect("write request");
         let _ = client.shutdown().await;
         let cb = server.await.expect("server join");
         (cb, addr)
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_callback_with_matching_token_in_path() {
         let registry = Arc::new(Registry::new());
@@ -729,6 +756,7 @@ mod tests {
         assert_eq!(cb.body_truncated_bytes, 0);
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_callback_with_token_in_body_is_matched() {
         let registry = Arc::new(Registry::new());
@@ -744,6 +772,7 @@ mod tests {
         assert_eq!(cb.body_preview, body);
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_callback_with_unknown_token_records_unmatched() {
         // Anti-rig: a callback we never planted (e.g. an unrelated
@@ -756,6 +785,7 @@ mod tests {
         assert_eq!(cb.matched_token, None);
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_body_above_cap_is_truncated_with_counter() {
         let registry = Arc::new(Registry::new());
@@ -774,6 +804,7 @@ mod tests {
         assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registry_matched_count_excludes_unmatched_callbacks() {
         let registry = Arc::new(Registry::new());
@@ -790,6 +821,7 @@ mod tests {
         assert_eq!(registry.matched_count().await, 1);
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_malformed_request_does_not_crash_the_listener() {
         // A client that sends garbage MUST NOT take the listener
@@ -837,7 +869,24 @@ mod tests {
             let _ = handle_conn(sock, peer, &registry_c, 8 * 1024, Duration::from_secs(3)).await;
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        // Connect with the same retry pattern drive_one_callback
+        // uses — Windows TCP under parallel test load occasionally
+        // returns OS error 10060 (timed out) on the first attempt
+        // despite the listener being bound.
+        let mut client = None;
+        for attempt in 0..5 {
+            match tokio::net::TcpStream::connect(addr).await {
+                Ok(s) => {
+                    client = Some(s);
+                    break;
+                }
+                Err(_e) if attempt < 4 => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => panic!("connect after 5 attempts: {e}"),
+            }
+        }
+        let mut client = client.expect("connected");
         let req = format!(
             "GET /_wafrift/check/{token} HTTP/1.1\r\nHost: x\r\n\
              Content-Length: 0\r\n\r\n"
@@ -866,6 +915,7 @@ mod tests {
         (status_line.to_string(), body)
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn management_check_unknown_token_returns_404_with_received_false() {
         let registry = Arc::new(Registry::new());
@@ -876,6 +926,7 @@ mod tests {
         assert!(body.contains("\"received\":false"), "body: {body}");
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn management_check_known_received_token_returns_200_received_true() {
         let registry = Arc::new(Registry::new());
@@ -894,6 +945,7 @@ mod tests {
         assert!(body.contains(&token), "body should include the token: {body}");
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn management_check_does_not_record_itself_as_a_callback() {
         // Anti-rig: a poll for /_wafrift/check/X must NOT append a
@@ -910,6 +962,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn management_check_path_with_trailing_slash_still_matches() {
         // Resilience: a caller hitting /_wafrift/check/TOK/ (with
@@ -933,6 +986,7 @@ mod tests {
     // the failure mode it gates against in its body so a future
     // reader can see why the case matters.
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_lowercase_method_is_normalised_to_upper() {
         // The Callback.method field must always be uppercased so
@@ -947,6 +1001,7 @@ mod tests {
         assert_eq!(cb.method, "POST", "method must be uppercased, got `{}`", cb.method);
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_callback_with_token_in_header_value_is_matched() {
         // A blind SSRF callback might land with the token in a
@@ -966,6 +1021,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_body_exactly_at_cap_is_not_marked_truncated() {
         // Boundary case: body length == cap (8 KiB). Nothing should
@@ -987,6 +1043,7 @@ mod tests {
         assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_one_byte_above_cap_truncates_one_byte() {
         // Boundary: body = cap + 1 byte. Truncated counter must be
@@ -1010,6 +1067,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_negative_content_length_does_not_crash() {
         // Adversarial Content-Length: garbage value. Our parser
@@ -1025,6 +1083,7 @@ mod tests {
         assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_huge_content_length_does_not_pre_allocate() {
         // Adversarial: Content-Length: 9999999999 (10 GiB) with
@@ -1048,6 +1107,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registered_tokens_persist_across_separate_mint_calls() {
         // Registry::mint can be called multiple times; previously
@@ -1063,6 +1123,7 @@ mod tests {
         }
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registered_caller_supplied_token_can_match() {
         // The `register()` API lets the caller supply their own
@@ -1080,6 +1141,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn registry_callbacks_log_is_in_arrival_order() {
         // Sanity: pushing three callbacks in order keeps them in

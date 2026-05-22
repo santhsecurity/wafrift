@@ -152,8 +152,11 @@ impl HostState {
     fn bump_success_for_technique(&mut self, technique: &Technique) {
         let name = technique.to_string();
         if let Some(stat) = self.technique_stats.iter_mut().find(|(n, _, _)| *n == name) {
-            stat.1 += 1;
-            stat.2 += 1;
+            // Use saturating_add to match the block path (audit fix: plain `+= 1`
+            // panics in debug or silently wraps in release after 2^32 successes on
+            // the same technique in a long-running proxy session).
+            stat.1 = stat.1.saturating_add(1);
+            stat.2 = stat.2.saturating_add(1);
         } else {
             self.technique_stats.push((name.clone(), 1, 1));
         }
@@ -991,5 +994,68 @@ mod tests {
         );
         // First detection wins — don't flip-flop.
         assert_eq!(state.waf_name.as_deref(), Some("Cloudflare"));
+    }
+
+    // ── Overflow guard tests ────────────────────────────────────────────
+
+    #[test]
+    fn bump_success_saturates_at_u32_max_not_wraps() {
+        // Pre-fix: plain `+= 1` would overflow in debug (panic) or
+        // silently wrap to 0 in release after 2^32 successes on the
+        // same technique in a long-running proxy session.
+        let mut state = HostState::default();
+        // Inject a stat entry already at (u32::MAX - 1, u32::MAX - 1)
+        // to force the boundary on the very next success.
+        state.technique_stats.push((
+            "encoding:Test".to_string(),
+            u32::MAX - 1,
+            u32::MAX - 1,
+        ));
+        // Record one more success — this used to plain-add, now saturates.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("Test".into()));
+        let stat = state
+            .technique_stats
+            .iter()
+            .find(|(n, _, _)| n == "encoding:Test")
+            .expect("stat entry must exist");
+        // Both successes (stat.1) and attempts (stat.2) must saturate, not wrap.
+        assert_eq!(stat.1, u32::MAX, "successes must saturate at u32::MAX");
+        assert_eq!(stat.2, u32::MAX, "attempts must saturate at u32::MAX");
+
+        // One more: must stay at MAX, not wrap back to 0.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("Test".into()));
+        let stat2 = state
+            .technique_stats
+            .iter()
+            .find(|(n, _, _)| n == "encoding:Test")
+            .expect("stat entry must exist");
+        assert_eq!(stat2.1, u32::MAX, "successes must remain at u32::MAX after second saturating add");
+        assert_eq!(stat2.2, u32::MAX, "attempts must remain at u32::MAX after second saturating add");
+    }
+
+    #[test]
+    fn bump_success_and_block_both_use_saturating_arithmetic() {
+        // Prove the two paths are symmetric: the block path already
+        // had saturating_add; the success path now also has it.
+        // Both must reach u32::MAX and stay there.
+        let mut state = HostState::default();
+        let name = "encoding:Sym".to_string();
+
+        // Start at u32::MAX - 2 so we can hit the boundary in two ops.
+        state.technique_stats.push((name.clone(), u32::MAX - 2, u32::MAX - 2));
+
+        // Two successes take successes+attempts to MAX then stick.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("Sym".into()));
+        state.bump_success_for_technique(&Technique::PayloadEncoding("Sym".into()));
+        // One extra must not wrap.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("Sym".into()));
+
+        let stat = state
+            .technique_stats
+            .iter()
+            .find(|(n, _, _)| n == &name)
+            .unwrap();
+        assert_eq!(stat.1, u32::MAX);
+        assert_eq!(stat.2, u32::MAX);
     }
 }

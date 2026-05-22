@@ -122,21 +122,111 @@ fn evade_xss() {
 
 #[test]
 fn evade_encoding_only() {
-    let (code, stdout, _) = wafrift(&["evade", "--payload", "test_payload", "--encoding-only"]);
+    // Strengthened (2026-05): prior assertion was just `!stdout.is_empty()`,
+    // which trivially passes for any non-empty banner — a build_variants
+    // that returned `vec![Variant { payload: "GARBAGE", … }]` would have
+    // slipped past. Pin the real contract: the JSON output must
+    // CONTAIN AT LEAST ONE variant whose payload is an encoded form
+    // of the input (i.e. either the literal input or a percent-encoded
+    // / unicode-escaped / case-altered / etc. mutation of it).
+    let payload = "test_payload";
+    let (code, stdout, _) = wafrift(&[
+        "evade",
+        "--payload",
+        payload,
+        "--encoding-only",
+        "--format",
+        "json",
+    ]);
     assert_eq!(code, 0, "evade --encoding-only should succeed");
-    // Should produce some output
-    assert!(!stdout.is_empty(), "should produce output");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("evade --format json must parse as JSON: {e}\n{stdout}"));
+    let variants = v.get("variants").and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("missing variants array: {v}"));
+    assert!(
+        !variants.is_empty(),
+        "evade --encoding-only must produce >=1 variant (got 0)"
+    );
+    // At least one variant should be a non-trivial encoding of the
+    // input — exact byte equality across all variants would mean
+    // every "encoding" was a no-op. Mutation-test the encoder: a
+    // function returning the input unchanged for every strategy must
+    // fail this gate.
+    let payload_seen: Vec<&str> = variants
+        .iter()
+        .filter_map(|x| x.get("payload").and_then(serde_json::Value::as_str))
+        .collect();
+    assert!(
+        !payload_seen.is_empty(),
+        "every variant must carry a `payload` field: {variants:?}"
+    );
+    let some_encoded = payload_seen.iter().any(|p| *p != payload);
+    assert!(
+        some_encoded,
+        "expected at least one variant whose payload differs from the input\
+         (would prove the encoder isn't a no-op); got all identical: {payload_seen:?}"
+    );
 }
 
 #[test]
 fn evade_all_levels() {
+    // Strengthened (2026-05): prior assertion only checked exit code,
+    // which would pass even if all three levels collapsed to the same
+    // strategy pool. The whole POINT of `--level` is "heavier levels
+    // produce more variants / more aggressive strategies." Pin that
+    // invariant: heavy must yield ≥ medium must yield ≥ light variants.
+    let mut variant_counts: Vec<(&str, usize)> = Vec::new();
     for level in &["light", "medium", "heavy"] {
-        let (code, _stdout, stderr) = wafrift(&["evade", "--payload", "1=1", "--level", level]);
+        let (code, stdout, stderr) = wafrift(&[
+            "evade",
+            "--payload",
+            "1=1",
+            "--level",
+            level,
+            "--format",
+            "json",
+        ]);
         assert_eq!(
             code, 0,
             "evade --level {level} should succeed: stderr={stderr}"
         );
+        let v: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+            panic!("evade --level {level} --format json must parse as JSON: {e}\n{stdout}")
+        });
+        let n = v
+            .get("variants")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0);
+        assert!(
+            n > 0,
+            "evade --level {level} must produce >=1 variant (got 0)"
+        );
+        variant_counts.push((level, n));
     }
+    // Monotone: heavy ≥ medium ≥ light. If a refactor collapses two
+    // levels to the same pool, exactly one comparison fires. If all
+    // three collapse, both fire.
+    let light = variant_counts.iter().find(|(l, _)| *l == "light").map(|x| x.1).unwrap_or(0);
+    let medium = variant_counts.iter().find(|(l, _)| *l == "medium").map(|x| x.1).unwrap_or(0);
+    let heavy = variant_counts.iter().find(|(l, _)| *l == "heavy").map(|x| x.1).unwrap_or(0);
+    assert!(
+        medium >= light,
+        "evade --level medium ({medium} variants) must produce >= light ({light}); \
+         counts: {variant_counts:?}"
+    );
+    assert!(
+        heavy >= medium,
+        "evade --level heavy ({heavy} variants) must produce >= medium ({medium}); \
+         counts: {variant_counts:?}"
+    );
+    // Anti-collapse: heavy must STRICTLY exceed light. Otherwise
+    // "what does --level even do" goes unanswered.
+    assert!(
+        heavy > light,
+        "evade --level heavy ({heavy}) must STRICTLY exceed light ({light}); \
+         counts: {variant_counts:?} — three identical pools is a regression"
+    );
 }
 
 /// Regression for TODO 2026-05-17: `--only encoding/base64/standard` returned
@@ -280,6 +370,13 @@ fn evade_explain_with_encoding_only() {
 fn evade_parameter_pollution_rejected_in_header_context() {
     // Headers don't parse `a=1&a=2` syntax — parameter pollution is N/A there.
     // (Body is intentionally allowed: form-urlencoded bodies use the same syntax.)
+    //
+    // Per the 2026-05 dogfood pass, "no variants generated" is a
+    // LEGITIMATE outcome — operator may have selected an inapplicable
+    // technique and CI pipelines treating non-zero as error shouldn't
+    // break on a no-op. So we now assert exit 0, but still require
+    // the explanation surface so the operator knows WHY nothing was
+    // produced.
     let (code, stdout, stderr) = wafrift(&[
         "evade",
         "--payload",
@@ -290,9 +387,9 @@ fn evade_parameter_pollution_rejected_in_header_context() {
         "header",
         "--explain",
     ]);
-    assert_ne!(
+    assert_eq!(
         code, 0,
-        "should fail when only inapplicable strategy is selected"
+        "empty-variants must exit 0 (legitimate outcome); stderr={stderr}"
     );
     let combined = format!("{stdout}{stderr}");
     assert!(
@@ -320,6 +417,63 @@ fn evade_parameter_pollution_works_in_body_context() {
     assert!(
         stdout.contains("ParameterPollute") || stdout.contains("=1&X"),
         "should produce a polluted variant: {stdout}"
+    );
+}
+
+#[test]
+fn evade_ct_starvation_tamper_fires_with_target_context_body() {
+    // Anti-regression for the 2026-05 dogfood bug: ct_starvation
+    // would never produce a variant because evade was passing the
+    // PAYLOAD-CLASS label ("SQL Injection") as the tamper context,
+    // not the operator's --target-context value. Every variant
+    // was Idempotent-skipped. Fix: target_context takes precedence
+    // over payload-class when set.
+    let (code, stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "' OR 1=1--",
+        "--only",
+        "tamper/ct_starvation",
+        "--target-context",
+        "body",
+    ]);
+    assert_eq!(
+        code, 0,
+        "ct_starvation with --target-context body must succeed: stderr={stderr}"
+    );
+    // The body-context tamper produces `q=<payload>`. Verify the
+    // form-pair envelope is in the output.
+    assert!(
+        stdout.contains("q=' OR 1=1--"),
+        "ct_starvation must produce form-pair variant under --target-context body:\n{stdout}"
+    );
+}
+
+#[test]
+fn evade_ct_starvation_tamper_is_idempotent_under_header_context() {
+    // The flip side: with --target-context header, ct_starvation
+    // has no leverage, so the tamper returns the payload unchanged
+    // and evade marks it Idempotent (no variants emitted, exit 0).
+    let (code, _stdout, stderr) = wafrift(&[
+        "evade",
+        "--payload",
+        "X",
+        "--only",
+        "tamper/ct_starvation",
+        "--target-context",
+        "header",
+        "--explain",
+    ]);
+    assert_eq!(
+        code, 0,
+        "ct_starvation idempotent under header context must exit 0: stderr={stderr}"
+    );
+    // The explain trace must surface why nothing fired.
+    let combined = format!("{stderr}");
+    assert!(
+        combined.contains("Idempotent") || combined.contains("no transform")
+            || combined.contains("No variants"),
+        "explain must say why ct_starvation didn't fire:\n{combined}"
     );
 }
 
@@ -369,12 +523,15 @@ fn evade_empty_variants_writes_error_to_output_file() {
         "--output",
         tmp.to_str().unwrap(),
     ]);
-    assert_ne!(code, 0, "no-variants path should exit non-zero");
+    // Empty-variants is a legitimate outcome (CI pipelines treating
+    // non-zero as error mustn't break). The JSON blob with the
+    // `note` field + explain trace still has to land in --output.
+    assert_eq!(code, 0, "no-variants path must exit 0 — empty is a legitimate outcome");
     let body =
         fs::read_to_string(&tmp).expect("output file should be written even on empty-variants");
     assert!(
         body.contains("no variants generated") && body.contains("explain"),
-        "output should contain the JSON error blob with explain: {body}"
+        "output should contain the JSON note blob with explain: {body}"
     );
     let _ = fs::remove_file(&tmp);
 }
@@ -391,9 +548,12 @@ fn evade_target_context_skips_inapplicable_with_reason() {
         "header",
         "--explain",
     ]);
-    // gzip-only + header context => no variants. The error must explain why,
-    // not just say "No variants generated."
-    assert_ne!(code, 0, "gzip in a header is not applicable; should fail");
+    // gzip-only + header context => no variants. Exit 0 (legitimate
+    // empty-variants outcome) BUT the explain trace must surface
+    // the applicability reason so the operator knows WHY nothing
+    // landed — silently producing zero variants with no signal is
+    // the worse UX of "is wafrift broken or did I ask for nothing?"
+    assert_eq!(code, 0, "empty-variants must exit 0; stderr={stderr}");
     let combined = format!("{stdout}{stderr}");
     assert!(
         combined.contains("not applicable") || combined.contains("compression"),
@@ -649,9 +809,19 @@ fn report_json_emits_valid_json_with_schema_version() {
     assert_eq!(code, 0, "report --format json should exit 0");
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("report --format json must emit valid JSON");
-    assert_eq!(parsed["schema_version"], 1, "schema_version field missing");
+    // schema_version 2 added the `curl_command` field per finding
+    // (additive — gated by version bump so downstream tooling can
+    // opt in cleanly).
+    assert_eq!(parsed["schema_version"], 2, "schema_version field missing");
     assert_eq!(parsed["hosts_with_bypasses"], 1);
     assert_eq!(parsed["findings"][0]["host"], "api.example.com");
+    // The new curl_command field must be present and shaped like a
+    // real curl invocation.
+    let curl = parsed["findings"][0]["curl_command"]
+        .as_str()
+        .expect("curl_command must be a string");
+    assert!(curl.starts_with("curl -i "), "got: {curl}");
+    assert!(curl.contains("api.example.com"), "got: {curl}");
 }
 
 #[test]

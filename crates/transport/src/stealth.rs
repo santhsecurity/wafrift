@@ -209,6 +209,24 @@ mod imp {
             body: Option<&[u8]>,
             max_body: usize,
         ) -> Result<StealthResponse, StealthError> {
+            self.send_pinned(method, url, headers, body, max_body, None)
+                .await
+        }
+
+        /// Like [`send`](Self::send), but when `pinned_addrs` is set the
+        /// request uses only those pre-validated addresses (no DNS lookup).
+        /// The proxy passes addresses from `resolve_forward_url_pinned` taken
+        /// immediately before the intercept rendezvous so a 30s operator wait
+        /// cannot reopen DNS-rebinding TOCTOU.
+        pub async fn send_pinned(
+            &self,
+            method: &str,
+            url: &str,
+            headers: &[(String, String)],
+            body: Option<&[u8]>,
+            max_body: usize,
+            pinned_addrs: Option<&[std::net::SocketAddr]>,
+        ) -> Result<StealthResponse, StealthError> {
             // Audit (2026-05-10): rquest 5.x DOES expose
             // .resolve_to_addrs() on ClientBuilder, but only at builder
             // time — not per-request. We use it to close the
@@ -240,36 +258,50 @@ mod imp {
                 .to_string();
             let port = parsed.port_or_known_default().unwrap_or(443);
 
-            // Fast-path literal-IP check.
-            if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-                if is_bogon_ip(ip) {
+            use wafrift_types::ip_addr_is_bogon;
+
+            let validated: Vec<std::net::SocketAddr> = if let Some(addrs) = pinned_addrs {
+                if addrs.is_empty() {
+                    return Err(StealthError::Transport(
+                        "stealth: pinned address list is empty".to_string(),
+                    ));
+                }
+                for sa in addrs {
+                    if ip_addr_is_bogon(sa.ip()) {
+                        return Err(StealthError::Transport(format!(
+                            "stealth refuses pinned upstream {} (bogon)",
+                            sa.ip()
+                        )));
+                    }
+                }
+                addrs.to_vec()
+            } else if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+                if ip_addr_is_bogon(ip) {
                     return Err(StealthError::Transport(format!(
                         "stealth refuses literal-IP upstream {ip} (private/loopback/CGN/Teredo). \
                          Route via reqwest + --allow-private-upstream for intentional lab targets."
                     )));
                 }
-                // Literal IP, not a bogon — just use the existing client.
                 return self
                     .send_inner(&self.inner, method, url, headers, body, max_body)
                     .await;
-            }
-
-            // Hostname path: pre-resolve + filter + build per-request client.
-            let lookups = tokio::net::lookup_host((host.as_str(), port))
-                .await
-                .map_err(|e| {
-                    StealthError::Transport(format!("DNS resolution failed for {host}: {e}"))
-                })?;
-            let validated: Vec<std::net::SocketAddr> = lookups
-                .into_iter()
-                .filter(|sa| !is_bogon_ip(sa.ip()))
-                .collect();
-            if validated.is_empty() {
-                return Err(StealthError::Transport(format!(
-                    "stealth refused {host}: every resolved address is in the bogon set \
-                     (DNS rebinding refused / IMDS / RFC1918)"
-                )));
-            }
+            } else {
+                let lookups = tokio::net::lookup_host((host.as_str(), port))
+                    .await
+                    .map_err(|e| {
+                        StealthError::Transport(format!("DNS resolution failed for {host}: {e}"))
+                    })?;
+                let v: Vec<_> = lookups
+                    .filter(|sa| !ip_addr_is_bogon(sa.ip()))
+                    .collect();
+                if v.is_empty() {
+                    return Err(StealthError::Transport(format!(
+                        "stealth refused {host}: every resolved address is in the bogon set \
+                         (DNS rebinding refused / IMDS / RFC1918)"
+                    )));
+                }
+                v
+            };
             // Build per-request client with rquest's resolver pinned
             // to our validated addresses. rquest will then use these
             // exact SocketAddrs without any further DNS lookup.
@@ -353,47 +385,6 @@ mod imp {
         }
     }
 
-    /// Standalone bogon check duplicated from wafrift-proxy's
-    /// upstream_policy because that crate sits ABOVE wafrift-transport
-    /// in the dependency graph. Keep the two implementations in sync
-    /// — the audit_extras tests in proxy guard the canonical version.
-    fn is_bogon_ip(ip: std::net::IpAddr) -> bool {
-        use std::net::IpAddr;
-        match ip {
-            IpAddr::V4(v) => {
-                if v.is_private()
-                    || v.is_loopback()
-                    || v.is_link_local()
-                    || v.is_broadcast()
-                    || v.is_documentation()
-                    || v.is_unspecified()
-                {
-                    return true;
-                }
-                let o = v.octets();
-                (o[0] == 100 && (o[1] & 0xc0) == 0x40) // CGN 100.64/10
-                    || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0/24
-                    || (o[0] == 198 && (o[1] & 0xfe) == 18) // benchmark 198.18/15
-                    || (o[0] == 169 && o[1] == 254 && o[2] == 169 && o[3] == 254) // IMDS
-            }
-            IpAddr::V6(v) => {
-                if let Some(m) = v.to_ipv4_mapped() {
-                    return is_bogon_ip(IpAddr::V4(m));
-                }
-                let segs = v.segments();
-                v.is_loopback()
-                    || v.is_multicast()
-                    || v.is_unspecified()
-                    || v.is_unique_local()
-                    || v.is_unicast_link_local()
-                    || (segs[0] == 0x2001 && segs[1] == 0x0db8) // doc
-                    || (segs[0] == 0x2001 && segs[1] == 0x0000) // Teredo
-                    || (segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020) // ORCHIDv2
-                    || (segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0) // discard
-            }
-        }
-    }
-
     fn profile_to_rquest(p: ImpersonateProfile) -> rquest_util::Emulation {
         // rquest 5.x renamed Impersonate -> Emulation and moved the
         // browser variants to the rquest-util companion crate. The
@@ -460,11 +451,23 @@ impl StealthClient {
 
     pub async fn send(
         &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: Option<&[u8]>,
+        max_body: usize,
+    ) -> Result<StealthResponse, StealthError> {
+        self.send_pinned(method, url, headers, body, max_body, None).await
+    }
+
+    pub async fn send_pinned(
+        &self,
         _method: &str,
         _url: &str,
         _headers: &[(String, String)],
         _body: Option<&[u8]>,
         _max_body: usize,
+        _pinned_addrs: Option<&[std::net::SocketAddr]>,
     ) -> Result<StealthResponse, StealthError> {
         Err(StealthError::Build(
             "wafrift-transport built without the `tls-impersonate` feature".into(),

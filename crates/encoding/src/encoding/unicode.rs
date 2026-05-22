@@ -25,12 +25,26 @@ pub fn unicode_encode(payload: &str) -> String {
 
 /// IIS/ASP percent Unicode encoding — each character becomes `%uXXXX`.
 ///
-/// **Context**: ONLY safe on IIS/ASP classic parsers.
+/// **Context**: ONLY safe on IIS/ASP classic parsers. IIS `%u` encoding
+/// is bounded to BMP (U+0000–U+FFFF) — non-BMP code points must be
+/// emitted as UTF-16 surrogate pairs (`%uD83D%uDE00` for 😀, NOT the
+/// invalid `%u1F600`). Pre-fix the loop wrote `ch as u32` straight
+/// into a 4-hex-wide format, silently truncating high bytes for any
+/// supplementary plane char and producing output IIS rejects — which
+/// looked encoded but bypassed nothing.
 #[must_use]
 pub fn iis_unicode_encode(payload: &str) -> String {
     let mut out = String::with_capacity(payload.len() * 6);
     for ch in payload.chars() {
-        let _ = write!(&mut out, "%u{:04X}", ch as u32);
+        let code = ch as u32;
+        if code > 0xFFFF {
+            let surrogate_base = code - 0x1_0000;
+            let high = 0xD800 + ((surrogate_base >> 10) & 0x3FF);
+            let low = 0xDC00 + (surrogate_base & 0x3FF);
+            let _ = write!(&mut out, "%u{high:04X}%u{low:04X}");
+        } else {
+            let _ = write!(&mut out, "%u{code:04X}");
+        }
     }
     out
 }
@@ -181,6 +195,43 @@ mod tests {
     }
 
     #[test]
+    fn iis_unicode_encode_bmp_only_for_3byte_utf8() {
+        // U+65E5 (日) is BMP — emits as a single %uXXXX, no
+        // surrogate. This is the existing happy path.
+        assert_eq!(iis_unicode_encode("日"), "%u65E5");
+    }
+
+    #[test]
+    fn iis_unicode_encode_non_bmp_emits_surrogate_pair() {
+        // U+1F600 (😀) is supplementary plane. Pre-fix this emitted
+        // `%u1F600` (5 hex digits — invalid IIS %u, silently
+        // unencodable, bypass-rate killer). Post-fix it MUST emit a
+        // UTF-16 surrogate pair `%uD83D%uDE00`.
+        assert_eq!(iis_unicode_encode("😀"), "%uD83D%uDE00");
+    }
+
+    #[test]
+    fn iis_unicode_encode_mixed_bmp_and_non_bmp() {
+        // Adversarial: a mix of plain ASCII + BMP + supplementary
+        // must produce exactly one %uXXXX or %uXXXX%uXXXX per char.
+        // No 5-digit %u sequences anywhere — pin the regression.
+        let out = iis_unicode_encode("A日😀");
+        assert_eq!(out, "%u0041%u65E5%uD83D%uDE00");
+        // Anti-regression: scan for any 5-hex-digit %u sequence.
+        // The fix would silently regress if someone widened the
+        // format string to %u{:05X} thinking it "supports" non-BMP.
+        for hex_run in out.split("%u").skip(1) {
+            let hex_part: String =
+                hex_run.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            assert!(
+                hex_part.len() == 4,
+                "every %u sequence must be exactly 4 hex digits (IIS spec); \
+                 got {hex_part:?} in output {out:?}"
+            );
+        }
+    }
+
+    #[test]
     fn json_encode_basic() {
         assert_eq!(json_string_encode("A"), "\"A\"");
         assert_eq!(json_string_encode("A\\B"), "\"A\\\\B\"");
@@ -318,5 +369,66 @@ mod tests {
         let encoded = homoglyph_encode("fn()");
         assert!(encoded.contains('\u{FF08}'), "should contain fullwidth (");
         assert!(encoded.contains('\u{FF09}'), "should contain fullwidth )");
+    }
+
+    // ── Bug 2 regression: iis_unicode_encode non-BMP adversarial twins ──
+    //
+    // PRE-FIX BUG: the loop body cast `ch as u32` into a %uXXXX format
+    // without checking whether `code > 0xFFFF`. For supplementary-plane
+    // characters (U+10000 and above) this produced a 5-digit hex sequence
+    // like `%u1F600`, which IIS's %u decoder rejects (its format is
+    // strictly 4 hex digits). The bypass looked encoded but was actually
+    // undecodable on any real IIS target — a silent bypass-rate killer.
+    // Fixed: emit a UTF-16 surrogate pair `%uHIGH%uLOW` for non-BMP chars.
+
+    #[test]
+    fn iis_unicode_encode_lowest_non_bmp_u10000() {
+        // U+10000 is the very first supplementary-plane codepoint (LINEAR B
+        // SYLLABLE B008 A). Pre-fix: emitted `%u10000` (5 hex digits —
+        // invalid IIS format). Post-fix: must emit the surrogate pair
+        // %uD800%uDC00 (high=0xD800, low=0xDC00 for U+10000).
+        let ch = '\u{10000}'; // U+10000
+        let encoded = iis_unicode_encode(&ch.to_string());
+        assert_eq!(
+            encoded, "%uD800%uDC00",
+            "U+10000 (lowest non-BMP) must encode as surrogate pair %uD800%uDC00, \
+             not the invalid %u10000"
+        );
+        // Anti-regression: no 5-digit %u sequence.
+        for hex_run in encoded.split("%u").skip(1) {
+            let hex_part: String =
+                hex_run.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            assert_eq!(
+                hex_part.len(),
+                4,
+                "every %u sequence must be exactly 4 hex digits (IIS spec); \
+                 got {hex_part:?} in {encoded:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn iis_unicode_encode_high_cjk_supplement_u20000() {
+        // U+20000 is the first codepoint in CJK Unified Ideographs Extension
+        // B (𠀀). Pre-fix: emitted `%u20000` (5 hex digits — IIS rejects).
+        // Post-fix: surrogate pair calculation:
+        //   surrogate_base = 0x20000 - 0x10000 = 0x10000
+        //   high = 0xD800 + (0x10000 >> 10) = 0xD800 + 0x40 = 0xD840
+        //   low  = 0xDC00 + (0x10000 & 0x3FF) = 0xDC00 + 0x00 = 0xDC00
+        let ch = '\u{20000}';
+        let encoded = iis_unicode_encode(&ch.to_string());
+        assert_eq!(
+            encoded, "%uD840%uDC00",
+            "U+20000 (CJK Supplement) must encode as %uD840%uDC00"
+        );
+        for hex_run in encoded.split("%u").skip(1) {
+            let hex_part: String =
+                hex_run.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            assert_eq!(
+                hex_part.len(),
+                4,
+                "each %u group must be 4 hex digits; got {hex_part:?}"
+            );
+        }
     }
 }

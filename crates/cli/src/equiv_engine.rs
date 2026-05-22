@@ -285,7 +285,16 @@ pub async fn send(
         builder = builder.body(body.clone());
     }
     builder = builder.timeout(std::time::Duration::from_secs(timeout_secs));
-    let resp = builder.send().await.map_err(|e| e.to_string())?;
+    // Surface the FULL cause chain instead of the bare "builder
+    // error" / "error sending request" display strings — pre-fix
+    // every scan emitted hundreds of `warn: equiv learn send (sql):
+    // builder error` lines with no actionable detail. Dogfood
+    // sonnet 3 (2026-05) flagged the noise as boy-cried-wolf
+    // training: operators learn to ignore `warn:`.
+    let resp = builder
+        .send()
+        .await
+        .map_err(|e| crate::helpers::walk_reqwest_error(&e))?;
     let status = resp.status().as_u16();
     // Bounded read — decompression-bomb defence on the WAF response.
     let body = crate::safe_body::read_bounded(

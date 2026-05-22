@@ -86,3 +86,8 @@ SCOREBOARD*.md
 !LICENSE-APACHE
 !LICENSE-MIT
 # ── Santh-internal artifacts (END) ──
+
+# Per-session dogfood scratch + Python __pycache__ — never commit.
+.tmp_*
+__pycache__/
+*.pyc

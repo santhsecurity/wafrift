@@ -52,9 +52,10 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
+use tracing::{debug, info, warn};
 use wafrift_smuggling::smuggling::{
-    self, SmugglingPayload, SmugglingVariant, cl_zero, detect_cl_te, detect_te_cl, dual_cl,
-    multi_value_cl, te_cl, te_te,
+    self, SmugglingPayload, cl_zero, detect_cl_te, detect_te_cl, dual_cl, multi_value_cl, te_cl,
+    te_te,
 };
 
 #[derive(Args, Debug)]
@@ -403,6 +404,16 @@ pub fn classify_detection(elapsed_ms: u64, baseline_ms: u64, threshold_ms: u64) 
 }
 
 async fn run_detect(args: DetectSmuggleArgs) -> ExitCode {
+    // TRACING: probe start — operator can confirm parameters at debug level.
+    debug!(
+        target: "wafrift::smuggle",
+        host = %args.host,
+        port = args.port,
+        baseline_samples = args.baseline_samples,
+        timeout_secs = args.timeout_secs,
+        threshold_ms = args.threshold_ms,
+        "smuggle detect: starting timing-differential probes"
+    );
     if args.format == "text" {
         eprintln!(
             "{} {}:{}  baseline={} samples, timeout={}s, threshold={}ms",
@@ -424,6 +435,7 @@ async fn run_detect(args: DetectSmuggleArgs) -> ExitCode {
     {
         Ok(b) => b,
         Err(e) => {
+            warn!(target: "wafrift::smuggle", host = %args.host, error = %e, "baseline measurement failed");
             eprintln!("{} measure baseline: {e}", "error:".red());
             return ExitCode::from(1);
         }
@@ -455,6 +467,27 @@ async fn run_detect(args: DetectSmuggleArgs) -> ExitCode {
         };
         let mut f = classify_detection(elapsed, baseline_ms, args.threshold_ms);
         f.variant = variant_key.to_string();
+        // TRACING: per-probe classification result — the key decision point.
+        // At debug level the operator sees why each probe was/wasn't flagged.
+        if f.desync_inferred {
+            info!(
+                target: "wafrift::smuggle",
+                variant = %variant_key,
+                elapsed_ms = f.elapsed_ms,
+                baseline_ms = f.baseline_ms,
+                delta_ms = f.delta_ms,
+                threshold_ms = f.threshold_ms,
+                "DESYNC inferred: timing delta exceeds threshold"
+            );
+        } else {
+            debug!(
+                target: "wafrift::smuggle",
+                variant = %variant_key,
+                elapsed_ms = f.elapsed_ms,
+                delta_ms = f.delta_ms,
+                "probe clean: delta below threshold"
+            );
+        }
         findings.push(f);
     }
 
@@ -594,6 +627,12 @@ fn run_dry(args: DryRunArgs) -> ExitCode {
 
 async fn run_probe(args: ProbeSmuggleArgs) -> ExitCode {
     if args.variant.info.tier == SafetyTier::Exploit && !args.r#unsafe {
+        warn!(
+            target: "wafrift::smuggle",
+            variant = %args.variant.info.key,
+            host = %args.host,
+            "exploit-tier probe refused: --unsafe not set"
+        );
         eprintln!(
             "{} variant `{}` is EXPLOIT-tier — it WILL desync the \
              connection pool. Re-run with `--unsafe` to acknowledge \
@@ -607,10 +646,24 @@ async fn run_probe(args: ProbeSmuggleArgs) -> ExitCode {
     let payload = match build_payload(args.variant.info, &args.host, &prefix) {
         Ok(p) => p,
         Err(e) => {
+            warn!(target: "wafrift::smuggle", variant = %args.variant.info.key, error = %e, "payload build failed");
             eprintln!("{} build payload: {e}", "error:".red());
             return ExitCode::from(1);
         }
     };
+    // TRACING: exploit probe about to fire — canary token lets operator
+    // correlate the wire send with any canary echo they observe.
+    // No sensitive value in the log: variant, host, byte count, and
+    // canary (a random nonce, not a credential) are all public to the operator.
+    info!(
+        target: "wafrift::smuggle",
+        variant = %args.variant.info.key,
+        host = %args.host,
+        port = args.port,
+        payload_bytes = payload.raw_bytes.len(),
+        canary = %payload.canary.token,
+        "firing exploit-tier smuggle probe"
+    );
     if args.format == "text" {
         eprintln!(
             "{} variant={} host={}:{} bytes={} canary={}",
@@ -669,6 +722,16 @@ async fn run_probe(args: ProbeSmuggleArgs) -> ExitCode {
     let elapsed_ms = elapsed.elapsed().as_millis() as u64;
     let bytes_read = buf.len();
     let response_preview: String = String::from_utf8_lossy(&buf[..buf.len().min(512)]).into_owned();
+    // TRACING: response received — gives the operator latency and byte count
+    // without requiring them to parse text output.
+    debug!(
+        target: "wafrift::smuggle",
+        variant = %args.variant.info.key,
+        elapsed_ms,
+        bytes_read,
+        timed_out = read_result.is_err(),
+        "probe response received"
+    );
 
     if args.format == "json" {
         let out = serde_json::json!({
@@ -745,11 +808,6 @@ pub fn run_smuggle(args: SmuggleArgs) -> ExitCode {
         }
     }
 }
-
-// `SmugglingVariant` is re-exported only so `cargo doc` cross-links
-// from this module land in the engine docs. Not used here directly.
-#[allow(dead_code)]
-const _ASSERT_VARIANT_LINKAGE: Option<SmugglingVariant> = None;
 
 #[cfg(test)]
 mod tests {
@@ -932,6 +990,7 @@ mod tests {
         assert!(p.raw_bytes.len() > 50);
     }
 
+    #[serial_test::serial]
     #[tokio::test]
     async fn time_first_byte_returns_timeout_value_when_server_silent() {
         // Spawn a TcpListener that accepts the connection and
@@ -962,8 +1021,13 @@ mod tests {
         assert!(elapsed < 2500, "should not exceed timeout+margin, got {elapsed}");
     }
 
+    #[serial_test::serial]
     #[tokio::test]
     async fn time_first_byte_returns_quickly_when_server_responds() {
+        // `#[serial_test::serial]` — binds a fresh `127.0.0.1:0`
+        // listener; under Windows parallel test runs the ephemeral-
+        // port + slow TIME_WAIT recycle path produces spurious
+        // `connection refused` failures.
         // Spawn a TcpListener that immediately writes a minimal
         // HTTP response. Confirms the path through the success
         // case returns a small elapsed_ms.

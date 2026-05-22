@@ -1,0 +1,80 @@
+schema = 1
+# NoSQL injection — advanced MongoDB / CouchDB operators beyond the
+# canonical `$ne` / `$gt` family. These exploit the query-shape
+# expressiveness that WAFs typically don't fully model.
+
+# ── $regex injection ──
+
+[[case]]
+id = "regex_password_extract"
+class = "nosql"
+payload = "{\"username\":\"admin\",\"password\":{\"$regex\":\"^.{8}$\"}}"
+description = "$regex with anchored length probe — pings server with  {match if password is exactly 8 chars}; blind data  extraction via response timing"
+
+[[case]]
+id = "regex_password_starts_with"
+class = "nosql"
+payload = "{\"username\":\"admin\",\"password\":{\"$regex\":\"^A\"}}"
+description = "$regex starts-with probe — extracts password byte by byte"
+
+# ── $where JavaScript injection (legacy MongoDB) ──
+
+[[case]]
+id = "where_js_sleep"
+class = "nosql"
+payload = "{\"$where\":\"function(){ return sleep(5000) || true; }\"}"
+description = "$where executes arbitrary JS in older MongoDB; sleep  creates a timing oracle"
+
+[[case]]
+id = "where_js_extract"
+class = "nosql"
+payload = "{\"$where\":\"this.password.match(/^a/)\"}"
+description = "$where with regex match — leaks per-char via response  differences"
+
+# ── $expr aggregation ──
+
+[[case]]
+id = "expr_strlen_probe"
+class = "nosql"
+payload = "{\"$expr\":{\"$gt\":[{\"$strLenCP\":\"$password\"},10]}}"
+description = "$expr + $strLenCP probes password length; bypasses naive  WAF rules that only know top-level operators"
+
+[[case]]
+id = "expr_substring_extract"
+class = "nosql"
+payload = "{\"$expr\":{\"$eq\":[{\"$substr\":[\"$password\",0,1]},\"a\"]}}"
+description = "$expr + $substr extracts password char-by-char"
+
+# ── Operator nesting + $type ──
+
+[[case]]
+id = "type_double_coercion"
+class = "nosql"
+payload = "{\"id\":{\"$type\":\"double\"}}"
+description = "$type lets attacker query by BSON type; bypasses validation  that expects strings only"
+
+[[case]]
+id = "or_array_bypass"
+class = "nosql"
+payload = "{\"$or\":[{\"username\":\"admin\"},{\"role\":\"admin\"}]}"
+description = "$or array — defeats single-key WAF rules"
+
+[[case]]
+id = "and_logical_bypass"
+class = "nosql"
+payload = "{\"$and\":[{\"id\":{\"$ne\":null}}]}"
+description = "$and wrapper around $ne — same effect as bare $ne but  multi-level operator depth"
+
+# ── CouchDB / Mango ──
+
+[[case]]
+id = "couchdb_selector_in"
+class = "nosql"
+payload = "{\"selector\":{\"role\":{\"$in\":[\"admin\",\"superuser\",\"root\"]}}}"
+description = "CouchDB Mango selector with $in array — list-based bypass"
+
+[[case]]
+id = "couchdb_selector_regex"
+class = "nosql"
+payload = "{\"selector\":{\"password\":{\"$regex\":\"^.\\\\{1,\\\\}\"}}}"
+description = "CouchDB-flavoured regex (escaped curlies) — same regex  attack via different dialect"

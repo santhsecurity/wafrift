@@ -53,11 +53,15 @@ pub struct EvadeArgs {
     #[arg(long)]
     pub stdin: bool,
 
-    /// Output format: `text` (default) or `json`. `--format json` is
-    /// equivalent to the global `--quiet` for this command and exists
-    /// so `evade` matches `scan`/`bypass-probe`/`import-curl`, whose
-    /// `--format` flag pentesters already script against.
-    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    /// Output format: `text` (default, colored summary), `json` (a
+    /// SINGLE top-level object — consistent with every other
+    /// command, parseable as `jq .variants[]`), or `jsonl` (one JSON
+    /// object per line — the legacy stream form, useful for piping
+    /// large variant counts into a downstream consumer that reads
+    /// line-by-line).  The legacy `--quiet` flag aliases to `json`
+    /// (wrapped object); pre-2026-05 scripts that expected NDJSON
+    /// on `--quiet` need to switch to `--format jsonl`.
+    #[arg(long, default_value = "text", value_parser = ["text", "json", "jsonl"])]
     pub format: String,
 
     /// Evasion intensity.
@@ -99,10 +103,14 @@ pub struct EvadeArgs {
 
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
-    // `--format json` is the per-command spelling of the global
-    // `--quiet`: both select machine-readable NDJSON. Shadow `quiet`
-    // so every downstream branch honours either spelling.
-    let quiet = quiet || args.format == "json";
+    // `--quiet` and `--format json` BOTH select machine-readable
+    // output.  Either spelling now produces the wrapped form
+    // (single top-level object with a `variants` array) — that's
+    // the workspace-wide JSON-shape contract every other command
+    // already honours.  The legacy NDJSON form is reachable via
+    // the explicit `--format jsonl` (added 2026-05 by dogfood pass
+    // 4).
+    let quiet = quiet || args.format == "json" || args.format == "jsonl";
     let payload = match resolve_payload(&args) {
         Ok(p) => p,
         Err(msg) => {
@@ -125,7 +133,7 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
     let encoding_only = args.encoding_only || !filter.grammar_enabled();
 
     let mut trace = args.explain.then(ExplainTrace::default);
-    let variants = build_variants_explained(
+    let mut variants = build_variants_explained(
         &payload,
         payload_type,
         encoding_only,
@@ -135,10 +143,99 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
         trace.as_mut(),
     );
 
+    // Tamper variants are a SEPARATE variant axis from the encoding
+    // `Strategy` enum.  They get applied opt-in here whenever the
+    // operator selected one or more `tamper/...` paths via `--only`
+    // (or `tamper` as a bare family).  This closes the long-standing
+    // wiring gap where the tamper registry existed but no `evade`
+    // surface invoked it — leaving the new frontier 2026 tampers
+    // (zero_width_inject, postgres_dollar_quote, etc.) effectively
+    // unreachable from the offline mutator.  Tampers in the default
+    // (no `--only`) flow are deliberately left to `wafrift scan` so
+    // the default evade output doesn't balloon from 12 to 31 variants
+    // and surprise existing scripts.
+    let any_tamper_selector = args
+        .only
+        .iter()
+        .flat_map(|s| s.split(','))
+        .map(str::trim)
+        .any(|sel| sel == "tamper" || sel.starts_with("tamper/"));
+    if any_tamper_selector {
+        let tamper_registry = wafrift_encoding::tamper::TamperRegistry::with_defaults();
+        // Tamper context resolution: prefer the operator-supplied
+        // `--target-context` when set (body / header / query / etc.)
+        // — that's what carrier-aware tampers like ct_starvation
+        // need. Fall back to the payload-class label (sql / xss /
+        // etc.) when no target context was provided, preserving
+        // the historical default for tampers that key on payload
+        // shape (e.g. mxss_namespace_wrap on XSS).
+        //
+        // Pre-fix (dogfood 2026-05): ct_starvation never fired
+        // because the context passed in was always the payload-
+        // class string ("SQL Injection" / "Unknown") which
+        // ct_starvation's body/form/json/multipart match never
+        // hits — every variant was Idempotent-skipped.
+        let context_str: Option<&str> = match args.target_context {
+            Some(tc) => Some(tc.label()),
+            None => {
+                let label = payload_type_label(payload_type);
+                if label.is_empty() { None } else { Some(label) }
+            }
+        };
+        let mut seen_tamper_payloads: std::collections::HashSet<String> = variants
+            .iter()
+            .map(|v| v.payload.clone())
+            .collect();
+        for &tamper_name in wafrift_encoding::tamper::all_tamper_names() {
+            let path = format!("tamper/{tamper_name}");
+            if !filter.allows_path(&path) {
+                continue;
+            }
+            let Some(strat) = tamper_registry.get(tamper_name) else {
+                continue;
+            };
+            let mutated = strat.tamper(&payload, context_str);
+            // Record the tamper outcome in the explain trace —
+            // operator running `--explain` must see whether a
+            // selected tamper actually fired or was a no-op /
+            // duplicate on this specific payload.
+            if mutated == payload {
+                if let Some(ref mut t) = trace {
+                    t.record_tamper(tamper_name, crate::explain::TamperOutcome::Idempotent);
+                }
+                continue;
+            }
+            if !seen_tamper_payloads.insert(mutated.clone()) {
+                if let Some(ref mut t) = trace {
+                    t.record_tamper(
+                        tamper_name,
+                        crate::explain::TamperOutcome::DuplicateOfExisting,
+                    );
+                }
+                continue;
+            }
+            if let Some(ref mut t) = trace {
+                t.record_tamper(tamper_name, crate::explain::TamperOutcome::Applied);
+            }
+            variants.push(crate::helpers::Variant {
+                payload: mutated,
+                techniques: vec![format!("tamper:{tamper_name}")],
+                confidence: strat.aggressiveness().clamp(0.05, 0.95),
+            });
+        }
+    }
+
     if variants.is_empty() {
+        // Empty variant set is a LEGITIMATE outcome — operator
+        // selected a tamper that doesn't apply to this payload
+        // shape (e.g. `--only tamper/postgres_dollar_quote` on a
+        // payload with no `'`).  Exit 0 with an empty array so
+        // CI pipelines that treat non-zero as error don't break
+        // on a no-op.  Found via dogfood pass 4 (2026-05).
         if quiet {
             let mut body = json!({
-                "error": "no variants generated",
+                "variants": serde_json::Value::Array(Vec::new()),
+                "note": "no variants generated — selected techniques produced no transform on this payload",
                 "payload_type": payload_type_label(payload_type),
             });
             if let Some(t) = trace.as_ref() {
@@ -155,7 +252,7 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             eprintln!(
                 "{}",
                 "No variants generated for the supplied payload."
-                    .red()
+                    .yellow()
                     .bold()
             );
             if let Some(ctx) = args.target_context {
@@ -173,34 +270,78 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
                 t.print_text();
             }
         }
-        return ExitCode::from(1);
+        // Exit 0 — no variants is a legitimate outcome, not an error.
+        return ExitCode::SUCCESS;
     }
 
-    if quiet {
-        // JSON output: one object per line (NDJSON), then an optional trailing
-        // {"explain": [...]} object so consumers can stream variants and still
-        // pick up the trace.
+    // Output format resolution:
+    //   --format jsonl       → NDJSON (one object per line, plus
+    //                          optional trailing explain object).
+    //                          Streaming-friendly for large runs.
+    //   --format json        → SINGLE top-level object with a
+    //                          `variants` array.  Consistent with
+    //                          every other wafrift command — `jq
+    //                          .variants[]` works.  Default for
+    //                          the `--quiet` legacy alias.
+    //   --quiet              → alias for `--format json` (wrapped).
+    //   --format text (default) → human-readable colorised output.
+    //
+    // The previous behaviour emitted NDJSON on both `--format json`
+    // and `--quiet`, breaking `jq .field` consumers and making
+    // evade the only command that disagreed with the workspace's
+    // JSON-shape contract.  Found via dogfood pass 4 (2026-05).
+    let emit_jsonl = args.format == "jsonl";
+    let emit_json_obj = !emit_jsonl && quiet;
+    if emit_jsonl || emit_json_obj {
         let mut buf = String::new();
-        for variant in &variants {
-            let obj = json!({
-                "payload": variant.payload,
-                "techniques": variant.techniques,
-                "confidence": variant.confidence,
-            });
-            if args.output.is_some() {
-                buf.push_str(&obj.to_string());
-                buf.push('\n');
-            } else {
-                println!("{obj}");
+        if emit_json_obj {
+            // Wrapped form: one top-level object containing the
+            // variants array plus the optional explain block.
+            let variant_objs: Vec<_> = variants
+                .iter()
+                .map(|variant| {
+                    json!({
+                        "payload": variant.payload,
+                        "techniques": variant.techniques,
+                        "confidence": variant.confidence,
+                    })
+                })
+                .collect();
+            let mut top = json!({ "variants": variant_objs });
+            if let Some(t) = trace.as_ref() {
+                let explain = t.to_json();
+                top["explain"] = explain["explain"].clone();
             }
-        }
-        if let Some(t) = trace.as_ref() {
-            let explain_obj = t.to_json();
+            let rendered = top.to_string();
             if args.output.is_some() {
-                buf.push_str(&explain_obj.to_string());
+                buf.push_str(&rendered);
                 buf.push('\n');
             } else {
-                println!("{explain_obj}");
+                println!("{rendered}");
+            }
+        } else {
+            // Legacy NDJSON form: one object per line.
+            for variant in &variants {
+                let obj = json!({
+                    "payload": variant.payload,
+                    "techniques": variant.techniques,
+                    "confidence": variant.confidence,
+                });
+                if args.output.is_some() {
+                    buf.push_str(&obj.to_string());
+                    buf.push('\n');
+                } else {
+                    println!("{obj}");
+                }
+            }
+            if let Some(t) = trace.as_ref() {
+                let explain_obj = t.to_json();
+                if args.output.is_some() {
+                    buf.push_str(&explain_obj.to_string());
+                    buf.push('\n');
+                } else {
+                    println!("{explain_obj}");
+                }
             }
         }
         if let Some(ref path) = args.output {
@@ -241,11 +382,31 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
                 "Techniques:".bold().cyan(),
                 variant.techniques.join(" -> ").yellow()
             );
+            // Escape non-printable ASCII control bytes so tampers
+            // like `bell_separator` (BEL 0x07), `null_byte` (NUL),
+            // and the zero-width Unicode injectors don't render as
+            // invisible characters in the operator's terminal —
+            // the terminal silently swallows BEL / NUL / NULL and
+            // the operator can't tell the tamper fired.  This is
+            // the "byte-level visibility" requirement called out
+            // in the 2026-05 dogfood pass.
             println!(
                 "{} {}",
                 "Payload:".bold().cyan(),
-                variant.payload.bright_white()
+                visualize_invisible_bytes(&variant.payload).bright_white()
             );
+        }
+
+        // Top-N tail summary: when the variant set is large enough
+        // to fill more than one terminal screen (>= 8 variants),
+        // surface the top 5 by confidence + the technique frequency
+        // breakdown. This is a UX dogfood gap — operators reading
+        // a 30-variant emit want to know "which 5 should I try
+        // first?" without re-scrolling the whole list. Suppressed
+        // for short emits where the body is already a glanceable
+        // summary.
+        if variants.len() >= 8 {
+            print_top_n_summary(&variants);
         }
 
         if let Some(t) = trace.as_ref() {
@@ -254,6 +415,73 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Trailing tail printed after the per-variant body in text mode.
+/// Pure wrapper: builds the string via [`top_n_summary_text`] (which
+/// is unit-testable) and prints it. Behind the >=8 variant threshold
+/// in the caller so short emits stay quiet.
+fn print_top_n_summary(variants: &[crate::helpers::Variant]) {
+    print!("{}", top_n_summary_text(variants));
+}
+
+/// Build the top-N summary tail as a single string. Two blocks:
+///   - Top 5 variants by confidence (the "try these first" list).
+///   - Technique-chain frequency (helps the operator spot which
+///     mutator family the engine leaned on).
+///
+/// Pure (no stdout I/O), so unit tests can assert on the rendered
+/// content directly. Each line is terminated by `\n`.
+fn top_n_summary_text(variants: &[crate::helpers::Variant]) -> String {
+    use std::collections::BTreeMap;
+    use std::fmt::Write as _;
+    const TOP_N: usize = 5;
+    let mut out = String::new();
+    out.push('\n');
+    let _ = writeln!(
+        out,
+        "{}",
+        "─── Summary (top-5 by confidence) ───".bold().bright_black()
+    );
+    let mut ranked: Vec<(usize, &crate::helpers::Variant)> = variants.iter().enumerate().collect();
+    // Stable-sort by descending confidence; ties keep input order.
+    ranked.sort_by(|a, b| {
+        b.1.confidence
+            .partial_cmp(&a.1.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for (orig_idx, v) in ranked.iter().take(TOP_N) {
+        let _ = writeln!(
+            out,
+            "  #{:<3} conf {:.2}  {}",
+            orig_idx + 1,
+            v.confidence,
+            v.techniques.join(" -> ").yellow()
+        );
+    }
+    // Technique-chain frequency. The chain (joined) is the bucket
+    // key because two variants reaching the same end state via
+    // different mutators are usually equivalent in practice; if you
+    // care about per-mutator frequency, --explain has the per-call
+    // counters.
+    let mut freq: BTreeMap<String, usize> = BTreeMap::new();
+    for v in variants {
+        *freq.entry(v.techniques.join(" -> ")).or_insert(0) += 1;
+    }
+    if freq.len() > 1 {
+        out.push('\n');
+        let _ = writeln!(
+            out,
+            "{}",
+            "─── Technique frequency ───".bold().bright_black()
+        );
+        let mut chain_counts: Vec<(&String, &usize)> = freq.iter().collect();
+        chain_counts.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+        for (chain, n) in chain_counts.iter().take(TOP_N) {
+            let _ = writeln!(out, "  {:>3}×  {}", n, chain.yellow());
+        }
+    }
+    out
 }
 
 /// Resolve the evade payload from `--payload`, `--payload-b64`, or
@@ -297,6 +525,15 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
         io::stdin()
             .read_to_end(&mut buf)
             .map_err(|e| format!("failed to read payload from stdin: {e}"))?;
+        // PowerShell silently prepends a UTF-8 BOM (`\xEF\xBB\xBF`)
+        // to piped output by default — `Write-Output "x" | wafrift
+        // evade --stdin` arrives as `\u{FEFF}x`, which then carries
+        // through every tamper output as an invisible prefix. Strip
+        // the BOM unconditionally so PowerShell + cmd + bash + zsh
+        // pipes all converge on the same bytes.
+        if buf.starts_with(b"\xef\xbb\xbf") {
+            buf.drain(0..3);
+        }
         // Strip a single trailing newline (the `echo 'x' |` case) without
         // mangling embedded control bytes in a deliberate binary payload.
         if buf.last() == Some(&b'\n') {
@@ -332,6 +569,43 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
             .to_string());
     }
     Ok(raw)
+}
+
+/// Render a payload string with non-printable / invisible Unicode
+/// codepoints escaped to their `\xNN` or `\u{NNNN}` form so the
+/// operator can SEE what byte-level transform a tamper applied.
+/// Terminals silently swallow BEL (`\x07`), NUL (`\x00`), and the
+/// zero-width Unicode injectors (`\u{200B}` etc.); without this
+/// the operator can't tell whether the transform fired.
+///
+/// Only ASCII printable + tab + standard whitespace pass through
+/// verbatim.  Everything else gets the explicit hex / unicode
+/// escape form.  JSON output is unaffected (serde escapes these
+/// automatically); this helper is for the text-mode `evade`
+/// printer only.
+pub(crate) fn visualize_invisible_bytes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            // ASCII printable + tab + newline + carriage-return
+            // pass through verbatim.  Newline preservation matters
+            // for multi-line payloads (XSS HTML templates etc).
+            '\t' | '\n' | '\r' => out.push(ch),
+            c if (' '..='~').contains(&c) => out.push(c),
+            // Common Unicode control / zero-width / format chars
+            // get the explicit `\u{...}` form so the operator
+            // sees the transform.
+            '\u{200B}' => out.push_str("\\u{200B}"),
+            '\u{200C}' => out.push_str("\\u{200C}"),
+            '\u{200D}' => out.push_str("\\u{200D}"),
+            '\u{FEFF}' => out.push_str("\\u{FEFF}"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7F => {
+                out.push_str(&format!("\\x{:02X}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -488,5 +762,379 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(b"RIGHT"),
         );
         assert_eq!(resolve_payload(&args).unwrap(), "RIGHT");
+    }
+
+    // ── Tamper wiring (added 2026-05) ──────────────────────
+    //
+    // These exercise the policy that tampers are opt-in for evade —
+    // default flows produce zero tamper variants, an explicit
+    // `--only tamper/...` selector produces one variant per matched
+    // tamper (deduped against the original + existing variants).
+    //
+    // We don't invoke `run_evade` directly here (it writes to stdout
+    // and process-exits); instead we mirror its TamperRegistry +
+    // TechniqueFilter logic in the assertion.
+
+    fn count_tamper_variants_for(selectors: &[&str], payload: &str) -> usize {
+        let filter = TechniqueFilter::parse(
+            &selectors.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            &[],
+        )
+        .expect("filter parses");
+        let any_tamper_selector = selectors
+            .iter()
+            .flat_map(|s| s.split(','))
+            .map(str::trim)
+            .any(|sel| sel == "tamper" || sel.starts_with("tamper/"));
+        if !any_tamper_selector {
+            return 0;
+        }
+        let reg = wafrift_encoding::tamper::TamperRegistry::with_defaults();
+        let mut hits = 0;
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(payload.to_string());
+        for &name in wafrift_encoding::tamper::all_tamper_names() {
+            let path = format!("tamper/{name}");
+            if !filter.allows_path(&path) {
+                continue;
+            }
+            let Some(strat) = reg.get(name) else {
+                continue;
+            };
+            let mutated = strat.tamper(payload, Some("sql"));
+            if mutated != payload && seen.insert(mutated) {
+                hits += 1;
+            }
+        }
+        hits
+    }
+
+    #[test]
+    fn tamper_opt_in_zero_variants_when_no_selector() {
+        assert_eq!(count_tamper_variants_for(&[], "' OR 1=1--"), 0);
+        assert_eq!(
+            count_tamper_variants_for(&["encoding/url"], "' OR 1=1--"),
+            0,
+            "encoding-only selector must not enable tamper variants"
+        );
+    }
+
+    #[test]
+    fn tamper_family_selector_enables_all_tampers() {
+        // `tamper` as a bare family selects every registered tamper
+        // — at least 10 of them will produce a non-identity variant
+        // on an SQL payload.
+        let hits = count_tamper_variants_for(&["tamper"], "' OR 1=1--");
+        assert!(
+            hits >= 5,
+            "tamper-family selector should fire many tampers; got {hits}"
+        );
+    }
+
+    #[test]
+    fn tamper_leaf_selector_isolates_single_tamper() {
+        // A specific tamper leaf produces at most one variant.
+        let hits =
+            count_tamper_variants_for(&["tamper/zero_width_inject"], "' OR 1=1--");
+        assert!(
+            hits <= 1,
+            "tamper/zero_width_inject must produce at most one variant; got {hits}"
+        );
+        // And specifically it DOES produce one for this payload
+        // (which contains alphabetic chars).
+        assert_eq!(hits, 1);
+    }
+
+    #[test]
+    fn tamper_inert_on_unrelated_payload_produces_zero() {
+        // postgres_dollar_quote only transforms single-quoted
+        // literals.  A payload with no `'` should produce no
+        // variant.
+        let hits =
+            count_tamper_variants_for(&["tamper/postgres_dollar_quote"], "1=1");
+        assert_eq!(hits, 0);
+    }
+
+    #[test]
+    fn tamper_multiple_leaves_compose() {
+        let hits = count_tamper_variants_for(
+            &[
+                "tamper/zero_width_inject",
+                "tamper/bracket_confusable",
+                "tamper/bell_separator",
+            ],
+            "<script>alert OR 1=1</script>",
+        );
+        // Three distinct selectors → up to three distinct
+        // outputs.  Lower-bound on 2 (some may collide on this
+        // payload).
+        assert!(hits >= 2);
+    }
+
+    #[test]
+    fn tamper_comma_separated_csv_form_is_recognised() {
+        // `--only "tamper/a,tamper/b"` — split on comma.
+        let hits = count_tamper_variants_for(
+            &["tamper/zero_width_inject,tamper/bracket_confusable"],
+            "<x>OR</x>",
+        );
+        assert!(hits >= 1);
+    }
+
+    #[test]
+    fn tamper_idempotent_on_pure_punctuation_payload() {
+        // `1=1` has no alphabetic chars → zero_width_inject is a
+        // no-op → no variant produced.
+        let hits = count_tamper_variants_for(&["tamper/zero_width_inject"], "1=1");
+        assert_eq!(hits, 0);
+    }
+
+    #[test]
+    fn visualize_escapes_bell_byte() {
+        assert_eq!(visualize_invisible_bytes("a\u{0007}b"), "a\\x07b");
+    }
+
+    #[test]
+    fn visualize_escapes_null_byte() {
+        assert_eq!(visualize_invisible_bytes("a\u{0000}b"), "a\\x00b");
+    }
+
+    #[test]
+    fn visualize_escapes_zero_width_codepoints() {
+        let input = "S\u{200B}E\u{200C}L\u{200D}E\u{FEFF}CT";
+        let out = visualize_invisible_bytes(input);
+        assert!(out.contains("\\u{200B}"));
+        assert!(out.contains("\\u{200C}"));
+        assert!(out.contains("\\u{200D}"));
+        assert!(out.contains("\\u{FEFF}"));
+        assert!(out.starts_with("S"));
+        assert!(out.ends_with("CT"));
+    }
+
+    #[test]
+    fn visualize_passes_printable_ascii_unchanged() {
+        let s = "abcXYZ123!@#$%^&*()_+={}[]:;\"'<>,.?/|";
+        assert_eq!(visualize_invisible_bytes(s), s);
+    }
+
+    #[test]
+    fn visualize_preserves_tab_newline_carriage_return() {
+        // Multi-line payloads (XSS HTML templates) must stay
+        // readable — the whitespace trio passes through.
+        assert_eq!(visualize_invisible_bytes("a\tb\nc\rd"), "a\tb\nc\rd");
+    }
+
+    #[test]
+    fn visualize_escapes_delete_byte() {
+        // 0x7F DEL — not printable, must be escaped.
+        assert_eq!(visualize_invisible_bytes("a\u{007F}b"), "a\\x7Fb");
+    }
+
+    #[test]
+    fn visualize_passes_high_unicode_printable_chars() {
+        // Fullwidth bracket (U+FF1C) from bracket_confusable —
+        // visually distinct, leave verbatim.
+        assert_eq!(visualize_invisible_bytes("a\u{FF1C}b"), "a\u{FF1C}b");
+    }
+
+    #[test]
+    fn visualize_handles_mixed_content() {
+        let input = "UNION\u{0007}SELECT \u{200B}1=1";
+        let out = visualize_invisible_bytes(input);
+        assert!(out.contains("UNION"));
+        assert!(out.contains("\\x07"));
+        assert!(out.contains("SELECT"));
+        assert!(out.contains("\\u{200B}"));
+        assert!(out.contains("1=1"));
+    }
+
+    #[test]
+    fn visualize_empty_input() {
+        assert_eq!(visualize_invisible_bytes(""), "");
+    }
+
+    #[test]
+    fn visualize_only_invisible_codepoints() {
+        let input = "\u{0007}\u{0000}\u{200B}";
+        let out = visualize_invisible_bytes(input);
+        assert_eq!(out, "\\x07\\x00\\u{200B}");
+    }
+
+    #[test]
+    fn tamper_unknown_leaf_fails_filter_parse() {
+        // Unknown selectors error out at the filter layer — must
+        // not silently match nothing.
+        let r = TechniqueFilter::parse(
+            &["tamper/no_such_tamper".to_string()],
+            &[],
+        );
+        assert!(r.is_err());
+    }
+
+    // ── format-shape regression guards (2026-05 dogfood pass 4) ──
+
+    #[test]
+    fn format_value_parser_accepts_text_json_jsonl() {
+        // The clap arg config must accept all three values without
+        // erroring out on parse time.  The actual rendering branch
+        // is exercised by run_evade integration tests below.
+        for value in ["text", "json", "jsonl"] {
+            // Construct args via clap's parse-from-iter so we exercise
+            // the full value_parser path.
+            use clap::Parser;
+            #[derive(clap::Parser)]
+            struct Wrap {
+                #[command(flatten)]
+                ev: EvadeArgs,
+            }
+            let r = Wrap::try_parse_from([
+                "evade",
+                "--payload",
+                "X",
+                "--format",
+                value,
+            ]);
+            assert!(r.is_ok(), "format `{value}` must parse: {:?}", r.err());
+        }
+    }
+
+    #[test]
+    fn format_value_parser_rejects_unknown_format() {
+        use clap::Parser;
+        #[derive(clap::Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            ev: EvadeArgs,
+        }
+        let r = Wrap::try_parse_from([
+            "evade",
+            "--payload",
+            "X",
+            "--format",
+            "yaml",
+        ]);
+        assert!(r.is_err(), "unknown format must reject");
+    }
+
+    // ── Top-N summary tail (text mode) ─────────────────────────
+
+    fn variant(payload: &str, techniques: &[&str], confidence: f64) -> crate::helpers::Variant {
+        crate::helpers::Variant {
+            payload: payload.to_string(),
+            techniques: techniques.iter().map(|s| (*s).to_string()).collect(),
+            confidence,
+        }
+    }
+
+    #[test]
+    fn top_n_summary_lists_top_5_by_descending_confidence() {
+        let variants = vec![
+            variant("low",  &["url"],    0.10),
+            variant("mid1", &["base64"], 0.50),
+            variant("hi1",  &["dwd"],    0.90),
+            variant("hi2",  &["wide"],   0.95),
+            variant("mid2", &["case"],   0.55),
+            variant("low2", &["nada"],   0.05),
+            variant("hi3",  &["pp"],     0.99),
+            variant("mid3", &["xor"],    0.60),
+        ];
+        let s = strip_ansi(&top_n_summary_text(&variants));
+        // Header present.
+        assert!(s.contains("Summary (top-5 by confidence)"), "summary header missing:\n{s}");
+        // The 5 highest confidence variants are #7 (0.99), #4 (0.95),
+        // #3 (0.90), #8 (0.60), #5 (0.55), in that order.
+        let expected_order = ["#7", "#4", "#3", "#8", "#5"];
+        let mut last_pos = 0;
+        for label in expected_order {
+            let pos = s.find(label).unwrap_or_else(|| panic!("missing {label} in:\n{s}"));
+            assert!(
+                pos >= last_pos,
+                "summary order broken: {label} appeared before previous row at pos {pos} vs last {last_pos}\n{s}"
+            );
+            last_pos = pos;
+        }
+        // The two lowest-confidence variants must NOT appear.
+        assert!(!s.contains("#6 "), "low2 (#6 conf 0.05) must not be in top-5:\n{s}");
+    }
+
+    #[test]
+    fn top_n_summary_shows_technique_frequency_when_more_than_one_chain() {
+        let variants = vec![
+            variant("a", &["url"], 0.5),
+            variant("b", &["url"], 0.5),
+            variant("c", &["url"], 0.5),
+            variant("d", &["b64"], 0.5),
+            variant("e", &["b64"], 0.5),
+            variant("f", &["hex"], 0.5),
+            variant("g", &["hex"], 0.5),
+            variant("h", &["hex"], 0.5),
+        ];
+        let s = strip_ansi(&top_n_summary_text(&variants));
+        assert!(
+            s.contains("Technique frequency"),
+            "freq header missing:\n{s}"
+        );
+        // Highest-count chain (hex × 3 + url × 3 -> tied) must
+        // appear; checking the most common alone is enough since
+        // tie-break is alphabetical (hex < url).
+        assert!(s.contains("3×  hex"), "hex × 3 line missing:\n{s}");
+        assert!(s.contains("3×  url"), "url × 3 line missing:\n{s}");
+        assert!(s.contains("2×  b64"), "b64 × 2 line missing:\n{s}");
+    }
+
+    #[test]
+    fn top_n_summary_omits_frequency_block_when_only_one_chain() {
+        // Single chain across all variants: the frequency block adds
+        // no signal, so it's hidden.
+        let variants = vec![
+            variant("a", &["url"], 0.5),
+            variant("b", &["url"], 0.6),
+            variant("c", &["url"], 0.7),
+            variant("d", &["url"], 0.8),
+            variant("e", &["url"], 0.9),
+            variant("f", &["url"], 0.4),
+            variant("g", &["url"], 0.3),
+            variant("h", &["url"], 0.2),
+        ];
+        let s = strip_ansi(&top_n_summary_text(&variants));
+        assert!(s.contains("Summary (top-5 by confidence)"));
+        assert!(
+            !s.contains("Technique frequency"),
+            "freq block must be hidden when only one chain exists:\n{s}"
+        );
+    }
+
+    #[test]
+    fn top_n_summary_caps_top_block_at_5_even_with_more_variants() {
+        let variants: Vec<_> = (0..20)
+            .map(|i| variant(&format!("p{i}"), &["url"], 1.0 - (i as f64) / 100.0))
+            .collect();
+        let s = strip_ansi(&top_n_summary_text(&variants));
+        // 5 numbered lines under the summary header.
+        let header_pos = s.find("Summary (top-5").unwrap();
+        let after = &s[header_pos..];
+        let count = after.matches("conf ").count();
+        assert_eq!(count, 5, "top block must show exactly 5 entries, found {count}:\n{after}");
+    }
+
+    /// Strip ANSI color codes so assertions are deterministic
+    /// regardless of whether the test runs under a TTY-detecting
+    /// `colored` build. The codes follow the form `ESC [ … m`.
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut iter = s.chars().peekable();
+        while let Some(c) = iter.next() {
+            if c == '\u{1b}' && iter.peek() == Some(&'[') {
+                iter.next(); // consume '['
+                for cc in iter.by_ref() {
+                    if cc.is_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
     }
 }

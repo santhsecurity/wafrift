@@ -3,10 +3,10 @@ name = "Kona SiteDefender"
 vendor = "Akamai"
 confidence_threshold = 0.3
 evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
-source = "WAFW00F:kona"
+source = "WAFW00F:kona + 2026-05-21 live dogfood (akamai.com 403)"
 [[waf.signature]]
   header_name = "server"
-  header_regex = "AkamaiGHost"
+  header_regex = "(?i)AkamaiGHost"
   weight = 0.5
 [[waf.signature]]
   header_name = "x-akamai-transformed"
@@ -22,11 +22,42 @@ source = "WAFW00F:kona"
 [[waf.signature]]
   body_regex = "access denied"
   weight = 0.4
+# ── Live-dogfood additions (2026-05-21 against akamai.com 403) ──
+# Akamai's own marketing site returned a 403 with NONE of the
+# canonical AkamaiGHost / x-akamai-transformed headers; instead it
+# sent X-Akam-SW-Version, Akamai-GRN, and Server-Timing: ak_p.
+# Adding these tells closes the false-negative gap on
+# Akamai-fronted properties using the newer (post-2023) header set.
+[[waf.signature]]
+  header_name = "x-akam-sw-version"
+  header_regex = "\\d+\\."
+  weight = 0.6
+[[waf.signature]]
+  header_name = "akamai-grn"
+  header_regex = "[0-9a-f]+\\."
+  weight = 0.6
+[[waf.signature]]
+  header_name = "server-timing"
+  header_regex = "ak_p;"
+  weight = 0.5
+# Akamai mPulse RUM reporting endpoints leak the vendor in
+# Content-Security-Policy + NEL + Report-To. Lower weight (a
+# non-Akamai site CAN use mPulse, but it almost always means
+# Akamai is in the path anyway).
+[[waf.signature]]
+  header_name = "report-to"
+  header_regex = "go-mpulse\\.net"
+  weight = 0.3
+[[waf.signature]]
+  header_name = "content-security-policy-report-only"
+  header_regex = "go-mpulse\\.net"
+  weight = 0.3
+# AkamaiNetStorage: Akamai's object-storage CDN — same vendor,
+# different product. microsoft.com fronts static assets on this.
+# Lower weight: NetStorage isn't strictly "Kona SiteDefender" (the
+# WAF) but it puts the operator's target on Akamai's CDN, which
+# is informative regardless.
 [[waf.signature]]
   header_name = "server"
-  header_regex = "akamaighost"
-  weight = 0.5
-[[waf.signature]]
-  header_name = "server"
-  header_regex = "akamaighosthost"
-  weight = 0.5
+  header_regex = "(?i)AkamaiNetStorage"
+  weight = 0.4

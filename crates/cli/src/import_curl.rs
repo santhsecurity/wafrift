@@ -343,7 +343,8 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     let Some(payload) = args.payload else {
         eprintln!(
             "no --payload supplied → running WAF detection on the parsed request \
-             (add --payload '<attack>' to scan for evasions instead)\n"
+             (static signatures + differential probe; add --payload '<attack>' \
+             to scan for evasions instead)\n"
         );
         return rt.block_on(detect_parsed_target(&target, &parsed, args.insecure));
     };
@@ -381,6 +382,35 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         only: args.only,
         exclude: args.exclude,
         output: None,
+        // import-curl already represents a fully-formed request;
+        // the operator can re-run via `wafrift scan --proxy/-H`
+        // if they need pentest-mode flags. Sensible defaults here.
+        proxy: None,
+        header: Vec::new(),
+        // import-curl synthesises a target/param/payload triplet
+        // from the curl line — no raw-request template path.
+        raw_request: None,
+        raw_request_scheme: "http".to_string(),
+        // Auto-distill defaults off; operators opt in explicitly
+        // via `wafrift scan --auto-distill` when they want the
+        // extra fires for cleaner reports.
+        auto_distill: false,
+        auto_distill_max_fires: 200,
+        // 0 = scan's dynamic default (concurrency 8/4 by delay;
+        // timeout = workspace default). import-curl users haven't
+        // historically had per-knob tuning here, so the safe move
+        // is "keep prior behaviour byte-identical".
+        concurrency: 0,
+        timeout_secs: 0,
+        quiet: false,
+        callback_timeout_secs: 5,
+        exploit_cap: 500,
+        // 0 = no cap; import-curl preserves prior unbounded behaviour
+        // so a script piping a curl into the evasion loop doesn't
+        // silently start truncating after this rev. Operators who
+        // want a bounded run can pass --level light or re-run with
+        // `wafrift scan --variants-cap N`.
+        variants_cap: 0,
     };
 
     let cancel = tokio_util::sync::CancellationToken::new();
@@ -390,7 +420,11 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
 /// Fetch the parsed request (method/headers/cookie/UA/body applied) and
 /// run WAF detection on the live response. This is the natural first
 /// step when you paste a Burp request and just want to know what's in
-/// front of the endpoint before crafting payloads.
+/// front of the endpoint before crafting payloads. When the static
+/// 165-rule corpus comes back empty, automatically falls back to a
+/// differential probe (benign vs attack-shaped GET) — same auto-
+/// promotion behaviour as `wafrift detect`, so the no-payload import-
+/// curl flow doesn't silently miss WAFs that strip vendor markers.
 async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool) -> ExitCode {
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -409,9 +443,102 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
         .method
         .as_deref()
         .unwrap_or(if parsed.body.is_some() { "POST" } else { "GET" });
+
+    // Benign probe — fires the parsed request verbatim.
+    let (status, headers, body) =
+        match send_parsed(&client, method, target, parsed).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: request to {target} failed: {e}");
+                return ExitCode::from(1);
+            }
+        };
+    eprintln!(
+        "probe: {method} {target} → HTTP {status} ({} headers)",
+        headers.len()
+    );
+
+    let detected = wafrift_detect::waf_detect::detect(status, &headers, &body);
+    if let Some(top) = detected.first() {
+        println!(
+            "Detected WAF: {} ({:.0}% confidence)",
+            top.name,
+            top.confidence * 100.0
+        );
+        for ind in &top.indicators {
+            println!("  - {ind}");
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    // Static corpus empty → run the differential probe before
+    // declaring "no WAF". Re-uses the parsed request's auth context
+    // (cookies / Authorization / cookies / custom headers / body) so
+    // a WAF that only intercepts authenticated requests is still
+    // surfaced.
+    let attack_url = if target.contains('?') {
+        format!("{target}&q=%27+OR+1%3D1--")
+    } else {
+        format!("{target}?q=%27+OR+1%3D1--")
+    };
+    match send_parsed(&client, method, &attack_url, parsed).await {
+        Ok((a_status, a_headers, a_body)) => {
+            if let Some(ev) = crate::detect_cmd::classify_differential(
+                status,
+                &headers,
+                body.len(),
+                a_status,
+                &a_headers,
+                a_body.len(),
+            ) {
+                println!(
+                    "WAF inferred via differential probe (static corpus empty): \
+                     {}",
+                    ev.reasons.join("; ")
+                );
+                println!(
+                    "  baseline: HTTP {} ({} bytes, server {:?})",
+                    ev.baseline_status, ev.baseline_body_len, ev.baseline_server
+                );
+                println!(
+                    "  attack  : HTTP {} ({} bytes, server {:?})",
+                    ev.attack_status, ev.attack_body_len, ev.attack_server
+                );
+            } else {
+                println!(
+                    "No WAF confidently detected on the parsed request (HTTP {status}); \
+                     differential probe also clean — origin is likely direct."
+                );
+            }
+        }
+        Err(e) => {
+            // Don't fail the whole detect just because the second
+            // probe couldn't fire; surface the static result alone.
+            eprintln!(
+                "warn: differential probe failed: {e} — falling back to static-only verdict"
+            );
+            println!(
+                "No WAF confidently detected on the parsed request (HTTP {status})."
+            );
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Fire one HTTP request with the parsed-curl context applied
+/// (method / headers / cookie / UA / body). Returns
+/// (status, headers, body-bounded-to-64KiB) on success. Pulled out
+/// of `detect_parsed_target` so the benign + attack probes share one
+/// implementation — keeps the differential comparison apples-to-apples.
+async fn send_parsed(
+    client: &reqwest::Client,
+    method: &str,
+    url: &str,
+    parsed: &ParsedCurl,
+) -> Result<(u16, Vec<(String, String)>, Vec<u8>), String> {
     let reqwest_method =
         reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET);
-    let mut req = client.request(reqwest_method, target);
+    let mut req = client.request(reqwest_method, url);
     for (k, v) in &parsed.headers {
         req = req.header(k, v);
     }
@@ -424,13 +551,7 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
     if let Some(b) = &parsed.body {
         req = req.body(b.clone());
     }
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: request to {target} failed: {e}");
-            return ExitCode::from(1);
-        }
-    };
+    let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status().as_u16();
     let headers: Vec<(String, String)> = resp
         .headers()
@@ -442,26 +563,11 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
             )
         })
         .collect();
-    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
-    let body = &body[..body.len().min(64 * 1024)];
-    eprintln!(
-        "probe: {method} {target} → HTTP {status} ({} headers)",
-        headers.len()
-    );
-    let detected = wafrift_detect::waf_detect::detect(status, &headers, body);
-    if let Some(top) = detected.first() {
-        println!(
-            "Detected WAF: {} ({:.0}% confidence)",
-            top.name,
-            top.confidence * 100.0
-        );
-        for ind in &top.indicators {
-            println!("  - {ind}");
-        }
-    } else {
-        println!("No WAF confidently detected on the parsed request (HTTP {status}).");
-    }
-    ExitCode::SUCCESS
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .unwrap_or_default();
+    let bounded_len = body.len().min(64 * 1024);
+    Ok((status, headers, body[..bounded_len].to_vec()))
 }
 
 fn parse_level(s: &str) -> crate::Level {
@@ -584,5 +690,108 @@ mod tests {
         let toks = shell_tokenize("curl -H 'noColon' https://x").unwrap();
         let err = parse_curl(&toks).unwrap_err();
         assert!(err.contains("malformed header"));
+    }
+
+    // ── Differential auto-promote on no-payload path ─────────────
+    //
+    // detect_parsed_target hits the network (it's an async function
+    // taking a real reqwest::Client). The full I/O path is exercised
+    // by the e2e dogfood; here we pin the smaller invariants that
+    // don't need a live socket:
+    //
+    //   - `send_parsed` builds the right method/headers/cookie/UA/body
+    //     request shape from a ParsedCurl
+    //   - the attack URL appended for the second probe is
+    //     ?-separator-aware
+    //
+    // The richer "WAF inferred via differential" path is integration-
+    // tested via `dogfood_fixes_e2e.rs` after the fixed binary
+    // builds (the python mock returns identical responses on both
+    // probes, so it asserts the "differential probe also clean" copy
+    // appears — that's the only invariant we can reliably exercise
+    // without a real WAF).
+
+    #[test]
+    fn attack_url_uses_ampersand_when_url_has_existing_query() {
+        let cases = [
+            ("https://x/y", "https://x/y?q=%27+OR+1%3D1--"),
+            ("https://x/y?a=1", "https://x/y?a=1&q=%27+OR+1%3D1--"),
+            (
+                "https://x/y?a=1&b=2",
+                "https://x/y?a=1&b=2&q=%27+OR+1%3D1--",
+            ),
+        ];
+        for (url, expected) in cases {
+            let attack_url = if url.contains('?') {
+                format!("{url}&q=%27+OR+1%3D1--")
+            } else {
+                format!("{url}?q=%27+OR+1%3D1--")
+            };
+            assert_eq!(
+                attack_url, expected,
+                "wrong separator chosen for input {url}"
+            );
+        }
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn send_parsed_applies_headers_cookie_and_user_agent() {
+        // Stands up a one-shot localhost server that echoes back the
+        // headers it received. Verifies send_parsed pushes
+        // headers/cookie/UA onto the request before firing — the
+        // entire reason the differential probe carries the parsed
+        // context (the parsed-Burp-request workflow).
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let url = format!("http://{addr}/");
+
+        let server = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 4096];
+            let n = sock.read(&mut buf).expect("read");
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = format!("captured-headers:\n{req}");
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            sock.write_all(resp.as_bytes()).ok();
+            req
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("client");
+
+        let parsed = ParsedCurl {
+            method: None,
+            url: Some(url.clone()),
+            headers: vec![("X-Wafrift-Probe".into(), "yes".into())],
+            user_agent: Some("dogfood/1.0".into()),
+            cookie: Some("sess=abc".into()),
+            body: None,
+        };
+        let (status, _hdrs, _body) = send_parsed(&client, "GET", &url, &parsed).await.expect("send");
+        assert_eq!(status, 200);
+        let captured = server.join().expect("server thread").to_ascii_lowercase();
+        // The captured request must contain every parsed-curl header.
+        // Header names get lowercased by hyper's HTTP/1.1 serialiser,
+        // so we lowercase the whole capture before matching.
+        assert!(
+            captured.contains("x-wafrift-probe: yes"),
+            "custom header missing from probe request:\n{captured}"
+        );
+        assert!(
+            captured.contains("user-agent: dogfood/1.0"),
+            "user agent missing from probe request:\n{captured}"
+        );
+        assert!(
+            captured.contains("cookie: sess=abc"),
+            "cookie missing from probe request:\n{captured}"
+        );
     }
 }

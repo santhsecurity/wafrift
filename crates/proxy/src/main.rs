@@ -115,9 +115,34 @@ impl RequestLogger {
     async fn log_entry(&self, entry: &serde_json::Value) {
         use std::io::Write;
         let mut w = self.writer.lock().await;
-        if let Ok(line) = serde_json::to_string(entry) {
-            let _ = writeln!(w, "{line}");
-            let _ = w.flush();
+        // The NDJSON file is the proxy's primary audit / replay trail.
+        // Silent write failures (full disk, stale handle, permission
+        // change) would leave the operator believing the log is
+        // complete when it isn't — so surface every IO error through
+        // the throttled warn channel rather than dropping the diagnostic.
+        let throttle = WARN_THROTTLE.get();
+        match serde_json::to_string(entry) {
+            Ok(line) => {
+                if let Err(e) = writeln!(w, "{line}") {
+                    if throttle.is_none_or(|t| t.should_warn("audit-log-write")) {
+                        warn!(error = %e, "audit log write failed — entries are being dropped");
+                    }
+                    return;
+                }
+                if let Err(e) = w.flush()
+                    && throttle.is_none_or(|t| t.should_warn("audit-log-flush"))
+                {
+                    warn!(error = %e, "audit log flush failed — recent entries may be in buffer only");
+                }
+            }
+            Err(e) => {
+                // `entry` is already a constructed serde_json::Value,
+                // so failure is pathological (non-string map key, etc.)
+                // — still surface it; silent drop hides upstream bugs.
+                if throttle.is_none_or(|t| t.should_warn("audit-log-serialize")) {
+                    warn!(error = %e, "audit log entry serialization failed");
+                }
+            }
         }
     }
 }
@@ -877,8 +902,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // this, attacker-controlled DNS could return a public IP at the
     // policy check then 169.254.169.254 / 127.0.0.1 / RFC1918 at fetch
     // time.
+    // **No redirect following.** A forward proxy must not follow
+    // redirects on behalf of the upstream — the downstream client
+    // (browser, scanner) follows them itself, so its policies apply.
+    // Critically, this CLOSES an SSRF bypass: an attacker controlling
+    // any public origin we're allowed to reach can return `Location:
+    // http://169.254.169.254/latest/meta-data/` (or any RFC1918 /
+    // loopback / link-local IP). Pre-fix, reqwest's default policy
+    // followed up to 10 redirects, and neither `assert_forward_url_allowed`
+    // (called on the original URL only) nor `BogonFilteringResolver`
+    // (only intercepts DNS, never literal IPs) was reapplied on the
+    // redirect target — the AWS / Azure / GCP IMDS endpoints were one
+    // attacker-controlled HTTP 302 away. Surface the redirect to the
+    // downstream client and let IT decide whether to follow.
     let mut client_builder = reqwest::Client::builder()
         .danger_accept_invalid_certs(config.insecure_tls)
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(
             wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
         ))
@@ -978,6 +1017,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Periodic flush task.
+        //
+        // Two correctness properties this loop must hold:
+        // 1. **No silent stop on panic.** Pre-fix, the body wasn't
+        //    panic-guarded — a panic in `save_gene_bank` (disk full,
+        //    serializer regression) killed the task and the proxy
+        //    silently stopped persisting gene-bank state for the rest
+        //    of the run. The operator saw a healthy proxy that was no
+        //    longer learning. We wrap the body in `catch_unwind` and
+        //    log loudly so the next monitor scrape catches it.
+        // 2. **JoinHandle survives.** Drop is intentional for an
+        //    intended-forever loop, but the panic-guard above means
+        //    drop is no longer a silent-failure surface.
         if args.gene_bank_flush_interval_secs > 0 {
             let flush_path = path.clone();
             let flush_state = shared_state.clone();
@@ -987,9 +1038,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tick.tick().await; // skip the immediate first tick
                 loop {
                     tick.tick().await;
-                    let st = flush_state.lock().await;
-                    if let Err(e) = save_gene_bank(&st, &flush_path) {
-                        warn!(error = %e, "periodic gene bank flush failed");
+                    // `lock().await` + `save_gene_bank` both run on the
+                    // tokio task; wrap the synchronous save in a
+                    // panic-catching closure. `lock()` can panic only
+                    // on poison, also captured here.
+                    let result = std::panic::AssertUnwindSafe(async {
+                        let st = flush_state.lock().await;
+                        save_gene_bank(&st, &flush_path)
+                    });
+                    use futures_util::FutureExt;
+                    match result.catch_unwind().await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            warn!(error = %e, "periodic gene bank flush failed");
+                        }
+                        Err(panic_payload) => {
+                            // Log + continue the loop. The next tick
+                            // re-attempts the flush; transient
+                            // poison/serializer panics shouldn't take
+                            // down persistence for the rest of the
+                            // proxy's lifetime.
+                            let msg = panic_payload
+                                .downcast_ref::<&'static str>()
+                                .copied()
+                                .or_else(|| {
+                                    panic_payload.downcast_ref::<String>().map(String::as_str)
+                                })
+                                .unwrap_or("<non-string panic payload>");
+                            warn!(
+                                panic = %msg,
+                                "periodic gene bank flush panicked — task continuing; next tick will retry"
+                            );
+                        }
                     }
                 }
             });
@@ -1951,7 +2031,11 @@ async fn mitm_plaintext_request(
     {
         let inner = extract_host_from_header(h);
         if !inner.eq_ignore_ascii_case(&sni_host) {
-            warn!(inner = %inner, expected = %sni_host, "mitm Host header does not match CONNECT");
+            // Strip embedded newlines/control bytes before logging: the Host header
+            // is client-controlled, so a raw `%inner` in the log message would allow
+            // log-line injection (attacker sends `Host: evil\nFAKE_LOG_ENTRY`).
+            let inner_safe: String = inner.chars().filter(|c| !c.is_control()).collect();
+            warn!(inner = %inner_safe, expected = %sni_host, "mitm Host header does not match CONNECT");
             return Ok(error_response(
                 StatusCode::BAD_REQUEST,
                 "Host header does not match CONNECT target",

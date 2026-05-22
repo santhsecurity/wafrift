@@ -36,9 +36,13 @@
 //! assert!(results.is_empty(), "no WAF should match a benign response");
 //! ```
 
+pub mod dns_fingerprint;
 pub mod response_fingerprint;
 pub mod waf_detect;
 
+pub use dns_fingerprint::{
+    CnameHop, CnameRuleEngine, DnsProbe, DnsProbeError, MAX_CNAME_CHAIN_DEPTH, probe_cname_chain,
+};
 pub use response_fingerprint::FingerprintDrift;
 pub use waf_detect::{
     DetectConfig, DetectRulesError, DetectedWaf, ProbePayload, ProbeResult, RuleEngine,

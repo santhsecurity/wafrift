@@ -1,0 +1,31 @@
+[[waf]]
+name = "F5 Distributed Cloud (Volterra)"
+vendor = "F5 Networks"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "SqlCommentInsertion", "DoubleUrlEncode", "ContentTypeSwitch"]
+source = "2026-05-21 live dogfood against www.f5.com"
+# F5's Distributed Cloud (formerly Volterra) is the modern F5
+# WAF/CDN offering. Its edge serves with `Server: volt-adc` and
+# emits `X-Volterra-*` headers. wafrift's older f5bigip{asm,ltm}
+# rules don't fire on Distributed Cloud — captured live on
+# https://www.f5.com/ which is fronted by F5's own DC product.
+
+[[waf.signature]]
+  header_name = "server"
+  header_regex = "(?i)volt-adc"
+  weight = 0.7
+
+[[waf.signature]]
+  header_name = "x-volterra-location"
+  header_regex = ".+"
+  weight = 0.7
+
+[[waf.signature]]
+  header_name = "x-volterra-pop"
+  header_regex = ".+"
+  weight = 0.5
+
+[[waf.signature]]
+  header_name = "x-volterra-request-id"
+  header_regex = ".+"
+  weight = 0.5

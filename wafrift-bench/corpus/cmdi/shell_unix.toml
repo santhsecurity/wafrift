@@ -27,7 +27,7 @@ class = "cmdi"
 payload = "|| id"
 
 [[case]]
-id = "backtick_id"
+id = "backtick_id_basic"
 class = "cmdi"
 payload = "`id`"
 
