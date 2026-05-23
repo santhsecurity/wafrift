@@ -6,7 +6,7 @@
 //!
 //! 1. Establish a baseline by GET-ing the user-supplied URL once.
 //! 2. Fire each probe family in turn:
-//!    - 136 auth-bypass header probes from `wafrift_encoding::auth_bypass`
+//!    - 230 auth-bypass header probes from `wafrift_encoding::auth_bypass`
 //!      (X-Original-URL, X-Rewrite-URL, X-Forwarded-For loopback,
 //!      method-override, scheme-trust, host-trust)
 //!    - All path-routing-disagreement variants from

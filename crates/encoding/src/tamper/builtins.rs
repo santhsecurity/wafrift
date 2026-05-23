@@ -89,6 +89,82 @@ impl TamperStrategy for HtmlEntityTamper {
 /// Case alternation tamper strategy.
 pub struct CaseAlternationTamper;
 
+/// Postgres / Oracle CHR()-function decomposition tamper.
+///
+/// Sibling to `sql_char_decompose` (MySQL/MSSQL variadic `CHAR()`); this
+/// one targets Postgres + Oracle by producing `(CHR(N)||CHR(N)||...)` per
+/// literal. Pipe-concat operator is SQL-standard but blocked by some
+/// over-eager WAFs — this tamper is the lever for Postgres/Oracle
+/// payloads where `||` is the canonical concat.
+pub struct PgChrDecomposeTamper;
+
+impl TamperStrategy for PgChrDecomposeTamper {
+    fn name(&self) -> &'static str {
+        "pg_chr_decompose"
+    }
+
+    fn description(&self) -> &'static str {
+        "Convert 'admin' → (CHR(97)||CHR(100)||...) — Postgres/Oracle pipe-concat form"
+    }
+
+    fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
+        crate::encoding::unicode::pg_chr_decompose(payload)
+    }
+
+    fn aggressiveness(&self) -> f64 {
+        0.6
+    }
+}
+
+/// SQL CHAR() decomposition tamper — every single-quoted string literal
+/// becomes `CHAR(N1,N2,...)` with one codepoint per arg. Defeats both
+/// literal-substring AND CONCAT-shaped blocklists (the payload contains
+/// NO single-quoted ASCII tokens at all).
+pub struct SqlCharDecomposeTamper;
+
+impl TamperStrategy for SqlCharDecomposeTamper {
+    fn name(&self) -> &'static str {
+        "sql_char_decompose"
+    }
+
+    fn description(&self) -> &'static str {
+        "Convert 'admin' → CHAR(97,100,109,105,110) — int codepoints, no quoted tokens"
+    }
+
+    fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
+        crate::encoding::unicode::sql_char_decompose(payload)
+    }
+
+    fn aggressiveness(&self) -> f64 {
+        0.6
+    }
+}
+
+/// SQL CONCAT split tamper — every single-quoted string literal becomes
+/// `CONCAT('a','b','c',...)`. Defeats blocklists scanning for literal
+/// substrings like `'admin'` / `'password'` / `'/etc/passwd'` because the
+/// substring no longer appears contiguously. The DB evaluates CONCAT() to
+/// the original string at runtime.
+pub struct SqlConcatSplitTamper;
+
+impl TamperStrategy for SqlConcatSplitTamper {
+    fn name(&self) -> &'static str {
+        "sql_concat_split"
+    }
+
+    fn description(&self) -> &'static str {
+        "Convert 'admin' → CONCAT('a','d','m','i','n') — splits literal substrings"
+    }
+
+    fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
+        crate::encoding::unicode::sql_concat_split(payload)
+    }
+
+    fn aggressiveness(&self) -> f64 {
+        0.55
+    }
+}
+
 /// Mathematical Alphanumeric Symbols tamper — replaces ASCII letters/digits
 /// with their `U+1D400`-block Math Bold counterparts. Both NFKC-normalise
 /// back to ASCII, so backends that normalise (Postgres ICU, MySQL

