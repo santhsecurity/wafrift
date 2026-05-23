@@ -1,0 +1,37 @@
+[[waf]]
+name = "Aikido Zen"
+vendor = "Aikido Security"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "UnicodeEncode", "SqlCommentInsertion"]
+source = "frontier-2026:aikido-zen-docs"
+
+# Aikido Zen (aikido.dev/zen) is Aikido's open-source runtime app
+# security agent — auto-instrumented WAF + RASP for Node, Python,
+# Django, Express, NestJS, Laravel, Ruby on Rails. When Zen blocks an
+# attack, the response is gated through Zen's middleware which sets a
+# specific X-Aikido header set and serves a small JSON body identifying
+# the blocked attack class. Detection rests on the Zen-injected headers
+# (load-bearing across all supported runtimes — they're inserted before
+# the framework can override them) plus the body literal.
+
+[[waf.signature]]
+  header_name = "x-aikido-blocked"
+  header_regex = ".+"
+  weight = 0.85
+
+[[waf.signature]]
+  body_regex = "Aikido Runtime detected"
+  weight = 0.75
+
+[[waf.signature]]
+  body_regex = "\"blocked_by\":\\s*\"aikido\""
+  weight = 0.8
+
+[[waf.signature]]
+  header_name = "x-aikido-event-id"
+  header_regex = "[0-9a-f-]+"
+  weight = 0.6
+
+[[waf.signature]]
+  body_regex = "blocked by Aikido"
+  weight = 0.6

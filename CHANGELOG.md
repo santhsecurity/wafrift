@@ -4,7 +4,90 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
-### Added — 2 new WAF detect rules (open-appsec, Datadog ASM)
+### Added — `pg_chr_decompose` tamper (Postgres/Oracle CHR() + pipe-concat)
+
+26th builtin `TamperStrategy`. Sibling to `sql_char_decompose` targeting
+Postgres + Oracle dialects with their unary `CHR()` function joined by
+the SQL-standard `||` pipe operator.
+
+Input  `'admin'`  →  output  `(CHR(97)||CHR(100)||CHR(109)||CHR(105)||CHR(110))`
+
+For ASCII payloads (the common case) both MySQL `CHAR()` and Postgres
+`CHR()` behave identically. Tampers ship in pairs so the bench can
+exercise both dialects without round-tripping a syntax-detector.
+
+Tests: 5 unit (admin decomposition, empty literal, WHERE-clause embed,
+distinct-from-char_decompose, unbalanced quote), 1 proptest never-panics.
+
+### Added — `sql_char_decompose` tamper (CHAR()-codepoint literal decomposition)
+
+25th builtin `TamperStrategy`. Sibling to `sql_concat_split` but with a
+distinct shape: every single-quoted SQL string literal becomes a
+`CHAR(N1,N2,...)` function call where each arg is the integer codepoint
+of the original char.
+
+Input  `'admin'`  →  output  `CHAR(97,100,109,105,110)`
+
+Why both: blocklists evolve, and `sql_concat_split` produces visible
+`'a','d',...` single-char tokens that a future rule could pattern-match
+on (sqlmap's `concat2concatws` tamper got fingerprinted within months of
+shipping). `sql_char_decompose` contains NO single-quoted ASCII tokens
+at all — it's an entirely different syntax shape that bypasses both
+literal-substring rules and CONCAT-shaped rules.
+
+Supported by MySQL, MariaDB, MSSQL (native `CHAR()`). Postgres/Oracle
+use `CHR()` — sibling `chr_decompose` could ship later.
+
+Tests: 9 unit (admin/password/path-literal split, distinct-from-concat,
+real injection payload, edge cases), 1 proptest never-panics.
+
+### Added — 94 new auth-bypass header probes (gateway-identity + header-smuggle-LWS)
+
+`wafrift bypass-probe` corpus expanded with two new families:
+
+**Gateway-injected-identity** (90 probes = 18 headers × 5 values):
+Cloud API gateways inject identity headers AFTER authenticating the caller —
+backends that read them without re-verifying the upstream signature are
+trivially bypassed if the WAF doesn't strip the gateway-namespaced
+headers from external traffic. Covers Cloudflare Access
+(`Cf-Access-Authenticated-User-Email`, `Cf-Access-Jwt-Assertion`), GCP IAP
+(`X-Goog-*`), AWS ALB OIDC (`X-Amzn-Oidc-*`), Azure App Service Easy Auth
+(`X-Ms-Client-Principal-*`), Authentik, oauth2-proxy
+(`X-Auth-Request-User`), Traefik forwardAuth (`X-Forwarded-User`), Grafana
+(`X-Webauth-User`). Spoofed values: `admin`, `admin@example.com`, `root`,
+`root@localhost`, `administrator@internal`.
+
+**Header-smuggling-LWS** (4 probes): single-char obfuscations of
+`X-Real-IP` — leading space, trailing tab, U+00AD soft hyphen,
+underscore-swap. Tests the WAF↔backend normalisation gap (nginx DROPS
+underscored variants, Apache PASSES THROUGH — Akamai / Imperva tier).
+
+Bypass-probe corpus is now 230 probes (was 136). Tests in
+`crates/encoding/src/auth_bypass.rs` confirm both new families surface in
+`auth_bypass_probes()` output.
+
+### Added — `sql_concat_split` tamper (literal-substring decomposition)
+
+24th builtin `TamperStrategy`. Every single-quoted SQL string literal is
+rewritten to a `CONCAT('a','b',...)` expression — one char per argument.
+
+Input  `' UNION SELECT 'admin','password' FROM users--`
+Output `' UNION SELECT CONCAT('a','d','m','i','n'),CONCAT('p','a','s','s','w','o','r','d') FROM users--`
+
+Mechanism: CRS and most commercial WAF blocklists scan for literal
+danger-string substrings — `'admin'`, `'password'`, `'union'`, `'or 1'`,
+`'/etc/passwd'`. CONCAT-splitting decomposes the substring into one-
+character literals that no literal-string regex matches. The DB
+evaluates `CONCAT(...)` to the original string at runtime, so the
+attack succeeds. Works against MySQL, MariaDB, PostgreSQL, MSSQL —
+all ship CONCAT as a scalar function. Oracle uses binary-only CONCAT
+so chained 1-char Oracle calls need a nested form — out of scope here.
+
+Tests: 10 unit (admin/password split, embedded in WHERE clause,
+empty literal, unbalanced quote passthrough, multiple literals,
+keyword preservation, real injection payload), 1 proptest never-panics.
+
+### Added — 3 new WAF detect rules (open-appsec, Datadog ASM, Aikido Zen)
 
 - **open-appsec** (`crates/detect/rules/detect/open_appsec.toml`) —
   Check Point's open-source ML-driven WAF (open-appsec.io), deployable
@@ -18,7 +101,14 @@ All notable changes to wafrift are documented here. The format is based on [Keep
   `"You've been blocked"` JSON error envelope + `x-datadog-appsec-event`
   header. Anti-overlap noted with DataDome (different vendor).
 
-Detect corpus is now 166 rules (was 164).
+- **Aikido Zen** (`crates/detect/rules/detect/aikido_zen.toml`) —
+  Aikido's open-source runtime app security agent (aikido.dev/zen),
+  auto-instrumented across Node / Python / Django / Express / NestJS /
+  Laravel / Rails. Fingerprinted by the `x-aikido-blocked` header +
+  `x-aikido-event-id` UUID + the "Aikido Runtime detected" body literal
+  + the `"blocked_by":"aikido"` JSON envelope.
+
+Detect corpus is now 167 rules (was 164).
 
 ### Added — `math_bold` tamper (Math Alphanumeric Symbols NFKC bypass)
 
