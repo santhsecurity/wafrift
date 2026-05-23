@@ -160,6 +160,35 @@ fn why_technique_works(tech: &Technique) -> &'static str {
              but lenient ones accept. A WAF that doesn't normalize overlong sequences sees \
              different bytes than the application does."
         }
+        Technique::PayloadEncoding(s) if s.contains("HtmlEntityVariants") => {
+            "HTML entity encoding rotated across `&#xHH;` / `&#XHH;` / `&#DD;` / `&#000DD;` per \
+             character. Browsers decode all four forms identically; WAF regexes anchored on the \
+             canonical lowercase-x hex form (`&#x[0-9a-f]+;`) miss 3 of every 4 characters."
+        }
+        Technique::PayloadEncoding(s) if s.contains("MathBold") => {
+            "Letters and digits replaced with their U+1D400 (Mathematical Bold) counterparts — \
+             `SELECT` becomes `𝐒𝐄𝐋𝐄𝐂𝐓`. Both NFKC-normalise back to ASCII, so backends with \
+             Unicode-normalising collations (Postgres ICU, MySQL utf8mb4_0900_ai_ci, Java/.NET/Go) \
+             execute the original keyword while WAF byte-regex sees a U+1D4xx codepoint and misses."
+        }
+        Technique::PayloadEncoding(s) if s.contains("SqlConcatSplit") => {
+            "Every `'string'` literal becomes `CONCAT('s','t','r','i','n','g')`. The literal \
+             substring (e.g. `'admin'`, `'/etc/passwd'`) no longer appears contiguously, so \
+             CRS-style block-list regexes anchored on these literals don't match. The DB \
+             reassembles at runtime."
+        }
+        Technique::PayloadEncoding(s) if s.contains("SqlCharDecompose") => {
+            "Every `'string'` literal becomes `CHAR(N1,N2,...)` with one codepoint integer per \
+             original char. The payload contains NO single-quoted ASCII tokens at all — defeats \
+             literal-substring rules AND CONCAT-shaped rules in one move. MySQL/MariaDB/MSSQL \
+             native; Postgres/Oracle use the sibling `pg_chr_decompose` tamper with unary CHR()."
+        }
+        Technique::PayloadEncoding(s) if s.contains("PgChrDecompose") => {
+            "Postgres/Oracle dialect: every `'string'` literal becomes \
+             `(CHR(N)||CHR(N)||...)` — unary CHR() joined by the SQL-standard `||` pipe operator. \
+             For ASCII payloads behaves identically to MySQL CHAR() decomposition; the syntactic \
+             shape is distinct enough to defeat blocklists trained on one or the other."
+        }
         Technique::GrammarMutation(_) => {
             "Grammar mutations replace blocked tokens with semantically-equivalent constructs \
              (e.g. `1=1` → `1 LIKE 1` or `1 BETWEEN 0 AND 2`). The WAF's keyword regex doesn't \
