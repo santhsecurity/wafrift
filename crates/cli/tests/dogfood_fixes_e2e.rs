@@ -1282,6 +1282,235 @@ fn dogfood_b5_sql_adjacent_handles_escaped_quote_via_cli() {
     );
 }
 
+// ─────────────────── B1+B9: bench-waf validate-only exit codes ───────
+//
+// Docs promise exit 4 for ALL corpus integrity errors. Pre-fix, only
+// the duplicate-id branch returned 4; TOML parse errors and missing
+// required fields (serde deserialization failures) returned exit 1,
+// conflating with generic I/O errors. CI gates checking `exit == 4`
+// missed parse-class errors entirely.
+
+#[test]
+fn dogfood_b1_toml_parse_error_exits_4_in_validate_only() {
+    let dir = std::env::temp_dir().join("wafrift_b1_parse");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Malformed TOML (missing string quote).
+    std::fs::write(dir.join("bad.toml"), "[[case]]\nid = \n").unwrap();
+    let (code, _stdout, stderr) = wafrift(&[
+        "bench-waf",
+        "--validate-only",
+        "--corpus",
+        dir.to_str().unwrap(),
+    ]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(code, 4, "TOML parse error must exit 4, got {code}\nstderr:\n{stderr}");
+    assert!(
+        stderr.contains("corpus error") || stderr.contains("TOML parse error"),
+        "stderr should mention the integrity error:\n{stderr}"
+    );
+}
+
+#[test]
+fn dogfood_b9_missing_field_exits_4_in_validate_only() {
+    let dir = std::env::temp_dir().join("wafrift_b9_missing");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Valid TOML but missing required `id` field.
+    std::fs::write(
+        dir.join("bad.toml"),
+        "[[case]]\nclass = \"sql\"\npayload = \"x\"\n",
+    )
+    .unwrap();
+    let (code, _stdout, stderr) = wafrift(&[
+        "bench-waf",
+        "--validate-only",
+        "--corpus",
+        dir.to_str().unwrap(),
+    ]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(code, 4, "schema error must exit 4, got {code}\nstderr:\n{stderr}");
+}
+
+// ─────────────────── B2: --class respected in --validate-only ─────────
+
+#[test]
+fn dogfood_b2_class_filter_respected_in_validate_only() {
+    let (code, stdout, _stderr) = wafrift(&[
+        "bench-waf",
+        "--validate-only",
+        "--class",
+        "sql",
+    ]);
+    assert_eq!(code, 0);
+    // SQL corpus has 277 cases; full corpus has 901. The filter must
+    // produce the 277-only count.
+    assert!(
+        stdout.contains("277"),
+        "expected 277 SQL cases (filter respected), got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("xss:") || stdout.contains("xss: 0"),
+        "xss class should be filtered out:\n{stdout}"
+    );
+}
+
+// ─────────────────── B3: audit --format json ──────────────────────────
+
+#[test]
+fn dogfood_b3_audit_json_format_emits_valid_json() {
+    let (code, stdout, _stderr) = wafrift(&["audit", "--format", "json"]);
+    assert_eq!(code, 0);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("audit --format json must emit valid JSON");
+    // Required top-level keys.
+    for key in &[
+        "ruleset_fingerprint",
+        "rules_loaded",
+        "inbound_threshold",
+        "audited_class",
+        "total_holes",
+        "holes",
+    ] {
+        assert!(
+            parsed.get(*key).is_some(),
+            "audit JSON missing key `{key}`:\n{stdout}"
+        );
+    }
+    // holes is an array.
+    assert!(parsed["holes"].is_array(), "holes must be an array");
+    // total_holes matches array length.
+    let holes_count = parsed["holes"].as_array().unwrap().len();
+    let total_holes = parsed["total_holes"].as_u64().unwrap() as usize;
+    assert_eq!(holes_count, total_holes, "holes[].len() must match total_holes");
+}
+
+#[test]
+fn dogfood_b3_audit_human_format_emits_text_table() {
+    let (code, stdout, _stderr) = wafrift(&["audit", "--format", "human"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("wafrift audit"));
+    // Negative twin: must NOT be JSON.
+    assert!(serde_json::from_str::<serde_json::Value>(stdout.trim()).is_err());
+}
+
+// ─────────────────── B4: techniques list/explain ──────────────────────
+
+#[test]
+fn dogfood_b4_techniques_list_json_format() {
+    let (code, stdout, _stderr) = wafrift(&["techniques", "list", "--format", "json"]);
+    assert_eq!(code, 0);
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON");
+    assert!(parsed["tampers"].is_array(), "tampers must be array");
+    assert!(
+        parsed["encoding_strategies"].is_array(),
+        "encoding_strategies must be array"
+    );
+    let tamper_count = parsed["tampers"].as_array().unwrap().len();
+    assert!(
+        tamper_count >= 28,
+        "expected >= 28 tampers, got {tamper_count}"
+    );
+}
+
+#[test]
+fn dogfood_b4_techniques_explain_known_tamper() {
+    let (code, stdout, _stderr) = wafrift(&[
+        "techniques",
+        "explain",
+        "tamper/json_unicode_alnum",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("json_unicode_alnum"));
+    assert!(stdout.contains("aggressiveness"));
+}
+
+#[test]
+fn dogfood_b4_techniques_explain_unknown_tamper_exits_2() {
+    let (code, _stdout, stderr) = wafrift(&[
+        "techniques",
+        "explain",
+        "tamper/does_not_exist_xyz",
+    ]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("unknown"));
+}
+
+#[test]
+fn dogfood_b4_techniques_explain_encoding_strategy() {
+    let (code, stdout, _stderr) = wafrift(&[
+        "techniques",
+        "explain",
+        "encoding/url/single",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("encoding/url/single"));
+}
+
+#[test]
+fn dogfood_b4_techniques_explain_bad_prefix_exits_2() {
+    let (code, _stdout, stderr) = wafrift(&[
+        "techniques",
+        "explain",
+        "garbage/selector",
+    ]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("must start with"));
+}
+
+// ─────────────────── B7: contradictory --only/--exclude ───────────────
+
+#[test]
+fn dogfood_b7_only_and_exclude_overlap_exits_2_with_clear_message() {
+    let (code, _stdout, stderr) = wafrift(&[
+        "evade",
+        "--only",
+        "tamper/json_unicode_alnum",
+        "--exclude",
+        "tamper/json_unicode_alnum",
+        "--payload",
+        "SELECT 1",
+    ]);
+    assert_eq!(code, 2);
+    assert!(
+        stderr.contains("contradictory") || stderr.contains("appear in both"),
+        "expected contradiction diagnostic, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn dogfood_b7_negative_twin_non_overlapping_selectors_work() {
+    // Positive twin proving B7 didn't break the legitimate case.
+    let (code, stdout, _stderr) = wafrift(&[
+        "evade",
+        "--only",
+        "tamper/json_unicode_alnum",
+        "--exclude",
+        "tamper/url_encode",
+        "--payload",
+        "SELECT 1",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("json_unicode_alnum") || stdout.contains("\\u"));
+}
+
+#[test]
+fn dogfood_b7_parent_child_overlap_also_caught() {
+    // --only tamper --exclude tamper/X — the exclude eats a leaf of
+    // the only family; both lists overlap and would yield empty.
+    let (code, _stdout, stderr) = wafrift(&[
+        "evade",
+        "--only",
+        "tamper/json_unicode_alnum",
+        "--exclude",
+        "tamper",
+        "--payload",
+        "SELECT 1",
+    ]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("contradictory") || stderr.contains("appear in both"));
+}
+
 #[test]
 fn dogfood_b5_negative_twin_no_escape_unchanged_behavior() {
     // Negative twin: a literal WITHOUT `''` escape must still shatter
