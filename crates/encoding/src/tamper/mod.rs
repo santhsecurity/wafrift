@@ -63,6 +63,7 @@ const DEFAULT_NAMES: &[&str] = &[
     "sql_concat_split",
     "sql_char_decompose",
     "pg_chr_decompose",
+    "sql_adjacent_string_concat",
     "case_alternation",
     "random_case",
     "whitespace_insertion",
@@ -114,6 +115,9 @@ impl TamperRegistry {
                     registry.register(Box::new(SqlCharDecomposeTamper));
                 }
                 "pg_chr_decompose" => registry.register(Box::new(PgChrDecomposeTamper)),
+                "sql_adjacent_string_concat" => {
+                    registry.register(Box::new(SqlAdjacentStringConcatTamper));
+                }
                 "case_alternation" => registry.register(Box::new(CaseAlternationTamper)),
                 "random_case" => registry.register(Box::new(RandomCaseTamper)),
                 "whitespace_insertion" => registry.register(Box::new(WhitespaceInsertionTamper)),

@@ -193,6 +193,16 @@ fn why_technique_works(tech: &Technique) -> &'static str {
              literal-substring rules AND CONCAT-shaped rules in one move. MySQL/MariaDB/MSSQL \
              native; Postgres/Oracle use the sibling `pg_chr_decompose` tamper with unary CHR()."
         }
+        Technique::PayloadEncoding(s) if s.contains("sql_adjacent_string_concat") => {
+            "Every `'string'` literal of length ≥ 2 is split into single-character adjacent \
+             literals: `'admin'` becomes `'a' 'd' 'm' 'i' 'n'`. ANSI SQL-92 §5.3 specifies that \
+             adjacent character-string literals separated by whitespace concatenate at parse \
+             time — implemented in MySQL, Postgres, SQLite, Oracle, DB2. The high-fidelity \
+             literal substring (the credential, the LFI path, the schema name) no longer \
+             appears contiguously, so blocklist regexes anchored on \
+             `'admin'`/`'/etc/passwd'`/`'root'` miss. Zero special characters, no functions, \
+             no comments — pure SQL semantics."
+        }
         Technique::PayloadEncoding(s) if s.contains("pg_chr_decompose") => {
             "Postgres/Oracle dialect: every `'string'` literal becomes \
              `(CHR(N)||CHR(N)||...)` — unary CHR() joined by the SQL-standard `||` pipe operator. \

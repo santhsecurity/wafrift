@@ -116,6 +116,36 @@ impl TamperStrategy for PgChrDecomposeTamper {
     }
 }
 
+/// SQL adjacent-string-literal concatenation tamper — rewrites every
+/// `'string'` literal of length ≥ 2 as a sequence of single-character
+/// adjacent literals (`'admin'` → `'a' 'd' 'm' 'i' 'n'`). The ANSI
+/// SQL-92 §5.3 specification requires the parser to concatenate
+/// adjacent string literals separated only by whitespace; MySQL,
+/// Postgres, SQLite, Oracle, DB2 all implement it. WAFs matching the
+/// LITERAL substring of well-known credentials/paths (`'admin'`,
+/// `'/etc/passwd'`, `'root'`) see N unrelated single-character strings
+/// instead. Pure SQL semantics — no comments, no CONCAT(), no special
+/// functions.
+pub struct SqlAdjacentStringConcatTamper;
+
+impl TamperStrategy for SqlAdjacentStringConcatTamper {
+    fn name(&self) -> &'static str {
+        "sql_adjacent_string_concat"
+    }
+
+    fn description(&self) -> &'static str {
+        "Split 'string' → 'a' 'b' 'c' … via ANSI SQL adjacent-literal concat — defeats literal-substring rules with zero special characters"
+    }
+
+    fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
+        crate::encoding::unicode::sql_adjacent_string_concat(payload)
+    }
+
+    fn aggressiveness(&self) -> f64 {
+        0.5
+    }
+}
+
 /// Partial JSON Unicode-escape tamper — encodes ASCII alphanumeric chars
 /// as `\uXXXX` while leaving structural punctuation (quotes, operators,
 /// whitespace, `<`, `>`, `(`, `)`) bare. The keyword fingerprint

