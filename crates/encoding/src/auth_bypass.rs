@@ -48,7 +48,10 @@ pub struct AuthBypassProbe {
 /// that don't take a path it is ignored.
 #[must_use]
 pub fn auth_bypass_probes(target_path: &str) -> Vec<AuthBypassProbe> {
-    let mut out = Vec::new();
+    // Pre-sized: the count is fixed at 230 and pinned by an integrity
+    // test. Pre-sizing eliminates 8-9 Vec reallocations during the
+    // family construction loops. Per perf-hunt finding F05.
+    let mut out = Vec::with_capacity(230);
 
     // ── URL-rewrite header family ────────────────────────────────────
     // IIS / ASP.NET / Apache mod_rewrite all honour these in various
@@ -231,9 +234,18 @@ pub fn auth_bypass_probes(target_path: &str) -> Vec<AuthBypassProbe> {
     // backends preserve as a distinct header. If the backend has a
     // case-insensitive lookup AND the WAF normalises tokens via
     // strict case-insensitive ASCII matching only, this slips.
+    //
+    // Per perf-hunt finding F19 (2026-05-23): two of these variants
+    // (leading-space, trailing-tab) violate RFC 7230 §3.2 and are
+    // rejected by compliant HTTP/1.1 parsers (Apache, nginx, IIS, the
+    // reqwest client we use). They survive against custom / embedded
+    // servers (some legacy app servers, internal RPC bridges) but
+    // hit rate is low. Kept for defense-in-depth against non-compliant
+    // stacks rather than removed — see the LWS anti-rig test in
+    // tests/auth_bypass_deep.rs.
     for variant in [
-        " X-Real-IP",       // leading space
-        "X-Real-IP\t",      // trailing tab
+        " X-Real-IP",       // leading space (RFC-illegal; legacy stacks only)
+        "X-Real-IP\t",      // trailing tab (RFC-illegal; legacy stacks only)
         "X\u{00ad}Real-IP", // soft hyphen U+00AD inside (some parsers drop)
         "X-Real_IP",        // underscore swap (nginx default DROPS this;
                             // Apache passes it through — divergence

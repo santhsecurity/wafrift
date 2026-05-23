@@ -506,7 +506,15 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     if let Some(ref probe) = cname_probe
         && (!probe.chain.is_empty() || probe.final_ptr.is_some() || probe.asn.is_some())
     {
-        let cname_engine = CnameRuleEngine::load_embedded().unwrap_or_default();
+        // Cache the CnameRuleEngine across detect calls — the embedded
+        // TOML parse + regex compile costs ~150ms on cold load. Without
+        // the cache, every `wafrift detect` invocation pays that cost,
+        // and `legendary` (which calls detect repeatedly) ends up
+        // visibly sluggish. OnceLock is `Send + Sync` and zero-overhead
+        // after init. Per perf-hunt finding F01 (2026-05-23).
+        static CNAME_ENGINE: std::sync::OnceLock<CnameRuleEngine> = std::sync::OnceLock::new();
+        let cname_engine =
+            CNAME_ENGINE.get_or_init(|| CnameRuleEngine::load_embedded().unwrap_or_default());
         let cname_hits = cname_engine.detect(probe);
         // ── Vendor subsumption ─────────────────────────────
         //

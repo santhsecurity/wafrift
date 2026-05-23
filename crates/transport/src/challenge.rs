@@ -1083,6 +1083,47 @@ mod tests {
     }
 
     #[test]
+    fn classify_turnstile_with_real_cloudflare_site_key() {
+        // Real CF Turnstile site key (public — gets embedded in the
+        // client-side widget HTML). Verifies the classifier handles the
+        // production-shape `0x4AAAAAA...` site-key format and not just a
+        // placeholder `X` — would catch regressions in the data-sitekey
+        // attribute parser if it ever got stricter about value format.
+        let body = br#"<html>
+<head><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script></head>
+<body>
+  <form>
+    <div class="cf-turnstile" data-sitekey="0x4AAAAAACpFle9cetQnJgJ2" data-callback="onTurnstileSuccess"></div>
+    <button type="submit">Submit</button>
+  </form>
+</body>
+</html>"#;
+        let headers = vec![
+            ("cf-ray".into(), "abc123-DFW".into()),
+            ("server".into(), "cloudflare".into()),
+        ];
+        assert_eq!(
+            classify_with_status(body, &headers, 403),
+            ChallengeKind::Turnstile,
+            "real CF site key shape must classify as Turnstile"
+        );
+    }
+
+    #[test]
+    fn classify_turnstile_renders_challenge_url_path_too() {
+        // Some Turnstile deployments load the widget via the
+        // challenges.cloudflare.com/turnstile URL even without the
+        // cf-turnstile class on a div — covers the URL-only detection
+        // branch.
+        let body = br#"<iframe src="https://challenges.cloudflare.com/turnstile/v0/b/abc"></iframe>"#;
+        assert_eq!(
+            classify_with_status(body, &[], 403),
+            ChallengeKind::Turnstile,
+            "Turnstile URL alone must classify as Turnstile"
+        );
+    }
+
+    #[test]
     fn classify_hcaptcha_recognised() {
         let body = b"<script src=\"https://hcaptcha.com/1/api.js\"></script>";
         assert_eq!(

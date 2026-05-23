@@ -31,6 +31,12 @@ pub struct AuditArgs {
     /// producing a report the operator can't reproduce.
     #[arg(long, default_value = "all", value_parser = ["xss", "sqli", "all"])]
     pub class: String,
+    /// Output format. `human` (default) prints the operator-friendly
+    /// report; `json` emits a machine-parseable structure suitable for
+    /// piping into `jq` / CI parsers. Dogfood B3 fix: previously the
+    /// command had no `--format` flag and `--quiet` was a no-op.
+    #[arg(long, default_value = "human", value_parser = ["human", "json"])]
+    pub format: String,
 }
 
 #[derive(clap::Args, Debug)]
@@ -134,14 +140,21 @@ pub fn run_audit(args: AuditArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    println!("wafrift audit — WAF decompilation report");
-    println!("ruleset fingerprint : {}", waf.fingerprint());
-    println!("rules loaded        : {}", waf.rule_count());
-    println!("inbound threshold   : {}\n", waf.threshold());
 
+    let json_mode = args.format == "json";
+    if !json_mode {
+        println!("wafrift audit — WAF decompilation report");
+        println!("ruleset fingerprint : {}", waf.fingerprint());
+        println!("rules loaded        : {}", waf.rule_count());
+        println!("inbound threshold   : {}\n", waf.threshold());
+    }
+
+    let mut holes_json: Vec<serde_json::Value> = Vec::new();
     let mut total_holes = 0usize;
     for (class, attacks, _) in class_data(&args.class) {
-        println!("== class: {class} ==");
+        if !json_mode {
+            println!("== class: {class} ==");
+        }
         for atk in attacks {
             for (label, cand) in candidates(atk) {
                 let passed = match classify_pass(&mut waf, &body(cand.as_bytes())) {
@@ -153,17 +166,39 @@ pub fn run_audit(args: AuditArgs) -> ExitCode {
                 };
                 if passed {
                     total_holes += 1;
-                    println!("  HOLE [{label:<26}] {atk}");
-                    println!("        delivered as: {cand}");
+                    if json_mode {
+                        holes_json.push(serde_json::json!({
+                            "class": class,
+                            "label": label,
+                            "attack": atk,
+                            "delivered_as": cand,
+                        }));
+                    } else {
+                        println!("  HOLE [{label:<26}] {atk}");
+                        println!("        delivered as: {cand}");
+                    }
                 }
             }
         }
     }
-    println!("\n{total_holes} hole(s) found.");
-    if total_holes == 0 {
-        println!("No bypass found for the audited classes with the shipped vectors.");
+
+    if json_mode {
+        let report = serde_json::json!({
+            "ruleset_fingerprint": waf.fingerprint(),
+            "rules_loaded": waf.rule_count(),
+            "inbound_threshold": waf.threshold(),
+            "audited_class": args.class,
+            "total_holes": total_holes,
+            "holes": holes_json,
+        });
+        println!("{}", serde_json::to_string(&report).unwrap_or_default());
     } else {
-        println!("Run `wafrift harden` to synthesize verified closing rules.");
+        println!("\n{total_holes} hole(s) found.");
+        if total_holes == 0 {
+            println!("No bypass found for the audited classes with the shipped vectors.");
+        } else {
+            println!("Run `wafrift harden` to synthesize verified closing rules.");
+        }
     }
     ExitCode::SUCCESS
 }

@@ -573,26 +573,40 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     }
 
     let base_url = resolve_base_url(&args);
-    let mut cases = load_corpus(&args.corpus)?;
+    // Load corpus; in --validate-only mode, parse/schema errors are
+    // themselves corpus integrity violations and must exit 4 (the
+    // documented "corpus integrity error" code), not 1 (generic).
+    let mut cases = match load_corpus(&args.corpus) {
+        Ok(cs) => cs,
+        Err(e) if args.validate_only => {
+            eprintln!("  ERROR: {e}");
+            eprintln!("1 corpus error(s)");
+            return Ok(ExitCode::from(4));
+        }
+        Err(e) => return Err(e),
+    };
+
+    // Apply --class filter BEFORE the validate-only early return so
+    // operators can validate just a slice (was: filter silently
+    // ignored, validated the full corpus regardless).
+    if !args.class.is_empty() {
+        let want: std::collections::HashSet<&str> = args.class.iter().map(String::as_str).collect();
+        cases.retain(|c| want.contains(c.class.as_str()));
+        if cases.is_empty() && !args.validate_only {
+            return Err(format!(
+                "no cases match the requested classes {:?}. \
+                 Hint: omit --class to run every class, or pick from the set printed by \
+                 `wafrift bench-waf --validate-only --corpus {}` (look at the per-class counts).",
+                args.class,
+                args.corpus.display()
+            ));
+        }
+    }
 
     // --validate-only: run corpus integrity checks then exit. Doesn't
     // need a live WAF target; intended for CI gating on corpus PRs.
     if args.validate_only {
         return validate_corpus_and_exit(&cases);
-    }
-
-    if !args.class.is_empty() {
-        let want: std::collections::HashSet<&str> = args.class.iter().map(String::as_str).collect();
-        cases.retain(|c| want.contains(c.class.as_str()));
-    }
-    if cases.is_empty() {
-        return Err(format!(
-            "no cases match the requested classes {:?}. \
-             Hint: omit --class to run every class, or pick from the set printed by \
-             `wafrift bench-waf --validate-only --corpus {}` (look at the per-class counts).",
-            args.class,
-            args.corpus.display()
-        ));
     }
 
     // Pick a randomized real-browser User-Agent (vs. the obvious

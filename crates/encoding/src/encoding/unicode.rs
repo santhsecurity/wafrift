@@ -277,21 +277,22 @@ pub fn sql_concat_split(payload: &str) -> String {
         if literal.is_empty() {
             out.push_str("''");
         } else {
-            let parts: Vec<String> = literal
-                .chars()
-                .map(|c| {
-                    // Escape any embedded single quote (defensive — input
-                    // already had a balanced pair, so an inner quote is
-                    // either escaped or unreachable here; we cover it
-                    // anyway).
-                    if c == '\'' {
-                        "''''".to_string()
-                    } else {
-                        format!("'{c}'")
-                    }
-                })
-                .collect();
-            out.push_str(&parts.join(","));
+            // Direct write loop instead of collect+join — saves N+1
+            // heap String allocations per literal. Per perf-hunt F03.
+            let mut first = true;
+            for c in literal.chars() {
+                if !first {
+                    out.push(',');
+                }
+                first = false;
+                if c == '\'' {
+                    out.push_str("''''");
+                } else {
+                    out.push('\'');
+                    out.push(c);
+                    out.push('\'');
+                }
+            }
         }
         out.push(')');
     }
@@ -355,8 +356,15 @@ pub fn sql_char_decompose(payload: &str) -> String {
             continue;
         }
         out.push_str("CHAR(");
-        let parts: Vec<String> = literal.chars().map(|c| (c as u32).to_string()).collect();
-        out.push_str(&parts.join(","));
+        // Direct write loop — per perf-hunt F03.
+        let mut first = true;
+        for c in literal.chars() {
+            if !first {
+                out.push(',');
+            }
+            first = false;
+            let _ = write!(&mut out, "{}", c as u32);
+        }
         out.push(')');
     }
     out
@@ -406,12 +414,16 @@ pub fn pg_chr_decompose(payload: &str) -> String {
             out.push_str("('')");
             continue;
         }
-        let parts: Vec<String> = literal
-            .chars()
-            .map(|c| format!("CHR({})", c as u32))
-            .collect();
+        // Direct write loop — per perf-hunt F03.
         out.push('(');
-        out.push_str(&parts.join("||"));
+        let mut first = true;
+        for c in literal.chars() {
+            if !first {
+                out.push_str("||");
+            }
+            first = false;
+            let _ = write!(&mut out, "CHR({})", c as u32);
+        }
         out.push(')');
     }
     out

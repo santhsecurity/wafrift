@@ -611,7 +611,28 @@ struct TechniquesArgs {
 #[derive(Subcommand, Debug)]
 enum TechniquesAction {
     /// Print the technique tree.
-    List,
+    List(TechniquesListArgs),
+    /// Print the explanation for a single technique selector
+    /// (e.g. `wafrift techniques explain tamper/json_unicode_alnum`).
+    /// Dogfood B4 fix: previously the only way to see per-technique
+    /// docs was to scan with `--explain`.
+    Explain(TechniquesExplainArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct TechniquesListArgs {
+    /// Output format. `tree` (default) prints the ASCII tree;
+    /// `json` emits the list as a structured array for downstream
+    /// tooling. Dogfood B4 fix: previously no machine-readable form.
+    #[arg(long, default_value = "tree", value_parser = ["tree", "json"])]
+    format: String,
+}
+
+#[derive(clap::Args, Debug)]
+struct TechniquesExplainArgs {
+    /// Selector to explain (e.g. `tamper/json_unicode_alnum`,
+    /// `encoding/url/single`).
+    selector: String,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -882,9 +903,67 @@ fn main() -> ExitCode {
         Some(Commands::OriginHints(args)) => origin_hints::run_origin_hints(args),
         Some(Commands::EgressExample(args)) => egress_example::run_egress_example(args),
         Some(Commands::Techniques(args)) => match args.action {
-            TechniquesAction::List => {
-                print!("{}", technique_filter::render_tree());
-                ExitCode::SUCCESS
+            TechniquesAction::List(sub) => match sub.format.as_str() {
+                "json" => {
+                    let names = wafrift_encoding::all_tamper_names();
+                    let strategies: Vec<String> = wafrift_encoding::all_strategies()
+                        .iter()
+                        .map(|s| technique_filter::strategy_path(*s).to_string())
+                        .collect();
+                    let payload = serde_json::json!({
+                        "tampers": names,
+                        "encoding_strategies": strategies,
+                    });
+                    println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+                    ExitCode::SUCCESS
+                }
+                _ => {
+                    print!("{}", technique_filter::render_tree());
+                    ExitCode::SUCCESS
+                }
+            },
+            TechniquesAction::Explain(sub) => {
+                // Look up the selector and print its description. Tamper
+                // selectors hit the TamperRegistry; encoding selectors
+                // hit the Strategy enum.
+                let sel = sub.selector.trim_matches('/').to_string();
+                if let Some(name) = sel.strip_prefix("tamper/") {
+                    let reg = wafrift_encoding::TamperRegistry::with_defaults();
+                    if let Some(s) = reg.get(name) {
+                        println!("{}: {}", s.name(), s.description());
+                        println!("aggressiveness: {:.2}", s.aggressiveness());
+                        ExitCode::SUCCESS
+                    } else {
+                        eprintln!(
+                            "unknown tamper `{name}`. Tip: `wafrift techniques list` to enumerate."
+                        );
+                        ExitCode::from(2)
+                    }
+                } else if sel.starts_with("encoding/") {
+                    // Find any strategy whose path matches.
+                    let found = wafrift_encoding::all_strategies().iter().copied().find(|s| {
+                        technique_filter::strategy_path(*s) == sel
+                    });
+                    if let Some(s) = found {
+                        println!(
+                            "{}: encoding strategy (aggressiveness {:.2})",
+                            sel,
+                            wafrift_encoding::aggressiveness(s)
+                        );
+                        ExitCode::SUCCESS
+                    } else {
+                        eprintln!(
+                            "unknown encoding selector `{sel}`. Tip: `wafrift techniques list`."
+                        );
+                        ExitCode::from(2)
+                    }
+                } else {
+                    eprintln!(
+                        "selector must start with `tamper/` or `encoding/`; got `{sel}`. \
+                         Tip: `wafrift techniques list`."
+                    );
+                    ExitCode::from(2)
+                }
             }
         },
         Some(Commands::Completion(args)) => {

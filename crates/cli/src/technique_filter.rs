@@ -92,6 +92,24 @@ impl TechniqueFilter {
                 bad.join(", ")
             ));
         }
+        // Contradiction guard (dogfood B7): a selector appearing in
+        // BOTH --only and --exclude — or where a `--only` selector is
+        // a sub-path of an `--exclude` selector — produces zero
+        // techniques and previously failed silently with "(no
+        // techniques considered)". Fail loudly instead.
+        let overlap: Vec<_> = only
+            .iter()
+            .filter(|o| exclude.iter().any(|e| matches(e, o) || matches(o, e)))
+            .cloned()
+            .collect();
+        if !overlap.is_empty() {
+            return Err(format!(
+                "contradictory --only/--exclude selectors: {} appear in both lists \
+                 (no variant would ever be selected).\n  \
+                 Tip: drop the selector from one of the two lists.",
+                overlap.join(", ")
+            ));
+        }
         Ok(Self { only, exclude })
     }
 
