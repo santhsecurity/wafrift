@@ -165,6 +165,16 @@ fn why_technique_works(tech: &Technique) -> &'static str {
              character. Browsers decode all four forms identically; WAF regexes anchored on the \
              canonical lowercase-x hex form (`&#x[0-9a-f]+;`) miss 3 of every 4 characters."
         }
+        Technique::PayloadEncoding(s) if s.contains("json_unicode_alnum") => {
+            "ASCII alphanumeric chars encoded as `\\uXXXX` while quotes, operators, brackets, and \
+             whitespace stay bare. The keyword fingerprint (`UNION`, `SELECT`, `script`, `alert`) \
+             never appears in the wire bytes — `UNION SELECT` becomes \
+             `\\u0055\\u004E\\u0049\\u004F\\u004E \\u0053\\u0045\\u004C\\u0045\\u0043\\u0054`. \
+             Origin JSON parsers and JS string-literal decoders re-materialize the keyword at the \
+             application layer. Distinct from full `unicode_escape` (which encodes every byte and \
+             trips high-`\\u`-density heuristics) — partial encode keeps the syntactic skeleton \
+             visible, so the payload still reads as data."
+        }
         Technique::PayloadEncoding(s) if s.contains("math_bold") => {
             "Letters and digits replaced with their U+1D400 (Mathematical Bold) counterparts — \
              `SELECT` becomes `𝐒𝐄𝐋𝐄𝐂𝐓`. Both NFKC-normalise back to ASCII, so backends with \

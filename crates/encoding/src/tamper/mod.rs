@@ -59,6 +59,7 @@ const DEFAULT_NAMES: &[&str] = &[
     "html_entity",
     "html_entity_variants",
     "math_bold",
+    "json_unicode_alnum",
     "sql_concat_split",
     "sql_char_decompose",
     "pg_chr_decompose",
@@ -105,6 +106,9 @@ impl TamperRegistry {
                     registry.register(Box::new(HtmlEntityVariantsTamper));
                 }
                 "math_bold" => registry.register(Box::new(MathBoldTamper)),
+                "json_unicode_alnum" => {
+                    registry.register(Box::new(JsonUnicodeAlnumTamper));
+                }
                 "sql_concat_split" => registry.register(Box::new(SqlConcatSplitTamper)),
                 "sql_char_decompose" => {
                     registry.register(Box::new(SqlCharDecomposeTamper));

@@ -116,6 +116,33 @@ impl TamperStrategy for PgChrDecomposeTamper {
     }
 }
 
+/// Partial JSON Unicode-escape tamper — encodes ASCII alphanumeric chars
+/// as `\uXXXX` while leaving structural punctuation (quotes, operators,
+/// whitespace, `<`, `>`, `(`, `)`) bare. The keyword fingerprint
+/// ("UNION", "SELECT", "script", "alert") never appears in the wire
+/// bytes; JSON.parse / JS string-literal decoding at the origin
+/// re-materializes it. Distinct from `unicode_escape` which encodes
+/// every byte (high `\u` density flags heuristic WAFs).
+pub struct JsonUnicodeAlnumTamper;
+
+impl TamperStrategy for JsonUnicodeAlnumTamper {
+    fn name(&self) -> &'static str {
+        "json_unicode_alnum"
+    }
+
+    fn description(&self) -> &'static str {
+        "Encode ASCII alphanumeric chars as `\\uXXXX`, leave punctuation bare — shatters keyword fingerprints inside JSON/JS contexts"
+    }
+
+    fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
+        crate::encoding::unicode::json_unicode_alnum(payload)
+    }
+
+    fn aggressiveness(&self) -> f64 {
+        0.45
+    }
+}
+
 /// SQL CHAR() decomposition tamper — every single-quoted string literal
 /// becomes `CHAR(N1,N2,...)` with one codepoint per arg. Defeats both
 /// literal-substring AND CONCAT-shaped blocklists (the payload contains

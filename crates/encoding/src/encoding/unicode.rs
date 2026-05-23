@@ -417,6 +417,55 @@ pub fn pg_chr_decompose(payload: &str) -> String {
     out
 }
 
+/// Partial JSON Unicode escape — encodes ASCII alphanumeric chars as
+/// `\uXXXX` while leaving structural punctuation (quotes, operators,
+/// whitespace) bare.
+///
+/// **Bypass mechanism**: Keyword fingerprint rules (UNION, SELECT, alert,
+/// script, eval, …) match against the byte sequence. Splitting the
+/// keyword across Unicode escapes defeats them — the origin's JSON
+/// parser / JS engine re-materializes the keyword at the application
+/// layer, but the WAF sees `UNION` in the wire
+/// bytes and finds no `UNION`. Distinct from [`unicode_encode`] which
+/// escapes EVERY char (high `\u` density flags some heuristic WAFs);
+/// this leaves the SQL/HTML/JS structural skeleton visible, so the
+/// payload still looks like data.
+///
+/// **Idempotent**: pre-existing `\uXXXX` sequences in the input are
+/// detected and passed through verbatim — second-pass tampering does
+/// not re-escape an already-escaped char.
+///
+/// **Context**: ONLY safe when the target parser performs
+/// JSON-style / JavaScript-style Unicode decoding. Inert against raw
+/// HTTP parameters (you'll send literal backslash-u bytes).
+#[must_use]
+pub fn json_unicode_alnum(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 6);
+    let chars: Vec<char> = payload.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\'
+            && i + 5 < chars.len()
+            && chars[i + 1] == 'u'
+            && chars[i + 2..i + 6].iter().all(|h| h.is_ascii_hexdigit())
+        {
+            for k in 0..6 {
+                out.push(chars[i + k]);
+            }
+            i += 6;
+            continue;
+        }
+        if c.is_ascii_alphanumeric() {
+            let _ = write!(&mut out, "\\u{:04X}", c as u32);
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
 /// Homoglyph substitution — replaces select ASCII characters with visually
 /// identical Unicode characters from other scripts.
 ///
@@ -461,6 +510,63 @@ mod tests {
     fn unicode_encode_basic() {
         assert_eq!(unicode_encode("A"), "\\u0041");
         assert_eq!(unicode_encode("AB"), "\\u0041\\u0042");
+    }
+
+    #[test]
+    fn json_unicode_alnum_keyword_split() {
+        // "UNION" becomes 5 `\uXXXX` sequences, ASCII bytes nowhere.
+        let out = json_unicode_alnum("UNION");
+        assert_eq!(out, "\\u0055\\u004E\\u0049\\u004F\\u004E");
+        assert!(!out.contains("UNION"));
+    }
+
+    #[test]
+    fn json_unicode_alnum_leaves_punctuation() {
+        // SQLi shape: keywords escaped, structural delimiters bare.
+        let out = json_unicode_alnum("' OR 1=1--");
+        assert_eq!(out, "' \\u004F\\u0052 \\u0031=\\u0031--");
+        let out2 = json_unicode_alnum("AB CD");
+        assert_eq!(out2, "\\u0041\\u0042 \\u0043\\u0044");
+    }
+
+    #[test]
+    fn json_unicode_alnum_idempotent_skip_pass() {
+        // Second pass MUST be a no-op — already-escaped \uXXXX
+        // sequences are detected and passed through.
+        let once = json_unicode_alnum("UNION SELECT");
+        let twice = json_unicode_alnum(&once);
+        assert_eq!(once, twice, "tamper must stabilize");
+    }
+
+    #[test]
+    fn json_unicode_alnum_preserves_quote_unencoded() {
+        // ' is U+0027 — NOT alphanumeric, so must stay literal.
+        let out = json_unicode_alnum("'");
+        assert_eq!(out, "'");
+    }
+
+    #[test]
+    fn json_unicode_alnum_xss_keyword_split() {
+        // <script>alert — `<`, `>`, `(`, `)` stay bare; letters/digits escape.
+        let out = json_unicode_alnum("<script>alert(1)</script>");
+        assert!(!out.contains("script"));
+        assert!(!out.contains("alert"));
+        assert!(out.contains('<'));
+        assert!(out.contains('>'));
+        assert!(out.contains('('));
+    }
+
+    #[test]
+    fn json_unicode_alnum_empty_input() {
+        assert_eq!(json_unicode_alnum(""), "");
+    }
+
+    #[test]
+    fn json_unicode_alnum_unicode_input_passes_through() {
+        // Non-ASCII chars (日本語) are NOT ascii_alphanumeric — left bare.
+        // This keeps the function focused on the keyword-bypass mission.
+        let out = json_unicode_alnum("日本");
+        assert_eq!(out, "日本");
     }
 
     #[test]
