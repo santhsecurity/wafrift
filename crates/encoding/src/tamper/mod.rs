@@ -58,6 +58,7 @@ const DEFAULT_NAMES: &[&str] = &[
     "unicode_escape",
     "html_entity",
     "html_entity_variants",
+    "math_bold",
     "case_alternation",
     "random_case",
     "whitespace_insertion",
@@ -100,6 +101,7 @@ impl TamperRegistry {
                 "html_entity_variants" => {
                     registry.register(Box::new(HtmlEntityVariantsTamper));
                 }
+                "math_bold" => registry.register(Box::new(MathBoldTamper)),
                 "case_alternation" => registry.register(Box::new(CaseAlternationTamper)),
                 "random_case" => registry.register(Box::new(RandomCaseTamper)),
                 "whitespace_insertion" => registry.register(Box::new(WhitespaceInsertionTamper)),

@@ -1,0 +1,37 @@
+[[waf]]
+name = "Datadog ASM"
+vendor = "Datadog"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "ContentTypeSwitch", "UnicodeEncode"]
+source = "frontier-2026:datadog-asm-blog"
+
+# Datadog Application Security Management (ASM) is Datadog's
+# in-process WAF/RASP, instrumented via the dd-trace agent across
+# Java, Python, Node, .NET, Go, Ruby, PHP. Blocking mode emits a
+# distinct JSON body when triggered server-side and propagates the
+# `dd-` family of trace headers that survive even when ASM serves a
+# templated block page. The "Security blocked" wording is the
+# load-bearing literal across all supported runtimes (it's hard-
+# coded in dd-trace-*).
+
+[[waf.signature]]
+  body_regex = "\"errors\":\\s*\\[\\{\"title\":\\s*\"You've been blocked\""
+  weight = 0.85
+
+[[waf.signature]]
+  body_regex = "Security provided by Datadog"
+  weight = 0.8
+
+[[waf.signature]]
+  header_name = "x-datadog-trace-id"
+  header_regex = "[0-9]+"
+  weight = 0.2
+
+[[waf.signature]]
+  header_name = "x-datadog-appsec-event"
+  header_regex = ".+"
+  weight = 0.7
+
+[[waf.signature]]
+  body_regex = "Sorry, you cannot access this page\\. Please contact the customer service\\."
+  weight = 0.6

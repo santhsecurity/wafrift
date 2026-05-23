@@ -1,0 +1,30 @@
+[[waf]]
+name = "ngrok WAF"
+vendor = "ngrok"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "ContentTypeSwitch", "SqlCommentInsertion"]
+source = "frontier-2026:ngrok-blog"
+
+# ngrok introduced WAF actions in 2024 and broadly rolled them out
+# through 2025; it ships Coraza + OWASP CRS under the hood. The
+# block path emits a specific JSON body and the `ngrok-error-code`
+# response header — both load-bearing fingerprints not covered by
+# the existing Coraza or CRS detection rules.
+
+[[waf.signature]]
+  header_name = "ngrok-error-code"
+  header_regex = ".+"
+  weight = 0.7
+
+[[waf.signature]]
+  body_regex = "ERR_NGROK_3200"
+  weight = 0.7
+
+[[waf.signature]]
+  body_regex = "request blocked by ngrok WAF"
+  weight = 0.6
+
+[[waf.signature]]
+  header_name = "ngrok-agent-session-id"
+  header_regex = ".+"
+  weight = 0.3

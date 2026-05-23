@@ -1,0 +1,37 @@
+[[waf]]
+name = "open-appsec WAF"
+vendor = "Check Point / open-appsec"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "UnicodeEncode", "SqlCommentInsertion"]
+source = "frontier-2026:open-appsec-docs"
+
+# open-appsec (open-appsec.io) is Check Point's open-source ML-driven
+# WAF, deployable as Kubernetes ingress or as a NGINX module. The
+# inline blocking path emits an identifiable HTML interstitial titled
+# "open-appsec Web Application & API Protection" and (in
+# kubernetes-ingress mode) sets a `x-checkpoint-appsec` response
+# header. The block page references the open-appsec project page,
+# which is the load-bearing fingerprint when running in transparent
+# (no-header) mode.
+
+[[waf.signature]]
+  body_regex = "open-appsec Web Application"
+  weight = 0.8
+
+[[waf.signature]]
+  body_regex = "open-appsec\\.io"
+  weight = 0.7
+
+[[waf.signature]]
+  header_name = "x-checkpoint-appsec"
+  header_regex = ".+"
+  weight = 0.6
+
+[[waf.signature]]
+  header_name = "x-cp-appsec-incident-id"
+  header_regex = "[0-9a-f-]{36}"
+  weight = 0.6
+
+[[waf.signature]]
+  body_regex = "Request blocked by open-appsec"
+  weight = 0.7

@@ -15,10 +15,10 @@ use proptest::prelude::*;
 use wafrift_encoding::tamper::{
     Base64Tamper, BellSeparatorTamper, BracketConfusableTamper, CaseAlternationTamper,
     DoubleUrlEncodeTamper, HexEncodeTamper, HexLiteralKeywordTamper, HtmlEntityTamper,
-    HtmlEntityVariantsTamper, MxssNamespaceWrapTamper, MysqlVersionedCommentWrapTamper,
-    NullByteTamper, OverlongUtf8Tamper, PostgresDollarQuoteTamper, RandomCaseTamper,
-    SqlCommentTamper, TamperStrategy, UnicodeEscapeTamper, UrlEncodeTamper,
-    WhitespaceInsertionTamper, ZeroWidthInjectTamper,
+    HtmlEntityVariantsTamper, MathBoldTamper, MxssNamespaceWrapTamper,
+    MysqlVersionedCommentWrapTamper, NullByteTamper, OverlongUtf8Tamper,
+    PostgresDollarQuoteTamper, RandomCaseTamper, SqlCommentTamper, TamperStrategy,
+    UnicodeEscapeTamper, UrlEncodeTamper, WhitespaceInsertionTamper, ZeroWidthInjectTamper,
 };
 
 // ── Helper: proptest strategy that generates adversarial strings ─────────────
@@ -82,6 +82,7 @@ never_panic_tests! {
     UnicodeEscapeTamper        => prop_unicode_escape_never_panics,
     HtmlEntityTamper           => prop_html_entity_never_panics,
     HtmlEntityVariantsTamper   => prop_html_entity_variants_never_panics,
+    MathBoldTamper             => prop_math_bold_never_panics,
     CaseAlternationTamper      => prop_case_alternation_never_panics,
     RandomCaseTamper           => prop_random_case_never_panics,
     WhitespaceInsertionTamper  => prop_whitespace_insertion_never_panics,

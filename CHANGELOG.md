@@ -4,6 +4,51 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — 2 new WAF detect rules (open-appsec, Datadog ASM)
+
+- **open-appsec** (`crates/detect/rules/detect/open_appsec.toml`) —
+  Check Point's open-source ML-driven WAF (open-appsec.io), deployable
+  as a Kubernetes ingress or NGINX module. Fingerprinted by
+  `x-checkpoint-appsec` + `x-cp-appsec-incident-id` UUID header and the
+  "open-appsec Web Application & API Protection" block-page literal.
+
+- **Datadog ASM** (`crates/detect/rules/detect/datadog_asm.toml`) —
+  Datadog's in-process WAF/RASP via dd-trace agent instrumentation
+  (Java/Python/Node/.NET/Go/Ruby/PHP). Fingerprinted by the hardcoded
+  `"You've been blocked"` JSON error envelope + `x-datadog-appsec-event`
+  header. Anti-overlap noted with DataDome (different vendor).
+
+Detect corpus is now 166 rules (was 164).
+
+### Added — `math_bold` tamper (Math Alphanumeric Symbols NFKC bypass)
+
+23rd builtin `TamperStrategy`. Replaces ASCII letters and digits with their
+Math Bold counterparts in the Unicode `U+1D400` block:
+
+- `A`–`Z` → `U+1D400`–`U+1D419` (𝐀…𝐙)
+- `a`–`z` → `U+1D41A`–`U+1D433` (𝐚…𝐳)
+- `0`–`9` → `U+1D7CE`–`U+1D7D7` (𝟎…𝟗)
+
+Mechanism: every codepoint in this range NFKC-normalises back to plain
+ASCII. Backends that normalise (Postgres ICU, MySQL `utf8mb4_0900_ai_ci`,
+Java `Normalizer`, .NET `String.Normalize`, Python `unicodedata.normalize`,
+Go `golang.org/x/text/unicode/norm`) see the original `SELECT` / `UNION`
+/ `script` keyword and execute / render it. WAFs scanning bytes for ASCII
+keywords see `U+1D4xx` codepoints — no keyword match.
+
+Distinct from existing `fullwidth_encode` (U+FF00 block) / `bracket_confusable`
+(U+FF1C-FF1E only). WAFs that ship a "fullwidth keyword" blocklist (now
+standard since ~2020) often do NOT also block U+1D400. Different code
+range, different gap.
+
+New SQL corpus file: `wafrift-bench/corpus/sql/math_bold_nfkc_2026.toml`
+(12 cases: tautology, UNION SELECT, stacked DDL, time-based blind for both
+MySQL and Postgres, EXTRACTVALUE error-based, information_schema dump,
+LOAD_FILE LFI).
+
+Tests: 8 unit (per-range encoding, mixed alphanumeric, punctuation preserved,
+distinct-from-fullwidth), 1 proptest never-panics. All green.
+
 ### Added — `html_entity_variants` tamper (case + decimal + zero-pad rotation)
 
 22nd builtin `TamperStrategy`. Rotates each output character through four

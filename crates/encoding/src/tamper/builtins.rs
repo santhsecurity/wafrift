@@ -89,6 +89,35 @@ impl TamperStrategy for HtmlEntityTamper {
 /// Case alternation tamper strategy.
 pub struct CaseAlternationTamper;
 
+/// Mathematical Alphanumeric Symbols tamper — replaces ASCII letters/digits
+/// with their `U+1D400`-block Math Bold counterparts. Both NFKC-normalise
+/// back to ASCII, so backends that normalise (Postgres ICU, MySQL
+/// `utf8mb4_0900_ai_ci`, Java/.NET/Python/Go NFKC) execute the original
+/// keyword while WAF byte-regex sees `U+1D4xx` codepoints and misses.
+///
+/// Distinct from `bracket_confusable` / `fullwidth`: those use the
+/// `U+FF00` block. Math Bold lives in `U+1D400` — different range,
+/// different blocklist coverage gap.
+pub struct MathBoldTamper;
+
+impl TamperStrategy for MathBoldTamper {
+    fn name(&self) -> &'static str {
+        "math_bold"
+    }
+
+    fn description(&self) -> &'static str {
+        "Replace ASCII letters/digits with U+1D400 Math Bold (NFKC normalises back to ASCII)"
+    }
+
+    fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
+        crate::encoding::unicode::math_bold_encode(payload)
+    }
+
+    fn aggressiveness(&self) -> f64 {
+        0.5
+    }
+}
+
 /// HTML entity variants tamper — rotates each char through 4 browser-tolerant
 /// forms (lowercase-x hex, uppercase-X hex, decimal, zero-padded decimal).
 /// Defeats WAF regexes that anchor on the canonical `&#xHH;` form only.

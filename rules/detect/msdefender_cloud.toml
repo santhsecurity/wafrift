@@ -1,0 +1,37 @@
+[[waf]]
+name = "Microsoft Defender for Cloud Apps"
+vendor = "Microsoft"
+confidence_threshold = 0.3
+evasions = ["CaseAlternation", "ContentTypeSwitch", "SqlCommentInsertion"]
+source = "frontier-2026:msdefender-mcas"
+
+# Microsoft Cloud App Security (rebranded "Defender for Cloud Apps"
+# 2024–2025) intercepts via reverse-proxy. Blocked / inspected
+# traffic carries the `x-ms-cpim-*` family of headers and any
+# redirect target lands on `*.mcas.ms` or `*.access.mcas.ms` —
+# both load-bearing signals not covered by the existing Microsoft
+# Azure WAF rule.
+
+[[waf.signature]]
+  header_name = "x-ms-cpim-trans"
+  header_regex = ".+"
+  weight = 0.5
+
+[[waf.signature]]
+  header_name = "x-ms-cpim-rules"
+  header_regex = ".+"
+  weight = 0.5
+
+[[waf.signature]]
+  header_name = "location"
+  header_regex = "https?://[^\\s]*\\.mcas\\.ms"
+  weight = 0.6
+
+[[waf.signature]]
+  header_name = "location"
+  header_regex = "https?://[^\\s]*\\.access\\.mcas\\.ms"
+  weight = 0.6
+
+[[waf.signature]]
+  body_regex = "Microsoft Defender for Cloud Apps"
+  weight = 0.4
