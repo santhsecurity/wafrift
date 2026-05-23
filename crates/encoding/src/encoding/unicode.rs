@@ -514,26 +514,18 @@ pub fn sql_adjacent_string_concat(payload: &str) -> String {
             out.push_str(&literal);
             continue;
         }
-        // Conservative: literals containing an escaped quote (SQL `''`
-        // produced a `'` inside `literal`) are not split — splitting
-        // across the escape boundary breaks SQL semantics. Pass
-        // through verbatim.
-        if literal.contains('\'') {
-            out.push('\'');
-            for c in literal.chars() {
-                if c == '\'' {
-                    out.push_str("''");
-                } else {
-                    out.push(c);
-                }
-            }
-            out.push('\'');
-            continue;
-        }
         let lit_chars: Vec<char> = literal.chars().collect();
         if lit_chars.len() < 2 {
+            // Length-0 or length-1 literal: pass through. Note for
+            // length-1 with `'`: that's a literal containing a single
+            // `'`, which we encode as `''''` (four-quote form) to keep
+            // the output SQL-valid.
             out.push('\'');
-            out.push_str(&literal);
+            if lit_chars.len() == 1 && lit_chars[0] == '\'' {
+                out.push_str("''");
+            } else {
+                out.push_str(&literal);
+            }
             out.push('\'');
             continue;
         }
@@ -542,6 +534,14 @@ pub fn sql_adjacent_string_concat(payload: &str) -> String {
         // §5.3 concatenates them at parse time. Idempotent: each output
         // sub-literal has length 1 (below the threshold) so a second
         // pass sees only short literals and produces identical output.
+        //
+        // Escaped-quote handling: if the source literal contained a
+        // SQL `''` escape it lives in `literal` as a single `'` char.
+        // The shattered single-char literal for that position emits
+        // `''''` (four-quote form: opening quote, escaped quote, escaped
+        // quote, closing quote) so the database reassembles the
+        // original `'` content. Idempotency holds because `''''` parses
+        // as a length-1 literal containing `'` on the next pass.
         let mut first = true;
         for c in lit_chars {
             if !first {
@@ -687,12 +687,39 @@ mod tests {
 
     #[test]
     fn sql_adjacent_string_concat_handles_escaped_quote() {
-        // SQL '' escape inside a literal must NOT be split — splitting
-        // across the escape boundary would break semantics
-        // (`'O'B' 'rien'` would parse as 4 tokens, not one string).
-        // Conservative behaviour: pass through verbatim.
+        // SQL '' escape inside a literal: the position holding `'` is
+        // emitted as the four-quote form `''''` — opening, escaped pair,
+        // closing — which parses as a length-1 literal containing `'`.
+        // The database reassembles "O" + "'" + "B" + "r" + "i" + "e" + "n".
         let out = sql_adjacent_string_concat("'O''Brien'");
-        assert_eq!(out, "'O''Brien'");
+        assert_eq!(out, "'O' '''' 'B' 'r' 'i' 'e' 'n'");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_escaped_quote_idempotent() {
+        // Second pass: the `''''` token is a length-1 literal containing
+        // `'` (below split threshold). It must pass through unchanged
+        // (via the length-1 branch with the escaped-quote sub-case).
+        let once = sql_adjacent_string_concat("'O''Brien'");
+        let twice = sql_adjacent_string_concat(&once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_single_quote_literal_emits_four_quotes() {
+        // A literal of length 1 containing only `'` (source: `''''`)
+        // must output the same `''''` (passthrough form).
+        let out = sql_adjacent_string_concat("''''");
+        assert_eq!(out, "''''");
+    }
+
+    #[test]
+    fn sql_adjacent_string_concat_its_a_test_shatters_correctly() {
+        // The dogfood agent's B5 reproducer.
+        let out = sql_adjacent_string_concat("'it''s a test'");
+        // Literal content: "it's a test" (11 chars). Each char emits
+        // its own single-char literal; the `'` becomes `''''`.
+        assert_eq!(out, "'i' 't' '''' 's' ' ' 'a' ' ' 't' 'e' 's' 't'");
     }
 
     #[test]

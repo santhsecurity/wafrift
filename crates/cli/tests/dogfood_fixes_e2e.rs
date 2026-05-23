@@ -1242,3 +1242,63 @@ fn legendary_payload_subprocess_pipeline_embeds_bypasses_into_markdown() {
         "re-run command block missing from markdown:\n{stdout}"
     );
 }
+
+// ─────────────────── B5: sql_adjacent_string_concat with `''` escape ────
+//
+// The dogfood agent (2026-05-23) found that
+// `sql_adjacent_string_concat` previously produced "no variants" on
+// any payload whose single-quoted literal contained a SQL `''` escape
+// (e.g. `'it''s a test'`). The conservative branch passed the literal
+// through verbatim, the CLI saw `output == input`, and the variant
+// was dropped as a no-op.
+//
+// Fix: shatter such literals, emitting the four-quote form `''''`
+// (length-1 literal containing `'`) for each escaped position. The DB
+// reassembles the original content via ANSI SQL-92 §5.3 adjacent-
+// literal concat.
+
+#[test]
+fn dogfood_b5_sql_adjacent_handles_escaped_quote_via_cli() {
+    let (code, stdout, _stderr) = wafrift(&[
+        "evade",
+        "--only",
+        "tamper/sql_adjacent_string_concat",
+        "--payload",
+        "SELECT 'it''s a test' FROM users",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code, 0, "evade should succeed");
+    // The "no variants" pre-fix outcome would yield {"variants":[]}.
+    assert!(
+        stdout.contains("'i' 't' '''' 's' ' ' 'a' ' ' 't' 'e' 's' 't'"),
+        "expected shattered output with four-quote form for `''` escape:\n{stdout}"
+    );
+    // Anti-rig: the literal must NOT appear verbatim — that'd mean we
+    // reverted to passthrough.
+    assert!(
+        !stdout.contains("'it''s a test'"),
+        "tamper output equals input — regression to passthrough:\n{stdout}"
+    );
+}
+
+#[test]
+fn dogfood_b5_negative_twin_no_escape_unchanged_behavior() {
+    // Negative twin: a literal WITHOUT `''` escape must still shatter
+    // into single-char form (proves the new escape-handling branch
+    // didn't accidentally break the canonical case).
+    let (code, stdout, _stderr) = wafrift(&[
+        "evade",
+        "--only",
+        "tamper/sql_adjacent_string_concat",
+        "--payload",
+        "SELECT 'admin' FROM users",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("'a' 'd' 'm' 'i' 'n'"),
+        "canonical shatter regressed:\n{stdout}"
+    );
+}
