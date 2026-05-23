@@ -79,7 +79,7 @@ payload = "<\\u0073\\u0063\\u0072\\u0069\\u0070\\u0074>\\u0065\\u0076\\u0061\\u0
 description = "Multi-layer: eval+atob+base64('alert(1)') with the wrapper keywords escaped. The high-confidence `eval(atob(` signature stays invisible."
 
 [[case]]
-id = "json_unicode_alnum_idempotent_passthrough"
+id = "json_unicode_alnum_xss_idempotent_passthrough"
 class = "xss"
 payload = "<\\u0073\\u0063\\u0072\\u0069\\u0070\\u0074>"
 description = "Negative-case: payload already partially encoded. Idempotency requirement: re-running the tamper produces no further change."
