@@ -15,9 +15,10 @@ use proptest::prelude::*;
 use wafrift_encoding::tamper::{
     Base64Tamper, BellSeparatorTamper, BracketConfusableTamper, CaseAlternationTamper,
     DoubleUrlEncodeTamper, HexEncodeTamper, HexLiteralKeywordTamper, HtmlEntityTamper,
-    MxssNamespaceWrapTamper, MysqlVersionedCommentWrapTamper, NullByteTamper, OverlongUtf8Tamper,
-    PostgresDollarQuoteTamper, RandomCaseTamper, SqlCommentTamper, TamperStrategy,
-    UnicodeEscapeTamper, UrlEncodeTamper, WhitespaceInsertionTamper, ZeroWidthInjectTamper,
+    HtmlEntityVariantsTamper, MxssNamespaceWrapTamper, MysqlVersionedCommentWrapTamper,
+    NullByteTamper, OverlongUtf8Tamper, PostgresDollarQuoteTamper, RandomCaseTamper,
+    SqlCommentTamper, TamperStrategy, UnicodeEscapeTamper, UrlEncodeTamper,
+    WhitespaceInsertionTamper, ZeroWidthInjectTamper,
 };
 
 // ── Helper: proptest strategy that generates adversarial strings ─────────────
@@ -80,6 +81,7 @@ never_panic_tests! {
     DoubleUrlEncodeTamper      => prop_double_url_encode_never_panics,
     UnicodeEscapeTamper        => prop_unicode_escape_never_panics,
     HtmlEntityTamper           => prop_html_entity_never_panics,
+    HtmlEntityVariantsTamper   => prop_html_entity_variants_never_panics,
     CaseAlternationTamper      => prop_case_alternation_never_panics,
     RandomCaseTamper           => prop_random_case_never_panics,
     WhitespaceInsertionTamper  => prop_whitespace_insertion_never_panics,
@@ -255,6 +257,7 @@ fn tamper_utf8_boundary_chars_no_panic() {
         &DoubleUrlEncodeTamper,
         &UnicodeEscapeTamper,
         &HtmlEntityTamper,
+        &HtmlEntityVariantsTamper,
         &CaseAlternationTamper,
         &RandomCaseTamper,
         &Base64Tamper,

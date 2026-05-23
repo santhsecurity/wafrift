@@ -4,6 +4,27 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — `html_entity_variants` tamper (case + decimal + zero-pad rotation)
+
+22nd builtin `TamperStrategy`. Rotates each output character through four
+browser-tolerant HTML entity forms:
+
+1. `&#xHH;`    — canonical lowercase-x hex
+2. `&#XHH;`    — uppercase-X hex
+3. `&#DD;`     — decimal
+4. `&#000DD;`  — decimal with leading zeros
+
+Targets WAF regexes that anchor on a single canonical form (`&#x[0-9a-f]+;`)
+with case-sensitive `x` and required `;`. Browsers decode all four variants
+identically — a payload of `&#X3c;&#115;&#00062;` reaches the DOM as `<s>`
+while the regex only saw three of its four anchor patterns. Wired into
+`TamperRegistry::with_defaults()` so it ships in every default scan / evade
+run.
+
+Tests: 7 unit (per-form encoding, deterministic, distinct-from-canonical),
+1 proptest never-panics, second-pass cap entry at 10× (10-byte zero-padded
+form drives the expansion bound). All green.
+
 ### Fixed — 6 duplicate corpus case IDs across 4 files
 
 Sonnet stress-test pass found cross-file duplicates that would

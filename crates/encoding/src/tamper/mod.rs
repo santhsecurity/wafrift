@@ -57,6 +57,7 @@ const DEFAULT_NAMES: &[&str] = &[
     "double_url_encode",
     "unicode_escape",
     "html_entity",
+    "html_entity_variants",
     "case_alternation",
     "random_case",
     "whitespace_insertion",
@@ -96,6 +97,9 @@ impl TamperRegistry {
                 "double_url_encode" => registry.register(Box::new(DoubleUrlEncodeTamper)),
                 "unicode_escape" => registry.register(Box::new(UnicodeEscapeTamper)),
                 "html_entity" => registry.register(Box::new(HtmlEntityTamper)),
+                "html_entity_variants" => {
+                    registry.register(Box::new(HtmlEntityVariantsTamper));
+                }
                 "case_alternation" => registry.register(Box::new(CaseAlternationTamper)),
                 "random_case" => registry.register(Box::new(RandomCaseTamper)),
                 "whitespace_insertion" => registry.register(Box::new(WhitespaceInsertionTamper)),

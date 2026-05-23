@@ -99,6 +99,53 @@ pub fn html_entity_decimal_encode(payload: &str) -> String {
     out
 }
 
+/// HTML entity encoding with per-character variant rotation.
+///
+/// Cycles each character through four browser-tolerant forms that strict
+/// WAF regexes (which typically anchor on `&#x[0-9a-f]+;` with a lowercase
+/// `x` and required `;`) miss:
+///
+/// 1. `&#xHH;`     — canonical lowercase-x hex
+/// 2. `&#XHH;`     — uppercase-X hex (browsers accept; case-sensitive regex misses)
+/// 3. `&#DD;`      — decimal
+/// 4. `&#000DD;`   — decimal with leading zeros (HTML5 spec allows arbitrary leading zeros)
+///
+/// Rotation is by character index (deterministic; same input always
+/// produces the same output — important for proptest idempotency).
+///
+/// **Bypass mechanism**: a `ModSecurity` regex like
+/// `@rx &#x([0-9a-f]+);.*&#x([0-9a-f]+);` won't match a payload of
+/// `&#X3C;&#0060;&#x73;&#62;` (the same `<s` payload routed through all
+/// four variants). The browser decodes all four; the regex anchored on
+/// the canonical form sees a different shape.
+///
+/// **Context**: HTML body / attribute. Equivalent to `html_entity` /
+/// `html_entity_decimal` for browser decoding; safer against
+/// canonicalising WAFs that strip the trailing `;` only on the lowercase
+/// form.
+#[must_use]
+pub fn html_entity_variants(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 8);
+    for (idx, ch) in payload.chars().enumerate() {
+        let code = ch as u32;
+        match idx % 4 {
+            0 => {
+                let _ = write!(&mut out, "&#x{code:x};");
+            }
+            1 => {
+                let _ = write!(&mut out, "&#X{code:X};");
+            }
+            2 => {
+                let _ = write!(&mut out, "&#{code};");
+            }
+            _ => {
+                let _ = write!(&mut out, "&#000{code};");
+            }
+        }
+    }
+    out
+}
+
 /// Fullwidth Unicode encoding — replaces ASCII with fullwidth equivalents.
 ///
 /// Maps `!`–`~` (0x21–0x7E) to the fullwidth range `！`–`～` (0xFF01–0xFF5E).
@@ -265,6 +312,60 @@ mod tests {
     #[test]
     fn html_entity_encode_empty() {
         assert_eq!(html_entity_encode(""), "");
+    }
+
+    // ── html_entity_variants tests ─────────────────────────────────────
+
+    #[test]
+    fn html_entity_variants_cycles_four_forms() {
+        // 'A'=0x41=65 — verify each of the four rotation slots
+        let encoded = html_entity_variants("AAAA");
+        assert_eq!(encoded, "&#x41;&#X41;&#65;&#00065;");
+    }
+
+    #[test]
+    fn html_entity_variants_continues_rotation() {
+        // 'A'=65 — fifth char returns to slot 0 (lowercase-x hex)
+        let encoded = html_entity_variants("AAAAA");
+        assert_eq!(encoded, "&#x41;&#X41;&#65;&#00065;&#x41;");
+    }
+
+    #[test]
+    fn html_entity_variants_empty() {
+        assert_eq!(html_entity_variants(""), "");
+    }
+
+    #[test]
+    fn html_entity_variants_xss_payload() {
+        // '<' = 0x3C = 60, 's'=0x73=115, '>'=0x3E=62
+        // First three chars use slots 0, 1, 2:
+        let encoded = html_entity_variants("<s>");
+        assert_eq!(encoded, "&#x3c;&#X73;&#62;");
+    }
+
+    #[test]
+    fn html_entity_variants_unicode_codepoint() {
+        // emoji U+1F600 ('😀') — codepoint 128512 — exercises higher-bit chars
+        let encoded = html_entity_variants("\u{1F600}");
+        assert_eq!(encoded, "&#x1f600;");
+    }
+
+    #[test]
+    fn html_entity_variants_distinct_from_canonical() {
+        // 4+ char payload MUST differ from canonical html_entity_encode
+        // (canonical is always lowercase-x hex with semicolon)
+        let canon = html_entity_encode("ABCD");
+        let var = html_entity_variants("ABCD");
+        assert_ne!(canon, var);
+    }
+
+    #[test]
+    fn html_entity_variants_deterministic() {
+        // Same input → same output (no randomness; rotation is by index)
+        assert_eq!(
+            html_entity_variants("hello world"),
+            html_entity_variants("hello world")
+        );
     }
 
     #[test]

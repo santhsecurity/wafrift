@@ -52,6 +52,12 @@ fn tamper_second_pass_cap(name: &str, once_len: usize) -> usize {
         "double_url_encode" => common::max_encoded_output_bytes(S::DoubleUrlEncode, once_len),
         "unicode_escape" => common::max_encoded_output_bytes(S::UnicodeEncode, once_len),
         "html_entity" => common::max_encoded_output_bytes(S::HtmlEntityEncode, once_len),
+        // html_entity_variants rotates each char through 4 forms; the largest
+        // form ("&#000XX;", 10 bytes for ASCII codepoints) drives the second-
+        // pass expansion. Per-char 1st pass ≤10 bytes → 2nd pass each of those
+        // 10 bytes becomes ≤10 more bytes → 10× upper bound + 64 fudge for the
+        // closing semicolons on short inputs.
+        "html_entity_variants" => once_len.saturating_mul(10).saturating_add(64),
         "case_alternation" => common::max_encoded_output_bytes(S::CaseAlternation, once_len),
         "whitespace_insertion" => {
             common::max_encoded_output_bytes(S::WhitespaceInsertion, once_len)

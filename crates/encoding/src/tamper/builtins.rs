@@ -89,6 +89,29 @@ impl TamperStrategy for HtmlEntityTamper {
 /// Case alternation tamper strategy.
 pub struct CaseAlternationTamper;
 
+/// HTML entity variants tamper — rotates each char through 4 browser-tolerant
+/// forms (lowercase-x hex, uppercase-X hex, decimal, zero-padded decimal).
+/// Defeats WAF regexes that anchor on the canonical `&#xHH;` form only.
+pub struct HtmlEntityVariantsTamper;
+
+impl TamperStrategy for HtmlEntityVariantsTamper {
+    fn name(&self) -> &'static str {
+        "html_entity_variants"
+    }
+
+    fn description(&self) -> &'static str {
+        "HTML entity encoding rotated across hex/HEX/decimal/zero-padded forms"
+    }
+
+    fn tamper(&self, payload: &str, _context: Option<&str>) -> String {
+        crate::encoding::unicode::html_entity_variants(payload)
+    }
+
+    fn aggressiveness(&self) -> f64 {
+        0.35
+    }
+}
+
 impl TamperStrategy for CaseAlternationTamper {
     fn name(&self) -> &'static str {
         "case_alternation"
