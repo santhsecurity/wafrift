@@ -153,24 +153,22 @@ pub struct ResponseProfileDb {
 
 impl ResponseProfileDb {
     /// Load all `.toml` files from a directory.
+    ///
+    /// Lossy: missing directory or unreadable files are silently
+    /// skipped; per-file parse errors are logged via `tracing::warn`
+    /// but the load continues. Iteration + sort + read is shared with
+    /// `RuleDb::load_directory` via [`wafrift_types::loaders`].
     pub fn load_dir(dir: &std::path::Path) -> Self {
         let mut profiles = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "toml")
-                    && let Ok(contents) = std::fs::read_to_string(&path)
-                {
-                    match toml::from_str::<ProfileFile>(&contents) {
-                        Ok(file) => profiles.extend(file.response_profile),
-                        Err(e) => {
-                            tracing::warn!(
-                                path = %path.display(),
-                                error = %e,
-                                "failed to parse response profile"
-                            );
-                        }
-                    }
+        for (path, contents) in wafrift_types::loaders::read_toml_files_lossy(dir) {
+            match toml::from_str::<ProfileFile>(&contents) {
+                Ok(file) => profiles.extend(file.response_profile),
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "failed to parse response profile"
+                    );
                 }
             }
         }
@@ -227,10 +225,7 @@ impl ResponseProfileDb {
         headers: &[(String, String)],
         body: &[u8],
     ) -> ResponseSignal {
-        let body_str = {
-            let scan_limit = body.len().min(4096);
-            String::from_utf8_lossy(&body[..scan_limit]).to_ascii_lowercase()
-        };
+        let body_str = crate::response::scan_body_lowercase(body, 4096);
 
         // Check for rate limiting first (any profile's rate_limit_status)
         for profile in &self.profiles {
@@ -355,10 +350,13 @@ impl ResponseProfileDb {
                 BlockClass::Pass
             }
         } else {
-            // No profile matched — fall back to legacy status-based detection
-            // Audit (2026-05-10): removed 451 (legal takedown) from the block
-            // list. 451 is NOT a WAF block — it's a legal/geo restriction.
-            if matches!(status, 403 | 406 | 503) {
+            // No profile matched — fall back to status-based detection.
+            // The canonical 403/406/503 set lives in
+            // `response::is_waf_block_status` (audited 2026-05-10 to
+            // exclude 429 / 451). Calling through the shared classifier
+            // keeps the two in lock-step instead of duplicating the
+            // list inline here.
+            if crate::response::is_waf_block_status(status) {
                 BlockClass::HardBlock
             } else if legacy_body_block_check(&body_str) {
                 BlockClass::SoftBlock

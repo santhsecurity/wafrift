@@ -566,7 +566,7 @@ mod tests {
                 });
             }
         });
-        tokio::time::sleep(Duration::from_millis(40)).await;
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
         addr
     }
 

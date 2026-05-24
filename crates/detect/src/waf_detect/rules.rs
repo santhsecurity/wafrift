@@ -329,20 +329,13 @@ impl RuleEngine {
     }
 
     /// Load all `.toml` files from a directory.
+    ///
+    /// Strict: I/O errors bubble up via `?`; per-file parse and
+    /// compile errors abort the whole load. Iteration + sort + read
+    /// is shared with `ResponseProfileDb::load_dir` via
+    /// [`wafrift_types::loaders`].
     pub fn load_directory(&mut self, path: &std::path::Path) -> Result<(), DetectRulesError> {
-        let mut entries: Vec<_> = std::fs::read_dir(path)?
-            .filter_map(std::result::Result::ok)
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
-            })
-            .map(|e| e.path())
-            .collect();
-        entries.sort();
-
-        for entry in entries {
-            let content = std::fs::read_to_string(&entry)?;
+        for (entry, content) in wafrift_types::loaders::read_toml_files_strict(path)? {
             let raw: RawRuleDb = toml::from_str(&content)
                 .map_err(|e| DetectRulesError::Parse(format!("{}: {e}", entry.display())))?;
             for waf in raw.waf {

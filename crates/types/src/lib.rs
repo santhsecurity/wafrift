@@ -14,6 +14,7 @@ pub mod escalation;
 pub mod explanation;
 pub mod format;
 pub mod injection_context;
+pub mod loaders;
 pub mod oob;
 pub mod request;
 pub mod result;

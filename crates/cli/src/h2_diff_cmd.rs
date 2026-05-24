@@ -337,11 +337,7 @@ fn emit_output(args: &H2DiffArgs, results: &[H2DiffResult]) {
     }
 
     for r in results.iter().filter(|r| r.severity != "none") {
-        let badge = match r.severity {
-            "high" => r.severity.bright_red().bold(),
-            "medium" => r.severity.yellow().bold(),
-            _ => r.severity.bright_black(),
-        };
+        let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
         println!("  [{badge}] {} — {}", r.kind.bold(), r.description);
         println!(
@@ -487,7 +483,7 @@ mod tests {
                 });
             }
         });
-        tokio::time::sleep(Duration::from_millis(40)).await;
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
         addr
     }
 

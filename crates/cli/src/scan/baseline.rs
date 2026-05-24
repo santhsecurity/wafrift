@@ -149,7 +149,7 @@ mod tests {
                 });
             }
         });
-        tokio::time::sleep(Duration::from_millis(40)).await;
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
         addr
     }
 
@@ -224,7 +224,7 @@ mod tests {
                 });
             }
         });
-        tokio::time::sleep(Duration::from_millis(40)).await;
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
         let client = reqwest::Client::builder().build().unwrap();
         let _ = run(&client, &format!("http://{addr}"), "id", "victim123", false).await;
         let req = received.lock().unwrap().clone();

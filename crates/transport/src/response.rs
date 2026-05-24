@@ -39,6 +39,17 @@ impl EvasionResponse {
     }
 }
 
+/// Lowercase the first `limit` bytes of a response body as a UTF-8
+/// lossy string. Shared substring-match plumbing for the WAF
+/// classifiers (`is_waf_block`, `signal::classify`) so the
+/// utf8-lossy + to_ascii_lowercase + bounded-slice trio lives in
+/// exactly one place.
+#[must_use]
+pub fn scan_body_lowercase(body: &[u8], limit: usize) -> String {
+    let scan_limit = body.len().min(limit);
+    String::from_utf8_lossy(&body[..scan_limit]).to_ascii_lowercase()
+}
+
 /// Check if an HTTP status code alone indicates a WAF block.
 ///
 /// Use this when the response body is not yet available (e.g., in a
@@ -85,9 +96,8 @@ pub fn is_waf_block(status: u16, body: &[u8]) -> bool {
         return false;
     }
 
-    // Body-based detection (check first 4KB)
-    let scan_limit = body.len().min(4096);
-    let body_str = String::from_utf8_lossy(&body[..scan_limit]).to_ascii_lowercase();
+    // Body-based detection (first 4 KiB; shared with signal::classify).
+    let body_str = scan_body_lowercase(body, 4096);
 
     // Audit (2026-05-10): removed vendor-name-only indicators
     // (cloudflare, akamai, sucuri, imperva, incapsula) and high-FP
