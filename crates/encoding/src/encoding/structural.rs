@@ -55,6 +55,23 @@ pub fn overlong_utf8(payload: impl AsRef<[u8]>) -> Result<String, EncodeError> {
 /// Extended overlong UTF-8 encoding (3-byte) — broader coverage with 3-byte sequences.
 ///
 /// **Context**: `iis-6` — some WAFs reject 2-byte overlongs but accept 3-byte overlongs.
+///
+/// RFC 3629 3-byte form: `1110xxxx 10xxxxxx 10xxxxxx` encoding a
+/// 16-bit codepoint as `(x[0]<<12) | (x[1]<<6) | x[2]`. For an
+/// ASCII byte (codepoint ≤ 0x7F) the high nibble is zero so the
+/// lead byte is `0xE0`; the continuation bytes carry the codepoint
+/// split into two 6-bit halves: `(byte >> 6)` and `(byte & 0x3F)`.
+///
+/// Pre-fix this used `0x80 | byte` for the third byte, which
+/// silently produced INVALID continuation bytes for any input
+/// `byte >= 0x40` (since `0x80 | 0x40 = 0xC0`, above the valid
+/// continuation range 0x80–0xBF). That includes `@`, `[`, `\`,
+/// `]`, `^`, `_`, `` ` ``, `{`, `|`, `}`, `~` — all of which
+/// appear in real-world payloads (SQL backticks, path escapes,
+/// template-injection braces). Any conforming UTF-8 decoder
+/// rejected those sequences outright, so the encoder produced
+/// garbage rather than the intended bypass for ~10 punctuation
+/// characters.
 pub fn overlong_utf8_more(payload: impl AsRef<[u8]>) -> Result<String, EncodeError> {
     let text = std::str::from_utf8(payload.as_ref()).map_err(|_| EncodeError::InvalidUtf8)?;
     Ok(text
@@ -64,7 +81,9 @@ pub fn overlong_utf8_more(payload: impl AsRef<[u8]>) -> Result<String, EncodeErr
                 ch.to_string()
             } else if ch.is_ascii() {
                 let byte = ch as u8;
-                format!("%{:02X}%{:02X}%{:02X}", 0xE0, 0x80, 0x80 | byte)
+                let cont1 = 0x80 | (byte >> 6);
+                let cont2 = 0x80 | (byte & 0x3F);
+                format!("%E0%{cont1:02X}%{cont2:02X}")
             } else {
                 ch.to_string()
             }
@@ -272,6 +291,66 @@ mod tests {
     fn overlong_utf8_more_slash() {
         let result = overlong_utf8_more("/").unwrap();
         assert_eq!(result, "%E0%80%AF");
+    }
+
+    #[test]
+    fn overlong_utf8_more_punctuation_above_0x40_uses_valid_continuation_bytes() {
+        // Regression for the silent garbage bug: pre-fix every
+        // input byte >= 0x40 produced a 3rd continuation byte
+        // above 0xBF (`0x80 | 0x7B` = 0xFB), so the percent-
+        // decoded sequence was rejected by every lenient parser
+        // on the planet — bypass produced nothing.
+        //
+        // The output IS still overlong by RFC 3629 (`std::str::from_utf8`
+        // refuses it — that's the whole point of an overlong-encoding
+        // bypass), but the continuation bytes must be in the valid
+        // 0x80..=0xBF window so a lenient parser (the WAF / origin
+        // we're trying to confuse) actually decodes the bytes back to
+        // the original ASCII codepoint.
+        for ch in ['@', '[', '\\', ']', '^', '_', '`', '{', '|', '}', '~'] {
+            let s = ch.to_string();
+            let encoded = overlong_utf8_more(&s).unwrap();
+            assert!(
+                encoded.starts_with("%E0%"),
+                "{ch:?} should use 3-byte form, got: {encoded}"
+            );
+            let bytes: Vec<u8> = encoded
+                .split('%')
+                .filter(|s| !s.is_empty())
+                .map(|s| u8::from_str_radix(s, 16).unwrap())
+                .collect();
+            assert_eq!(bytes.len(), 3, "expected 3 bytes for {ch:?}");
+            assert_eq!(bytes[0], 0xE0, "lead byte wrong for {ch:?}");
+            assert!(
+                (0x80..=0xBF).contains(&bytes[1]),
+                "{ch:?} 2nd byte 0x{:02X} outside valid continuation range",
+                bytes[1]
+            );
+            assert!(
+                (0x80..=0xBF).contains(&bytes[2]),
+                "{ch:?} 3rd byte 0x{:02X} outside valid continuation range",
+                bytes[2]
+            );
+            // Verify the bit-shifted codepoint matches the original.
+            // RFC 3629 decode: ((b1 & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F)
+            // Lead nibble is 0 (we encoded ASCII), so the upper 12
+            // bits drop out and the codepoint equals
+            // ((b2 & 0x3F) << 6) | (b3 & 0x3F).
+            let codepoint = ((bytes[1] & 0x3F) as u32) << 6 | (bytes[2] & 0x3F) as u32;
+            assert_eq!(
+                codepoint, ch as u32,
+                "decoded codepoint 0x{codepoint:X} != original 0x{:X}",
+                ch as u32
+            );
+        }
+    }
+
+    #[test]
+    fn overlong_utf8_more_preserves_alphanumerics_verbatim() {
+        // Alphanumeric chars pass through unchanged — this is the
+        // existing fast-path that lets the WAF see "evil" payload
+        // markers while obfuscating the punctuation surrounding them.
+        assert_eq!(overlong_utf8_more("abc123").unwrap(), "abc123");
     }
 
     #[test]
