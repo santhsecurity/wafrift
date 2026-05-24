@@ -838,14 +838,28 @@ fn classify(
     })
 }
 
-/// Pull the path component out of a URL for the auth-bypass probe set.
+/// Pull the path + query component out of a URL for the auth-bypass
+/// probe set. The returned string starts with `/`.
+///
+/// Routes through `reqwest::Url::parse` so:
+/// * Path-less URLs with a query (`http://x?q=1`) keep the query
+///   in the returned value (`/?q=1`). Pre-fix the naive
+///   string-split lost the query when there was no leading slash
+///   after the host, silently making auth-bypass probes target a
+///   different path-shape than the operator typed.
+/// * IPv6 literals (`http://[::1]/path`) are handled correctly via
+///   reqwest's URL parser.
+/// * The unparseable / non-URL fallback preserves the prior
+///   behaviour (return `/` or the input if it already begins with
+///   one).
 fn parse_path_from_url(url: &str) -> String {
-    if let Some(after_scheme) = url.split_once("://") {
-        let rest = after_scheme.1;
-        if let Some(slash) = rest.find('/') {
-            return rest[slash..].to_string();
-        }
-        return "/".to_string();
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        let path = parsed.path();
+        let path = if path.is_empty() { "/" } else { path };
+        return match parsed.query() {
+            Some(q) => format!("{path}?{q}"),
+            None => path.to_string(),
+        };
     }
     if url.starts_with('/') {
         return url.to_string();
@@ -937,15 +951,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_path_from_url_strips_fragment_naturally() {
-        // Fragments live at the end after `#`. parse_path_from_url
-        // returns the path-and-query verbatim; the # is part of
-        // the trailing fragment. Lock the current behaviour in so
-        // a refactor that drops the fragment surfaces.
-        let got = parse_path_from_url("http://x/path#section");
-        assert!(got.starts_with("/path"));
-        // Current contract keeps everything after the authority:
-        assert_eq!(got, "/path#section");
+    fn parse_path_from_url_drops_fragment() {
+        // RFC 3986 §3.5: the fragment is client-side and never
+        // sent on the wire. The auth-bypass probe URL the
+        // operator constructs from this path must NOT include
+        // `#section`, otherwise reqwest would silently strip it
+        // again and the probe URL displayed to the operator
+        // would diverge from what was sent. Returning the
+        // bare path matches what the server actually sees.
+        assert_eq!(parse_path_from_url("http://x/path#section"), "/path");
+    }
+
+    #[test]
+    fn parse_path_from_url_preserves_query_when_path_is_empty() {
+        // Regression for the silent-query-loss bug: pre-fix
+        // `http://x?token=xyz` returned `/`, losing the query
+        // entirely, and auth-bypass probes silently targeted a
+        // different URL shape than the operator typed.
+        assert_eq!(parse_path_from_url("http://x?token=xyz"), "/?token=xyz");
+        assert_eq!(parse_path_from_url("http://x/?q=1"), "/?q=1");
+    }
+
+    #[test]
+    fn parse_path_from_url_handles_ipv6_literal() {
+        assert_eq!(parse_path_from_url("http://[::1]/path"), "/path");
+        assert_eq!(parse_path_from_url("http://[::1]:8080/api?q=1"), "/api?q=1");
     }
 
     #[test]
