@@ -1466,11 +1466,19 @@ async fn run_smuggling_strategy(
         .trim_end_matches('/')
         .to_string();
     // Build the smuggled prefix as a POST containing the payload.
+    // Content-Length must reflect the BYTE LENGTH of the body
+    // actually on the wire — `q=` + URL-encoded payload. Pre-fix
+    // the CL was computed on the RAW payload length (`+ 2` for
+    // `q=`), but the body sent was URL-encoded: every `<`, `>`,
+    // `&`, `"`, space, and non-ASCII byte expanded to 3-byte
+    // `%XX`. A `<script>` payload (raw 8 bytes) URL-encodes to
+    // 28 bytes, so CL would be 10 while body was 30 — server
+    // truncates the body mid-payload AND falsely records a WAF
+    // block in the bench score.
+    let encoded_body = format!("q={}", urlencoding::encode(&case.payload));
     let smuggled = format!(
-        "POST /post HTTP/1.1\r\nHost: {}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\nq={}",
-        host,
-        case.payload.len() + 2,
-        urlencoding::encode(&case.payload)
+        "POST /post HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{encoded_body}",
+        encoded_body.len()
     );
     let payloads = match smuggling_all_payloads(&host, &smuggled) {
         Ok(p) => p,

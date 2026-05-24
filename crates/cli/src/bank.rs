@@ -356,7 +356,12 @@ fn run_export(args: BankExportArgs) -> ExitCode {
         eprintln!("error: create output dir {}: {e}", parent.display());
         return ExitCode::from(1);
     }
-    if let Err(e) = fs::write(&args.output, &json) {
+    // Atomic write: tmp file → fsync → rename → parent fsync. Pre-fix
+    // a power loss / signal mid-`fs::write` left the destination
+    // truncated and the JSON invalid — silently destroying the only
+    // off-host backup of the gene bank. seed.rs already uses this
+    // helper for the same reason; keep behaviour consistent.
+    if let Err(e) = wafrift_types::loaders::write_atomic(&args.output, json.as_bytes()) {
         eprintln!("error: write {}: {e}", args.output.display());
         return ExitCode::from(1);
     }

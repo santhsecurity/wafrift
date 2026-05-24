@@ -1392,7 +1392,16 @@ pub(crate) async fn run_scan(
                     }
                 } else if matches!(verdict, wafrift_types::Verdict::RateLimited { .. }) {
                     _rate_limited += 1;
-                    tokio::time::sleep(delay * 2).await;
+                    // Race the cooldown sleep against cancellation so
+                    // Ctrl-C / budget-exhaustion exits within the
+                    // millisecond window, not after `delay * 2`.
+                    // Pre-fix the operator could be stuck waiting
+                    // seconds for the next outer-loop check while
+                    // every live request slot was held.
+                    tokio::select! {
+                        () = tokio::time::sleep(delay * 2) => {}
+                        () = cancel.cancelled() => { break; }
+                    }
                 } else {
                     bypassed += 1;
                     tamper_bypassed += 1;
@@ -1881,7 +1890,12 @@ pub(crate) async fn run_scan(
             .take(10)
             .map(|(_, payload, techs, _)| (payload.clone(), techs.clone()))
             .collect();
-        top_payloads.dedup_by(|a, b| a.0 == b.0);
+        // HashSet::retain — bypass_variants order is confidence-sorted
+        // (highest-first), not payload-sorted. dedup_by would only
+        // collapse adjacent equal payloads and leave non-adjacent
+        // dupes to fire as wasted probes against rate-limit budget.
+        let mut seen_top: std::collections::HashSet<String> = std::collections::HashSet::new();
+        top_payloads.retain(|(payload, _)| seen_top.insert(payload.clone()));
 
         // Top blocked payloads for rescue attempts — any variant
         // whose payload string isn't already in the bypass set.
@@ -1898,7 +1912,11 @@ pub(crate) async fn run_scan(
             .take(20)
             .map(|v| (v.payload.clone(), vec![]))
             .collect();
-        rescue_payloads.dedup_by(|a, b| a.0 == b.0);
+        // Same reasoning as top_payloads above: variants iter is
+        // generation-order, not sorted, so dedup_by would miss
+        // non-adjacent dupes.
+        let mut seen_rescue: std::collections::HashSet<String> = std::collections::HashSet::new();
+        rescue_payloads.retain(|(payload, _)| seen_rescue.insert(payload.clone()));
 
         let phase = multi_vector::run_phase(multi_vector::PhaseInput {
             http: &http,
@@ -2100,7 +2118,12 @@ pub(crate) async fn run_scan(
 
     // Results.
     let elapsed = scan_start.elapsed();
-    let requests_completed = bypassed + blocked + errors;
+    // Rate-limited requests are real fired probes — including them in
+    // the denominator keeps the bypass % honest. Pre-fix a target
+    // that 80% rate-limited would inflate the apparent bypass rate
+    // by 5× (50/100 instead of 50/500 = 10%), making a noisy run
+    // look like a strong result on paper.
+    let requests_completed = bypassed + blocked + errors + _rate_limited;
     let bypass_rate = if requests_completed > 0 {
         f64::from(bypassed) / f64::from(requests_completed) * 100.0
     } else {
