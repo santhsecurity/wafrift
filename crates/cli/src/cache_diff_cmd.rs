@@ -255,7 +255,7 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
 
 /// Run the cache-diff scanner.
 pub async fn run_cache_diff(args: CacheDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -507,14 +507,7 @@ fn render_curl(url: &str, extra_headers: &[(String, String)]) -> String {
     out
 }
 
-fn build_http_client(args: &CacheDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(CacheDiffArgs);
 
 fn emit_output(
     args: &CacheDiffArgs,

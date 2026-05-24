@@ -203,7 +203,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
 }
 
 pub async fn run_gql_diff(args: GqlDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -326,14 +326,7 @@ async fn fire_gql(
     Ok((status, body.len()))
 }
 
-fn build_http_client(args: &GqlDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(GqlDiffArgs);
 
 fn render_curl(url: &str, content_type: &str, body: &str) -> String {
     format!(

@@ -240,7 +240,7 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -352,14 +352,7 @@ async fn fire_with_bearer(http: &Client, url: &str, token: &str) -> Result<(u16,
     Ok((status, body.len()))
 }
 
-fn build_http_client(args: &JwtDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(JwtDiffArgs);
 
 fn render_curl(url: &str, token: &str) -> String {
     format!(

@@ -300,7 +300,7 @@ pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
 /// (regardless of whether any divergences were found); exit 1 on
 /// HTTP-client setup failure.
 pub async fn run_header_diff(args: HeaderDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -411,14 +411,7 @@ pub async fn run_header_diff(args: HeaderDiffArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn build_http_client(args: &HeaderDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(HeaderDiffArgs);
 
 /// Fire a single GET with `extra` headers appended on top of the
 /// pentest-client defaults. Returns `(status, body_len, body_bytes)`

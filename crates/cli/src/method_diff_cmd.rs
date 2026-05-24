@@ -188,7 +188,7 @@ pub fn generate_method_variants() -> Vec<MethodProbe> {
 }
 
 pub async fn run_method_diff(args: MethodDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -302,14 +302,7 @@ async fn fire_with_method(
     Ok((status, body.len()))
 }
 
-fn build_http_client(args: &MethodDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(MethodDiffArgs);
 
 fn render_curl(method: &str, url: &str) -> String {
     format!("curl -i -X {method} {}", shell_single_quote(url))

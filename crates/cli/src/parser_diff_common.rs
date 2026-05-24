@@ -106,6 +106,62 @@ pub fn build_diff_http_client(
     })
 }
 
+/// Read-only view of the HTTP-client knobs every parser-diff cmd
+/// already exposes on its Args struct: `--timeout-secs`,
+/// `--insecure`, `--proxy`, `-H/--header`. Lifting this lets every
+/// cmd build its client with a single call —
+/// `build_diff_http_client_for(&args)?` — instead of repeating
+/// the 4-arg unpack at every site. A new diff cmd just adds a
+/// one-liner `impl_parser_diff_http_args!(NewDiffArgs);` (or
+/// hand-rolls the impl) and inherits the client wiring for free.
+pub trait ParserDiffHttpArgs {
+    fn timeout_secs(&self) -> u64;
+    fn insecure(&self) -> bool;
+    fn proxy(&self) -> Option<&str>;
+    fn headers(&self) -> &[String];
+}
+
+/// Build the canonical parser-diff client straight from any
+/// [`ParserDiffHttpArgs`] view. Equivalent to spelling out the
+/// 4 accessors at the call site — see [`build_diff_http_client`].
+pub fn build_diff_http_client_for(args: &impl ParserDiffHttpArgs) -> Result<Client, ExitCode> {
+    build_diff_http_client(
+        args.timeout_secs(),
+        args.insecure(),
+        args.proxy(),
+        args.headers(),
+    )
+}
+
+/// Implement [`ParserDiffHttpArgs`] for any struct whose field
+/// shape matches `pub timeout_secs: u64`, `pub insecure: bool`,
+/// `pub proxy: Option<String>`, `pub header: Vec<String>` — i.e.
+/// every existing parser-diff Args struct. One macro call per
+/// struct replaces the 8-line `build_http_client` wrapper.
+#[macro_export]
+macro_rules! impl_parser_diff_http_args {
+    ($ty:ty) => {
+        impl $crate::parser_diff_common::ParserDiffHttpArgs for $ty {
+            #[inline]
+            fn timeout_secs(&self) -> u64 {
+                self.timeout_secs
+            }
+            #[inline]
+            fn insecure(&self) -> bool {
+                self.insecure
+            }
+            #[inline]
+            fn proxy(&self) -> Option<&str> {
+                self.proxy.as_deref()
+            }
+            #[inline]
+            fn headers(&self) -> &[String] {
+                &self.header
+            }
+        }
+    };
+}
+
 /// `(probe_len - baseline_len) / max(baseline_len, 1)` as a signed
 /// percentage. Negative when the probe yields a shorter body.
 /// When `baseline_len == 0`, returns `0.0` for matching empty probe
@@ -207,6 +263,54 @@ fn size_pair_for_pct(pct: f64) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ParserDiffHttpArgs trait ──────────────────────────────
+
+    struct FakeArgs {
+        timeout_secs: u64,
+        insecure: bool,
+        proxy: Option<String>,
+        header: Vec<String>,
+    }
+    crate::impl_parser_diff_http_args!(FakeArgs);
+
+    #[test]
+    fn trait_view_returns_each_field() {
+        let a = FakeArgs {
+            timeout_secs: 17,
+            insecure: true,
+            proxy: Some("http://127.0.0.1:8080".into()),
+            header: vec!["X: 1".into()],
+        };
+        assert_eq!(a.timeout_secs(), 17);
+        assert!(a.insecure());
+        assert_eq!(a.proxy(), Some("http://127.0.0.1:8080"));
+        assert_eq!(a.headers(), &["X: 1".to_string()]);
+    }
+
+    #[test]
+    fn trait_view_handles_none_proxy_and_empty_headers() {
+        let a = FakeArgs {
+            timeout_secs: 8,
+            insecure: false,
+            proxy: None,
+            header: vec![],
+        };
+        assert_eq!(a.proxy(), None);
+        assert!(a.headers().is_empty());
+    }
+
+    #[test]
+    fn build_diff_http_client_for_compiles_and_returns_ok() {
+        let a = FakeArgs {
+            timeout_secs: 8,
+            insecure: false,
+            proxy: None,
+            header: vec![],
+        };
+        let client = build_diff_http_client_for(&a);
+        assert!(client.is_ok());
+    }
 
     // ── body_delta_pct ────────────────────────────────────────
 

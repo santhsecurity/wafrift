@@ -261,7 +261,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
 
 /// Run the body-diff scanner.
 pub async fn run_body_diff(args: BodyDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -371,14 +371,7 @@ pub async fn run_body_diff(args: BodyDiffArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn build_http_client(args: &BodyDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(BodyDiffArgs);
 
 async fn fire_body(
     http: &Client,

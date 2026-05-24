@@ -245,7 +245,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
 }
 
 pub async fn run_query_diff(args: QueryDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -349,14 +349,7 @@ pub async fn run_query_diff(args: QueryDiffArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn build_http_client(args: &QueryDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(QueryDiffArgs);
 
 async fn fire_get(http: &Client, url: &str) -> Result<(u16, usize), String> {
     let resp = http.get(url).send().await.map_err(|e| format!("{e}"))?;

@@ -224,7 +224,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
 }
 
 pub async fn run_cors_diff(args: CorsDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -398,14 +398,7 @@ async fn fire_cors(
     Ok((status, headers))
 }
 
-fn build_http_client(args: &CorsDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(CorsDiffArgs);
 
 fn render_curl(
     method: &str,
