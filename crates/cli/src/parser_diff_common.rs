@@ -63,6 +63,18 @@ pub fn severity_badge(severity: &str) -> ColoredString {
 #[cfg(test)]
 pub const TEST_SETTLE: Duration = Duration::from_millis(40);
 
+/// Print `value` to stdout as 2-space-indented JSON, or on
+/// serialisation failure print a `JSON error: {e}` line to stderr
+/// (matching the contract every parser-diff `--format json` arm
+/// shipped pre-extract). Lifting the 4-line match means a future
+/// `--no-color` / structured-error policy lives in one place.
+pub fn print_pretty_json(value: &serde_json::Value) {
+    match serde_json::to_string_pretty(value) {
+        Ok(s) => println!("{s}"),
+        Err(e) => eprintln!("JSON error: {e}"),
+    }
+}
+
 use crate::scan::pentest_client;
 
 /// Build the canonical parser-diff HTTP client.
