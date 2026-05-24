@@ -88,7 +88,18 @@ pub fn manipulate(
             Ok(format!("{new_header_b64}.{payload_b64}.{sig_b64}"))
         }
         JwtManipulation::JwkEmbed { jwk } => {
-            header["jwk"] = serde_json::from_str(jwk).unwrap_or(serde_json::Value::Null);
+            // F129: pre-fix swallowed JWK parse errors via
+            // `unwrap_or(Value::Null)` — operator passes a malformed
+            // JWK string, gets back a token with `"jwk": null` and an
+            // Ok result. The "test if server validates jwk claim
+            // correctly" probe was rendered meaningless because the
+            // header carried null instead of the intended JWK. Surface
+            // the parse error as InvalidToken so the operator knows
+            // their JWK input was bad before sending the request.
+            let jwk_value = serde_json::from_str(jwk).map_err(|e| JwtError::InvalidToken {
+                reason: format!("--jwk is not valid JSON: {e}"),
+            })?;
+            header["jwk"] = jwk_value;
             let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
                 reason: format!("header serialization failed: {e}"),
             })?;
@@ -228,13 +239,61 @@ mod tests {
         assert_eq!(header["jwk"]["kty"], "RSA");
     }
 
+    // F129 regression: malformed JWK input MUST surface as Err, not
+    // silently substitute `null`. Pre-fix the helper used
+    // `unwrap_or(Value::Null)` and the resulting token had `"jwk":
+    // null` in its header — operator probing whether the server
+    // validates the `jwk` claim got a meaningless probe because the
+    // claim was missing the actual key material.
     #[test]
-    fn jwk_embed_invalid_json_becomes_null() {
-        let out = manipulate(
+    fn jwk_embed_invalid_json_returns_err() {
+        let err = manipulate(
             &valid_token(),
             &JwtManipulation::JwkEmbed {
                 jwk: "not json".into(),
             },
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, JwtError::InvalidToken { ref reason } if reason.contains("--jwk")),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn jwk_embed_empty_string_returns_err() {
+        let err = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed { jwk: "".into() },
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, JwtError::InvalidToken { .. }));
+    }
+
+    #[test]
+    fn jwk_embed_partial_json_returns_err() {
+        // Half-quoted, missing closing brace — common operator typo.
+        let err = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed {
+                jwk: r#"{"kty":"RSA""#.into(),
+            },
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, JwtError::InvalidToken { .. }));
+    }
+
+    #[test]
+    fn jwk_embed_valid_jwk_string_with_unicode_escapes_preserved() {
+        // Anti-rig: a valid JWK with non-ASCII escapes must round-trip
+        // intact through the header, not get re-encoded by serde.
+        let jwk = r#"{"kty":"oct","k":"é"}"#;
+        let out = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed { jwk: jwk.into() },
             None,
         )
         .unwrap();
@@ -243,6 +302,7 @@ mod tests {
             .decode(parts[0])
             .unwrap();
         let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
-        assert!(header["jwk"].is_null());
+        // The unicode escape decodes to é (U+00E9).
+        assert_eq!(header["jwk"]["k"], "é");
     }
 }
