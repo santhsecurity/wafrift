@@ -545,13 +545,24 @@ fn rw_tautology(payload: &str, s: &str, rng: &mut Rng) -> Option<String> {
         }
     }
     let (pos, atom) = best?;
+    // Defensive char-boundary check: `to_ascii_lowercase` does not
+    // change non-ASCII byte positions, so for ASCII atoms the
+    // positions align — but if a prior tamper introduced a
+    // multibyte char before the matched atom (homoglyphs,
+    // fullwidth-encoded intermediates) the slice could land
+    // mid-codepoint and panic. Fall back to None on any boundary
+    // mismatch rather than crashing the equiv generator.
+    let end = pos + atom.len();
+    if !s.is_char_boundary(pos) || !s.is_char_boundary(end) {
+        return None;
+    }
     let truth = gen_true(rng, 0);
     let mut out = String::with_capacity(s.len() + truth.len());
     out.push_str(&s[..pos]);
     out.push('(');
     out.push_str(&truth);
     out.push(')');
-    out.push_str(&s[pos + atom.len()..]);
+    out.push_str(&s[end..]);
     Some(out)
 }
 
