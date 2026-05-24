@@ -1338,6 +1338,21 @@ async fn forward_wafrift_request(
     // landed each bypass instead of permanently showing 0.
     attempt_idx: u32,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    // F81 observability: emit an info-level log per forwarded
+    // request so the proxy is observable in non-TUI / headless
+    // mode (CI runs, log scrapers). Pre-fix the only stdout
+    // signal beyond startup was the TUI dashboard, so an
+    // operator running `wafrift-proxy --listen ...` without
+    // --tui saw zero per-request output and had no way to
+    // confirm the proxy was even processing traffic.
+    info!(
+        target: "wafrift::proxy::forward",
+        method = %wafrift_req.method,
+        host = %host,
+        path = %request_log_uri,
+        attempt = attempt_idx,
+        "forwarding request"
+    );
     // Snapshot the state needed for evasion, then DROP the lock before
     // running evade() / evade_smart() — those calls do regex-heavy
     // mutations that can take seconds on large request bodies, and

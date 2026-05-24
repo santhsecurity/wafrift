@@ -263,17 +263,52 @@ pub async fn run_query_diff(args: QueryDiffArgs) -> ExitCode {
     }
 
     // Baseline: same URL with ?param=safe.
+    // F80 retry-on-baseline-flake: a transient connection drop
+    // (target exhausted its conn pool after a heavy scan, brief
+    // network blip, WAF rate-limited the very first probe) used
+    // to exit 1 immediately. In real CI the next-second probe
+    // would have succeeded — pre-fix the operator saw a false
+    // "tool failure". Retry up to 3 times with 200/400/800 ms
+    // backoff before giving up.
     let baseline_url = format!("{}?{}=safe", args.url.trim_end_matches('?'), args.param);
-    let (baseline_status, baseline_body_len) = match fire_get(&http, &baseline_url).await {
-        Ok((s, len)) => (s, len),
-        Err(e) => {
-            eprintln!(
-                "  {} baseline probe failed: {e}",
-                "✗ Transport error:".red().bold()
-            );
-            return ExitCode::from(1);
+    let baseline = {
+        let mut last_err: Option<String> = None;
+        let mut delay_ms = 200u64;
+        let mut result: Option<(u16, usize)> = None;
+        for attempt in 1..=3u32 {
+            match fire_get(&http, &baseline_url).await {
+                Ok(pair) => {
+                    result = Some(pair);
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt < 3 {
+                        if !args.quiet && args.format == "text" {
+                            eprintln!(
+                                "  {} baseline attempt {attempt}/3 failed; retrying in {delay_ms}ms",
+                                "…".yellow()
+                            );
+                        }
+                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                        delay_ms = delay_ms.saturating_mul(2);
+                    }
+                }
+            }
+        }
+        match result {
+            Some(pair) => pair,
+            None => {
+                eprintln!(
+                    "  {} baseline probe failed after 3 attempts: {}",
+                    "✗ Transport error:".red().bold(),
+                    last_err.as_deref().unwrap_or("<no error>")
+                );
+                return ExitCode::from(1);
+            }
         }
     };
+    let (baseline_status, baseline_body_len) = baseline;
     if !args.quiet && args.format == "text" {
         eprintln!(
             "  {} baseline: HTTP {} ({} bytes)",
