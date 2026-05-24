@@ -290,13 +290,13 @@ pub async fn run_scan_raw(
 /// captured request file ALREADY carries any cookies / auth headers
 /// they need; layering a second session would double-set them.
 fn build_http_client(args: &ScanArgs) -> Result<Client, ExitCode> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(
-            wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
-        ))
-        .danger_accept_invalid_certs(args.insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(crate::config::shared_user_agent());
+    let ua = crate::config::shared_user_agent();
+    let mut builder = wafrift_transport::base_client_builder(
+        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+        args.insecure,
+        Some(&ua),
+    )
+    .redirect(reqwest::redirect::Policy::limited(5));
     builder = match pentest_client::apply_pentest_flags(
         builder,
         args.proxy.as_deref(),

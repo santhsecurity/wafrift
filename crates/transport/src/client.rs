@@ -58,14 +58,14 @@ impl EvasionClient {
     pub fn with_config(config: EvasionConfig) -> Result<Self, EvasionError> {
         config.validate().map_err(EvasionError::InvalidRequest)?;
 
-        let mut builder = reqwest::Client::builder()
-            .danger_accept_invalid_certs(config.insecure_tls)
-            .redirect(reqwest::redirect::Policy::limited(
-                wafrift_types::DEFAULT_MAX_REDIRECTS,
-            ))
-            .timeout(std::time::Duration::from_secs(
-                wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
-            ));
+        let mut builder = crate::http_builder::base_client_builder(
+            wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+            config.insecure_tls,
+            None,
+        )
+        .redirect(reqwest::redirect::Policy::limited(
+            wafrift_types::DEFAULT_MAX_REDIRECTS,
+        ));
 
         #[cfg(feature = "proxy-pool")]
         if !config.proxies.is_empty()

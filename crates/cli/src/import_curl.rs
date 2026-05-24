@@ -426,12 +426,8 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
 /// promotion behaviour as `wafrift detect`, so the no-payload import-
 /// curl flow doesn't silently miss WAFs that strip vendor markers.
 async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool) -> ExitCode {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+    let builder = wafrift_transport::base_client_builder(15, insecure, None)
         .redirect(reqwest::redirect::Policy::none());
-    if insecure {
-        builder = builder.danger_accept_invalid_certs(true);
-    }
     let client = match builder.build() {
         Ok(c) => c,
         Err(e) => {

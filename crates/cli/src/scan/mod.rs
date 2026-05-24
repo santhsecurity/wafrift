@@ -644,15 +644,17 @@ pub(crate) async fn run_scan(
     };
 
     // Step 1: WAF detection — fetch target and identify WAF.
-    let mut http_builder = reqwest::Client::builder()
-        .timeout(request_timeout)
-        .danger_accept_invalid_certs(args.insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        // Operator-configurable via `.wafrift.toml`'s `http.user_agent`.
-        // Default is a browser-shaped UA: CRS PL2+ rule 913100/913110
-        // blocks `reqwest/*`, `curl/*`, `python-requests/*` before any
-        // payload inspection ever runs.
-        .user_agent(crate::config::shared_user_agent());
+    // UA is operator-configurable via `.wafrift.toml`'s `http.user_agent`.
+    // Default is a browser-shaped UA: CRS PL2+ rule 913100/913110
+    // blocks `reqwest/*`, `curl/*`, `python-requests/*` before any
+    // payload inspection ever runs.
+    let scan_ua = crate::config::shared_user_agent();
+    let mut http_builder = wafrift_transport::base_client_builder(
+        request_timeout.as_secs(),
+        args.insecure,
+        Some(&scan_ua),
+    )
+    .redirect(reqwest::redirect::Policy::limited(5));
     if let Some(ref state) = session_state {
         // Default headers travel on every request issued by this
         // client — so cookies/auth captured at init replay through

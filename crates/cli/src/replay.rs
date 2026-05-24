@@ -21,7 +21,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Duration;
 use wafrift_strategy::strategy::evade;
 use wafrift_strategy::{EvasionConfig, HostState};
 use wafrift_transport::is_waf_block;
@@ -189,9 +188,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         evasion.techniques.iter().map(ToString::to_string).collect()
     };
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(args.timeout_secs))
-        .danger_accept_invalid_certs(args.insecure)
+    let client = match wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, None)
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
     {

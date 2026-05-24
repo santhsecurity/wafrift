@@ -911,15 +911,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // redirect target — the AWS / Azure / GCP IMDS endpoints were one
     // attacker-controlled HTTP 302 away. Surface the redirect to the
     // downstream client and let IT decide whether to follow.
-    let mut client_builder = reqwest::Client::builder()
-        .danger_accept_invalid_certs(config.insecure_tls)
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(
-            wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
-        ))
-        .dns_resolver(Arc::new(BogonFilteringResolver {
-            policy: policy.clone(),
-        }));
+    let mut client_builder = wafrift_transport::base_client_builder(
+        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+        config.insecure_tls,
+        None,
+    )
+    .redirect(reqwest::redirect::Policy::none())
+    .dns_resolver(Arc::new(BogonFilteringResolver {
+        policy: policy.clone(),
+    }));
     if args.no_conn_reuse {
         // Force a fresh TCP connection per request. Kernel chooses a
         // new ephemeral source port each time, defeating per-source-
