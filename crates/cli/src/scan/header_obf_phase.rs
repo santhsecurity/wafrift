@@ -115,10 +115,24 @@ pub struct PhaseOutcome {
     pub new_variant_outcomes: Vec<(Vec<String>, bool)>,
 }
 
-/// Build the (param=urlencoded(payload)) URL the same way scan/
-/// mod.rs's scan_url_with_param does — duplicated only because
-/// that function is `pub(crate)` on scan/mod.rs and we want to
-/// keep the phase module's deps minimal.
+/// Build the (param=urlencoded(payload)) URL. INTENTIONALLY a
+/// raw string-concat — NOT a delegation to
+/// `super::scan_url_with_param`. The two paths produce different
+/// outputs by design:
+///
+/// * `scan_url_with_param` routes through `reqwest::Url::query_pairs_mut`
+///   which RE-ENCODES any `%` in the input, double-encoding pre-
+///   encoded payloads (`%E2%9C%93` → `%25E2%259C%2593`). All scan-
+///   path callers already call `urlencoding::encode(...)` before
+///   passing to it, so the actual wire is double-encoded.
+/// * The header-obfuscation path needs the payload BYTES to land
+///   on the wire singly-encoded (the whole point of encoding-based
+///   bypass), so this local helper concatenates the already-encoded
+///   value without a second pass.
+///
+/// Unifying the two requires fixing `scan_url_with_param` to NOT
+/// re-encode (changes 10+ call sites + tests). Tracked separately;
+/// leaving the duplication explicit here is the safer interim.
 fn scan_url(target: &str, param: &str, value_encoded: &str) -> String {
     if target.contains('?') {
         format!("{target}&{param}={value_encoded}")

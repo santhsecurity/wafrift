@@ -106,15 +106,29 @@ pub struct InterceptStore {
     inner: Arc<Mutex<InterceptInner>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct InterceptInner {
     /// Per-request rendezvous sender. Removed when the operator
     /// resolves the intercept (release/kill) or when a timeout fires.
     senders: BTreeMap<u64, oneshot::Sender<InterceptDecision>>,
     /// Snapshot of the same set the TUI iterates for display.
     pending: BTreeMap<u64, PendingIntercept>,
-    /// Monotonic ID generator.
+    /// Monotonic ID generator. Starts at 0 so the first `register`
+    /// call's `wrapping_add(1)` yields id=1 — id=0 is RESERVED as
+    /// an "invalid intercept" sentinel. `resolve(0, ...)` and
+    /// `cancel(0, ...)` silently return false, so callers must
+    /// never pass 0 expecting it to map to a real intercept.
     next_id: u64,
+}
+
+impl Default for InterceptInner {
+    fn default() -> Self {
+        Self {
+            senders: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            next_id: 0,
+        }
+    }
 }
 
 /// Default intercept timeout — after which the request defaults
@@ -360,5 +374,23 @@ mod tests {
         let (id3, _) = s.register("a", "GET", "/");
         assert_eq!(id2, id1 + 1);
         assert_eq!(id3, id2 + 1);
+    }
+
+    #[test]
+    fn id_zero_is_reserved_and_resolve_cancel_return_false() {
+        // Contract regression: id=0 is a reserved sentinel — no
+        // register() call can ever assign it (the first call hands
+        // back id=1). Caller mistakes that pass 0 must not match
+        // any real intercept; both resolve and cancel return false.
+        let s = store();
+        // No intercepts registered yet.
+        assert!(!s.resolve(0, InterceptDecision::Release));
+        assert!(!s.cancel(0));
+        // Register one — id is 1, never 0.
+        let (id, _rx) = s.register("h", "GET", "/");
+        assert_eq!(id, 1, "first id must be 1 (0 is reserved)");
+        // 0 still returns false even with real intercepts present.
+        assert!(!s.resolve(0, InterceptDecision::Release));
+        assert!(!s.cancel(0));
     }
 }
