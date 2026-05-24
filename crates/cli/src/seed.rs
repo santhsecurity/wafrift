@@ -207,7 +207,6 @@ fn seed_host(
         );
         return ExitCode::from(1);
     }
-    let tmp = path.with_extension("json.tmp");
     let json = match serde_json::to_string_pretty(&bank) {
         Ok(s) => s,
         Err(e) => {
@@ -215,26 +214,12 @@ fn seed_host(
             return ExitCode::from(1);
         }
     };
-    {
-        use std::io::Write;
-        let mut f = match fs::File::create(&tmp) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("error: create {}: {e}", tmp.display());
-                return ExitCode::from(1);
-            }
-        };
-        if let Err(e) = f.write_all(json.as_bytes()) {
-            eprintln!("error: write {}: {e}", tmp.display());
-            return ExitCode::from(1);
-        }
-        if let Err(e) = f.sync_all() {
-            eprintln!("error: sync {}: {e}", tmp.display());
-            return ExitCode::from(1);
-        }
-    }
-    if let Err(e) = fs::rename(&tmp, &path) {
-        eprintln!("error: rename {} -> {}: {e}", tmp.display(), path.display());
+    // Atomic, durable write via wafrift_types::loaders::write_atomic
+    // — shared with strategy::gene_bank::write_genome and
+    // proxy::gene_bank_io. The helper does the full tmp + fsync +
+    // rename + parent-fsync dance with a multi-writer-safe tmp suffix.
+    if let Err(e) = wafrift_types::loaders::write_atomic(&path, json.as_bytes()) {
+        eprintln!("error: atomic write {}: {e}", path.display());
         return ExitCode::from(1);
     }
 

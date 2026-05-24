@@ -18,7 +18,6 @@
 //! future schema bump can be detected at load time.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -162,38 +161,12 @@ pub fn save(state: &ProxyState, path: &Path) -> std::io::Result<()> {
         );
     }
     let json = serde_json::to_string_pretty(&bank)?;
-    // Atomic, durable write via tempfile + fsync + rename + parent fsync.
-    // Without the fsyncs a system crash between write and rename can leave
-    // the renamed file zero-length or partially flushed.
-    //
-    // The temp filename includes the PID + a nanosecond timestamp so two
-    // proxies pointed at the same gene-bank path don't both try to
-    // create the same `<path>.tmp` and clobber each other's file
-    // mid-flight (one rename succeeds; the other gets ENOENT). With a
-    // per-writer tmp name each rename is independent — the last one to
-    // rename wins, which matches the existing single-writer semantics.
-    let pid = std::process::id();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let tmp = path.with_extension(format!("json.tmp.{pid}.{nanos}"));
-    let write_result = (|| -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(json.as_bytes())?;
-        f.sync_all()?;
-        Ok(())
-    })();
-    if let Err(e) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, path)?;
-    // Fsync parent directory so the rename is durable.
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent)
-    {
-        let _ = dir.sync_all();
-    }
+    // Atomic, durable write (tempfile + fsync + rename + parent
+    // fsync) via the shared helper — same dance as
+    // `strategy::gene_bank::write_genome` and `cli::seed`, lifted
+    // to wafrift_types so the multi-writer tmp-suffix policy stays
+    // in lock-step.
+    wafrift_types::loaders::write_atomic(path, json.as_bytes())?;
     Ok(())
 }
 
