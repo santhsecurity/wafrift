@@ -40,7 +40,30 @@ fn xss_rules() -> &'static XssRules {
     static RULES: OnceLock<XssRules> = OnceLock::new();
     RULES.get_or_init(|| {
         let raw = include_str!("../rules/xss/structure.toml");
-        toml::from_str(raw).expect("rules/xss/structure.toml must parse")
+        let mut rules: XssRules =
+            toml::from_str(raw).expect("rules/xss/structure.toml must parse");
+        // F134: every lookup uses `payload.to_ascii_lowercase().contains(needle)`,
+        // so any rule whose `name` / `prefix` contains an upper-case letter is
+        // dead — pre-fix this silently disabled the `setTimeout`, `setInterval`,
+        // `Function`, and `innerHTML` exec_sink entries (and any future
+        // mixed-case rule). Normalize at load so the TOML stays human-readable
+        // and lookups stay O(n) `contains` against pre-lowered needles.
+        for t in &mut rules.tag {
+            t.prefix = t.prefix.to_ascii_lowercase();
+        }
+        for e in &mut rules.event {
+            e.name = e.name.to_ascii_lowercase();
+        }
+        for s in &mut rules.exec_sink {
+            s.name = s.name.to_ascii_lowercase();
+        }
+        for s in &mut rules.js_uri_scheme {
+            s.prefix = s.prefix.to_ascii_lowercase();
+        }
+        for s in &mut rules.dangerous_sink {
+            s.name = s.name.to_ascii_lowercase();
+        }
+        rules
     })
 }
 
@@ -193,6 +216,49 @@ mod tests {
         assert!(oracle.is_semantically_valid(
             "<script>alert(1)</script>",
             "<img src=x onerror=constructor.constructor('alert(1)')()>",
+        ));
+    }
+
+    // F134 regression: exec_sink rules with mixed-case names
+    // (setTimeout, setInterval, Function, innerHTML) were dead — the
+    // payload is lowercased before `contains` but the rule needles were
+    // not, so the substring never appeared. Pin the live cases.
+
+    #[test]
+    fn settimeout_exec_sink_is_recognized() {
+        // Tag + setTimeout + document.write (dangerous_sink) — pre-fix
+        // has_exec was false because needle "setTimeout" doesn't appear
+        // in the lowercased haystack "settimeout". With has_exec false
+        // AND no event, the (tag && exec && dangerous_sink) and
+        // (tag && event && dangerous_sink) branches both failed.
+        let oracle = XssOracle;
+        assert!(oracle.is_semantically_valid(
+            "<script>setTimeout(document.write('x'),0)</script>",
+            "<script>setTimeout(document.write('x'),0)</script>",
+        ));
+    }
+
+    #[test]
+    fn function_constructor_exec_sink_is_recognized() {
+        let oracle = XssOracle;
+        // `Function('...')()` — the `Function` exec_sink needle was
+        // mixed-case in the TOML and never matched the lowered payload.
+        assert!(oracle.is_semantically_valid(
+            "<script>Function('alert(1)')()</script>",
+            "<script>Function('document.write(1)')()</script>",
+        ));
+    }
+
+    #[test]
+    fn innerhtml_dangerous_sink_in_payload_matches() {
+        // innerHTML appears in BOTH exec_sink and dangerous_sink. The
+        // dangerous_sink TOML uses lowercase `innerhtml` so that branch
+        // already worked — but pre-fix the exec_sink `innerHTML` was
+        // dead. Pin that both paths now match a single payload.
+        let oracle = XssOracle;
+        assert!(oracle.is_semantically_valid(
+            "<img src=x onerror=document.body.innerHTML='<b>x</b>'>",
+            "<img src=x onerror=document.body.innerHTML='<b>x</b>'>",
         ));
     }
 }
