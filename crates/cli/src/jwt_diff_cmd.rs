@@ -77,6 +77,20 @@ pub struct JwtDiffArgs {
     #[arg(long, short = 'H', value_name = "HEADER", num_args = 0..)]
     pub header: Vec<String>,
 
+    /// HTTP method to use for both baseline + probes. JWT-protected
+    /// endpoints are commonly POST (GraphQL mutations, REST writes);
+    /// the GET default was silently returning 405/404 on those and
+    /// the diff falsely reported "no divergence" — not because the
+    /// server validated the JWT correctly, but because every probe
+    /// was the wrong shape. Accepts any HTTP method name.
+    #[arg(long, default_value = "GET", value_name = "METHOD")]
+    pub method: String,
+
+    /// Optional request body for non-GET methods. Sent verbatim;
+    /// pair with `-H 'Content-Type: ...'` if the endpoint needs it.
+    #[arg(long, value_name = "BODY")]
+    pub body: Option<String>,
+
     /// Output format: `text` (default) or `json`.
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
@@ -258,7 +272,10 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
         );
     }
 
-    let baseline = match fire_with_bearer(&http, &args.url, &args.token).await {
+    let baseline =
+        match fire_with_bearer(&http, &args.url, &args.method, args.body.as_deref(), &args.token)
+            .await
+        {
         Ok(v) => v,
         Err(e) => {
             eprintln!(
@@ -282,6 +299,8 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
     let sem = Arc::new(Semaphore::new(args.concurrency.max(1)));
     let http_arc = Arc::new(http);
     let url_arc = Arc::new(args.url.clone());
+    let method_arc = Arc::new(args.method.clone());
+    let body_arc = Arc::new(args.body.clone());
     let counter = Arc::new(AtomicUsize::new(0));
 
     let mut handles = Vec::with_capacity(variants.len());
@@ -289,6 +308,8 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
         let permit = sem.clone().acquire_owned().await.unwrap();
         let http = http_arc.clone();
         let url = url_arc.clone();
+        let method = method_arc.clone();
+        let body = body_arc.clone();
         let counter = counter.clone();
         let delay = Duration::from_millis(args.delay_ms);
         handles.push(tokio::spawn(async move {
@@ -296,7 +317,14 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
-            let result = fire_with_bearer(&http, &url, &v.mutated_token).await;
+            let result = fire_with_bearer(
+                &http,
+                &url,
+                &method,
+                body.as_deref(),
+                &v.mutated_token,
+            )
+            .await;
             counter.fetch_add(1, Ordering::SeqCst);
             (v, result)
         }));
@@ -340,13 +368,22 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-async fn fire_with_bearer(http: &Client, url: &str, token: &str) -> Result<(u16, usize), String> {
-    let resp = http
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|e| format!("{e}"))?;
+async fn fire_with_bearer(
+    http: &Client,
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+    token: &str,
+) -> Result<(u16, usize), String> {
+    let method = reqwest::Method::from_bytes(method.as_bytes())
+        .map_err(|e| format!("invalid method {method:?}: {e}"))?;
+    let mut req = http
+        .request(method, url)
+        .header("Authorization", format!("Bearer {token}"));
+    if let Some(b) = body {
+        req = req.body(b.to_string());
+    }
+    let resp = req.send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
     let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
     Ok((status, body.len()))
@@ -737,6 +774,8 @@ mod tests {
             insecure: false,
             proxy: None,
             header: Vec::new(),
+            method: "GET".into(),
+            body: None,
             format: "json".into(),
             quiet: true,
         };
@@ -799,6 +838,8 @@ mod tests {
             insecure: false,
             proxy: None,
             header: Vec::new(),
+            method: "GET".into(),
+            body: None,
             format: "json".into(),
             quiet: true,
         };
@@ -817,6 +858,8 @@ mod tests {
             insecure: false,
             proxy: None,
             header: Vec::new(),
+            method: "GET".into(),
+            body: None,
             format: "json".into(),
             quiet: true,
         };
