@@ -172,7 +172,9 @@ impl Environment for WafRiftEnv {
             && let Some(ref body) = self.req.body
             && crate::strategy::is_text_payload(&self.req)
         {
-            let params = wafrift_content_type::parse_form_body(body);
+            // F115: parse_form_body returns Result; treat oversized /
+            // unparseable as "no params" for action-list enumeration.
+            let params = wafrift_content_type::parse_form_body(body).unwrap_or_default();
             if !params.is_empty() {
                 actions.push(TechniqueAction::ContentTypeSwitch("Multipart".to_string()));
                 actions.push(TechniqueAction::ContentTypeSwitch(
@@ -282,7 +284,12 @@ impl Environment for WafRiftEnv {
                 if let Some(ref body) = self.req.body
                     && crate::strategy::is_text_payload(&self.req)
                 {
-                    let params = wafrift_content_type::parse_form_body(body);
+                    // F115: parse_form_body now returns Result; an
+                    // oversized / unparseable body for the content-type
+                    // switch means "no params to switch on" — fall
+                    // through rather than erroring the whole MCTS step.
+                    let params = wafrift_content_type::parse_form_body(body)
+                        .unwrap_or_default();
                     if !params.is_empty() {
                         let variants = wafrift_content_type::generate_variants(&params);
                         if let Some(variant) = variants
