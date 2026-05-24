@@ -347,7 +347,16 @@ async fn time_first_byte(
     let mut stream = match timeout(Duration::from_secs(timeout_secs), stream_fut).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => return Err(format!("tcp connect: {e}")),
-        Err(_) => return Ok(timeout_secs * 1000),
+        // F126: pre-fix returned `Ok(timeout_secs * 1000)` on CONNECT
+        // timeout, conflating "host unreachable" with "back-end hung
+        // on the response." If the connect timed out at 8 s but the
+        // benign baseline connects fast (200 ms), the delta was
+        // 7800 ms — false DESYNC inferred. The READ timeout below
+        // is the genuine "back-end is hanging" signal we want; the
+        // CONNECT timeout means the network never got us in. Surface
+        // it as Err so the caller aborts the probe and the operator
+        // gets "connect timeout" instead of a phantom desync.
+        Err(_) => return Err(format!("tcp connect: timed out after {timeout_secs}s")),
     };
     if let Err(e) = stream.write_all(bytes).await {
         return Err(format!("tcp write: {e}"));
@@ -360,6 +369,9 @@ async fn time_first_byte(
     match timeout(Duration::from_secs(timeout_secs), read_fut).await {
         Ok(Ok(_)) => Ok(start.elapsed().as_millis() as u64),
         Ok(Err(_)) => Ok(start.elapsed().as_millis() as u64),
+        // Read timeout IS the desync signal — back-end accepted the
+        // request and is hanging on the truncated chunked body. Bin
+        // it at the budget for the delta calculation.
         Err(_) => Ok(timeout_secs * 1000),
     }
 }
@@ -1274,6 +1286,36 @@ mod tests {
             wire.contains("/smuggled-marker"),
             "smuggled prefix MUST reach the wire"
         );
+    }
+
+    // F126 regression: TCP connect timeout (unreachable host, blocked
+    // port) must surface as Err, NOT as a phantom-elapsed measurement
+    // that gets compared against the baseline and produces a false
+    // DESYNC. Aim at port 1 on localhost — Windows + most Linux
+    // configs refuse it, but the connect should ERROR fast rather
+    // than hang. Either way we want Err out of time_first_byte, not
+    // a giant phantom Ok value.
+    #[tokio::test]
+    async fn time_first_byte_unreachable_returns_err_not_phantom_elapsed() {
+        // Use a port reserved for "no host should listen here":
+        // 1 = TCP-port-multiplexer, not in use on stock systems.
+        let result = time_first_byte("127.0.0.1", 1, b"GET / HTTP/1.1\r\n\r\n", 2).await;
+        match result {
+            Err(msg) => {
+                // Either "tcp connect: <connection refused>" (refusal)
+                // OR "tcp connect: timed out after 2s" (filtered).
+                // Both are the desired Err surface.
+                assert!(
+                    msg.starts_with("tcp connect:"),
+                    "expected tcp connect error, got: {msg}"
+                );
+            }
+            Ok(elapsed_ms) => panic!(
+                "unreachable host returned phantom Ok({elapsed_ms}) ms — \
+                 F126 regression: would feed into delta calculation and \
+                 false-flag DESYNC"
+            ),
+        }
     }
 
     #[test]
