@@ -94,16 +94,14 @@ pub async fn establish_from_curl(
         .or_else(|| if parsed.body.is_some() { Some("POST".into()) } else { None })
         .unwrap_or_else(|| "GET".into());
 
-    let mut builder = reqwest::Client::builder()
-        .timeout(timeout)
-        // The init request is allowed to redirect — login flows
-        // routinely 302 to /home; we want the cookies set on the
-        // FINAL page, not the intermediate.
-        .redirect(reqwest::redirect::Policy::limited(8));
-    if insecure {
-        builder = builder.danger_accept_invalid_certs(true);
-    }
-    let client = builder
+    // The init request follows redirects deeper than the parser-diff
+    // default (login flows routinely chain through 302s to /home
+    // before setting the final cookies). Shared floor via
+    // base_client_builder for timeout + insecure + UA; the redirect
+    // policy stays caller-owned.
+    let ua = crate::config::shared_user_agent();
+    let client = wafrift_transport::base_client_builder(timeout.as_secs(), insecure, Some(&ua))
+        .redirect(reqwest::redirect::Policy::limited(8))
         .build()
         .map_err(|e| SessionInitError::Request(format!("build client: {e}")))?;
 

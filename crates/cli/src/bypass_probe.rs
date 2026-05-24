@@ -151,23 +151,15 @@ pub fn run_bypass_probe(args: BypassProbeArgs) -> Result<(), String> {
 }
 
 async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
-    let mut builder = Client::builder()
-        .timeout(Duration::from_secs(args.timeout_secs))
-        .redirect(reqwest::redirect::Policy::none()); // see redirects, don't follow them
-    if args.insecure {
-        // Align with `wafrift scan` / `detect` / `replay`: only
-        // accept_invalid_certs. Previously this also set
-        // `danger_accept_invalid_hostnames(true)`, which is much
-        // looser — it lets ANY cert authenticate the requested
-        // host (e.g. an evil.com cert would be trusted on a probe
-        // to target.example.com). Pentesters running --insecure
-        // expect "accept self-signed / expired on the actual
-        // target", not "accept any cert from any origin". The
-        // tighter default matches operator intent and removes a
-        // cross-command behaviour gap.
-        builder = builder.danger_accept_invalid_certs(true);
-    }
-    let client = builder
+    // Shared floor: timeout + insecure-toggle + (no UA override here —
+    // bypass_probe historically sends reqwest's default UA so the
+    // target sees a "neutral" client identity during the probe).
+    // Redirect policy stays caller-owned: we INTENTIONALLY refuse to
+    // follow redirects so the probe sees them as response signals,
+    // not as a transparent next-hop. Don't replace this with
+    // build_diff_http_client: that one follows up to 5 redirects.
+    let client = wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, None)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 

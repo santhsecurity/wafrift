@@ -23,7 +23,6 @@
 use colored::Colorize;
 use serde_json::json;
 use std::process::ExitCode;
-use std::time::Duration;
 use wafrift_detect::dns_fingerprint::{CnameRuleEngine, DnsProbe};
 use wafrift_detect::waf_detect;
 
@@ -127,16 +126,18 @@ pub(crate) type DetectFetch = Result<(u16, Vec<(String, String)>, Vec<u8>), Stri
 /// `(status, headers, body)` with the body capped at 64 KiB — WAF/CDN
 /// banners and block pages are always in the head.
 pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> DetectFetch {
-    let mut builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs.clamp(1, 120)))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent(crate::config::shared_user_agent());
-    if insecure {
-        builder = builder.danger_accept_invalid_certs(true);
-    }
-    let client = builder
-        .build()
-        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    // Shared floor via base_client_builder + caller-owned redirect
+    // policy (intentionally `none()` so detect sees redirects as
+    // signals, not as transparent next-hops to follow).
+    let ua = crate::config::shared_user_agent();
+    let client = wafrift_transport::base_client_builder(
+        timeout_secs.clamp(1, 120),
+        insecure,
+        Some(&ua),
+    )
+    .redirect(reqwest::redirect::Policy::none())
+    .build()
+    .map_err(|e| format!("failed to build HTTP client: {e}"))?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
