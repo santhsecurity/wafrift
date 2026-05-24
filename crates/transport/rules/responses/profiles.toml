@@ -47,6 +47,17 @@ avoid = [
 ]
 # When the WAF returns 429 specifically, it means rate limiting not rule block
 rate_limit_status = [429]
+# Interactive-challenge detection: Cloudflare serves JS challenges on
+# 200 / 503 with a body containing "challenge-platform" (modern), or
+# the legacy "captcha" + "cloudflare" combo on pre-challenge-platform
+# pages. Matching here returns BlockClass::Challenge — the engine
+# backs off rather than escalating evasion, because the JS solver
+# (not a rule-block) is what's gating the request.
+challenge_status_codes = [200, 503]
+challenge_markers = [
+    "challenge-platform",
+    { all = ["captcha", "cloudflare"] },
+]
 # Notes for the practitioner (shown in reports)
 notes = "Cloudflare inspects decoded payload once. Double-encoding bypasses the single-pass decode. Unicode homoglyphs bypass character-class checks. 503+challenge-platform means JS challenge, not a rule block — back off."
 
