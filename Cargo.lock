@@ -6090,6 +6090,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "urlencoding",
  "wafrift-types",
 ]
 
