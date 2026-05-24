@@ -44,6 +44,45 @@ impl EvasionClient {
             .lock()
             .unwrap_or_else(|poisoned: std::sync::PoisonError<_>| poisoned.into_inner())
     }
+
+    /// FIFO-evict at the 10k cap if needed, then register `host` in
+    /// the states map if absent and push it onto the FIFO tail.
+    /// Returns a mutable reference to the (possibly freshly-inserted)
+    /// HostState.
+    ///
+    /// Lock-ordering contract (states → fifo) lives in this ONE
+    /// place so the three send-loop branches (HardBlock /
+    /// RateLimit / Pass) and any future caller can't inherit the
+    /// wrong order. Takes the states guard as a parameter so the
+    /// caller still owns the critical-section boundary.
+    fn ensure_host_registered<'a>(
+        &self,
+        states: &'a mut HashMap<String, HostState>,
+        host: &str,
+    ) -> &'a mut HostState {
+        // Cap-evict if at the bound AND the new key isn't already
+        // present (already-present means no growth).
+        if states.len() >= 10_000 && !states.contains_key(host) {
+            let mut fifo = self
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            while let Some(key_to_remove) = fifo.pop_front() {
+                if states.remove(&key_to_remove).is_some() {
+                    break;
+                }
+            }
+        }
+        let is_new = !states.contains_key(host);
+        if is_new {
+            let mut fifo = self
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            fifo.push_back(host.to_string());
+        }
+        states.entry(host.to_string()).or_default()
+    }
     /// Create a new evasion client with default configuration.
     ///
     /// # Errors
@@ -254,26 +293,7 @@ impl EvasionClient {
                     );
                     {
                         let mut states = self.lock_states();
-                        if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            while let Some(key_to_remove) = fifo.pop_front() {
-                                if states.remove(&key_to_remove).is_some() {
-                                    break;
-                                }
-                            }
-                        }
-                        let is_new = !states.contains_key(&host);
-                        let state = states.entry(host.clone()).or_default();
-                        if is_new {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            fifo.push_back(host.clone());
-                        }
+                        let state = self.ensure_host_registered(&mut states, &host);
                         state.record_signal(
                             classification == BlockClass::HardBlock,
                             classification == BlockClass::SoftBlock,
@@ -299,26 +319,7 @@ impl EvasionClient {
                     );
                     {
                         let mut states = self.lock_states();
-                        if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            while let Some(key_to_remove) = fifo.pop_front() {
-                                if states.remove(&key_to_remove).is_some() {
-                                    break;
-                                }
-                            }
-                        }
-                        let is_new = !states.contains_key(&host);
-                        let state = states.entry(host.clone()).or_default();
-                        if is_new {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            fifo.push_back(host.clone());
-                        }
+                        let state = self.ensure_host_registered(&mut states, &host);
                         state.record_signal(
                             false,
                             false,
@@ -340,26 +341,7 @@ impl EvasionClient {
                     // Pass or last attempt — record success (if Pass) and return
                     if !classification.is_blocked() {
                         let mut states = self.lock_states();
-                        if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            while let Some(key_to_remove) = fifo.pop_front() {
-                                if states.remove(&key_to_remove).is_some() {
-                                    break;
-                                }
-                            }
-                        }
-                        let is_new = !states.contains_key(&host);
-                        let state = states.entry(host.clone()).or_default();
-                        if is_new {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            fifo.push_back(host.clone());
-                        }
+                        let state = self.ensure_host_registered(&mut states, &host);
                         if !techniques.is_empty() {
                             state.record_success_for_many(&techniques);
                         }
