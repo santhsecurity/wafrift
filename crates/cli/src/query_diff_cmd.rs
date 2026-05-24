@@ -53,7 +53,6 @@ use std::time::Duration;
 
 use clap::Args;
 use colored::Colorize;
-use reqwest::Client;
 use serde_json::json;
 use tokio::sync::Semaphore;
 
@@ -351,12 +350,7 @@ pub async fn run_query_diff(args: QueryDiffArgs) -> ExitCode {
 
 crate::impl_parser_diff_http_args!(QueryDiffArgs);
 
-async fn fire_get(http: &Client, url: &str) -> Result<(u16, usize), String> {
-    let resp = http.get(url).send().await.map_err(|e| format!("{e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
-    Ok((status, body.len()))
-}
+use crate::parser_diff_common::fire_get_status_len as fire_get;
 
 fn render_curl(url: &str) -> String {
     format!("curl -i {}", shell_single_quote(url))

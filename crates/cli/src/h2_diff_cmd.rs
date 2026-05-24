@@ -252,12 +252,7 @@ fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
     })
 }
 
-async fn fire_get(client: &Client, url: &str) -> Result<(u16, usize), String> {
-    let resp = client.get(url).send().await.map_err(|e| format!("{e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
-    Ok((status, body.len()))
-}
+use crate::parser_diff_common::fire_get_status_len as fire_get;
 
 fn with_query(base: &str, new_query: &str) -> String {
     if new_query.is_empty() {

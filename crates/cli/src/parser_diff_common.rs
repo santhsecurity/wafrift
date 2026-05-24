@@ -121,6 +121,23 @@ pub trait ParserDiffHttpArgs {
     fn headers(&self) -> &[String];
 }
 
+/// Fire a single GET, return `(status, body_len)`. The minimal
+/// shape every parser-diff cmd needs from an HTTP probe — body
+/// content is irrelevant when the question is "did the WAF
+/// shape this response differently?". Lifted from identical
+/// definitions in `h2_diff_cmd` and `query_diff_cmd`. Errors
+/// surface the reqwest error verbatim so a caller's `eprintln!`
+/// can name the failing URL.
+pub async fn fire_get_status_len(
+    http: &Client,
+    url: &str,
+) -> std::result::Result<(u16, usize), String> {
+    let resp = http.get(url).send().await.map_err(|e| format!("{e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    Ok((status, body.len()))
+}
+
 /// Build the canonical parser-diff client straight from any
 /// [`ParserDiffHttpArgs`] view. Equivalent to spelling out the
 /// 4 accessors at the call site — see [`build_diff_http_client`].
