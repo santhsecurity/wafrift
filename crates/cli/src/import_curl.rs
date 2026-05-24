@@ -197,7 +197,7 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                         .clone(),
                 );
             }
-            "-d" | "--data" | "--data-raw" | "--data-binary" | "--data-urlencode" => {
+            "-d" | "--data" | "--data-raw" | "--data-binary" => {
                 i += 1;
                 let v = tokens
                     .get(i)
@@ -207,6 +207,46 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                     body.push('&');
                 }
                 body.push_str(v);
+            }
+            // F125: `--data-urlencode` differs from `--data` — curl
+            // URL-encodes the value (or the value half of `key=value`)
+            // before sending. Folding it into the raw `-d` arm
+            // produced bodies that diverged from what curl would
+            // actually send, breaking import-curl parity (the whole
+            // point of this command).
+            "--data-urlencode" => {
+                i += 1;
+                let v = tokens
+                    .get(i)
+                    .ok_or_else(|| format!("{tok} needs a value"))?;
+                // curl's `@file` forms require disk access on the
+                // operator's box; we don't model that. The two real
+                // file forms are bare `@file` and `name=@file`. A
+                // legitimate value like `email=foo@bar.com` is fine —
+                // the `@` is in the middle, not at the start of the
+                // bare value or the post-`=` value.
+                let is_file_form = match v.split_once('=') {
+                    None => v.starts_with('@'),
+                    Some((_, val)) => val.starts_with('@'),
+                };
+                if is_file_form {
+                    return Err(format!(
+                        "--data-urlencode @file form is not supported \
+                         in import-curl (would require filesystem access \
+                         on the operator's box); inline the file contents \
+                         into the pasted command (got {v:?})"
+                    ));
+                }
+                let encoded = if let Some((k, val)) = v.split_once('=') {
+                    format!("{k}={}", urlencoding::encode(val))
+                } else {
+                    urlencoding::encode(v).into_owned()
+                };
+                let body = p.body.get_or_insert_with(String::new);
+                if !body.is_empty() {
+                    body.push('&');
+                }
+                body.push_str(&encoded);
             }
             // Common no-op flags from Burp's "Copy as cURL" — accept and ignore.
             "-i" | "--include" | "-k" | "--insecure" | "--compressed" | "-s" | "--silent"
@@ -609,6 +649,58 @@ mod tests {
     fn tokenize_simple_curl() {
         let toks = shell_tokenize("curl https://example.com").unwrap();
         assert_eq!(toks, vec!["curl", "https://example.com"]);
+    }
+
+    // F125 regression suite: --data-urlencode must URL-encode the value
+    // half (or the whole bare value), matching curl's wire behaviour.
+    #[test]
+    fn data_urlencode_encodes_value_only_for_kv_pair() {
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode 'q=hello world'").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("q=hello%20world"));
+    }
+
+    #[test]
+    fn data_urlencode_encodes_whole_value_for_bare_string() {
+        let toks = shell_tokenize("curl https://t/ --data-urlencode 'a b&c'").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("a%20b%26c"));
+    }
+
+    #[test]
+    fn data_urlencode_at_file_form_is_rejected_loudly() {
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode '@/etc/passwd'").unwrap();
+        let err = parse_curl(&toks).unwrap_err();
+        assert!(err.contains("@file"), "got: {err}");
+    }
+
+    #[test]
+    fn data_urlencode_kv_at_file_form_rejected() {
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode 'name=@/etc/passwd'").unwrap();
+        let err = parse_curl(&toks).unwrap_err();
+        assert!(err.contains("@file"), "got: {err}");
+    }
+
+    #[test]
+    fn data_urlencode_legitimate_at_in_value_not_rejected() {
+        // Anti-rig: email-like values must NOT trigger the @file guard.
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode 'email=foo@bar.com'").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("email=foo%40bar.com"));
+    }
+
+    #[test]
+    fn data_urlencode_and_plain_data_concat_with_ampersand() {
+        let toks = shell_tokenize(
+            "curl https://t/ -d 'a=1' --data-urlencode 'b=hello world'",
+        )
+        .unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("a=1&b=hello%20world"));
     }
 
     #[test]
