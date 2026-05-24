@@ -9,6 +9,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "aes"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66bd29a732b644c0431c6140f370d097879203d79b80c94a6747ba0872adaef8"
+dependencies = [
+ "cipher 0.5.2",
+ "cpubits",
+ "cpufeatures 0.3.0",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -598,7 +609,7 @@ dependencies = [
  "async-trait",
  "base64",
  "chromiumoxide",
- "rand 0.8.6",
+ "rand 0.8.5",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -778,7 +789,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common 0.1.7",
- "inout",
+ "inout 0.1.4",
+]
+
+[[package]]
+name = "cipher"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
+dependencies = [
+ "block-buffer 0.12.0",
+ "crypto-common 0.2.2",
+ "inout 0.2.2",
 ]
 
 [[package]]
@@ -1035,6 +1057,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "cpubits"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15b85f9c39137c3a891689859392b1bd49812121d0d61c9caf00d46ed5ce06ae"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1239,6 +1267,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctr"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17469f8eb9bdbfad10f71f4cfddfd38b01143520c0e717d8796ccb4d44d44e42"
+dependencies = [
+ "cipher 0.5.2",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1336,6 +1373,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid 0.9.6",
+ "pem-rfc7468",
  "zeroize",
 ]
 
@@ -1390,7 +1428,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
 dependencies = [
- "cipher",
+ "cipher 0.4.4",
 ]
 
 [[package]]
@@ -1406,6 +1444,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
+ "const-oid 0.9.6",
  "crypto-common 0.1.7",
  "subtle",
 ]
@@ -2513,6 +2552,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "inout"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
+dependencies = [
+ "hybrid-array",
+]
+
+[[package]]
 name = "instability"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2523,6 +2571,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "interactsh"
+version = "0.2.0"
+dependencies = [
+ "aes",
+ "base64",
+ "ctr",
+ "futures-util",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -2690,6 +2757,9 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+dependencies = [
+ "spin",
+]
 
 [[package]]
 name = "leb128fmt"
@@ -2712,6 +2782,12 @@ dependencies = [
  "cfg-if",
  "windows-link 0.2.1",
 ]
+
+[[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
@@ -3041,13 +3117,13 @@ checksum = "05cc3c6b6bf0c15ed05e39c311f3e03cdddc63df971685e075c73a6d6610fc12"
 dependencies = [
  "bitflags 2.11.1",
  "chrono",
- "cipher",
+ "cipher 0.4.4",
  "des",
  "digest 0.10.7",
  "hmac",
  "md-5 0.10.6",
  "md4",
- "rand 0.8.6",
+ "rand 0.8.5",
  "windows",
 ]
 
@@ -3068,6 +3144,22 @@ checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
  "num-traits",
+]
+
+[[package]]
+name = "num-bigint-dig"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e661dda6640fad38e827a6d4a310ff4763082116fe217f279885c97f511bb0b7"
+dependencies = [
+ "lazy_static",
+ "libm",
+ "num-integer",
+ "num-iter",
+ "num-traits",
+ "rand 0.8.5",
+ "smallvec",
+ "zeroize",
 ]
 
 [[package]]
@@ -3097,12 +3189,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-iter"
+version = "0.1.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -3303,6 +3407,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pem-rfc7468"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
+dependencies = [
+ "base64ct",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3399,7 +3512,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
  "phf_shared 0.11.3",
- "rand 0.8.6",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -3461,6 +3574,17 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pkcs1"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f"
+dependencies = [
+ "der",
+ "pkcs8",
+ "spki",
+]
 
 [[package]]
 name = "pkcs8"
@@ -3767,9 +3891,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -4064,6 +4188,7 @@ dependencies = [
  "bytes",
  "cookie",
  "cookie_store 0.22.1",
+ "encoding_rs",
  "futures-core",
  "futures-util",
  "h2",
@@ -4076,6 +4201,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime",
  "mime_guess",
  "once_cell",
  "percent-encoding",
@@ -4218,6 +4344,26 @@ checksum = "d3e3762f6e3e0d1674a6e74ebcbcb3b8d56c895757fc2cc2aa0d5e62ccfcb21e"
 dependencies = [
  "rquest",
  "typed-builder",
+]
+
+[[package]]
+name = "rsa"
+version = "0.9.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8573f03f5883dcaebdfcf4725caa1ecb9c15b2ef50c43a07b816e06799bb12d"
+dependencies = [
+ "const-oid 0.9.6",
+ "digest 0.10.7",
+ "num-bigint-dig",
+ "num-integer",
+ "num-traits",
+ "pkcs1",
+ "pkcs8",
+ "rand_core 0.6.4",
+ "signature",
+ "spki",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -4728,6 +4874,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
+ "digest 0.10.7",
  "rand_core 0.6.4",
 ]
 
@@ -4790,6 +4937,12 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
 name = "spki"
@@ -5643,7 +5796,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-captchaforge-bridge"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5660,7 +5813,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-cli"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "base64",
  "clap",
@@ -5676,7 +5829,7 @@ dependencies = [
  "libc",
  "pocgen",
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "ratatui",
  "regex",
  "reqwest 0.12.28",
@@ -5710,10 +5863,10 @@ dependencies = [
 
 [[package]]
 name = "wafrift-content-type"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "serde_json",
  "thiserror 2.0.18",
  "wafrift-types",
@@ -5721,9 +5874,9 @@ dependencies = [
 
 [[package]]
 name = "wafrift-core"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
- "rand 0.8.6",
+ "rand 0.8.5",
  "rcgen",
  "serde",
  "serde_json",
@@ -5746,7 +5899,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-detect"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "aho-corasick",
  "criterion",
@@ -5766,14 +5919,14 @@ dependencies = [
 
 [[package]]
 name = "wafrift-encoding"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "base64",
  "brotli",
  "flate2",
  "hex",
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5786,11 +5939,11 @@ dependencies = [
 
 [[package]]
 name = "wafrift-evolution"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "lru 0.18.0",
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "sha2",
@@ -5806,17 +5959,17 @@ dependencies = [
 
 [[package]]
 name = "wafrift-fingerprint"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "wafrift-detect",
  "wafrift-types",
 ]
 
 [[package]]
 name = "wafrift-genome-registry"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -5832,10 +5985,10 @@ dependencies = [
 
 [[package]]
 name = "wafrift-grammar"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "sqlparser",
@@ -5848,10 +6001,11 @@ dependencies = [
 
 [[package]]
 name = "wafrift-oracle"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "async-trait",
  "flate2",
+ "interactsh",
  "proptest",
  "serde",
  "serde_json",
@@ -5868,7 +6022,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-pool"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "proptest",
  "reqwest 0.12.28",
@@ -5879,7 +6033,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-proxy"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "anyhow",
  "arboard",
@@ -5924,7 +6078,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-recon"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "anyhow",
  "axum",
@@ -5941,12 +6095,12 @@ dependencies = [
 
 [[package]]
 name = "wafrift-smuggling"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "base64",
  "httparse",
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "serde",
  "thiserror 2.0.18",
  "toml",
@@ -5955,7 +6109,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-strategy"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "dirs",
  "fs4",
@@ -5980,7 +6134,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-transport"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "authjar",
  "base64",
@@ -6011,10 +6165,10 @@ dependencies = [
 
 [[package]]
 name = "wafrift-types"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "bogon",
- "rand 0.8.6",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -6025,10 +6179,10 @@ dependencies = [
 
 [[package]]
 name = "wafrift-wafmodel"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.5",
  "regex",
  "serde",
  "serde_json",
