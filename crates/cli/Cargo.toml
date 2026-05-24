@@ -60,6 +60,15 @@ tracing-subscriber = { workspace = true }
 tokio-rustls = { workspace = true }
 webpki-roots = { workspace = true }
 
+# Santh-owned differential response analysis primitive.
+# Replaces per-command hand-rolled body-delta + severity classification
+# in the 11-cmd parser-diff family (parser-/header-/body-/query-/cache-
+# /h2-/method-/gql-/jwt-/cors-/trailer-diff). One shared
+# ResponseSnapshot + compare_responses + DiffPolicy means a fix to the
+# classification logic reaches every subcommand in one edit.
+# crates.io 0.2.0 (santhsecurity org).
+respdiff = "=0.2.0"
+
 # SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
 # instead of panicking.
 [target.'cfg(unix)'.dependencies]
