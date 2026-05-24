@@ -121,10 +121,8 @@ mod tests {
     fn oracle_trait_supports_dyn_dispatch() {
         // Build a heterogeneous oracle vec — the trait must be
         // dyn-compatible (object-safe).
-        let oracles: Vec<Box<dyn PayloadOracle>> = vec![
-            Box::new(EchoOracle),
-            Box::new(PreservesKeyOracle),
-        ];
+        let oracles: Vec<Box<dyn PayloadOracle>> =
+            vec![Box::new(EchoOracle), Box::new(PreservesKeyOracle)];
         assert_eq!(oracles.len(), 2);
         assert_ne!(oracles[0].name(), oracles[1].name());
     }

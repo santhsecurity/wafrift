@@ -130,33 +130,26 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
     // policy (intentionally `none()` so detect sees redirects as
     // signals, not as transparent next-hops to follow).
     let ua = crate::config::shared_user_agent();
-    let client = wafrift_transport::base_client_builder(
-        timeout_secs.clamp(1, 120),
-        insecure,
-        Some(&ua),
-    )
-    .redirect(reqwest::redirect::Policy::none())
-    .build()
-    .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    let client =
+        wafrift_transport::base_client_builder(timeout_secs.clamp(1, 120), insecure, Some(&ua))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("failed to build HTTP client: {e}"))?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("failed to start tokio runtime: {e}"))?;
     rt.block_on(async move {
-        let resp = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| {
-                // reqwest::Error's Display often shows only "error
-                // sending request" without the underlying DNS / TCP cause.
-                // walk_reqwest_error (helpers.rs) surfaces the full chain
-                // (NXDOMAIN, connection refused, TLS, etc.).
-                format!(
-                    "request to {url} failed: {}",
-                    crate::helpers::walk_reqwest_error(&e)
-                )
-            })?;
+        let resp = client.get(url).send().await.map_err(|e| {
+            // reqwest::Error's Display often shows only "error
+            // sending request" without the underlying DNS / TCP cause.
+            // walk_reqwest_error (helpers.rs) surfaces the full chain
+            // (NXDOMAIN, connection refused, TLS, etc.).
+            format!(
+                "request to {url} failed: {}",
+                crate::helpers::walk_reqwest_error(&e)
+            )
+        })?;
         let status = resp.status().as_u16();
         let headers: Vec<(String, String)> = resp
             .headers()
@@ -468,7 +461,9 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // (Apache stock 403, etc.).
     let differential_evidence: Option<DifferentialEvidence> =
         if args.differential && resolved_url.is_some() {
-            let url = resolved_url.as_deref().expect("differential gated on Some(url)");
+            let url = resolved_url
+                .as_deref()
+                .expect("differential gated on Some(url)");
             match fetch_differential(url, args.timeout_secs, args.insecure) {
                 Ok(ev) => ev,
                 Err(e) => {
@@ -538,9 +533,7 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
             // indicators tagged with `cname:` / `ptr:` / `asn:`.
             // Header-derived entries use `header N: V` form.
             detected_entry.indicators.iter().any(|ind| {
-                ind.starts_with("cname: ")
-                    || ind.starts_with("ptr: ")
-                    || ind.starts_with("asn: ")
+                ind.starts_with("cname: ") || ind.starts_with("ptr: ") || ind.starts_with("asn: ")
             })
         }
 
@@ -670,9 +663,10 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 .iter()
                 .map(|h| json!({ "query": h.query, "target": h.target }))
                 .collect();
-            let asn = p.asn.as_ref().map(|a| {
-                json!({ "number": a.number, "name": a.name })
-            });
+            let asn = p
+                .asn
+                .as_ref()
+                .map(|a| json!({ "number": a.number, "name": a.name }));
             json!({
                 "chain": hops,
                 "final_ip": p.first_a.map(|i| i.to_string()),
@@ -870,10 +864,7 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 "  {}",
                 format!(
                     "(benign GET → HTTP {} from '{}'; attack GET → HTTP {} from '{}')",
-                    ev.baseline_status,
-                    ev.baseline_server,
-                    ev.attack_status,
-                    ev.attack_server
+                    ev.baseline_status, ev.baseline_server, ev.attack_status, ev.attack_server
                 )
                 .bright_black()
             );
@@ -925,7 +916,10 @@ mod tests {
         assert!(m.iter().any(|(k, _)| k.eq_ignore_ascii_case("cf-ray")));
         // Content-Type is not in the infra allowlist (it's a general
         // response header, not a fingerprint anchor) — must be dropped.
-        assert!(!m.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")));
+        assert!(
+            !m.iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        );
     }
 
     // ── Live --url path against a mock server (added 2026-05-20).
@@ -1111,8 +1105,8 @@ mod tests {
     fn differential_status_flip_alone_is_evidence() {
         // The bare 200 → 403 case: server header may not even be
         // present, but the status flip is unambiguous WAF signal.
-        let ev = classify_differential(200, &[], 100, 403, &[], 200)
-            .expect("status flip must classify");
+        let ev =
+            classify_differential(200, &[], 100, 403, &[], 200).expect("status flip must classify");
         assert_eq!(ev.baseline_status, 200);
         assert_eq!(ev.attack_status, 403);
         assert!(
@@ -1127,17 +1121,12 @@ mod tests {
         // benign 200 from 'gunicorn/19.9.0', attack 403 from
         // 'Apache' (ModSec block page). The server-change reason
         // must surface.
-        let ev = classify_differential(
-            200,
-            &hdr("gunicorn/19.9.0"),
-            445,
-            403,
-            &hdr("Apache"),
-            239,
-        )
-        .expect("classify");
+        let ev = classify_differential(200, &hdr("gunicorn/19.9.0"), 445, 403, &hdr("Apache"), 239)
+            .expect("classify");
         assert!(
-            ev.reasons.iter().any(|r| r.contains("server header changed")),
+            ev.reasons
+                .iter()
+                .any(|r| r.contains("server header changed")),
             "expected server-change reason: {:?}",
             ev.reasons
         );
@@ -1176,10 +1165,7 @@ mod tests {
         // 10% difference (timestamps, request IDs, jitter in
         // body) must NOT classify. 50% is the threshold.
         let ev = classify_differential(200, &hdr("nginx"), 10_000, 200, &hdr("nginx"), 9_500);
-        assert!(
-            ev.is_none(),
-            "5% body change must not classify"
-        );
+        assert!(ev.is_none(), "5% body change must not classify");
     }
 
     #[test]
@@ -1187,15 +1173,8 @@ mod tests {
         // The strongest case: status flip + server change + body
         // swing all together. Every reason should appear in the
         // output so the operator sees the full picture.
-        let ev = classify_differential(
-            200,
-            &hdr("gunicorn"),
-            10_000,
-            403,
-            &hdr("Apache"),
-            200,
-        )
-        .expect("classify");
+        let ev = classify_differential(200, &hdr("gunicorn"), 10_000, 403, &hdr("Apache"), 200)
+            .expect("classify");
         let reasons: String = ev.reasons.join(" | ");
         assert!(reasons.contains("status flipped"));
         assert!(reasons.contains("server header changed"));
@@ -1208,8 +1187,7 @@ mod tests {
         // HEAD-style endpoint), attack returned a block page.
         // We can't compute pct_diff against zero, but the
         // non-zero attack body IS still signal.
-        let ev = classify_differential(200, &[], 0, 403, &[], 500)
-            .expect("classify");
+        let ev = classify_differential(200, &[], 0, 403, &[], 500).expect("classify");
         let reasons: String = ev.reasons.join(" | ");
         assert!(
             reasons.contains("attack response had 500 bytes") || reasons.contains("status flipped"),

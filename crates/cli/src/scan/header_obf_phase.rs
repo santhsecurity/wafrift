@@ -40,12 +40,30 @@ pub struct HeaderTechnique {
 /// technique here corresponds to a documented WAF parser bug
 /// that's worth re-emitting against fresh targets.
 pub const TECHNIQUES: &[HeaderTechnique] = &[
-    HeaderTechnique { name: "case_mixing", target_header: "Content-Type" },
-    HeaderTechnique { name: "underscore_sub", target_header: "Content-Type" },
-    HeaderTechnique { name: "null_byte", target_header: "X-Forwarded-For" },
-    HeaderTechnique { name: "whitespace_pad", target_header: "Content-Type" },
-    HeaderTechnique { name: "trailing_space", target_header: "Content-Type" },
-    HeaderTechnique { name: "line_fold", target_header: "Content-Type" },
+    HeaderTechnique {
+        name: "case_mixing",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "underscore_sub",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "null_byte",
+        target_header: "X-Forwarded-For",
+    },
+    HeaderTechnique {
+        name: "whitespace_pad",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "trailing_space",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "line_fold",
+        target_header: "Content-Type",
+    },
 ];
 
 const HEADER_VALUE: &str = "application/x-www-form-urlencoded";
@@ -59,8 +77,12 @@ pub fn obfuscate(technique: &HeaderTechnique) -> String {
         "case_mixing" => header_obfuscation::case_mix(technique.target_header),
         "underscore_sub" => header_obfuscation::underscore_substitute(technique.target_header),
         "null_byte" => header_obfuscation::null_byte_inject(technique.target_header),
-        "whitespace_pad" => header_obfuscation::whitespace_pad(technique.target_header, HEADER_VALUE),
-        "trailing_space" => header_obfuscation::trailing_space(technique.target_header, HEADER_VALUE),
+        "whitespace_pad" => {
+            header_obfuscation::whitespace_pad(technique.target_header, HEADER_VALUE)
+        }
+        "trailing_space" => {
+            header_obfuscation::trailing_space(technique.target_header, HEADER_VALUE)
+        }
         "line_fold" => header_obfuscation::line_fold(technique.target_header, HEADER_VALUE),
         _ => technique.target_header.to_string(),
     }
@@ -238,8 +260,7 @@ mod tests {
         // Anti-rig: a refactor that dropped case_mixing or
         // line_fold would silently weaken the engine. Lock the
         // headline techniques in.
-        let names: std::collections::HashSet<&str> =
-            TECHNIQUES.iter().map(|t| t.name).collect();
+        let names: std::collections::HashSet<&str> = TECHNIQUES.iter().map(|t| t.name).collect();
         for required in ["case_mixing", "underscore_sub", "null_byte", "line_fold"] {
             assert!(names.contains(required), "missing {required}");
         }
@@ -252,7 +273,7 @@ mod tests {
         // Output must differ in casing from the canonical
         // Content-Type. case_mix is the wafrift-encoding helper;
         // it always returns SOMETHING different than the input.
-        assert!(out.to_ascii_lowercase() == "content-type");
+        assert!(out.eq_ignore_ascii_case("content-type"));
         assert_ne!(out, "Content-Type", "case_mix must actually mix casing");
     }
 
@@ -467,7 +488,10 @@ mod tests {
         let out = obfuscate(t);
         let lower = out.to_ascii_lowercase();
         assert!(lower.contains("content-type"), "{out:?}");
-        assert!(lower.contains("application/x-www-form-urlencoded"), "{out:?}");
+        assert!(
+            lower.contains("application/x-www-form-urlencoded"),
+            "{out:?}"
+        );
     }
 
     #[test]
@@ -656,7 +680,10 @@ mod tests {
         // Cross-axis anti-rig: underscore_sub should ONLY be
         // associated with Content-Type (X-Forwarded-For has no
         // dash to substitute and would noop).
-        let underscore = TECHNIQUES.iter().find(|t| t.name == "underscore_sub").unwrap();
+        let underscore = TECHNIQUES
+            .iter()
+            .find(|t| t.name == "underscore_sub")
+            .unwrap();
         assert_eq!(underscore.target_header, "Content-Type");
     }
 

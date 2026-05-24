@@ -205,7 +205,10 @@ fn record_feedback_invalid_index_returns_err_not_ok() {
     // Verify the error is specifically InvalidChromosomeIndex.
     use crate::types::EvolutionError;
     assert!(
-        matches!(result.unwrap_err(), EvolutionError::InvalidChromosomeIndex(_)),
+        matches!(
+            result.unwrap_err(),
+            EvolutionError::InvalidChromosomeIndex(_)
+        ),
         "error must be InvalidChromosomeIndex so callers can distinguish it from \
          TargetHealthCritical and handle each branch separately"
     );

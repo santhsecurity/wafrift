@@ -167,7 +167,9 @@ pub async fn run_attack(args: AttackArgs) -> ExitCode {
             }
         }
     } else {
-        emit_text(&args, &totals, &path, &headers, &body, &query, &cache, &h2, &method);
+        emit_text(
+            &args, &totals, &path, &headers, &body, &query, &cache, &h2, &method,
+        );
     }
     ExitCode::SUCCESS
 }
@@ -286,11 +288,7 @@ fn push_common_flags(out: &mut Vec<String>, args: &AttackArgs) {
 /// failure (subprocess didn't launch, returned non-zero, returned
 /// non-JSON, timed out) returns the error string — the orchestrator
 /// converts it into a structured `{ "error": "..." }` value.
-async fn spawn_subprobe(
-    subcmd: &str,
-    args: &[String],
-    timeout_secs: u64,
-) -> Result<Value, String> {
+async fn spawn_subprobe(subcmd: &str, args: &[String], timeout_secs: u64) -> Result<Value, String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("could not locate current wafrift exe: {e}"))?;
     let mut cmd = tokio::process::Command::new(exe);
@@ -310,8 +308,7 @@ async fn spawn_subprobe(
     }
     let stdout = std::str::from_utf8(&result.stdout)
         .map_err(|e| format!("subprobe {subcmd} stdout not utf-8: {e}"))?;
-    serde_json::from_str(stdout.trim())
-        .map_err(|e| format!("subprobe {subcmd} json parse: {e}"))
+    serde_json::from_str(stdout.trim()).map_err(|e| format!("subprobe {subcmd} json parse: {e}"))
 }
 
 fn into_value(family: &str, res: Result<Value, String>) -> Value {
@@ -351,12 +348,12 @@ fn emit_text(
     }
     for (label, probe) in [
         ("url-path", path),
-        ("headers",  headers),
-        ("body",     body),
-        ("query",    query),
-        ("cache",    cache),
-        ("h2",       h2),
-        ("method",   method),
+        ("headers", headers),
+        ("body", body),
+        ("query", query),
+        ("cache", cache),
+        ("h2", h2),
+        ("method", method),
     ] {
         let d = probe.get("divergences");
         let high = d

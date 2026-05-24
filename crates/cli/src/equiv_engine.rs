@@ -297,12 +297,9 @@ pub async fn send(
         .map_err(|e| crate::helpers::walk_reqwest_error(&e))?;
     let status = resp.status().as_u16();
     // Bounded read — decompression-bomb defence on the WAF response.
-    let body = crate::safe_body::read_bounded(
-        resp,
-        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| e.to_string())?;
     let blocked = is_waf_block(status, &body);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok((status, blocked, elapsed_ms))
@@ -688,11 +685,7 @@ mod tests {
     #[test]
     fn oracle_valid_sql_rejects_unparseable_noise() {
         // The whole point of the oracle gate.
-        assert!(!oracle_valid(
-            "sql",
-            "1 OR 1=1",
-            ")) not sql at all (("
-        ));
+        assert!(!oracle_valid("sql", "1 OR 1=1", ")) not sql at all (("));
     }
 
     // ── json_escape ───────────────────────────────────────────
@@ -744,8 +737,8 @@ mod tests {
             "newline:\nand:tab\t",
         ] {
             let wrapped = format!("\"{}\"", json_escape(input));
-            let parsed: String = serde_json::from_str(&wrapped)
-                .expect("escaped output must be valid JSON string");
+            let parsed: String =
+                serde_json::from_str(&wrapped).expect("escaped output must be valid JSON string");
             assert_eq!(parsed, input, "round-trip mismatch on {input:?}");
         }
     }

@@ -179,7 +179,9 @@ fn probe_shapes(param: &str, payload: &str) -> Vec<(&'static str, &'static str, 
              length limits (often 8KB); H2 has frame size limits \
              but a different boundary. WAFs that gate by H1 \
              request-line length miss long H2 queries.",
-            format!("{param}=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{payload}"),
+            format!(
+                "{param}=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{payload}"
+            ),
         ),
     ]
 }
@@ -219,14 +221,8 @@ fn build_diff_result(
         h1_body_len,
         h2_body_len,
         body_delta_pct: delta,
-        h1_curl_cmd: format!(
-            "curl -i --http1.1 {}",
-            shell_single_quote(probe_url)
-        ),
-        h2_curl_cmd: format!(
-            "curl -i --http2 {}",
-            shell_single_quote(probe_url)
-        ),
+        h1_curl_cmd: format!("curl -i --http1.1 {}", shell_single_quote(probe_url)),
+        h2_curl_cmd: format!("curl -i --http2 {}", shell_single_quote(probe_url)),
         severity,
         h2_error,
     }
@@ -252,20 +248,13 @@ fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
         builder.http1_only()
     };
     builder.build().map_err(|e| {
-        eprintln!(
-            "  {} {e}",
-            "✗ Failed to build HTTP client:".red().bold()
-        );
+        eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
     })
 }
 
 async fn fire_get(client: &Client, url: &str) -> Result<(u16, usize), String> {
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("{e}"))?;
+    let resp = client.get(url).send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
     let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
     Ok((status, body.len()))
@@ -382,7 +371,11 @@ mod tests {
             .iter()
             .find(|(k, _, _)| *k == "payload-in-query")
             .expect("payload-in-query probe");
-        assert!(payload_probe.2.contains("search=ATTACK"), "got: {}", payload_probe.2);
+        assert!(
+            payload_probe.2.contains("search=ATTACK"),
+            "got: {}",
+            payload_probe.2
+        );
     }
 
     #[test]
@@ -452,7 +445,11 @@ mod tests {
     #[test]
     fn build_diff_result_curl_carries_http_version_flag() {
         let r = build_diff_result("p", "d", "http://x/?q=1", Ok((200, 0)), Ok((200, 0)));
-        assert!(r.h1_curl_cmd.contains("--http1.1"), "got: {}", r.h1_curl_cmd);
+        assert!(
+            r.h1_curl_cmd.contains("--http1.1"),
+            "got: {}",
+            r.h1_curl_cmd
+        );
         assert!(r.h2_curl_cmd.contains("--http2"), "got: {}", r.h2_curl_cmd);
         assert!(r.h1_curl_cmd.contains("'http://x/?q=1'"));
         assert!(r.h2_curl_cmd.contains("'http://x/?q=1'"));

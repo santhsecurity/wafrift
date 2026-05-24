@@ -468,9 +468,7 @@ impl ChallengeStore {
         // underflow, any existing entries are necessarily fresh (the
         // window hasn't elapsed yet), so the loop is a no-op anyway —
         // but we still enter it to keep behaviour uniform.
-        let cutoff = now
-            .checked_sub(GLOBAL_PROMPT_WINDOW)
-            .unwrap_or(now);
+        let cutoff = now.checked_sub(GLOBAL_PROMPT_WINDOW).unwrap_or(now);
         while let Some((_, ts)) = inner.global_prompt_window.front() {
             if *ts < cutoff {
                 inner.global_prompt_window.pop_front();
@@ -1129,7 +1127,8 @@ mod tests {
         // challenges.cloudflare.com/turnstile URL even without the
         // cf-turnstile class on a div — covers the URL-only detection
         // branch.
-        let body = br#"<iframe src="https://challenges.cloudflare.com/turnstile/v0/b/abc"></iframe>"#;
+        let body =
+            br#"<iframe src="https://challenges.cloudflare.com/turnstile/v0/b/abc"></iframe>"#;
         assert_eq!(
             classify_with_status(body, &[], 403),
             ChallengeKind::Turnstile,

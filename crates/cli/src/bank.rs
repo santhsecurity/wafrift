@@ -353,10 +353,7 @@ fn run_export(args: BankExportArgs) -> ExitCode {
         && !parent.as_os_str().is_empty()
         && let Err(e) = fs::create_dir_all(parent)
     {
-        eprintln!(
-            "error: create output dir {}: {e}",
-            parent.display()
-        );
+        eprintln!("error: create output dir {}: {e}", parent.display());
         return ExitCode::from(1);
     }
     if let Err(e) = fs::write(&args.output, &json) {
@@ -459,10 +456,7 @@ fn run_import(args: BankImportArgs) -> ExitCode {
         && !parent.as_os_str().is_empty()
         && let Err(e) = fs::create_dir_all(parent)
     {
-        eprintln!(
-            "error: create proxy-bank dir {}: {e}",
-            parent.display()
-        );
+        eprintln!("error: create proxy-bank dir {}: {e}", parent.display());
         return ExitCode::from(1);
     }
     let proxy_json = match serde_json::to_string_pretty(&current) {
@@ -479,10 +473,7 @@ fn run_import(args: BankImportArgs) -> ExitCode {
 
     // ── Per-WAF genome merge ────────────────────────────────────────
     if let Err(e) = fs::create_dir_all(&genome_dir) {
-        eprintln!(
-            "error: create genome dir {}: {e}",
-            genome_dir.display()
-        );
+        eprintln!("error: create genome dir {}: {e}", genome_dir.display());
         return ExitCode::from(1);
     }
     let mut wafs_written = 0usize;

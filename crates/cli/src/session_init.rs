@@ -91,7 +91,13 @@ pub async fn establish_from_curl(
     let method = parsed
         .method
         .clone()
-        .or_else(|| if parsed.body.is_some() { Some("POST".into()) } else { None })
+        .or_else(|| {
+            if parsed.body.is_some() {
+                Some("POST".into())
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(|| "GET".into());
 
     // The init request follows redirects deeper than the parser-diff
@@ -181,12 +187,11 @@ pub async fn establish_from_curl(
     // forward — bearer tokens / basic-auth need to be replayed on
     // every attack request the same way they were set on the init.
     for (k, v) in &parsed.headers {
-        if k.eq_ignore_ascii_case("authorization") {
-            if let (Ok(name), Ok(val)) =
+        if k.eq_ignore_ascii_case("authorization")
+            && let (Ok(name), Ok(val)) =
                 (HeaderName::try_from(k.as_str()), HeaderValue::from_str(v))
-            {
-                headers.insert(name, val);
-            }
+        {
+            headers.insert(name, val);
         }
     }
 
@@ -334,7 +339,12 @@ mod tests {
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
             .expect("init must succeed");
-        let cookie = state.headers.get(reqwest::header::COOKIE).unwrap().to_str().unwrap();
+        let cookie = state
+            .headers
+            .get(reqwest::header::COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(cookie.contains("manual=value"));
         assert!(cookie.contains("persistent=keep"));
     }
@@ -345,18 +355,27 @@ mod tests {
         // Mirrors browser cookie-jar semantics: a server Set-Cookie
         // replaces the same-name client-supplied cookie. Anti-rig
         // against a stale token surviving past its rotation.
-        let addr = spawn_session_server(|_| {
-            ok_with_setcookie("rotated", &[("session", "NEW")])
-        })
-        .await;
+        let addr =
+            spawn_session_server(|_| ok_with_setcookie("rotated", &[("session", "NEW")])).await;
         let mut parsed = curl_from_url(&format!("http://{addr}/refresh"));
         parsed.cookie = Some("session=OLD".into());
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
             .expect("init must succeed");
-        let cookie = state.headers.get(reqwest::header::COOKIE).unwrap().to_str().unwrap();
-        assert!(cookie.contains("session=NEW"), "rotated cookie must win: {cookie}");
-        assert!(!cookie.contains("session=OLD"), "stale cookie must be evicted: {cookie}");
+        let cookie = state
+            .headers
+            .get(reqwest::header::COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            cookie.contains("session=NEW"),
+            "rotated cookie must win: {cookie}"
+        );
+        assert!(
+            !cookie.contains("session=OLD"),
+            "stale cookie must be evicted: {cookie}"
+        );
     }
 
     #[serial]
@@ -396,7 +415,12 @@ mod tests {
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
             .expect("init must succeed");
-        let cookie = state.headers.get(reqwest::header::COOKIE).unwrap().to_str().unwrap();
+        let cookie = state
+            .headers
+            .get(reqwest::header::COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
         // Cookie request header = "k=v" exactly, no attributes.
         assert_eq!(cookie, "k=v");
     }
@@ -417,10 +441,8 @@ mod tests {
     #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_summary_names_status_and_cookie_count() {
-        let addr = spawn_session_server(|_| {
-            ok_with_setcookie("ok", &[("a", "1"), ("b", "2")])
-        })
-        .await;
+        let addr =
+            spawn_session_server(|_| ok_with_setcookie("ok", &[("a", "1"), ("b", "2")])).await;
         let parsed = curl_from_url(&format!("http://{addr}/"));
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
@@ -460,9 +482,8 @@ mod tests {
             ok_with_setcookie("ok", &[("session", "ABC123XYZ"), ("csrf", "DEF456")])
         })
         .await;
-        let curl = format!(
-            "curl 'http://{addr}/login' \\\n  -X POST \\\n  -H 'Accept: application/json'"
-        );
+        let curl =
+            format!("curl 'http://{addr}/login' \\\n  -X POST \\\n  -H 'Accept: application/json'");
         let path = write_curl_to_temp(&curl);
 
         let state = establish_from_file(&path, Duration::from_secs(5), false)
@@ -494,8 +515,7 @@ mod tests {
     #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_from_file_missing_file_returns_read_file_error() {
-        let missing = std::env::temp_dir()
-            .join("wafrift-session-init-DOES-NOT-EXIST-9999.curl");
+        let missing = std::env::temp_dir().join("wafrift-session-init-DOES-NOT-EXIST-9999.curl");
         let err = establish_from_file(&missing, Duration::from_secs(2), false)
             .await
             .expect_err("missing file must error");

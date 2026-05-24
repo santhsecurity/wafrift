@@ -69,11 +69,13 @@ fn gql_diff_finds_introspection_leak_on_permissive_mock() {
         "0",
     ]);
     assert_eq!(code, 0, "gql-diff exit 0 — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let total = p["divergences"]["high"].as_u64().unwrap_or(0)
         + p["divergences"]["medium"].as_u64().unwrap_or(0);
-    assert!(total > 0, "introspection-permissive mock must yield ≥1 divergence: {p}");
+    assert!(
+        total > 0,
+        "introspection-permissive mock must yield ≥1 divergence: {p}"
+    );
     let results = p["results"].as_array().expect("results");
     for r in results {
         let curl = r["curl_cmd"].as_str().expect("curl_cmd");

@@ -67,17 +67,16 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
         "--timeout-secs",
         "3",
     ]);
-    assert_eq!(code, 0, "h2-diff exit 0 even on H1-only target — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    assert_eq!(
+        code, 0,
+        "h2-diff exit 0 even on H1-only target — stderr:\n{stderr}"
+    );
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let results = p["results"].as_array().expect("results");
     assert!(!results.is_empty(), "must have probe results");
     // Mock is H1-only → every probe should record an h2_error.
     let h2_errs = p["h2_errors"].as_u64().unwrap_or(0);
-    assert!(
-        h2_errs > 0,
-        "H1-only mock must produce h2_errors > 0: {p}"
-    );
+    assert!(h2_errs > 0, "H1-only mock must produce h2_errors > 0: {p}");
     // Every probe row has BOTH H1 and H2 curl reproducers.
     for r in results {
         let h1c = r["h1_curl_cmd"].as_str().expect("h1_curl_cmd");
@@ -99,7 +98,10 @@ fn h2_diff_against_unreachable_target_still_exits_cleanly() {
         "1",
     ]);
     // Informational tool — exits 0 even when both H1 and H2 fail.
-    assert_eq!(code, 0, "h2-diff is informational; should exit 0 even on transport failure");
+    assert_eq!(
+        code, 0,
+        "h2-diff is informational; should exit 0 even on transport failure"
+    );
 }
 
 #[test]

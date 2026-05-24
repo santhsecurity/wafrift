@@ -51,10 +51,7 @@ pub enum CallbackVerdict {
 /// base URL + token.
 #[must_use]
 pub fn check_url(base_url: &str, token: &str) -> String {
-    format!(
-        "{}/_wafrift/check/{token}",
-        base_url.trim_end_matches('/')
-    )
+    format!("{}/_wafrift/check/{token}", base_url.trim_end_matches('/'))
 }
 
 /// Hit the listener's `/_wafrift/check/<TOKEN>` endpoint and classify

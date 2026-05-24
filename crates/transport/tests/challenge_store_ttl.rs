@@ -23,7 +23,12 @@ use helpers::{record_short, store};
 #[test]
 fn get_returns_none_after_ttl_expires() {
     let s = store();
-    record_short(&s, "ttl.example", "cf_clearance=dead", Duration::from_millis(15));
+    record_short(
+        &s,
+        "ttl.example",
+        "cf_clearance=dead",
+        Duration::from_millis(15),
+    );
     assert_eq!(s.get("ttl.example").as_deref(), Some("cf_clearance=dead"));
     thread::sleep(Duration::from_millis(40));
     assert_eq!(
@@ -45,7 +50,12 @@ fn purge_expired_removes_stale_entries() {
 #[test]
 fn record_on_other_host_gc_expired_entry() {
     let s = store();
-    record_short(&s, "old.example", "cf_clearance=old", Duration::from_millis(10));
+    record_short(
+        &s,
+        "old.example",
+        "cf_clearance=old",
+        Duration::from_millis(10),
+    );
     assert_eq!(s.len(), 1);
     thread::sleep(Duration::from_millis(40));
     s.record(

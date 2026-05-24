@@ -227,7 +227,10 @@ pub fn generate_variants(path: &str) -> Vec<ParserDisagreement> {
     out.push(ParserDisagreement {
         kind: "dot-segment",
         description: "`/./` inserted — RFC 3986 says remove, some routers don't",
-        variant_path: trimmed.replace('/', "/./").trim_end_matches("/./").to_string(),
+        variant_path: trimmed
+            .replace('/', "/./")
+            .trim_end_matches("/./")
+            .to_string(),
     });
     out.push(ParserDisagreement {
         kind: "dot-segment",
@@ -365,10 +368,7 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
         "{}://{}{}",
         parsed.scheme(),
         parsed.host_str().unwrap_or(""),
-        parsed
-            .port()
-            .map(|p| format!(":{p}"))
-            .unwrap_or_default()
+        parsed.port().map(|p| format!(":{p}")).unwrap_or_default()
     );
     let baseline_path = if parsed.path().is_empty() {
         "/".to_string()
@@ -390,12 +390,10 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
         .map_err(|e| format!("baseline GET: {e}"))?;
     let baseline_status = baseline_resp.status().as_u16();
     // Bounded read — decompression-bomb defence.
-    let baseline_body = crate::safe_body::read_bounded(
-        baseline_resp,
-        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-    )
-    .await
-    .unwrap_or_default();
+    let baseline_body =
+        crate::safe_body::read_bounded(baseline_resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+            .await
+            .unwrap_or_default();
     let baseline_len = baseline_body.len();
 
     let variants = generate_variants(&baseline_path);
@@ -415,10 +413,17 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
             probes_c.fetch_add(1, Ordering::Relaxed);
-            let url = format!("{origin_c}{path}", origin_c = origin_c, path = v.variant_path);
+            let url = format!(
+                "{origin_c}{path}",
+                origin_c = origin_c,
+                path = v.variant_path
+            );
             let resp = client_c.get(&url).send().await.ok()?;
             let probe_status = resp.status().as_u16();
-            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             let probe_len = body.len();
             let delta = if baseline_len == 0 {
                 if probe_len == 0 { 0.0 } else { 100.0 }
@@ -431,7 +436,25 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
             let status_changed = probe_status != baseline_status;
             if !status_changed && !body_changed && severity == "EQUAL" {
                 // Only emit equality rows if the operator asked for them.
-                return Some((true, DiffResult {
+                return Some((
+                    true,
+                    DiffResult {
+                        kind: v.kind,
+                        description: v.description,
+                        variant_path: v.variant_path,
+                        probe_status,
+                        baseline_status,
+                        body_delta_pct: delta,
+                        baseline_body_len: baseline_len,
+                        probe_body_len: probe_len,
+                        curl_cmd: format!("curl -s '{url}'"),
+                        severity: "EQUAL",
+                    },
+                ));
+            }
+            Some((
+                false,
+                DiffResult {
                     kind: v.kind,
                     description: v.description,
                     variant_path: v.variant_path,
@@ -441,21 +464,9 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
                     baseline_body_len: baseline_len,
                     probe_body_len: probe_len,
                     curl_cmd: format!("curl -s '{url}'"),
-                    severity: "EQUAL",
-                }));
-            }
-            Some((false, DiffResult {
-                kind: v.kind,
-                description: v.description,
-                variant_path: v.variant_path,
-                probe_status,
-                baseline_status,
-                body_delta_pct: delta,
-                baseline_body_len: baseline_len,
-                probe_body_len: probe_len,
-                curl_cmd: format!("curl -s '{url}'"),
-                severity,
-            }))
+                    severity,
+                },
+            ))
         }));
     }
 
@@ -472,8 +483,11 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
     }
 
     divergences.sort_by(|a, b| {
-        severity_rank(b.severity).cmp(&severity_rank(a.severity))
-            .then_with(|| (b.probe_status != b.baseline_status).cmp(&(a.probe_status != a.baseline_status)))
+        severity_rank(b.severity)
+            .cmp(&severity_rank(a.severity))
+            .then_with(|| {
+                (b.probe_status != b.baseline_status).cmp(&(a.probe_status != a.baseline_status))
+            })
             .then_with(|| b.body_delta_pct.abs().total_cmp(&a.body_delta_pct.abs()))
     });
 
@@ -498,15 +512,14 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
             probes_fired.load(Ordering::Relaxed)
         );
         if divergences.is_empty() {
-            println!("no parser disagreements detected — the WAF and origin agree on this URL surface");
+            println!(
+                "no parser disagreements detected — the WAF and origin agree on this URL surface"
+            );
         } else {
             println!("{} parser disagreement(s):", divergences.len());
             println!();
             for d in &divergences {
-                println!(
-                    "[{}] {} (kind={})",
-                    d.severity, d.description, d.kind
-                );
+                println!("[{}] {} (kind={})", d.severity, d.description, d.kind);
                 println!(
                     "    HTTP {}→{}  body Δ {:+.1}%",
                     d.baseline_status, d.probe_status, d.body_delta_pct
@@ -604,7 +617,10 @@ mod tests {
         let has_jsession = v
             .iter()
             .any(|d| d.kind == "semicolon-strip" && d.variant_path.contains("JSESSIONID"));
-        assert!(has_jsession, "semicolon-strip family missing JSESSIONID variant");
+        assert!(
+            has_jsession,
+            "semicolon-strip family missing JSESSIONID variant"
+        );
     }
 
     #[test]

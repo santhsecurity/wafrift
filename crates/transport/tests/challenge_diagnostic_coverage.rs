@@ -27,8 +27,18 @@ fn len_increments_on_record_and_decrements_on_forget() {
     // PROPERTY: `len()` must reflect the number of live entries —
     // increment on `record`, decrement on `forget`.
     let s = ChallengeStore::new();
-    s.record("a.com", "cf_clearance=1", ChallengeKind::CloudflareManaged, None);
-    s.record("b.com", "cf_clearance=2", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "a.com",
+        "cf_clearance=1",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
+    s.record(
+        "b.com",
+        "cf_clearance=2",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     assert_eq!(s.len(), 2);
     assert!(!s.is_empty());
     s.forget("a.com");
@@ -41,7 +51,12 @@ fn len_is_bounded_by_distinct_hosts_not_insert_count() {
     // the entry, not append. `len()` must stay at 1 after N overwrites.
     let s = ChallengeStore::new();
     for i in 0..50 {
-        s.record("same.host", format!("cf_clearance=v{i}"), ChallengeKind::CloudflareManaged, None);
+        s.record(
+            "same.host",
+            format!("cf_clearance=v{i}"),
+            ChallengeKind::CloudflareManaged,
+            None,
+        );
     }
     assert_eq!(s.len(), 1, "50 overwrites must keep len at 1");
 }
@@ -65,11 +80,7 @@ fn kind_returns_stored_challenge_kind() {
     ] {
         let host = format!("{}.test", kind.label());
         s.record(&host, "cf_clearance=x", kind, None);
-        assert_eq!(
-            s.kind(&host),
-            Some(kind),
-            "kind() mismatch for {kind:?}"
-        );
+        assert_eq!(s.kind(&host), Some(kind), "kind() mismatch for {kind:?}");
     }
 }
 
@@ -128,7 +139,12 @@ fn age_is_non_negative_and_small_after_fresh_record() {
     // test execution time). A huge age indicates the captured_at was
     // initialised to the wrong Instant.
     let s = ChallengeStore::new();
-    s.record("h", "cf_clearance=x", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "h",
+        "cf_clearance=x",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     let age = s.age("h").expect("age must be Some after record");
     assert!(
         age < Duration::from_secs(5),
@@ -141,7 +157,12 @@ fn age_is_none_after_forget() {
     // PROPERTY: `age()` must return `None` after `forget()` removes
     // the entry — consistent with `get()` and `kind()`.
     let s = ChallengeStore::new();
-    s.record("h", "cf_clearance=x", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "h",
+        "cf_clearance=x",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     s.forget("h");
     assert_eq!(s.age("h"), None);
 }
@@ -155,7 +176,12 @@ fn get_is_case_insensitive_on_host() {
     // This is the pre-audit bug: case variants scattered across multiple
     // by_host slots so `get("example.com")` missed `Example.com`'s cookie.
     let s = ChallengeStore::new();
-    s.record("EXAMPLE.COM", "cf_clearance=x", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "EXAMPLE.COM",
+        "cf_clearance=x",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     assert_eq!(
         s.get("example.com").as_deref(),
         Some("cf_clearance=x"),
@@ -174,14 +200,24 @@ fn get_strips_port_from_host() {
     // for cookie-replay purposes; the port must be stripped so a cookie
     // recorded for `example.com:443` replays on `example.com`.
     let s = ChallengeStore::new();
-    s.record("example.com:443", "cf_clearance=x", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "example.com:443",
+        "cf_clearance=x",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     assert_eq!(
         s.get("example.com").as_deref(),
         Some("cf_clearance=x"),
         "port-stripped lookup must find the :443-recorded entry"
     );
     // And vice-versa.
-    s.record("other.example.com", "cf_clearance=y", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "other.example.com",
+        "cf_clearance=y",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     assert_eq!(
         s.get("other.example.com:8443").as_deref(),
         Some("cf_clearance=y"),
@@ -195,7 +231,12 @@ fn get_case_and_port_combined() {
     // must apply simultaneously. `API.TARGET.COM:443` must match
     // `api.target.com` with no port.
     let s = ChallengeStore::new();
-    s.record("API.TARGET.COM:443", "cf_clearance=z", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "API.TARGET.COM:443",
+        "cf_clearance=z",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
     assert_eq!(
         s.get("api.target.com").as_deref(),
         Some("cf_clearance=z"),
@@ -279,7 +320,12 @@ fn concurrent_get_and_record_do_not_deadlock() {
     // — multiple readers can proceed simultaneously, a writer blocks only
     // until all readers are done.
     let s = Arc::new(ChallengeStore::new());
-    s.record("shared.host", "cf_clearance=init", ChallengeKind::CloudflareManaged, None);
+    s.record(
+        "shared.host",
+        "cf_clearance=init",
+        ChallengeKind::CloudflareManaged,
+        None,
+    );
 
     let mut handles = Vec::new();
     for _ in 0..8 {

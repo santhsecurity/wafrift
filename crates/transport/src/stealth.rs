@@ -291,9 +291,7 @@ mod imp {
                     .map_err(|e| {
                         StealthError::Transport(format!("DNS resolution failed for {host}: {e}"))
                     })?;
-                let v: Vec<_> = lookups
-                    .filter(|sa| !ip_addr_is_bogon(sa.ip()))
-                    .collect();
+                let v: Vec<_> = lookups.filter(|sa| !ip_addr_is_bogon(sa.ip())).collect();
                 if v.is_empty() {
                     return Err(StealthError::Transport(format!(
                         "stealth refused {host}: every resolved address is in the bogon set \
@@ -457,7 +455,8 @@ impl StealthClient {
         body: Option<&[u8]>,
         max_body: usize,
     ) -> Result<StealthResponse, StealthError> {
-        self.send_pinned(method, url, headers, body, max_body, None).await
+        self.send_pinned(method, url, headers, body, max_body, None)
+            .await
     }
 
     pub async fn send_pinned(

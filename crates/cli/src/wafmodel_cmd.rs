@@ -271,9 +271,7 @@ pub fn run_harden(args: HardenArgs) -> ExitCode {
         let holes_after: usize = attacks
             .iter()
             .flat_map(|a| candidates(a))
-            .filter(|(_, c)| {
-                classify_pass(&mut hardened, &body(c.as_bytes())).unwrap_or(false)
-            })
+            .filter(|(_, c)| classify_pass(&mut hardened, &body(c.as_bytes())).unwrap_or(false))
             .count();
         let fp: usize = benign
             .iter()

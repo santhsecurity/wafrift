@@ -201,10 +201,7 @@ fn seed_host(
         && !parent.as_os_str().is_empty()
         && let Err(e) = fs::create_dir_all(parent)
     {
-        eprintln!(
-            "error: create seed-bank dir {}: {e}",
-            parent.display()
-        );
+        eprintln!("error: create seed-bank dir {}: {e}", parent.display());
         return ExitCode::from(1);
     }
     let json = match serde_json::to_string_pretty(&bank) {
@@ -423,7 +420,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let bank_path = dir.join("gene-bank.json");
-        seed_host("api.a.com", &["EncodingUrl".into()], Some(&bank_path), false);
+        seed_host(
+            "api.a.com",
+            &["EncodingUrl".into()],
+            Some(&bank_path),
+            false,
+        );
         seed_host(
             "api.b.com",
             &["GrammarTautology".into()],

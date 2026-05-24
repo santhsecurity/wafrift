@@ -147,8 +147,8 @@ fn sql_adjacent_then_json_unicode_alnum_combined() {
     let a = tamper("sql_adjacent_string_concat", p, None).unwrap();
     let b = tamper("json_unicode_alnum", &a, None).unwrap();
     // Both transformations applied.
-    assert!(b.contains("\\u"));     // keyword chars encoded
-    assert!(b.contains("' '"));     // shattered literals still visible
+    assert!(b.contains("\\u")); // keyword chars encoded
+    assert!(b.contains("' '")); // shattered literals still visible
 }
 
 #[test]
@@ -186,9 +186,21 @@ fn composition_with_all_default_tampers_does_not_panic() {
 fn three_way_composition_does_not_panic() {
     let payload = "WHERE n='admin'";
     let triples = [
-        ("sql_adjacent_string_concat", "json_unicode_alnum", "url_encode"),
-        ("json_unicode_alnum", "sql_adjacent_string_concat", "html_entity"),
-        ("sql_concat_split", "sql_adjacent_string_concat", "json_unicode_alnum"),
+        (
+            "sql_adjacent_string_concat",
+            "json_unicode_alnum",
+            "url_encode",
+        ),
+        (
+            "json_unicode_alnum",
+            "sql_adjacent_string_concat",
+            "html_entity",
+        ),
+        (
+            "sql_concat_split",
+            "sql_adjacent_string_concat",
+            "json_unicode_alnum",
+        ),
         ("case_alternation", "json_unicode_alnum", "url_encode"),
         ("html_entity_variants", "json_unicode_alnum", "url_encode"),
     ];
@@ -208,8 +220,18 @@ fn three_way_composition_does_not_panic() {
 #[test]
 fn json_unicode_alnum_url_encode_order_matters() {
     let p = "UNION";
-    let ab = tamper("url_encode", &tamper("json_unicode_alnum", p, None).unwrap(), None).unwrap();
-    let ba = tamper("json_unicode_alnum", &tamper("url_encode", p, None).unwrap(), None).unwrap();
+    let ab = tamper(
+        "url_encode",
+        &tamper("json_unicode_alnum", p, None).unwrap(),
+        None,
+    )
+    .unwrap();
+    let ba = tamper(
+        "json_unicode_alnum",
+        &tamper("url_encode", p, None).unwrap(),
+        None,
+    )
+    .unwrap();
     assert_ne!(ab, ba);
 }
 
@@ -269,9 +291,8 @@ fn composition_preserves_utf8_validity_unicode_input() {
     for (a, b) in &pairs {
         let s1 = tamper(a, p, None).unwrap();
         let s2 = tamper(b, &s1, None).unwrap();
-        let _ = std::str::from_utf8(s2.as_bytes()).unwrap_or_else(|_| {
-            panic!("invalid UTF-8 from composition {a} -> {b}")
-        });
+        let _ = std::str::from_utf8(s2.as_bytes())
+            .unwrap_or_else(|_| panic!("invalid UTF-8 from composition {a} -> {b}"));
     }
 }
 
@@ -283,9 +304,8 @@ fn composition_preserves_utf8_for_all_pairs_simple_payload() {
         let a = tamper(first, p, None).unwrap();
         for second in all_tamper_names() {
             let b = tamper(second, &a, None).unwrap();
-            let _ = std::str::from_utf8(b.as_bytes()).unwrap_or_else(|_| {
-                panic!("invalid UTF-8 from {first} -> {second}")
-            });
+            let _ = std::str::from_utf8(b.as_bytes())
+                .unwrap_or_else(|_| panic!("invalid UTF-8 from {first} -> {second}"));
         }
     }
 }

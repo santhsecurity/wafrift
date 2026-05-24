@@ -22,7 +22,7 @@ pub struct OriginHintsArgs {
         long = "host",
         value_name = "HOST",
         conflicts_with = "host_positional",
-        required_unless_present = "host_positional",
+        required_unless_present = "host_positional"
     )]
     pub host: Option<String>,
 

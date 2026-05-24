@@ -84,8 +84,7 @@ fn jwt_diff_against_permissive_mock_succeeds_and_emits_results() {
         "0",
     ]);
     assert_eq!(code, 0, "jwt-diff exit 0 — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let results = p["results"].as_array().expect("results array");
     assert!(!results.is_empty(), "must have probe results");
     // Each probe should carry a curl reproducer with Bearer header.

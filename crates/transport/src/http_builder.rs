@@ -29,7 +29,6 @@ use reqwest::ClientBuilder;
 /// The redirect policy is INTENTIONALLY left unconfigured — callers
 /// must add their own `.redirect(Policy::...)`. See module-level
 /// docs for why.
-#[must_use]
 pub fn base_client_builder(
     timeout_secs: u64,
     insecure: bool,

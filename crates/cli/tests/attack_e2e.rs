@@ -24,9 +24,9 @@ async fn spawn_mock() -> std::net::SocketAddr {
                 // Mock returns longer body for X-Real-IP localhost (header-diff
                 // detection point) and for any request containing the attack
                 // token (body-diff / query-diff detection point).
-                let internal = req
-                    .lines()
-                    .any(|l| l.to_ascii_lowercase().starts_with("x-real-ip:") && l.contains("127.0.0.1"));
+                let internal = req.lines().any(|l| {
+                    l.to_ascii_lowercase().starts_with("x-real-ip:") && l.contains("127.0.0.1")
+                });
                 let leaked = req.contains("WAFRIFT_ATTACK_TOKEN");
                 let body: String = if internal || leaked {
                     "<html>internal / leaked attack — long body</html>".into()
@@ -96,7 +96,9 @@ fn attack_runs_all_four_subprobes_and_merges_into_unified_report() {
 
     // All six sub-probe objects must be present.
     let probes = parsed["probes"].as_object().expect("probes object");
-    for family in ["url_path", "headers", "body", "query", "cache", "h2", "method"] {
+    for family in [
+        "url_path", "headers", "body", "query", "cache", "h2", "method",
+    ] {
         assert!(
             probes.contains_key(family),
             "missing sub-probe family `{family}` in attack output"
@@ -104,7 +106,9 @@ fn attack_runs_all_four_subprobes_and_merges_into_unified_report() {
     }
 
     // Totals must be present + numeric.
-    let div = parsed["divergences"].as_object().expect("divergences object");
+    let div = parsed["divergences"]
+        .as_object()
+        .expect("divergences object");
     assert!(div["high"].is_number(), "high must be a number");
     assert!(div["medium"].is_number(), "medium must be a number");
     assert!(div["total"].is_number(), "total must be a number");
@@ -132,10 +136,12 @@ fn attack_marks_subprobe_failures_without_taking_down_the_whole_run() {
         "--timeout-secs",
         "2",
     ]);
-    assert_eq!(code, 0, "attack should exit 0 even on subprobe errors — stderr:\n{stderr}");
+    assert_eq!(
+        code, 0,
+        "attack should exit 0 even on subprobe errors — stderr:\n{stderr}"
+    );
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let probes = parsed["probes"].as_object().expect("probes");
     // Every sub-probe should either have an "error" field OR an
     // "errors" count > 0 (some probes succeed transport-wise but
@@ -167,7 +173,10 @@ fn attack_help_documents_orchestrator_role() {
 fn attack_appears_in_main_help_listing() {
     let (code, stdout, _) = wafrift(&["--help"]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("attack"), "attack must appear in top-level help");
+    assert!(
+        stdout.contains("attack"),
+        "attack must appear in top-level help"
+    );
 }
 
 #[serial_test::serial]
@@ -194,7 +203,9 @@ fn attack_text_format_emits_per_family_summary_lines() {
         "30",
     ]);
     assert_eq!(code, 0);
-    for family in ["url-path", "headers", "body", "query", "cache", "h2", "method"] {
+    for family in [
+        "url-path", "headers", "body", "query", "cache", "h2", "method",
+    ] {
         assert!(
             stdout.contains(family),
             "text output missing family `{family}`: {stdout}"

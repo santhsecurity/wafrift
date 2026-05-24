@@ -23,6 +23,7 @@ pub async fn start_proxy_with_output(port: u16, args: &[&str]) -> io::Result<Out
     cmd.output().await
 }
 
+#[allow(dead_code)]
 pub async fn start_proxy(port: u16, args: &[&str]) -> io::Result<Child> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_wafrift-proxy"));
     cmd.arg("--listen")
@@ -33,12 +34,14 @@ pub async fn start_proxy(port: u16, args: &[&str]) -> io::Result<Child> {
     cmd.spawn()
 }
 
+#[allow(dead_code)]
 pub async fn start_proxy_and_wait(port: u16, args: &[&str]) -> io::Result<Child> {
     let mut child = start_proxy(port, args).await?;
     wait_for_listen(&mut child, port, Duration::from_secs(5)).await?;
     Ok(child)
 }
 
+#[allow(dead_code)]
 pub async fn wait_for_listen(child: &mut Child, port: u16, timeout: Duration) -> io::Result<()> {
     let deadline = Instant::now() + timeout;
     loop {
@@ -68,6 +71,7 @@ pub fn proxy_client(port: u16) -> Result<reqwest::Client, reqwest::Error> {
         .build()
 }
 
+#[allow(dead_code)]
 pub async fn stop_proxy(child: &mut Child) {
     if child.try_wait().ok().and_then(|s| s).is_none() {
         let _ = child.kill().await;

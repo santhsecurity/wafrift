@@ -142,15 +142,13 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 1. HPP — duplicate parameter ─────────────────────────
     out.push(QueryDisagreement {
         kind: "hpp-last-wins",
-        description:
-            "Duplicate parameter — PHP / Express take the LAST occurrence; WAFs that \
+        description: "Duplicate parameter — PHP / Express take the LAST occurrence; WAFs that \
              scan the first never see the attack value",
         query: format!("{param}=safe&{param}={attack_token}"),
     });
     out.push(QueryDisagreement {
         kind: "hpp-first-wins",
-        description:
-            "Duplicate parameter — Java Servlet / Tomcat take the FIRST; WAFs that \
+        description: "Duplicate parameter — Java Servlet / Tomcat take the FIRST; WAFs that \
              scan the last never see the attack value",
         query: format!("{param}={attack_token}&{param}=safe"),
     });
@@ -158,8 +156,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 2. Array notation ────────────────────────────────────
     out.push(QueryDisagreement {
         kind: "array-bracket-notation",
-        description:
-            "PHP / Express array notation: `q[]=safe&q[]=attack` parses to a list. \
+        description: "PHP / Express array notation: `q[]=safe&q[]=attack` parses to a list. \
              WAFs that match by exact key string see `q[]`, not `q`",
         query: format!("{param}[]=safe&{param}[]={attack_token}"),
     });
@@ -167,8 +164,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 3. Comma split ───────────────────────────────────────
     out.push(QueryDisagreement {
         kind: "comma-split",
-        description:
-            "Comma-separated values — some parsers expose as one string, others split \
+        description: "Comma-separated values — some parsers expose as one string, others split \
              into a list; WAF substring rules miss attack hidden in a comma cell",
         query: format!("{param}=safe,{attack_token},neutral"),
     });
@@ -176,8 +172,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 4. Empty-value HPP ───────────────────────────────────
     out.push(QueryDisagreement {
         kind: "empty-value-hpp",
-        description:
-            "First occurrence is empty value; second carries the attack. WAFs that \
+        description: "First occurrence is empty value; second carries the attack. WAFs that \
              bail on empty values short-circuit before scanning the second",
         query: format!("{param}=&{param}={attack_token}"),
     });
@@ -185,8 +180,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 5. Missing value ─────────────────────────────────────
     out.push(QueryDisagreement {
         kind: "missing-value",
-        description:
-            "Parameter without `=` — parsers disagree on whether the value is `\"\"`, \
+        description: "Parameter without `=` — parsers disagree on whether the value is `\"\"`, \
              `None`, or the next token. Bypass via parser-confusion",
         query: format!("{param}&attack={attack_token}"),
     });
@@ -207,8 +201,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     };
     out.push(QueryDisagreement {
         kind: "percent-encoded-key",
-        description:
-            "Key name is percent-encoded — origins URL-decode keys before lookup; \
+        description: "Key name is percent-encoded — origins URL-decode keys before lookup; \
              WAFs that match by raw key-string never see the canonical name",
         query: pct_key,
     });
@@ -216,8 +209,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 7. NUL truncation in value ───────────────────────────
     out.push(QueryDisagreement {
         kind: "nul-truncate-value",
-        description:
-            "Value contains NUL — C-style parsers truncate at NUL (see safe prefix); \
+        description: "Value contains NUL — C-style parsers truncate at NUL (see safe prefix); \
              Python / Java pass the full string with NUL embedded; the WAF sees the \
              attack and blocks if the rule fires, but the origin only processes \
              whatever comes BEFORE the NUL — a divergence-of-action seam",
@@ -227,8 +219,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 8. Semicolon as separator ────────────────────────────
     out.push(QueryDisagreement {
         kind: "semicolon-separator",
-        description:
-            "`?a=1;b=2` — RFC 3986 reserves `;` in query; old PHP / Tomcat defaults \
+        description: "`?a=1;b=2` — RFC 3986 reserves `;` in query; old PHP / Tomcat defaults \
              split on it. WAF rule scanning the literal `a=1;b=2` may miss `b=2`",
         query: format!("{param}=safe;attack={attack_token}"),
     });
@@ -236,8 +227,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 9. Fragment-style encoded `#` ────────────────────────
     out.push(QueryDisagreement {
         kind: "encoded-hash-leak",
-        description:
-            "Encoded `%23` (`#`) in value — origins that decode-then-re-split treat \
+        description: "Encoded `%23` (`#`) in value — origins that decode-then-re-split treat \
              it as a fragment delimiter; bypass for rules that match the literal \
              encoded form",
         query: format!("{param}={attack_token}%23frag"),
@@ -246,8 +236,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     // ── 10. Trailing dot in key ──────────────────────────────
     out.push(QueryDisagreement {
         kind: "trailing-dot-key",
-        description:
-            "`q.=attack` — some frameworks (Django) collapse trailing dots in keys; \
+        description: "`q.=attack` — some frameworks (Django) collapse trailing dots in keys; \
              WAFs scanning raw `q.` miss the `q` lookup",
         query: format!("{param}.={attack_token}"),
     });
@@ -337,11 +326,7 @@ pub async fn run_query_diff(args: QueryDiffArgs) -> ExitCode {
             Ok((probe_status, probe_body_len)) => {
                 let body_delta = body_delta_pct(baseline_body_len, probe_body_len);
                 let severity = severity_of(baseline_status, probe_status, body_delta);
-                let probe_url = format!(
-                    "{}?{}",
-                    args.url.trim_end_matches('?'),
-                    variant.query
-                );
+                let probe_url = format!("{}?{}", args.url.trim_end_matches('?'), variant.query);
                 let curl_cmd = render_curl(&probe_url);
                 results.push(QueryDiffResult {
                     kind: variant.kind,
@@ -454,7 +439,11 @@ mod tests {
     #[test]
     fn generate_query_variants_returns_non_empty_curated_set() {
         let v = generate_query_variants("q", "ATTACK");
-        assert!(v.len() >= 10, "expected at least 10 probes, got {}", v.len());
+        assert!(
+            v.len() >= 10,
+            "expected at least 10 probes, got {}",
+            v.len()
+        );
     }
 
     #[test]
@@ -490,8 +479,7 @@ mod tests {
             // Either the literal `search` name appears, OR the
             // percent-encoded variant (the percent-encoded-key
             // probe). Both are valid presence forms.
-            let has_param = p.query.contains("search")
-                || p.query.contains("%73%65%61%72%63%68");
+            let has_param = p.query.contains("search") || p.query.contains("%73%65%61%72%63%68");
             assert!(
                 has_param,
                 "probe {} must reference the custom param name: query={}",
@@ -515,7 +503,10 @@ mod tests {
             .iter()
             .map(|p| p.kind)
             .collect();
-        assert!(kinds.iter().any(|k| k.starts_with("hpp")), "must cover HPP family");
+        assert!(
+            kinds.iter().any(|k| k.starts_with("hpp")),
+            "must cover HPP family"
+        );
     }
 
     #[test]
@@ -542,11 +533,7 @@ mod tests {
             .find(|p| p.kind == "percent-encoded-key")
             .expect("percent-encoded-key probe");
         // Every char of "user" should be percent-encoded.
-        assert!(
-            p.query.contains("%75%73%65%72"),
-            "got: {}",
-            p.query
-        );
+        assert!(p.query.contains("%75%73%65%72"), "got: {}", p.query);
     }
 
     // ── render_curl ───────────────────────────────────────────
@@ -567,9 +554,7 @@ mod tests {
 
     async fn spawn_query_aware_mock() -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {

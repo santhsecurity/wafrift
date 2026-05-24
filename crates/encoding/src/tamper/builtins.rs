@@ -515,7 +515,9 @@ impl TamperStrategy for PostgresDollarQuoteTamper {
         // produces the same output (gene-bank replay needs
         // determinism).  Hash-based identifier; 4 lowercase letters.
         let mut tag = String::with_capacity(4);
-        let h: u64 = payload.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(u64::from(b)));
+        let h: u64 = payload
+            .bytes()
+            .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(u64::from(b)));
         for i in 0..4 {
             let c = b'a' + u8::try_from((h >> (i * 8)) & 25).unwrap_or(0);
             tag.push(c as char);
@@ -764,9 +766,7 @@ impl TamperStrategy for MxssNamespaceWrapTamper {
         // (`<img src=x onerror=alert(1)>`), we still wrap; the
         // browser tolerates the redundant `<img>` inside the
         // re-serialised stream.
-        format!(
-            "<math><mtext><table><mglyph><style><!--</style><img src=x {payload}>"
-        )
+        format!("<math><mtext><table><mglyph><style><!--</style><img src=x {payload}>")
     }
 
     fn aggressiveness(&self) -> f64 {
@@ -1478,7 +1478,11 @@ mod tests {
             &MysqlVersionedCommentWrapTamper,
             &BracketConfusableTamper,
         ] {
-            assert!(!strat.description().is_empty(), "{} has empty description", strat.name());
+            assert!(
+                !strat.description().is_empty(),
+                "{} has empty description",
+                strat.name()
+            );
         }
     }
 
@@ -1509,7 +1513,10 @@ mod tests {
                 "tamper `{name}` has non-snake-case name"
             );
             assert!(!name.is_empty(), "empty name");
-            assert!(!name.starts_with('_'), "name `{name}` starts with underscore");
+            assert!(
+                !name.starts_with('_'),
+                "name `{name}` starts with underscore"
+            );
         }
     }
 
@@ -1591,11 +1598,25 @@ mod tests {
     #[test]
     fn zero_width_inject_pure_punctuation_unchanged() {
         let strategy = ZeroWidthInjectTamper;
-        assert_eq!(strategy.tamper("' OR 1=1 --", None).matches('\u{200B}').count() +
-            strategy.tamper("' OR 1=1 --", None).matches('\u{200C}').count() +
-            strategy.tamper("' OR 1=1 --", None).matches('\u{200D}').count() +
-            strategy.tamper("' OR 1=1 --", None).matches('\u{FEFF}').count(),
-            2); // 'O' + 'R'
+        assert_eq!(
+            strategy
+                .tamper("' OR 1=1 --", None)
+                .matches('\u{200B}')
+                .count()
+                + strategy
+                    .tamper("' OR 1=1 --", None)
+                    .matches('\u{200C}')
+                    .count()
+                + strategy
+                    .tamper("' OR 1=1 --", None)
+                    .matches('\u{200D}')
+                    .count()
+                + strategy
+                    .tamper("' OR 1=1 --", None)
+                    .matches('\u{FEFF}')
+                    .count(),
+            2
+        ); // 'O' + 'R'
     }
 
     #[test]
@@ -1743,7 +1764,10 @@ mod tests {
         let strategy = BracketConfusableTamper;
         assert_eq!(strategy.tamper("<", None), "\u{FF1C}");
         assert_eq!(strategy.tamper(">", None), "\u{FF1E}");
-        assert_eq!(strategy.tamper("<<>>", None), "\u{FF1C}\u{FF1C}\u{FF1E}\u{FF1E}");
+        assert_eq!(
+            strategy.tamper("<<>>", None),
+            "\u{FF1C}\u{FF1C}\u{FF1E}\u{FF1E}"
+        );
     }
 
     #[test]
@@ -1756,7 +1780,7 @@ mod tests {
     fn bracket_confusable_aggressiveness_in_range() {
         let strategy = BracketConfusableTamper;
         let a = strategy.aggressiveness();
-        assert!(a >= 0.0 && a <= 1.0);
+        assert!((0.0..=1.0).contains(&a));
     }
 
     // ── Cross-cutting invariants ────────────────────────────
@@ -1862,10 +1886,7 @@ mod tests {
     #[test]
     fn bell_separator_replaces_space_with_bel() {
         let strategy = BellSeparatorTamper;
-        assert_eq!(
-            strategy.tamper("UNION SELECT", None),
-            "UNION\u{0007}SELECT"
-        );
+        assert_eq!(strategy.tamper("UNION SELECT", None), "UNION\u{0007}SELECT");
     }
 
     #[test]
@@ -1903,11 +1924,7 @@ mod tests {
         // Property: replacing BEL back to space recovers the
         // original.
         let strategy = BellSeparatorTamper;
-        let inputs = [
-            "UNION SELECT 1",
-            "OR 1=1 -- ",
-            "<script>alert(1)</script>",
-        ];
+        let inputs = ["UNION SELECT 1", "OR 1=1 -- ", "<script>alert(1)</script>"];
         for input in inputs {
             let tampered = strategy.tamper(input, None);
             let restored = tampered.replace('\u{0007}', " ");
@@ -1944,7 +1961,10 @@ mod tests {
         );
         // Must re-open with an <img> that carries the operator's
         // payload as its attribute set.
-        assert!(out.contains("<img src=x onerror=alert(1)>"), "payload missing: {out}");
+        assert!(
+            out.contains("<img src=x onerror=alert(1)>"),
+            "payload missing: {out}"
+        );
     }
 
     #[test]
@@ -1965,8 +1985,14 @@ mod tests {
     fn mxss_namespace_wrap_handles_empty_payload() {
         let t = MxssNamespaceWrapTamper;
         let out = t.tamper("", None);
-        assert!(out.starts_with("<math>"), "empty payload still produces harness: {out}");
-        assert!(out.ends_with("<img src=x >"), "empty payload yields bare <img>: {out}");
+        assert!(
+            out.starts_with("<math>"),
+            "empty payload still produces harness: {out}"
+        );
+        assert!(
+            out.ends_with("<img src=x >"),
+            "empty payload yields bare <img>: {out}"
+        );
     }
 
     #[test]
@@ -1990,8 +2016,16 @@ mod tests {
             &MysqlVersionedCommentWrapTamper,
             &BracketConfusableTamper,
         ] {
-            assert!(!strat.description().is_empty(), "{} has empty description", strat.name());
-            assert!(strat.description().len() > 20, "{} description too short", strat.name());
+            assert!(
+                !strat.description().is_empty(),
+                "{} has empty description",
+                strat.name()
+            );
+            assert!(
+                strat.description().len() > 20,
+                "{} description too short",
+                strat.name()
+            );
         }
     }
 
@@ -2050,7 +2084,10 @@ mod tests {
         // Payload containing literal `"` must not break the envelope.
         let t = JsonDupKeyTamper;
         let out = t.tamper("' OR 1=1--\"--", None);
-        assert!(out.contains("OR 1=1--\\\"--"), "payload `\"` not escaped: {out}");
+        assert!(
+            out.contains("OR 1=1--\\\"--"),
+            "payload `\"` not escaped: {out}"
+        );
         // Round-trip: serde_json must parse the envelope successfully.
         let v: serde_json::Value = serde_json::from_str(&out)
             .expect("envelope must be valid JSON even with escaped quote");

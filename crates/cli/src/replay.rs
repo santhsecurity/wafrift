@@ -233,7 +233,9 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         }
     };
     let status = resp.status().as_u16();
-    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .unwrap_or_default();
     let elapsed = started.elapsed();
     let blocked = is_waf_block(status, &body);
 

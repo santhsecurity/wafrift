@@ -271,8 +271,8 @@ fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
     // Strip any path component on the base URL — `--paths-file`
     // entries are absolute paths or `scheme://host` overrides, and
     // the only meaningful "base" is the authority.
-    let parsed = reqwest::Url::parse(&args.url)
-        .map_err(|e| format!("--url is not a valid URL: {e}"))?;
+    let parsed =
+        reqwest::Url::parse(&args.url).map_err(|e| format!("--url is not a valid URL: {e}"))?;
     let authority_only = match parsed.port() {
         Some(p) => format!(
             "{}://{}:{}",
@@ -280,11 +280,7 @@ fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
             parsed.host_str().unwrap_or(""),
             p
         ),
-        None => format!(
-            "{}://{}",
-            parsed.scheme(),
-            parsed.host_str().unwrap_or("")
-        ),
+        None => format!("{}://{}", parsed.scheme(), parsed.host_str().unwrap_or("")),
     };
     if !matches!(parsed.path(), "" | "/") {
         eprintln!(
@@ -335,20 +331,18 @@ async fn probe_one_url(
     let baseline = match client.get(url).send().await {
         Ok(r) => r,
         Err(e) => {
-                return Err(format!(
-                    "baseline GET {url} failed: {}",
-                    crate::helpers::walk_reqwest_error(&e)
-                ))
-            }
+            return Err(format!(
+                "baseline GET {url} failed: {}",
+                crate::helpers::walk_reqwest_error(&e)
+            ));
+        }
     };
     let baseline_status = baseline.status().as_u16();
     // Bounded read — decompression-bomb defence on the baseline.
-    let baseline_body = crate::safe_body::read_bounded(
-        baseline,
-        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-    )
-    .await
-    .unwrap_or_default();
+    let baseline_body =
+        crate::safe_body::read_bounded(baseline, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+            .await
+            .unwrap_or_default();
     let baseline_len = baseline_body.len();
 
     // TRACING: baseline captured — confirms what the probe run considers
@@ -640,7 +634,10 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             classify(
                 "headers",
                 probe.label,
@@ -684,7 +681,10 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             classify(
                 "paths",
                 "path-routing",
@@ -705,7 +705,10 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             classify(
                 "methods",
                 &m,
@@ -963,10 +966,7 @@ mod tests {
 
     #[test]
     fn parse_path_from_url_preserves_query_string() {
-        assert_eq!(
-            parse_path_from_url("http://x/api?a=1&b=2"),
-            "/api?a=1&b=2"
-        );
+        assert_eq!(parse_path_from_url("http://x/api?a=1&b=2"), "/api?a=1&b=2");
     }
 
     #[test]
@@ -1009,17 +1009,9 @@ mod tests {
         // 429 (Too Many Requests) and 503 are throttle/unavailable;
         // never treated as a real divergence even if status changed.
         for status in [429u16, 503] {
-            let d = classify(
-                "headers",
-                "x",
-                "y",
-                200,
-                500,
-                status,
-                500,
-                10.0,
-                || "curl".to_string(),
-            );
+            let d = classify("headers", "x", "y", 200, 500, status, 500, 10.0, || {
+                "curl".to_string()
+            });
             assert!(d.is_none(), "{status} must be filtered as throttle");
         }
     }
@@ -1051,20 +1043,10 @@ mod tests {
         // Verify it gets called when we expect a divergence.
         let called = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let called_c = called.clone();
-        let _d = classify(
-            "headers",
-            "x",
-            "y",
-            403,
-            500,
-            200,
-            500,
-            10.0,
-            move || {
-                called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                "curl".to_string()
-            },
-        );
+        let _d = classify("headers", "x", "y", 403, 500, 200, 500, 10.0, move || {
+            called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            "curl".to_string()
+        });
         assert_eq!(
             called.load(std::sync::atomic::Ordering::SeqCst),
             1,
@@ -1077,20 +1059,10 @@ mod tests {
         // No divergence ⇒ no allocation.
         let called = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let called_c = called.clone();
-        let _d = classify(
-            "headers",
-            "x",
-            "y",
-            200,
-            500,
-            200,
-            500,
-            10.0,
-            move || {
-                called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                "curl".to_string()
-            },
-        );
+        let _d = classify("headers", "x", "y", 200, 500, 200, 500, 10.0, move || {
+            called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            "curl".to_string()
+        });
         assert_eq!(
             called.load(std::sync::atomic::Ordering::SeqCst),
             0,
@@ -1282,10 +1254,9 @@ mod tests {
         // a degenerate counter that bumps even for zero-duration hints.
         let addr = spawn_mock_server(|n| match n {
             0 => ok_response("base"),
-            1 => format!(
-                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\n\
+            1 => "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\n\
                  Content-Length: 0\r\nConnection: close\r\n\r\n"
-            ),
+                .to_string(),
             _ => ok_response("bypassed!"),
         })
         .await;
@@ -1322,10 +1293,9 @@ mod tests {
         // reported max_retry_after_obeyed_ms is ≤ 60_000.
         let addr = spawn_mock_server(|n| match n {
             0 => ok_response("base"),
-            1 => format!(
-                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3600\r\n\
+            1 => "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3600\r\n\
                  Content-Length: 0\r\nConnection: close\r\n\r\n"
-            ),
+                .to_string(),
             _ => ok_response("bypassed!"),
         })
         .await;
@@ -1374,10 +1344,7 @@ mod tests {
     fn classify_probe_with_zero_baseline_and_zero_probe_is_inert() {
         // Boundary: both sides empty. delta_signal must return
         // (false, false, 0.0) — and classify returns None.
-        let d = classify(
-            "x", "x", "x", 200, 0, 200, 0, 10.0,
-            || "curl".to_string(),
-        );
+        let d = classify("x", "x", "x", 200, 0, 200, 0, 10.0, || "curl".to_string());
         assert!(d.is_none());
     }
 
@@ -1386,10 +1353,9 @@ mod tests {
         // u32-large body sizes. The f64 conversion uses the full
         // usize, so this must produce a finite delta without
         // overflowing into infinity.
-        let d = classify(
-            "x", "x", "x", 200, 100, 200, 1_000_000_000, 10.0,
-            || "curl".to_string(),
-        )
+        let d = classify("x", "x", "x", 200, 100, 200, 1_000_000_000, 10.0, || {
+            "curl".to_string()
+        })
         .expect("must fire");
         assert!(
             d.body_delta_pct.is_finite(),

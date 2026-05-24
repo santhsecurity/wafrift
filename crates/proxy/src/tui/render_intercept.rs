@@ -181,10 +181,7 @@ mod tests {
         set_intercept_mode(true);
         let buf = render(120, 6);
         // Mode label + empty hint.
-        assert!(
-            buf.contains("MODE: ON"),
-            "mode banner missing: {buf}"
-        );
+        assert!(buf.contains("MODE: ON"), "mode banner missing: {buf}");
         assert!(buf.contains("no requests parked"));
         set_intercept_mode(prior);
     }

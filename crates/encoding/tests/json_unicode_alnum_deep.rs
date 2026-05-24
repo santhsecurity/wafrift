@@ -3,8 +3,8 @@
 //! helper. Each test pins a single behavior so a future regression
 //! lights up exactly which contract broke.
 
+use wafrift_encoding::tamper;
 use wafrift_encoding::tamper::TamperRegistry;
-use wafrift_encoding::{TamperStrategy, tamper};
 
 fn run(payload: &str) -> String {
     tamper("json_unicode_alnum", payload, Some("sql")).expect("tamper must exist")
@@ -388,7 +388,9 @@ fn handles_100kb_input_without_panic() {
 
 #[test]
 fn handles_alternating_alnum_punct() {
-    let p: String = (0..1000).map(|i| if i % 2 == 0 { 'A' } else { ' ' }).collect();
+    let p: String = (0..1000)
+        .map(|i| if i % 2 == 0 { 'A' } else { ' ' })
+        .collect();
     let _ = run(&p);
 }
 
@@ -596,7 +598,9 @@ fn concurrent_calls_produce_consistent_output() {
     use std::thread;
     let reg = Arc::new(TamperRegistry::with_defaults());
     let payload = "UNION SELECT * FROM users";
-    let expected = reg.tamper_with("json_unicode_alnum", payload, None).unwrap();
+    let expected = reg
+        .tamper_with("json_unicode_alnum", payload, None)
+        .unwrap();
     let mut handles = vec![];
     for _ in 0..32 {
         let r = Arc::clone(&reg);
@@ -643,7 +647,10 @@ fn all_ascii_digits_produce_expected_codepoints() {
 fn underscore_is_not_alphanumeric_passes_through() {
     // Rust's is_ascii_alphanumeric returns false for '_'.
     assert_eq!(run("_"), "_");
-    assert_eq!(run("snake_case"), "\\u0073\\u006E\\u0061\\u006B\\u0065_\\u0063\\u0061\\u0073\\u0065");
+    assert_eq!(
+        run("snake_case"),
+        "\\u0073\\u006E\\u0061\\u006B\\u0065_\\u0063\\u0061\\u0073\\u0065"
+    );
 }
 
 #[test]

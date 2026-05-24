@@ -70,11 +70,13 @@ fn method_diff_finds_propfind_divergence_on_mod_dav_mock() {
         "0",
     ]);
     assert_eq!(code, 0, "method-diff exit 0 — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let total_div = p["divergences"]["high"].as_u64().unwrap_or(0)
         + p["divergences"]["medium"].as_u64().unwrap_or(0);
-    assert!(total_div > 0, "PROPFIND must diverge against mod_dav mock: {p}");
+    assert!(
+        total_div > 0,
+        "PROPFIND must diverge against mod_dav mock: {p}"
+    );
 
     let results = p["results"].as_array().expect("results array");
     // Each probe carries curl_cmd with the variant method.

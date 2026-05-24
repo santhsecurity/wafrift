@@ -93,8 +93,8 @@ fn distill_reduces_long_bypass_to_minimum_via_real_binary() {
     ]);
     assert_eq!(code, 0, "distill should exit 0 — stderr:\n{stderr}");
 
-    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
-        .expect("distill --format json must emit valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("distill --format json must emit valid JSON");
     assert_eq!(parsed["target"], target.as_str());
     assert_eq!(parsed["param"], "q");
     let orig_len = parsed["original"]["length"].as_u64().unwrap_or(0);
@@ -106,10 +106,7 @@ fn distill_reduces_long_bypass_to_minimum_via_real_binary() {
     );
     // Reduction is reported as a percentage.
     let reduction = parsed["reduction_pct"].as_f64().unwrap_or(-1.0);
-    assert!(
-        reduction > 0.0,
-        "reduction_pct must be > 0: {reduction}"
-    );
+    assert!(reduction > 0.0, "reduction_pct must be > 0: {reduction}");
     // Counter sanity: at least 2 fires (baseline + ≥1 ddmin step).
     assert!(
         counter.load(Ordering::SeqCst) >= 2,
@@ -216,7 +213,10 @@ fn distill_respects_max_fires_cap() {
         "--format",
         "json",
     ]);
-    assert_eq!(code, 0, "distill should exit 0 even when capped — stdout:\n{stdout}");
+    assert_eq!(
+        code, 0,
+        "distill should exit 0 even when capped — stdout:\n{stdout}"
+    );
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     let capped = parsed["fires_capped"].as_bool().unwrap_or(false);
     assert!(capped, "fires_capped must be true at low cap: {parsed}");
@@ -252,9 +252,18 @@ fn distill_text_format_prints_summary_lines() {
 fn distill_help_is_documented_and_shown_under_main_help() {
     let (code, stdout, _) = wafrift(&["distill", "--help"]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("--payload"), "--payload must be documented: {stdout}");
-    assert!(stdout.contains("--max-fires"), "--max-fires must be documented: {stdout}");
-    assert!(stdout.contains("ddmin") || stdout.to_lowercase().contains("distill"), "stdout:\n{stdout}");
+    assert!(
+        stdout.contains("--payload"),
+        "--payload must be documented: {stdout}"
+    );
+    assert!(
+        stdout.contains("--max-fires"),
+        "--max-fires must be documented: {stdout}"
+    );
+    assert!(
+        stdout.contains("ddmin") || stdout.to_lowercase().contains("distill"),
+        "stdout:\n{stdout}"
+    );
 
     let (code2, stdout2, _) = wafrift(&["--help"]);
     assert_eq!(code2, 0);

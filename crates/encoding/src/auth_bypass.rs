@@ -195,22 +195,22 @@ pub fn auth_bypass_probes(target_path: &str) -> Vec<AuthBypassProbe> {
     for h in [
         "Cf-Access-Authenticated-User-Email", // Cloudflare Access
         "Cf-Access-Jwt-Assertion",
-        "X-Goog-Authenticated-User-Email",    // GCP IAP
+        "X-Goog-Authenticated-User-Email", // GCP IAP
         "X-Goog-Iap-Jwt-Assertion",
-        "X-Amzn-Oidc-Identity",                // AWS ALB OIDC
+        "X-Amzn-Oidc-Identity", // AWS ALB OIDC
         "X-Amzn-Oidc-Data",
-        "X-Ms-Client-Principal-Name",          // Azure App Service Easy Auth
+        "X-Ms-Client-Principal-Name", // Azure App Service Easy Auth
         "X-Ms-Client-Principal-Id",
         "X-Ms-Token-Aad-Id-Token",
-        "X-Authentik-Username",                // Authentik / open-source proxy
+        "X-Authentik-Username", // Authentik / open-source proxy
         "X-Authentik-Groups",
-        "X-Auth-Request-User",                 // oauth2-proxy default
+        "X-Auth-Request-User", // oauth2-proxy default
         "X-Auth-Request-Email",
         "X-Auth-Request-Groups",
-        "X-Forwarded-User",                    // Traefik forwardAuth default
+        "X-Forwarded-User", // Traefik forwardAuth default
         "X-Forwarded-Email",
         "X-Forwarded-Groups",
-        "X-Webauth-User",                      // Grafana
+        "X-Webauth-User", // Grafana
     ] {
         for v in [
             "admin",

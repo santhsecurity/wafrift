@@ -43,14 +43,16 @@ async fn spawn_realistic_mock() -> std::net::SocketAddr {
                 });
                 // Body / query reflection — any request containing
                 // the canonical attack token gets the leaked body.
-                let leaked =
-                    req.contains("WAFRIFT_ATTACK_TOKEN") || req.contains("PWN");
+                let leaked = req.contains("WAFRIFT_ATTACK_TOKEN") || req.contains("PWN");
                 // "Block" simulation for scan: anything containing
                 // BLOCKED gets 403.
                 let blocked = req.contains("BLOCKED");
 
                 let (status, body) = if blocked {
-                    ("403 Forbidden", "<html>blocked by mock WAF</html>".to_string())
+                    (
+                        "403 Forbidden",
+                        "<html>blocked by mock WAF</html>".to_string(),
+                    )
                 } else if internal_via_header || leaked {
                     (
                         "200 OK",
@@ -93,8 +95,9 @@ fn wafrift(args: &[&str]) -> (i32, String, String) {
 /// Helper: parse stdout as JSON; on failure include both stdout
 /// AND stderr in the panic message (the actual bug-finding info).
 fn parse_or_explain(stdout: &str, stderr: &str, ctx: &str) -> serde_json::Value {
-    serde_json::from_str(stdout.trim())
-        .unwrap_or_else(|e| panic!("{ctx}: JSON parse failed ({e}). stdout:\n{stdout}\nstderr:\n{stderr}"))
+    serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!("{ctx}: JSON parse failed ({e}). stdout:\n{stdout}\nstderr:\n{stderr}")
+    })
 }
 
 /// One target — every subcommand fires against this URL.
@@ -137,7 +140,10 @@ fn dogfood_distill_reduces_bypass_to_minimum_form() {
     let orig_len = p["original"]["length"].as_u64().unwrap_or(0);
     let min_len = p["minimal"]["length"].as_u64().unwrap_or(u64::MAX);
     assert!(orig_len > 0, "original length > 0");
-    assert!(min_len < orig_len, "min must be < original: orig={orig_len} min={min_len}");
+    assert!(
+        min_len < orig_len,
+        "min must be < original: orig={orig_len} min={min_len}"
+    );
 }
 
 // ── header-diff ──────────────────────────────────────────────
@@ -267,7 +273,9 @@ fn dogfood_attack_runs_all_seven_subprobes_concurrently_via_real_binary() {
     let p = parse_or_explain(&stdout, &stderr, "attack");
     let probes = p["probes"].as_object().expect("probes object");
     // All seven sub-probe families present.
-    for family in ["url_path", "headers", "body", "query", "cache", "h2", "method"] {
+    for family in [
+        "url_path", "headers", "body", "query", "cache", "h2", "method",
+    ] {
         assert!(
             probes.contains_key(family),
             "missing sub-probe family `{family}`"
@@ -290,9 +298,8 @@ fn dogfood_scan_raw_request_with_auto_distill_via_real_binary() {
         "wafrift-dogfood-raw-{}-{port}.req",
         std::process::id()
     ));
-    let body = format!(
-        "GET /search?q=§§ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: */*\r\n\r\n"
-    );
+    let body =
+        format!("GET /search?q=§§ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: */*\r\n\r\n");
     let mut f = std::fs::File::create(&path).expect("create fixture");
     f.write_all(body.as_bytes()).unwrap();
     let (code, stdout, stderr) = wafrift(&[
@@ -316,7 +323,10 @@ fn dogfood_scan_raw_request_with_auto_distill_via_real_binary() {
     assert_eq!(p["mode"], "raw-request");
     assert_eq!(p["auto_distill_enabled"], true);
     let bypasses = p["bypass_variants"].as_array().expect("bypass_variants");
-    assert!(!bypasses.is_empty(), "must have bypasses on safe-token mock");
+    assert!(
+        !bypasses.is_empty(),
+        "must have bypasses on safe-token mock"
+    );
     // Every bypass has BOTH a repro_curl AND a minimal_payload + minimal_repro_curl.
     for b in bypasses {
         assert!(b["repro_curl"].is_string(), "repro_curl missing: {b}");
@@ -353,7 +363,11 @@ fn dogfood_attack_repeats_produce_same_shape_three_runs() {
         let p = parse_or_explain(&stdout, &stderr, &format!("attack-run-{i}"));
         // Stable structure: all 7 families present every time.
         let probes = p["probes"].as_object().expect("probes object");
-        assert_eq!(probes.len(), 7, "run {i}: must have exactly 7 sub-probe families");
+        assert_eq!(
+            probes.len(),
+            7,
+            "run {i}: must have exactly 7 sub-probe families"
+        );
     }
 }
 
@@ -376,7 +390,10 @@ fn dogfood_attack_subprobe_failures_are_isolated() {
         "--timeout-secs",
         "2",
     ]);
-    assert_eq!(code, 0, "attack exit 0 even with all sub-probes failing — stderr:\n{stderr}");
+    assert_eq!(
+        code, 0,
+        "attack exit 0 even with all sub-probes failing — stderr:\n{stderr}"
+    );
     let p = parse_or_explain(&stdout, &stderr, "attack-isolated-failure");
     let probes = p["probes"].as_object().expect("probes");
     // Every family records SOME failure signal (either `error` or
@@ -424,16 +441,17 @@ fn dogfood_scan_url_query_with_auto_distill_emits_minimal_payload() {
     ]);
     assert_eq!(code, 0, "scan exit 0 — stderr:\n{stderr}");
     let p = parse_or_explain(&stdout, &stderr, "scan url-query auto-distill");
-    assert_eq!(p["auto_distill_enabled"], true, "auto_distill_enabled must be true");
+    assert_eq!(
+        p["auto_distill_enabled"], true,
+        "auto_distill_enabled must be true"
+    );
     let bypasses = p["bypass_variants"]
         .as_array()
         .expect("bypass_variants array");
     // We expect at least some bypasses on a safe-payload mock.
     if !bypasses.is_empty() {
         // Each bypass should have a minimal_payload populated.
-        let any_with_minimal = bypasses
-            .iter()
-            .any(|b| b["minimal_payload"].is_string());
+        let any_with_minimal = bypasses.iter().any(|b| b["minimal_payload"].is_string());
         assert!(
             any_with_minimal,
             "at least one bypass must carry minimal_payload string under --auto-distill: {p}"

@@ -353,7 +353,7 @@ mod tests {
         // selector that must validate.
         for &name in wafrift_encoding::tamper::all_tamper_names() {
             let selector = format!("tamper/{name}");
-            let f = TechniqueFilter::parse(&[selector.clone()], &[])
+            let f = TechniqueFilter::parse(std::slice::from_ref(&selector), &[])
                 .unwrap_or_else(|e| panic!("tamper selector `{selector}` rejected: {e}"));
             assert!(!f.is_default(), "filter must register the selector");
         }
@@ -370,7 +370,10 @@ mod tests {
     #[test]
     fn render_tree_includes_tamper_section() {
         let out = render_tree();
-        assert!(out.contains("tamper"), "render_tree must include tamper family header");
+        assert!(
+            out.contains("tamper"),
+            "render_tree must include tamper family header"
+        );
         // Every registered tamper must appear in the rendered output.
         for &name in wafrift_encoding::tamper::all_tamper_names() {
             let needle = format!("tamper/{name}");
@@ -418,7 +421,7 @@ mod tests {
             "bell_separator",
         ] {
             let selector = format!("tamper/{name}");
-            let f = TechniqueFilter::parse(&[selector.clone()], &[]);
+            let f = TechniqueFilter::parse(std::slice::from_ref(&selector), &[]);
             assert!(
                 f.is_ok(),
                 "frontier 2026 tamper `{selector}` is no longer registered"

@@ -57,12 +57,10 @@ pub async fn run(
             // Bounded read — decompression-bomb defence. A hostile
             // target serving a gzip bomb would OOM the CLI without
             // this cap.
-            let body = crate::safe_body::read_bounded(
-                resp,
-                crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-            )
-            .await
-            .unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             let blocked = is_waf_block(status, &body);
             BaselineOutcome {
                 status,
@@ -212,8 +210,7 @@ mod tests {
                 tokio::spawn(async move {
                     let mut buf = [0u8; 4096];
                     let n = sock.read(&mut buf).await.unwrap_or(0);
-                    *received_cc.lock().unwrap() =
-                        String::from_utf8_lossy(&buf[..n]).to_string();
+                    *received_cc.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).to_string();
                     let _ = sock
                         .write_all(
                             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\

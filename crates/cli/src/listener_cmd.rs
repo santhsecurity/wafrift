@@ -411,7 +411,8 @@ async fn handle_conn(
         }
     }
     let header_end = header_end.expect("loop exited only when found");
-    let head = std::str::from_utf8(&buf[..header_end]).map_err(|e| format!("non-utf8 headers: {e}"))?;
+    let head =
+        std::str::from_utf8(&buf[..header_end]).map_err(|e| format!("non-utf8 headers: {e}"))?;
     let mut lines = head.split("\r\n");
     let request_line = lines
         .next()
@@ -474,7 +475,11 @@ async fn handle_conn(
     if let Some(rest) = path.strip_prefix("/_wafrift/check/") {
         // Trim any trailing query string / slash; token alphabet is
         // alnum only so anything past it is noise.
-        let token = rest.split(&['/', '?', '#'][..]).next().unwrap_or("").to_string();
+        let token = rest
+            .split(&['/', '?', '#'][..])
+            .next()
+            .unwrap_or("")
+            .to_string();
         let received = registry
             .callbacks()
             .await
@@ -587,18 +592,19 @@ mod tests {
         r.register("ABCDEFGHIJKLMNOPQRSTUVWXY2").await;
         // Exact, prefix, suffix, embedded — all must match.
         assert_eq!(
-            r.match_token_in("ABCDEFGHIJKLMNOPQRSTUVWXY2").await.as_deref(),
+            r.match_token_in("ABCDEFGHIJKLMNOPQRSTUVWXY2")
+                .await
+                .as_deref(),
             Some("ABCDEFGHIJKLMNOPQRSTUVWXY2")
         );
         assert_eq!(
-            r.match_token_in("/ABCDEFGHIJKLMNOPQRSTUVWXY2/x").await.as_deref(),
+            r.match_token_in("/ABCDEFGHIJKLMNOPQRSTUVWXY2/x")
+                .await
+                .as_deref(),
             Some("ABCDEFGHIJKLMNOPQRSTUVWXY2")
         );
         // Different token must not falsely match.
-        assert_eq!(
-            r.match_token_in("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").await,
-            None
-        );
+        assert_eq!(r.match_token_in("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").await, None);
     }
 
     #[serial_test::serial]
@@ -608,10 +614,7 @@ mod tests {
         // NOT match (caller's contract — we never normalise on lookup).
         let r = Registry::new();
         r.register("ABCDEFGHIJKLMNOPQRSTUVWXY2").await;
-        assert_eq!(
-            r.match_token_in("abcdefghijklmnopqrstuvwxy2").await,
-            None
-        );
+        assert_eq!(r.match_token_in("abcdefghijklmnopqrstuvwxy2").await, None);
     }
 
     #[serial_test::serial]
@@ -695,7 +698,11 @@ mod tests {
         }
         let elapsed = started.elapsed();
         let cbs = r.callbacks.read().await;
-        assert_eq!(cbs.len(), MAX_CALLBACK_LOG, "log must stay capped under flood");
+        assert_eq!(
+            cbs.len(),
+            MAX_CALLBACK_LOG,
+            "log must stay capped under flood"
+        );
         assert!(
             elapsed.as_secs() < 30,
             "eviction storm took {elapsed:?} — suspect O(n) eviction regression"
@@ -793,9 +800,7 @@ mod tests {
     async fn end_to_end_callback_with_matching_token_in_path() {
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
         assert_eq!(cb.method, "GET");
         assert_eq!(cb.path, format!("/{token}"));
@@ -857,9 +862,7 @@ mod tests {
     async fn registry_matched_count_excludes_unmatched_callbacks() {
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req_match = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let req_match = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let req_no_match = b"GET /random HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n";
         let (cb1, _) = drive_one_callback(registry.clone(), req_match.as_bytes()).await;
         registry.push(cb1).await;
@@ -882,7 +885,14 @@ mod tests {
         let registry_c = registry.clone();
         let server = tokio::spawn(async move {
             let (sock, peer) = listener.accept().await.unwrap();
-            handle_conn(sock, peer, &registry_c, 8 * 1024, Duration::from_millis(200)).await
+            handle_conn(
+                sock,
+                peer,
+                &registry_c,
+                8 * 1024,
+                Duration::from_millis(200),
+            )
+            .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
         let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -903,10 +913,7 @@ mod tests {
     /// Drive one /_wafrift/check/<token> request. Reads the raw
     /// response off the socket so we can assert on the status line
     /// + JSON body.
-    async fn drive_management_check(
-        registry: Arc<Registry>,
-        token: &str,
-    ) -> (String, String) {
+    async fn drive_management_check(registry: Arc<Registry>, token: &str) -> (String, String) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
@@ -955,11 +962,7 @@ mod tests {
         let resp = String::from_utf8_lossy(&resp_buf).into_owned();
         // Split status line + body for the caller.
         let (status_line, rest) = resp.split_once("\r\n").unwrap_or(("", ""));
-        let body = rest
-            .split("\r\n\r\n")
-            .nth(1)
-            .unwrap_or("")
-            .to_string();
+        let body = rest.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
         (status_line.to_string(), body)
     }
 
@@ -968,8 +971,7 @@ mod tests {
     async fn management_check_unknown_token_returns_404_with_received_false() {
         let registry = Arc::new(Registry::new());
         let _ = registry.mint(1).await; // mint one so the registry is non-empty
-        let (status, body) =
-            drive_management_check(registry, "NEVERSEENABCDEFGHIJKLMNOPQ").await;
+        let (status, body) = drive_management_check(registry, "NEVERSEENABCDEFGHIJKLMNOPQ").await;
         assert!(status.contains("404"), "status was: {status}");
         assert!(body.contains("\"received\":false"), "body: {body}");
     }
@@ -981,16 +983,17 @@ mod tests {
         let token = registry.mint(1).await.into_iter().next().unwrap();
         // Record a callback for this token by going through the
         // normal callback path.
-        let cb_req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let cb_req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry.clone(), cb_req.as_bytes()).await;
         registry.push(cb).await;
         // Now ask the management endpoint.
         let (status, body) = drive_management_check(registry, &token).await;
         assert!(status.contains("200"), "status was: {status}");
         assert!(body.contains("\"received\":true"), "body: {body}");
-        assert!(body.contains(&token), "body should include the token: {body}");
+        assert!(
+            body.contains(&token),
+            "body should include the token: {body}"
+        );
     }
 
     #[serial_test::serial]
@@ -1017,9 +1020,7 @@ mod tests {
         // trailing slash) must still get the right answer.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let cb_req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let cb_req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry.clone(), cb_req.as_bytes()).await;
         registry.push(cb).await;
         // Use a token with a trailing slash in the URL request.
@@ -1042,11 +1043,13 @@ mod tests {
         // to worry about `"get"` vs `"GET"`.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "post /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let req = format!("post /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
-        assert_eq!(cb.method, "POST", "method must be uppercased, got `{}`", cb.method);
+        assert_eq!(
+            cb.method, "POST",
+            "method must be uppercased, got `{}`",
+            cb.method
+        );
     }
 
     #[serial_test::serial]
@@ -1087,7 +1090,10 @@ mod tests {
         );
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
         assert_eq!(cb.body_preview.len(), exact);
-        assert_eq!(cb.body_truncated_bytes, 0, "exact-cap body must NOT truncate");
+        assert_eq!(
+            cb.body_truncated_bytes, 0,
+            "exact-cap body must NOT truncate"
+        );
         assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
     }
 
@@ -1124,9 +1130,7 @@ mod tests {
         // hang on the read loop.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: -7\r\n\r\n"
-        );
+        let req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: -7\r\n\r\n");
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
         assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
     }
@@ -1141,9 +1145,7 @@ mod tests {
         // we just see an empty body.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 9999999999\r\n\r\n"
-        );
+        let req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 9999999999\r\n\r\n");
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
         // We at least got the request line + headers parsed (token
         // match in path proves it). Body is empty because the client

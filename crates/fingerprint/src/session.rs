@@ -165,10 +165,10 @@ pub struct H2Profile {
 pub const CHROME_H2: H2Profile = H2Profile {
     family: "chrome",
     settings: &[
-        (1, 65_536),       // HEADER_TABLE_SIZE
-        (2, 0),            // ENABLE_PUSH (Chrome disables)
-        (4, 6_291_456),    // INITIAL_WINDOW_SIZE = 6 MiB
-        (6, 262_144),      // MAX_HEADER_LIST_SIZE
+        (1, 65_536),    // HEADER_TABLE_SIZE
+        (2, 0),         // ENABLE_PUSH (Chrome disables)
+        (4, 6_291_456), // INITIAL_WINDOW_SIZE = 6 MiB
+        (6, 262_144),   // MAX_HEADER_LIST_SIZE
     ],
     initial_window_increment: 15_663_105,
 };
@@ -178,9 +178,9 @@ pub const CHROME_H2: H2Profile = H2Profile {
 pub const FIREFOX_H2: H2Profile = H2Profile {
     family: "firefox",
     settings: &[
-        (1, 65_536),       // HEADER_TABLE_SIZE
-        (4, 131_072),      // INITIAL_WINDOW_SIZE = 128 KiB (Firefox)
-        (5, 16_384),       // MAX_FRAME_SIZE
+        (1, 65_536),  // HEADER_TABLE_SIZE
+        (4, 131_072), // INITIAL_WINDOW_SIZE = 128 KiB (Firefox)
+        (5, 16_384),  // MAX_FRAME_SIZE
     ],
     initial_window_increment: 12_517_377,
 };
@@ -190,9 +190,9 @@ pub const FIREFOX_H2: H2Profile = H2Profile {
 pub const SAFARI_H2: H2Profile = H2Profile {
     family: "safari",
     settings: &[
-        (3, 100),          // MAX_CONCURRENT_STREAMS
-        (4, 2_097_152),    // INITIAL_WINDOW_SIZE = 2 MiB
-        (8, 1),            // ENABLE_CONNECT_PROTOCOL (Safari sets)
+        (3, 100),       // MAX_CONCURRENT_STREAMS
+        (4, 2_097_152), // INITIAL_WINDOW_SIZE = 2 MiB
+        (8, 1),         // ENABLE_CONNECT_PROTOCOL (Safari sets)
     ],
     initial_window_increment: 10_485_760,
 };
@@ -317,15 +317,15 @@ impl SessionPool {
         // Fast path: existing binding under bump.
         {
             let bindings = self.bindings.read().expect("bindings RwLock poisoned");
-            if let Some(&(idx, count)) = bindings.get(host) {
-                if count + 1 < self.rotate_after_requests {
-                    drop(bindings);
-                    let mut bindings = self.bindings.write().expect("bindings RwLock poisoned");
-                    if let Some(entry) = bindings.get_mut(host) {
-                        entry.1 += 1;
-                    }
-                    return self.profiles[idx];
+            if let Some(&(idx, count)) = bindings.get(host)
+                && count + 1 < self.rotate_after_requests
+            {
+                drop(bindings);
+                let mut bindings = self.bindings.write().expect("bindings RwLock poisoned");
+                if let Some(entry) = bindings.get_mut(host) {
+                    entry.1 += 1;
                 }
+                return self.profiles[idx];
             }
         }
         // Slow path: either no binding or the count is about to roll over.
@@ -341,7 +341,10 @@ impl SessionPool {
     /// Forget every binding. Useful at the start of a new scan run
     /// when the operator wants a clean per-host shuffle.
     pub fn clear(&self) {
-        self.bindings.write().expect("bindings RwLock poisoned").clear();
+        self.bindings
+            .write()
+            .expect("bindings RwLock poisoned")
+            .clear();
     }
 
     /// Snapshot of (host, profile_name, request_count). Read-only,
@@ -569,7 +572,10 @@ mod tests {
         // assert the binding got refreshed (counter back to small).
         let snap = pool.snapshot();
         let (_, _, count) = snap.iter().find(|(h, _, _)| h == "a.com").unwrap();
-        assert!(*count <= 2, "expected reset-ish count after rotation, got {count}");
+        assert!(
+            *count <= 2,
+            "expected reset-ish count after rotation, got {count}"
+        );
         let _ = after;
     }
 
@@ -753,10 +759,7 @@ mod tests {
         ] {
             let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
             for s in slots {
-                assert!(
-                    seen.insert(*s),
-                    "{name}: duplicate slot `{s}`"
-                );
+                assert!(seen.insert(*s), "{name}: duplicate slot `{s}`");
             }
         }
     }

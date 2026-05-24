@@ -256,10 +256,8 @@ mod tests {
 
     #[test]
     fn load_v01_flat_format_migrates_to_schema_1() {
-        let path = std::env::temp_dir().join(format!(
-            "wafrift-genebank-load-v01-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("wafrift-genebank-load-v01-{}", std::process::id()));
         // Pre-schema flat HashMap format — no `schema` field, no
         // `hosts` wrapper. The auto-migration must recognise this
         // shape and convert without dropping any host.

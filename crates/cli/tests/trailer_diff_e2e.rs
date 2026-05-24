@@ -87,26 +87,31 @@ fn trailer_diff_sends_trailer_in_attack_request() {
         // the exit code, then verify the captured bytes.
 
         let handle = tokio::spawn(async move {
-            let baseline_raw = tokio::time::timeout(
-                Duration::from_secs(5),
-                rx.recv(),
-            ).await.expect("timeout").expect("baseline recv");
+            let baseline_raw = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("timeout")
+                .expect("baseline recv");
 
-            let attack_raw = tokio::time::timeout(
-                Duration::from_secs(5),
-                rx.recv(),
-            ).await.expect("timeout").expect("attack recv");
+            let attack_raw = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("timeout")
+                .expect("attack recv");
 
             (baseline_raw, attack_raw)
         });
 
         let (code, stdout, stderr) = wafrift(&[
             "trailer-diff",
-            "--url", &format!("http://{addr}/"),
-            "--header-name", "X-Original-URL",
-            "--payload", "' OR 1=1--",
-            "--format", "json",
-            "--timeout-secs", "5",
+            "--url",
+            &format!("http://{addr}/"),
+            "--header-name",
+            "X-Original-URL",
+            "--payload",
+            "' OR 1=1--",
+            "--format",
+            "json",
+            "--timeout-secs",
+            "5",
         ]);
 
         let (baseline_raw, attack_raw) = handle.await.unwrap();
@@ -133,8 +138,7 @@ fn trailer_diff_sends_trailer_in_attack_request() {
             })
             .count();
         assert_eq!(
-            baseline_trailer_value_count,
-            0,
+            baseline_trailer_value_count, 0,
             "baseline must NOT send X-Original-URL as a trailer value; got:\n{baseline_raw}"
         );
 
@@ -158,10 +162,22 @@ fn trailer_diff_sends_trailer_in_attack_request() {
         // JSON output must parse cleanly.
         let parsed: serde_json::Value =
             serde_json::from_str(stdout.trim()).expect("JSON parse; stdout:\n{stdout}");
-        assert!(parsed["severity"].as_str().is_some(), "severity field must be present");
-        assert!(parsed["baseline"].is_object(), "baseline object must be present");
-        assert!(parsed["attack"].is_object(), "attack object must be present");
-        assert!(parsed["divergences"].is_object(), "divergences object must be present");
+        assert!(
+            parsed["severity"].as_str().is_some(),
+            "severity field must be present"
+        );
+        assert!(
+            parsed["baseline"].is_object(),
+            "baseline object must be present"
+        );
+        assert!(
+            parsed["attack"].is_object(),
+            "attack object must be present"
+        );
+        assert!(
+            parsed["divergences"].is_object(),
+            "divergences object must be present"
+        );
     });
 }
 
@@ -171,12 +187,12 @@ fn trailer_diff_sends_trailer_in_attack_request() {
 fn trailer_diff_against_unreachable_target_exits_1() {
     let (code, _stdout, stderr) = wafrift(&[
         "trailer-diff",
-        "--url", "http://127.0.0.1:1/",
-        "--timeout-secs", "2",
-        "--format", "json",
+        "--url",
+        "http://127.0.0.1:1/",
+        "--timeout-secs",
+        "2",
+        "--format",
+        "json",
     ]);
-    assert_eq!(
-        code, 1,
-        "unreachable target must exit 1; stderr:\n{stderr}"
-    );
+    assert_eq!(code, 1, "unreachable target must exit 1; stderr:\n{stderr}");
 }

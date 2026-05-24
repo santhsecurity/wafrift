@@ -5,11 +5,11 @@
 
 #[cfg(test)]
 mod state_coverage_tests {
-    use std::time::Duration;
     use crate::tui::state::{
-        Event, InputMode, OutcomeFilter, RequestRecord, State, Tab, TechStats,
-        TlsStats, Toast, ToastKind,
+        Event, InputMode, OutcomeFilter, RequestRecord, State, Tab, TechStats, TlsStats, Toast,
+        ToastKind,
     };
+    use std::time::Duration;
 
     // ─── helper ─────────────────────────────────────────────────────────
 
@@ -140,15 +140,33 @@ mod state_coverage_tests {
     fn request_record_outcome_block_and_pass() {
         // PROPERTY: blocked=true, bypassed=false → "BLOCK"; both false → "PASS".
         let base = RequestRecord {
-            timestamp: "t".into(), host: "h".into(), method: "GET".into(), path: "/".into(),
-            status: 403, bypassed: false, blocked: true, techniques: "".into(),
-            tls_profile: None, body_padded: false, upstream_latency_ms: 0,
-            waf_name: None, req_headers: vec![], req_body_excerpt: vec![],
-            req_headers_pre: vec![], req_body_pre_excerpt: vec![],
-            resp_headers: vec![], resp_body_excerpt: vec![], resp_body_total: 0, attempts: 1,
+            timestamp: "t".into(),
+            host: "h".into(),
+            method: "GET".into(),
+            path: "/".into(),
+            status: 403,
+            bypassed: false,
+            blocked: true,
+            techniques: "".into(),
+            tls_profile: None,
+            body_padded: false,
+            upstream_latency_ms: 0,
+            waf_name: None,
+            req_headers: vec![],
+            req_body_excerpt: vec![],
+            req_headers_pre: vec![],
+            req_body_pre_excerpt: vec![],
+            resp_headers: vec![],
+            resp_body_excerpt: vec![],
+            resp_body_total: 0,
+            attempts: 1,
         };
         assert_eq!(base.outcome(), "BLOCK");
-        let pass = RequestRecord { blocked: false, status: 200, ..base };
+        let pass = RequestRecord {
+            blocked: false,
+            status: 200,
+            ..base
+        };
         assert_eq!(pass.outcome(), "PASS");
     }
 
@@ -159,16 +177,32 @@ mod state_coverage_tests {
         // PROPERTY: technique_keys must split on commas and strip
         // whitespace — the TUI uses this for the per-technique stats.
         let rec = RequestRecord {
-            timestamp: "t".into(), host: "h".into(), method: "GET".into(), path: "/".into(),
-            status: 200, bypassed: true, blocked: false,
+            timestamp: "t".into(),
+            host: "h".into(),
+            method: "GET".into(),
+            path: "/".into(),
+            status: 200,
+            bypassed: true,
+            blocked: false,
             techniques: "encoding:UrlEncode, grammar:cmd, header:obf".into(),
-            tls_profile: None, body_padded: false, upstream_latency_ms: 0,
-            waf_name: None, req_headers: vec![], req_body_excerpt: vec![],
-            req_headers_pre: vec![], req_body_pre_excerpt: vec![],
-            resp_headers: vec![], resp_body_excerpt: vec![], resp_body_total: 0, attempts: 1,
+            tls_profile: None,
+            body_padded: false,
+            upstream_latency_ms: 0,
+            waf_name: None,
+            req_headers: vec![],
+            req_body_excerpt: vec![],
+            req_headers_pre: vec![],
+            req_body_pre_excerpt: vec![],
+            resp_headers: vec![],
+            resp_body_excerpt: vec![],
+            resp_body_total: 0,
+            attempts: 1,
         };
         let keys: Vec<&str> = rec.technique_keys().collect();
-        assert_eq!(keys, vec!["encoding:UrlEncode", "grammar:cmd", "header:obf"]);
+        assert_eq!(
+            keys,
+            vec!["encoding:UrlEncode", "grammar:cmd", "header:obf"]
+        );
     }
 
     #[test]
@@ -176,12 +210,26 @@ mod state_coverage_tests {
         // PROPERTY: an empty techniques string must yield zero keys — the
         // TUI must not count an empty key as a technique.
         let rec = RequestRecord {
-            timestamp: "t".into(), host: "h".into(), method: "GET".into(), path: "/".into(),
-            status: 200, bypassed: false, blocked: false, techniques: "".into(),
-            tls_profile: None, body_padded: false, upstream_latency_ms: 0,
-            waf_name: None, req_headers: vec![], req_body_excerpt: vec![],
-            req_headers_pre: vec![], req_body_pre_excerpt: vec![],
-            resp_headers: vec![], resp_body_excerpt: vec![], resp_body_total: 0, attempts: 1,
+            timestamp: "t".into(),
+            host: "h".into(),
+            method: "GET".into(),
+            path: "/".into(),
+            status: 200,
+            bypassed: false,
+            blocked: false,
+            techniques: "".into(),
+            tls_profile: None,
+            body_padded: false,
+            upstream_latency_ms: 0,
+            waf_name: None,
+            req_headers: vec![],
+            req_body_excerpt: vec![],
+            req_headers_pre: vec![],
+            req_body_pre_excerpt: vec![],
+            resp_headers: vec![],
+            resp_body_excerpt: vec![],
+            resp_body_total: 0,
+            attempts: 1,
         };
         assert_eq!(rec.technique_keys().count(), 0);
     }
@@ -202,7 +250,11 @@ mod state_coverage_tests {
         let mut s = State::new();
         for lat in [10u64, 20, 30] {
             let mut e = req_with("h", "/", 200, false, "");
-            if let Event::Request { upstream_latency_ms, .. } = &mut e {
+            if let Event::Request {
+                upstream_latency_ms,
+                ..
+            } = &mut e
+            {
                 *upstream_latency_ms = lat;
             }
             s.record(&e);
@@ -276,8 +328,8 @@ mod state_coverage_tests {
         // first record that passes the active filter — not index 0
         // unconditionally (filters may exclude the head of the ring).
         let mut s = State::new();
-        s.record(&req_with("a.com", "/x", 403, false, ""));  // block — index 0
-        s.record(&req_with("a.com", "/y", 200, true, ""));   // bypass — index 1
+        s.record(&req_with("a.com", "/x", 403, false, "")); // block — index 0
+        s.record(&req_with("a.com", "/y", 200, true, "")); // bypass — index 1
         s.outcome_filter = OutcomeFilter::BypassOnly;
         s.select_first();
         // Only index 1 is visible; select_first must land on it.
@@ -407,17 +459,41 @@ mod state_coverage_tests {
         // PROPERTY: `OutcomeFilter::All.matches` must always return true —
         // no filtering when the operator has not selected a specific outcome.
         let rec = RequestRecord {
-            timestamp: "t".into(), host: "h".into(), method: "GET".into(), path: "/".into(),
-            status: 200, bypassed: true, blocked: false, techniques: "".into(),
-            tls_profile: None, body_padded: false, upstream_latency_ms: 0,
-            waf_name: None, req_headers: vec![], req_body_excerpt: vec![],
-            req_headers_pre: vec![], req_body_pre_excerpt: vec![],
-            resp_headers: vec![], resp_body_excerpt: vec![], resp_body_total: 0, attempts: 1,
+            timestamp: "t".into(),
+            host: "h".into(),
+            method: "GET".into(),
+            path: "/".into(),
+            status: 200,
+            bypassed: true,
+            blocked: false,
+            techniques: "".into(),
+            tls_profile: None,
+            body_padded: false,
+            upstream_latency_ms: 0,
+            waf_name: None,
+            req_headers: vec![],
+            req_body_excerpt: vec![],
+            req_headers_pre: vec![],
+            req_body_pre_excerpt: vec![],
+            resp_headers: vec![],
+            resp_body_excerpt: vec![],
+            resp_body_total: 0,
+            attempts: 1,
         };
         assert!(OutcomeFilter::All.matches(&rec));
-        let blocked = RequestRecord { bypassed: false, blocked: true, status: 403, ..rec.clone() };
+        let blocked = RequestRecord {
+            bypassed: false,
+            blocked: true,
+            status: 403,
+            ..rec.clone()
+        };
         assert!(OutcomeFilter::All.matches(&blocked));
-        let pass = RequestRecord { bypassed: false, blocked: false, status: 200, ..rec.clone() };
+        let pass = RequestRecord {
+            bypassed: false,
+            blocked: false,
+            status: 200,
+            ..rec.clone()
+        };
         assert!(OutcomeFilter::All.matches(&pass));
     }
 
@@ -452,7 +528,8 @@ mod state_coverage_tests {
         for t in Tab::ORDER {
             assert!(
                 seen.insert(t.label()),
-                "duplicate tab in ORDER: {:?}", t.label()
+                "duplicate tab in ORDER: {:?}",
+                t.label()
             );
         }
     }

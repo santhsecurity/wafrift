@@ -73,9 +73,15 @@ fn every_name_is_lowercase_ascii_snake_case() {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "tamper `{name}` not snake_case"
         );
-        assert!(!name.starts_with('_'), "tamper `{name}` starts with underscore");
+        assert!(
+            !name.starts_with('_'),
+            "tamper `{name}` starts with underscore"
+        );
         assert!(!name.ends_with('_'), "tamper `{name}` ends with underscore");
-        assert!(!name.contains("__"), "tamper `{name}` has double underscore");
+        assert!(
+            !name.contains("__"),
+            "tamper `{name}` has double underscore"
+        );
     }
 }
 
@@ -110,7 +116,10 @@ fn every_aggressiveness_finite_in_range() {
         let a = s.aggressiveness();
         assert!(!a.is_nan(), "{name} aggressiveness is NaN");
         assert!(a.is_finite(), "{name} aggressiveness is not finite");
-        assert!((0.0..=1.0).contains(&a), "{name} aggressiveness {a} out of [0,1]");
+        assert!(
+            (0.0..=1.0).contains(&a),
+            "{name} aggressiveness {a} out of [0,1]"
+        );
     }
 }
 
@@ -262,9 +271,8 @@ fn every_tamper_returns_valid_utf8_for_keyword_payload() {
     let p = "UNION SELECT * FROM users WHERE id=1";
     for name in all_default_names() {
         let out = tamper(name, p, None).unwrap();
-        std::str::from_utf8(out.as_bytes()).unwrap_or_else(|_| {
-            panic!("{name} produced invalid UTF-8 on `{p}`")
-        });
+        std::str::from_utf8(out.as_bytes())
+            .unwrap_or_else(|_| panic!("{name} produced invalid UTF-8 on `{p}`"));
     }
 }
 
@@ -273,9 +281,8 @@ fn every_tamper_returns_valid_utf8_for_unicode_payload() {
     let p = "café 日本語 🔥";
     for name in all_default_names() {
         let out = tamper(name, p, None).unwrap();
-        std::str::from_utf8(out.as_bytes()).unwrap_or_else(|_| {
-            panic!("{name} produced invalid UTF-8 on unicode payload")
-        });
+        std::str::from_utf8(out.as_bytes())
+            .unwrap_or_else(|_| panic!("{name} produced invalid UTF-8 on unicode payload"));
     }
 }
 
@@ -284,9 +291,8 @@ fn every_tamper_returns_valid_utf8_for_xss() {
     let p = "<script>alert('XSS')</script>";
     for name in all_default_names() {
         let out = tamper(name, p, None).unwrap();
-        std::str::from_utf8(out.as_bytes()).unwrap_or_else(|_| {
-            panic!("{name} produced invalid UTF-8 on XSS payload")
-        });
+        std::str::from_utf8(out.as_bytes())
+            .unwrap_or_else(|_| panic!("{name} produced invalid UTF-8 on XSS payload"));
     }
 }
 
@@ -304,9 +310,9 @@ const SECOND_PASS_FUDGE: usize = 64;
 /// need explicit per-strategy caps; the default 4× applies to the rest.
 fn second_pass_cap(name: &str, once_len: usize) -> usize {
     let mult = match name {
-        "unicode_escape" => 36,           // 6× per pass × 6× → 36
-        "html_entity_variants" => 100,    // documented 10× per pass
-        "html_entity" => 36,              // 6× → 36
+        "unicode_escape" => 36,        // 6× per pass × 6× → 36
+        "html_entity_variants" => 100, // documented 10× per pass
+        "html_entity" => 36,           // 6× → 36
         "url_encode" => 9,
         "double_url_encode" => 81,
         "base64" => 16,
@@ -314,7 +320,9 @@ fn second_pass_cap(name: &str, once_len: usize) -> usize {
         "overlong_utf8" => 16,
         _ => 4,
     };
-    once_len.saturating_mul(mult).saturating_add(SECOND_PASS_FUDGE)
+    once_len
+        .saturating_mul(mult)
+        .saturating_add(SECOND_PASS_FUDGE)
 }
 
 #[test]

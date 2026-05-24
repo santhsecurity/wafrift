@@ -579,9 +579,8 @@ pub enum EvasionError {
 /// converts the canonical None into the existing EvasionError
 /// variant so this call's contract is unchanged.
 fn extract_host(url: &str) -> Result<String, EvasionError> {
-    let h = crate::url_util::host_from_url(url).ok_or_else(|| {
-        EvasionError::InvalidUrl(format!("could not extract host from {url:?}"))
-    })?;
+    let h = crate::url_util::host_from_url(url)
+        .ok_or_else(|| EvasionError::InvalidUrl(format!("could not extract host from {url:?}")))?;
 
     Ok(h)
 }

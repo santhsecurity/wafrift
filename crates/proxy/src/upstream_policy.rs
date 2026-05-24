@@ -88,7 +88,9 @@ pub async fn resolve_forward_url_pinned(
 ) -> Result<Vec<SocketAddr>, String> {
     if policy.insecure_open_upstream || policy.allow_private_upstream {
         let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
-        let host = u.host_str().ok_or_else(|| "upstream URL has no host".to_string())?;
+        let host = u
+            .host_str()
+            .ok_or_else(|| "upstream URL has no host".to_string())?;
         let port = u.port_or_known_default().unwrap_or(80);
         if let Ok(ip) = host.parse::<IpAddr>() {
             return Ok(vec![SocketAddr::new(ip, port)]);
@@ -108,7 +110,9 @@ pub async fn resolve_forward_url_pinned(
         ));
     }
     let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
-    let host = u.host_str().ok_or_else(|| "upstream URL has no host".to_string())?;
+    let host = u
+        .host_str()
+        .ok_or_else(|| "upstream URL has no host".to_string())?;
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(vec![SocketAddr::new(
             ip,

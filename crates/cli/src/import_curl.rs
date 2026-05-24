@@ -445,14 +445,13 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
         .unwrap_or(if parsed.body.is_some() { "POST" } else { "GET" });
 
     // Benign probe — fires the parsed request verbatim.
-    let (status, headers, body) =
-        match send_parsed(&client, method, target, parsed).await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("error: request to {target} failed: {e}");
-                return ExitCode::from(1);
-            }
-        };
+    let (status, headers, body) = match send_parsed(&client, method, target, parsed).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: request to {target} failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
     eprintln!(
         "probe: {method} {target} → HTTP {status} ({} headers)",
         headers.len()
@@ -514,12 +513,8 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
         Err(e) => {
             // Don't fail the whole detect just because the second
             // probe couldn't fire; surface the static result alone.
-            eprintln!(
-                "warn: differential probe failed: {e} — falling back to static-only verdict"
-            );
-            println!(
-                "No WAF confidently detected on the parsed request (HTTP {status})."
-            );
+            eprintln!("warn: differential probe failed: {e} — falling back to static-only verdict");
+            println!("No WAF confidently detected on the parsed request (HTTP {status}).");
         }
     }
     ExitCode::SUCCESS
@@ -775,7 +770,9 @@ mod tests {
             cookie: Some("sess=abc".into()),
             body: None,
         };
-        let (status, _hdrs, _body) = send_parsed(&client, "GET", &url, &parsed).await.expect("send");
+        let (status, _hdrs, _body) = send_parsed(&client, "GET", &url, &parsed)
+            .await
+            .expect("send");
         assert_eq!(status, 200);
         let captured = server.join().expect("server thread").to_ascii_lowercase();
         // The captured request must contain every parsed-curl header.

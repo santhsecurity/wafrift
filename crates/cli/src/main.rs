@@ -6,45 +6,45 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 
+mod attack_cmd;
 mod bank;
 mod bank_registry;
 mod bench_diff;
 mod bench_waf;
+mod body_diff_cmd;
 mod bypass_probe;
+mod cache_diff_cmd;
 mod callback_token;
 mod compress_cmd;
 mod config;
+mod cors_diff_cmd;
 mod detect_cmd;
 mod discover_cmd;
+mod distill_cmd;
 mod egress_example;
 mod equiv_engine;
 mod evade_cmd;
 mod explain;
-mod attack_cmd;
-mod body_diff_cmd;
-mod cache_diff_cmd;
-mod cors_diff_cmd;
-mod distill_cmd;
 mod gql_diff_cmd;
 mod h2_diff_cmd;
 mod header_diff_cmd;
 mod helpers;
-#[cfg(feature = "tls-impersonate")]
-mod ja3_diff_cmd;
-mod jwt_diff_cmd;
-mod method_diff_cmd;
-mod parser_diff_common;
-mod query_diff_cmd;
 mod import_curl;
 mod init_cmd;
 mod interactive;
+#[cfg(feature = "tls-impersonate")]
+mod ja3_diff_cmd;
+mod jwt_diff_cmd;
 mod legendary;
 mod listener_cmd;
 mod man_cmd;
+mod method_diff_cmd;
 mod origin_hints;
 mod parser_diff_cmd;
+mod parser_diff_common;
 mod probe_classify;
 mod probe_cmd;
+mod query_diff_cmd;
 mod raw_request;
 mod recon_cmd;
 mod replay;
@@ -56,8 +56,8 @@ mod seed;
 mod session_init;
 mod smuggle_cmd;
 mod target_context;
-mod trailer_diff_cmd;
 mod technique_filter;
+mod trailer_diff_cmd;
 mod wafmodel_cmd;
 
 // All per-command helpers are imported by their command modules now.
@@ -91,6 +91,13 @@ struct Cli {
     command: Option<Commands>,
 }
 
+// large_enum_variant: the Commands enum holds heterogeneous CLI Args
+// structs (some 500+ bytes for the rich scan/bench/proxy flag sets,
+// others ~16 bytes for trivial subcommands). Boxing each variant
+// would slow every dispatch by an indirection and complicate clap
+// derive macros for no operational benefit — Commands is matched
+// once per invocation, not on a hot path.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Transform a payload with evasion techniques.
@@ -99,6 +106,7 @@ enum Commands {
     ///
     /// Two invocations work:
     ///
+    /// ```text
     ///   wafrift detect --url https://target.com
     ///     — fetches once, runs all four detection axes (HTTP
     ///       headers + body, DNS CNAME chain, reverse-DNS PTR,
@@ -108,6 +116,7 @@ enum Commands {
     ///                  --headers 'CF-Ray: x' --body '<html>...'
     ///     — feed a prior curl/Burp capture's response triple
     ///       directly (no network call).
+    /// ```
     ///
     /// Exactly ONE mode required; --url is mutually exclusive with
     /// --status / --headers.  Use `wafrift detect --help` for the
@@ -595,9 +604,7 @@ impl ScanArgs {
     /// invariant).
     #[must_use]
     pub fn resolved_target(&self) -> Option<&str> {
-        self.target_positional
-            .as_deref()
-            .or(self.target.as_deref())
+        self.target_positional.as_deref().or(self.target.as_deref())
     }
 }
 
@@ -940,9 +947,10 @@ fn main() -> ExitCode {
                     }
                 } else if sel.starts_with("encoding/") {
                     // Find any strategy whose path matches.
-                    let found = wafrift_encoding::all_strategies().iter().copied().find(|s| {
-                        technique_filter::strategy_path(*s) == sel
-                    });
+                    let found = wafrift_encoding::all_strategies()
+                        .iter()
+                        .copied()
+                        .find(|s| technique_filter::strategy_path(*s) == sel);
                     if let Some(s) = found {
                         println!(
                             "{}: encoding strategy (aggressiveness {:.2})",

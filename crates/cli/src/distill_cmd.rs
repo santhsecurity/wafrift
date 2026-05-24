@@ -223,11 +223,7 @@ pub async fn run_distill(args: DistillArgs, cancel: CancellationToken) -> ExitCo
         }
     } else {
         println!();
-        println!(
-            "  {} {}",
-            "Original payload:".bold(),
-            args.payload.yellow()
-        );
+        println!("  {} {}", "Original payload:".bold(), args.payload.yellow());
         println!("  {} {} chars", "Length:".bold(), original_len);
         println!();
         println!(
@@ -293,7 +289,10 @@ where
 
         // 1) Subset pass — try each chunk in isolation. Only accept
         // candidates STRICTLY SHORTER than current; anything else
-        // is not a reduction.
+        // is not a reduction. `n` is mutated inside the loop body
+        // but every mutation is followed by `break`, so the
+        // range-bound clippy warning is a false positive.
+        #[allow(clippy::mut_range_bound)]
         for i in 0..n {
             let start = i * chunk_size;
             if start >= current.len() {
@@ -318,6 +317,8 @@ where
 
         // 2) Complement pass — try removing each chunk. Always
         // strictly shorter as long as the chunk is non-empty.
+        // Same break-after-mutation pattern as pass 1.
+        #[allow(clippy::mut_range_bound)]
         for i in 0..n {
             let start = i * chunk_size;
             if start >= current.len() {
@@ -365,11 +366,7 @@ async fn fire_and_check(
     payload: &str,
 ) -> Result<bool, String> {
     let url = scan_url_with_param(target, param, &urlencoding_encode(payload));
-    let resp = http
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("{e}"))?;
+    let resp = http.get(&url).send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
     let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
     Ok(!is_waf_block(status, &body))
@@ -425,9 +422,10 @@ mod tests {
     #[tokio::test]
     async fn ddmin_reduces_to_both_load_bearing_chars_when_test_requires_both() {
         // Predicate: must contain BOTH 'X' AND 'Y'.
-        let result = ddmin("aXbcdYef", |s| async move {
-            s.contains('X') && s.contains('Y')
-        })
+        let result = ddmin(
+            "aXbcdYef",
+            |s| async move { s.contains('X') && s.contains('Y') },
+        )
         .await;
         // Should reduce to the minimum subset that contains both —
         // 'XY' or 'XbcdY' or shorter. Both load-bearing chars must
@@ -487,16 +485,13 @@ mod tests {
         // accidentally-quadratic implementation.
         let calls = Arc::new(AtomicU32::new(0));
         let calls_c = calls.clone();
-        let _ = ddmin(
-            "abcdefghijklmnopqrstuvwxyz",
-            move |s: String| {
-                let calls = calls_c.clone();
-                async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    s.contains('m')
-                }
-            },
-        )
+        let _ = ddmin("abcdefghijklmnopqrstuvwxyz", move |s: String| {
+            let calls = calls_c.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                s.contains('m')
+            }
+        })
         .await;
         let n = calls.load(Ordering::SeqCst);
         // 26-byte input, 1 load-bearing byte. ddmin in O(n log n)
@@ -534,13 +529,9 @@ mod tests {
 
     // ── Live mock-WAF integration ────────────────────────────
 
-    async fn spawn_mock_waf_blocking_on_substring(
-        magic: &'static str,
-    ) -> std::net::SocketAddr {
+    async fn spawn_mock_waf_blocking_on_substring(magic: &'static str) -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
@@ -622,10 +613,7 @@ mod tests {
 
     #[test]
     fn urlencoding_encode_passes_unreserved_chars_through() {
-        assert_eq!(
-            urlencoding_encode("AbZ0-9_.~"),
-            "AbZ0-9_.~"
-        );
+        assert_eq!(urlencoding_encode("AbZ0-9_.~"), "AbZ0-9_.~");
     }
 
     #[test]

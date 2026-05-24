@@ -175,11 +175,16 @@ mod tests {
     fn render_shows_table_headers() {
         let s = State::new();
         let buf = render(140, 12, &s);
-        for header in ["HOST", "WAF", "SENT", "BLOCKED", "BYPASSED", "BYPASS%", "TOP TECHNIQUE"] {
-            assert!(
-                buf.contains(header),
-                "expected header `{header}` in: {buf}"
-            );
+        for header in [
+            "HOST",
+            "WAF",
+            "SENT",
+            "BLOCKED",
+            "BYPASSED",
+            "BYPASS%",
+            "TOP TECHNIQUE",
+        ] {
+            assert!(buf.contains(header), "expected header `{header}` in: {buf}");
         }
     }
 

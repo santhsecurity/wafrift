@@ -38,8 +38,7 @@ use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::rate_limit::RateLimiter;
 use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
-    BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed,
-    resolve_forward_url_pinned,
+    BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed, resolve_forward_url_pinned,
 };
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
@@ -1525,14 +1524,14 @@ async fn forward_wafrift_request(
 
     // Pin upstream addresses before intercept so a long operator wait
     // cannot reopen DNS-rebinding TOCTOU on the stealth TLS path.
-    let pinned_upstream = match resolve_forward_url_pinned(&evasion_result.request.url, &policy).await
-    {
-        Ok(v) => v,
-        Err(msg) => {
-            warn!(host = %host, url = %evasion_result.request.url, "{}", msg);
-            return Ok(error_response(StatusCode::FORBIDDEN, &msg));
-        }
-    };
+    let pinned_upstream =
+        match resolve_forward_url_pinned(&evasion_result.request.url, &policy).await {
+            Ok(v) => v,
+            Err(msg) => {
+                warn!(host = %host, url = %evasion_result.request.url, "{}", msg);
+                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+            }
+        };
 
     // ── Operator intercept rendezvous (#119) ────────────────────────
     // When intercept-mode is on, park here until the operator

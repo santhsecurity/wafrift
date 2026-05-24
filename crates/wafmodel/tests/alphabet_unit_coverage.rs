@@ -5,10 +5,12 @@
 //! foundational type every learner, oracle, and bypass miner depends on.
 //! A bug here propagates to every downstream correctness property.
 
-use wafrift_wafmodel::{Alphabet, l_star_budgeted, BoundedExhaustiveEq, EquivalenceOracle, WafOracle, Outcome};
-use wafrift_wafmodel::oracle::{Rule, ChannelSet, SimRegexWaf};
-use wafrift_wafmodel::canon::Channel;
 use wafrift_types::Request;
+use wafrift_wafmodel::canon::Channel;
+use wafrift_wafmodel::oracle::{ChannelSet, Rule, SimRegexWaf};
+use wafrift_wafmodel::{
+    Alphabet, BoundedExhaustiveEq, EquivalenceOracle, Outcome, WafOracle, l_star_budgeted,
+};
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -200,9 +202,15 @@ fn guard_for_catch_all_covers_non_distinguished_bytes() {
         "catch-all guard must not contain distinguished byte '>'"
     );
     // The catch-all must cover the representative byte 'A'.
-    assert!(g_ca.contains(b'A'), "catch-all guard must contain the representative byte 'A'");
+    assert!(
+        g_ca.contains(b'A'),
+        "catch-all guard must contain the representative byte 'A'"
+    );
     // It must also cover any byte not in {<, >}.
-    assert!(g_ca.contains(b'B'), "catch-all guard must cover non-distinguished bytes");
+    assert!(
+        g_ca.contains(b'B'),
+        "catch-all guard must cover non-distinguished bytes"
+    );
 }
 
 #[test]

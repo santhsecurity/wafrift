@@ -48,6 +48,26 @@ status = "beta"
 unsafe_code = "warn"
 unused_must_use = "deny"
 
+# Clippy lints the workspace explicitly opts out of. Each entry has
+# a reason — drift the policy by editing this block, not by sprinkling
+# `#[allow]` attributes across the codebase.
+[workspace.lints.clippy]
+# Orchestrator functions (scan::run_scan + raw_runner + a few CLI
+# entry points) thread 8-14 argument values through their phase
+# pipelines because each is an operator-provided CLI knob.
+# Refactoring into a single Args struct costs more documentation
+# than it saves; the wide signatures are pinned to the CLI flag
+# surface deliberately.
+too_many_arguments = "allow"
+# Build-time regression gates (e.g. `MAX_TUNNEL_BYTES_PER_DIRECTION
+# < u64::MAX/1000`, `DELIVERY_ARMS >= 7`) intentionally assert on
+# constants; clippy's `assertions_on_constants` would erase the gate.
+assertions_on_constants = "allow"
+# Doc comments use `///   - sub-bullet` (3-space indent) in several
+# places; the lint wants 2-space which conflicts with rustfmt's
+# wrap behaviour. We already enforce rustfmt — let it win.
+doc_lazy_continuation = "allow"
+
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)
 wafrift-types = { path = "crates/types", version = "0.2.17" }

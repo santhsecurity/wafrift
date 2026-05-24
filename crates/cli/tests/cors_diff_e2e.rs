@@ -20,7 +20,7 @@ async fn spawn_cors_mock() -> std::net::SocketAddr {
                 let origin = req
                     .lines()
                     .find(|l| l.to_ascii_lowercase().starts_with("origin:"))
-                    .and_then(|l| l.splitn(2, ':').nth(1))
+                    .and_then(|l| l.split_once(':').map(|x| x.1))
                     .map(|s| s.trim().to_string())
                     .unwrap_or_default();
                 let extra = if origin.is_empty() {
@@ -77,8 +77,7 @@ fn cors_diff_finds_high_severity_on_reflective_mock() {
         "0",
     ]);
     assert_eq!(code, 0, "cors-diff exit 0 — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let high = p["divergences"]["high"].as_u64().unwrap_or(0);
     assert!(
         high > 0,

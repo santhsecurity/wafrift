@@ -6,7 +6,7 @@
 //!
 //! # Module structure
 //!
-//! - [`state`] — `ScanState` (mutable counters) and `ScanConfig` (immutable args)
+//! - `state` — `ScanState` (mutable counters) and `ScanConfig` (immutable args)
 //! - this module (`mod.rs`) — the `run_scan` orchestrator and step functions
 
 pub(crate) mod baseline;
@@ -158,7 +158,12 @@ pub(crate) fn render_summary_text_block(
         "{}",
         "══════════════════════════════════════════════════".bright_cyan()
     );
-    let _ = writeln!(out, "  {} {}", "WAF:".bold().cyan(), waf_name.bold().yellow());
+    let _ = writeln!(
+        out,
+        "  {} {}",
+        "WAF:".bold().cyan(),
+        waf_name.bold().yellow()
+    );
     let _ = writeln!(
         out,
         "  {} {}",
@@ -195,20 +200,17 @@ pub(crate) fn render_summary_text_block(
         out,
         "  {} {}",
         "Bypass Rate:".bold().cyan(),
-        format!("{bypass_rate:.1}%").bold().color(if bypass_rate > 50.0 {
-            colored::Color::BrightGreen
-        } else if bypass_rate > 20.0 {
-            colored::Color::Yellow
-        } else {
-            colored::Color::Red
-        })
+        format!("{bypass_rate:.1}%")
+            .bold()
+            .color(if bypass_rate > 50.0 {
+                colored::Color::BrightGreen
+            } else if bypass_rate > 20.0 {
+                colored::Color::Yellow
+            } else {
+                colored::Color::Red
+            })
     );
-    let _ = writeln!(
-        out,
-        "  {} {:.1}s",
-        "Elapsed:".bold().cyan(),
-        elapsed_secs
-    );
+    let _ = writeln!(out, "  {} {:.1}s", "Elapsed:".bold().cyan(), elapsed_secs);
     let _ = writeln!(
         out,
         "{}",
@@ -580,10 +582,7 @@ pub(crate) async fn run_scan(
                 estimate_scan_seconds(variants.len() / 4, args.delay_ms.min(50)),
             );
         } else {
-            eprintln!(
-                "  {} ~{estimate_secs}s",
-                "Estimated:".bold().cyan(),
-            );
+            eprintln!("  {} ~{estimate_secs}s", "Estimated:".bold().cyan(),);
         }
         println!();
     }
@@ -671,15 +670,11 @@ pub(crate) async fn run_scan(
     ) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!(
-                "  {} {e}",
-                "✗ pentest flag invalid:".red().bold(),
-            );
+            eprintln!("  {} {e}", "✗ pentest flag invalid:".red().bold(),);
             return ExitCode::from(1);
         }
     };
-    let http = match http_builder.build()
-    {
+    let http = match http_builder.build() {
         Ok(client) => client,
         Err(e) => {
             eprintln!(
@@ -832,7 +827,12 @@ pub(crate) async fn run_scan(
                         scan_url_with_param(target, &args.param, &urlencoding::encode(enc_payload));
                     if let Ok(resp) = http.get(&url).send().await {
                         let status = resp.status().as_u16();
-                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(
+                            resp,
+                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                        )
+                        .await
+                        .unwrap_or_default();
                         if !is_waf_block(status, &body) {
                             cache_hit_bypass = true;
                             bypassed += 1;
@@ -1098,7 +1098,12 @@ pub(crate) async fn run_scan(
                         } else {
                             None
                         };
-                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(
+                            resp,
+                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                        )
+                        .await
+                        .unwrap_or_default();
                         let ctx = ResponseContext {
                             status,
                             body: body.to_vec(),
@@ -1119,8 +1124,7 @@ pub(crate) async fn run_scan(
         // back to the existing exponential-backoff curve.
         let mut batch_retry_after: Option<Duration> = None;
         while let Some(result) = tasks.join_next().await {
-            let Ok((index, payload, techniques, confidence, verdict_opt, retry_after_opt)) =
-                result
+            let Ok((index, payload, techniques, confidence, verdict_opt, retry_after_opt)) = result
             else {
                 errors += 1;
                 continue;
@@ -1140,8 +1144,7 @@ pub(crate) async fn run_scan(
                 if let Some(d) = retry_after_opt {
                     batch_retry_after = Some(batch_retry_after.map_or(d, |b| b.max(d)));
                     retry_after_responses += 1;
-                    max_retry_after_obeyed =
-                        Some(max_retry_after_obeyed.map_or(d, |b| b.max(d)));
+                    max_retry_after_obeyed = Some(max_retry_after_obeyed.map_or(d, |b| b.max(d)));
                 }
                 if args.format == "text" {
                     print!("{}", "R".yellow());
@@ -1159,7 +1162,12 @@ pub(crate) async fn run_scan(
                 }
             } else {
                 bypassed += 1;
-                bypass_variants.push((total_fired, payload.clone(), techniques.clone(), confidence));
+                bypass_variants.push((
+                    total_fired,
+                    payload.clone(),
+                    techniques.clone(),
+                    confidence,
+                ));
                 // Record winning encoding strategies for exploitation.
                 for tech in &techniques {
                     if tech.starts_with("encoding::") {
@@ -1278,7 +1286,8 @@ pub(crate) async fn run_scan(
             // Honest hint > our guess. Both are already capped (the
             // header parser at MAX_OBEYED, the computed at 30 s).
             let base = batch_retry_after.map_or(computed, |ra| ra.max(computed));
-            let backoff = crate::retry_after::jittered(base, u32::try_from(total_fired).unwrap_or(u32::MAX));
+            let backoff =
+                crate::retry_after::jittered(base, u32::try_from(total_fired).unwrap_or(u32::MAX));
             if let Some(ra) = batch_retry_after {
                 eprintln!(
                     "[wafrift scan] obeying Retry-After: {} ms (server-named cooldown)",
@@ -1347,7 +1356,12 @@ pub(crate) async fn run_scan(
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(
+                            resp,
+                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                        )
+                        .await
+                        .unwrap_or_default();
                         oracle.classify(&ResponseContext {
                             status,
                             body: body.to_vec(),
@@ -1575,7 +1589,12 @@ pub(crate) async fn run_scan(
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(
+                            resp,
+                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                        )
+                        .await
+                        .unwrap_or_default();
                         is_waf_block(status, &body)
                     }
                     Err(_) => {
@@ -1650,7 +1669,12 @@ pub(crate) async fn run_scan(
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(
+                            resp,
+                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                        )
+                        .await
+                        .unwrap_or_default();
                         is_waf_block(status, &body)
                     }
                     Err(_) => {
@@ -1743,7 +1767,12 @@ pub(crate) async fn run_scan(
                     let is_blocked = match http.get(&url).send().await {
                         Ok(resp) => {
                             let status = resp.status().as_u16();
-                            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+                            let body = crate::safe_body::read_bounded(
+                                resp,
+                                crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                            )
+                            .await
+                            .unwrap_or_default();
                             is_waf_block(status, &body)
                         }
                         Err(_) => {
@@ -1999,7 +2028,12 @@ pub(crate) async fn run_scan(
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+                        let body = crate::safe_body::read_bounded(
+                            resp,
+                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                        )
+                        .await
+                        .unwrap_or_default();
                         oracle.classify(&ResponseContext {
                             status,
                             body: body.to_vec(),
@@ -2121,16 +2155,10 @@ pub(crate) async fn run_scan(
                         if cancel.is_cancelled() {
                             return false;
                         }
-                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                            >= cap
-                        {
+                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= cap {
                             return false;
                         }
-                        let url = scan_url_with_param(
-                            &t,
-                            &p,
-                            &urlencoding::encode(&candidate),
-                        );
+                        let url = scan_url_with_param(&t, &p, &urlencoding::encode(&candidate));
                         match http.get(&url).send().await {
                             Ok(resp) => {
                                 let status = resp.status().as_u16();
@@ -2144,10 +2172,8 @@ pub(crate) async fn run_scan(
                     }
                 }
             };
-            let minimum =
-                crate::distill_cmd::ddmin(original_payload, predicate).await;
-            auto_distill_fires_total +=
-                u64::from(fires.load(std::sync::atomic::Ordering::SeqCst));
+            let minimum = crate::distill_cmd::ddmin(original_payload, predicate).await;
+            auto_distill_fires_total += u64::from(fires.load(std::sync::atomic::Ordering::SeqCst));
             minimal_payloads[i] = Some(minimum);
         }
     }
@@ -2441,11 +2467,8 @@ pub(crate) async fn run_scan(
     // token was minted, delegate to `callback_poll::verify` which
     // hits the listener's /_wafrift/check/<TOKEN> management API.
     if let Some(ref pending) = callback_pending {
-        let verdict = callback_poll::verify(
-            pending,
-            Duration::from_secs(args.callback_timeout_secs),
-        )
-        .await;
+        let verdict =
+            callback_poll::verify(pending, Duration::from_secs(args.callback_timeout_secs)).await;
         if scan_text {
             match verdict {
                 callback_poll::CallbackVerdict::Verified => {
@@ -2533,10 +2556,7 @@ mod tests {
     #[test]
     fn scan_url_with_param_appends_query() {
         let url = scan_url_with_param("http://x/", "q", "abc");
-        assert!(
-            url.contains("q=abc"),
-            "expected q=abc in {url}"
-        );
+        assert!(url.contains("q=abc"), "expected q=abc in {url}");
     }
 
     #[test]
@@ -2622,7 +2642,14 @@ mod tests {
     #[test]
     fn render_summary_text_block_contains_all_top_level_counters() {
         let s = strip_ansi(&render_summary_text_block(
-            "Cloudflare", 30, 28, 25, 3, 1, 10.7, 4.2,
+            "Cloudflare",
+            30,
+            28,
+            25,
+            3,
+            1,
+            10.7,
+            4.2,
         ));
         // Every counter must surface — operator scrolling the
         // banner needs to see the absolute numbers AND the rate.
@@ -2643,7 +2670,10 @@ mod tests {
         ));
         // Errors row is conditional — zero errors means the row
         // doesn't render (less visual noise).
-        assert!(!s.contains("Errors:"), "Errors row must be hidden at 0:\n{s}");
+        assert!(
+            !s.contains("Errors:"),
+            "Errors row must be hidden at 0:\n{s}"
+        );
     }
 
     #[test]
@@ -2656,7 +2686,10 @@ mod tests {
         // bodies. This mirrors what the orchestrator would render
         // if it ever lost its guard.
         assert!(s.contains("Successful Bypasses:"));
-        assert!(!s.contains("Variant #"), "no per-variant lines on empty input:\n{s}");
+        assert!(
+            !s.contains("Variant #"),
+            "no per-variant lines on empty input:\n{s}"
+        );
     }
 
     #[test]
@@ -2688,12 +2721,7 @@ mod tests {
     #[test]
     fn build_bypass_variants_json_round_trips_payload_and_techniques() {
         let variants = vec![
-            (
-                1_usize,
-                "p1".to_string(),
-                vec!["url".to_string()],
-                0.9_f64,
-            ),
+            (1_usize, "p1".to_string(), vec!["url".to_string()], 0.9_f64),
             (
                 17_usize,
                 "/**/UNION/**/SELECT".to_string(),
@@ -2716,10 +2744,12 @@ mod tests {
         assert!(arr[0]["repro_curl"].as_str().unwrap_or("").contains("p1"));
         // minimal_repro_curl only populated when minimal_payload is.
         assert!(arr[0]["minimal_repro_curl"].is_null());
-        assert!(arr[1]["minimal_repro_curl"]
-            .as_str()
-            .unwrap_or("")
-            .contains("UNION SELECT"));
+        assert!(
+            arr[1]["minimal_repro_curl"]
+                .as_str()
+                .unwrap_or("")
+                .contains("UNION SELECT")
+        );
     }
 
     #[test]
@@ -2754,16 +2784,21 @@ mod tests {
             layered["layer_report"]["detection"]["chosen_waf"],
             "Cloudflare"
         );
-        assert_eq!(layered["layer_report"]["baseline_probe"]["raw_get_status"], 403);
+        assert_eq!(
+            layered["layer_report"]["baseline_probe"]["raw_get_status"],
+            403
+        );
         assert_eq!(
             layered["layer_report"]["evasion_campaign"]["variants_generated"],
             50
         );
-        assert!((layered["layer_report"]["evasion_campaign"]["bypass_rate_pct"]
-            .as_f64()
-            .unwrap()
-            - 6.0)
-            .abs()
-            < 1e-9);
+        assert!(
+            (layered["layer_report"]["evasion_campaign"]["bypass_rate_pct"]
+                .as_f64()
+                .unwrap()
+                - 6.0)
+                .abs()
+                < 1e-9
+        );
     }
 }

@@ -40,8 +40,7 @@ pub fn run_man(args: ManArgs) -> ExitCode {
             Some(c) => c,
             None => {
                 let cmd = Cli::command();
-                let names: Vec<&str> =
-                    cmd.get_subcommands().map(clap::Command::get_name).collect();
+                let names: Vec<&str> = cmd.get_subcommands().map(clap::Command::get_name).collect();
                 eprintln!("error: unknown subcommand {name:?}. Available: {names:?}");
                 return ExitCode::from(1);
             }
@@ -93,9 +92,6 @@ mod tests {
         // Use the Debug repr smoke: a SUCCESS value would print
         // "ExitCode(unix_exit_status(0))"; a 1 prints "(1)".
         let s = format!("{code:?}");
-        assert!(
-            s.contains("1"),
-            "unknown subcommand should exit 1, got {s}"
-        );
+        assert!(s.contains("1"), "unknown subcommand should exit 1, got {s}");
     }
 }

@@ -142,14 +142,14 @@ pub struct HeaderDiffResult {
 /// Generate the full header-disagreement variant set. Pure
 /// function — no I/O, deterministic, testable in isolation.
 #[must_use]
+#[allow(clippy::vec_init_then_push)] // builder pattern reads better one push! per case
 pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
     let mut out = Vec::new();
 
     // ── 1. Duplicate X-Forwarded-For: which value does the WAF see? ──
     out.push(HeaderDisagreement {
         kind: "dup-xff-first-vs-last",
-        description:
-            "Two X-Forwarded-For headers — some parsers use the first, others the last; \
+        description: "Two X-Forwarded-For headers — some parsers use the first, others the last; \
              spoof client IP if WAF allowlists by IP",
         headers: vec![
             ("X-Forwarded-For".into(), "10.0.0.1".into()),
@@ -198,8 +198,7 @@ pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
     });
     out.push(HeaderDisagreement {
         kind: "leading-ws-value",
-        description:
-            "X-Real-User with leading whitespace — same idea, opposite end",
+        description: "X-Real-User with leading whitespace — same idea, opposite end",
         headers: vec![("X-Real-User".into(), "   admin".into())],
     });
 
@@ -241,8 +240,7 @@ pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
     // ── 6. Cookie smuggling via dup-header ──
     out.push(HeaderDisagreement {
         kind: "dup-cookie-attack-first",
-        description:
-            "Two Cookie headers — most clients join with `; `, but some servers see them \
+        description: "Two Cookie headers — most clients join with `; `, but some servers see them \
              separately; smuggle an extra session cookie past the WAF's first-cookie check",
         headers: vec![
             ("Cookie".into(), "session=attacker; role=admin".into()),
@@ -266,8 +264,7 @@ pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
     });
     out.push(HeaderDisagreement {
         kind: "x-originating-ip-localhost",
-        description:
-            "X-Originating-IP localhost spoof — variation seen in Exchange / IIS stacks",
+        description: "X-Originating-IP localhost spoof — variation seen in Exchange / IIS stacks",
         headers: vec![("X-Originating-IP".into(), "127.0.0.1".into())],
     });
     out.push(HeaderDisagreement {
@@ -527,7 +524,11 @@ mod tests {
     fn generate_header_variants_returns_non_empty_curated_set() {
         let v = generate_header_variants();
         assert!(!v.is_empty(), "must have ≥1 variant");
-        assert!(v.len() >= 14, "expected at least 14 curated probes, got {}", v.len());
+        assert!(
+            v.len() >= 14,
+            "expected at least 14 curated probes, got {}",
+            v.len()
+        );
     }
 
     #[test]
@@ -570,22 +571,28 @@ mod tests {
 
     #[test]
     fn generate_header_variants_covers_dup_xff_family() {
-        let kinds: Vec<&str> = generate_header_variants()
-            .iter()
-            .map(|p| p.kind)
-            .collect();
-        assert!(kinds.iter().any(|k| k.contains("xff")), "must cover XFF family: {kinds:?}");
-        assert!(kinds.iter().any(|k| k.contains("authorization")), "must cover Authorization family");
-        assert!(kinds.iter().any(|k| k.contains("cookie")), "must cover Cookie family");
-        assert!(kinds.iter().any(|k| k.contains("host")), "must cover Host family");
+        let kinds: Vec<&str> = generate_header_variants().iter().map(|p| p.kind).collect();
+        assert!(
+            kinds.iter().any(|k| k.contains("xff")),
+            "must cover XFF family: {kinds:?}"
+        );
+        assert!(
+            kinds.iter().any(|k| k.contains("authorization")),
+            "must cover Authorization family"
+        );
+        assert!(
+            kinds.iter().any(|k| k.contains("cookie")),
+            "must cover Cookie family"
+        );
+        assert!(
+            kinds.iter().any(|k| k.contains("host")),
+            "must cover Host family"
+        );
     }
 
     #[test]
     fn generate_header_variants_includes_obscure_proxy_chain_spoofs() {
-        let kinds: Vec<&str> = generate_header_variants()
-            .iter()
-            .map(|p| p.kind)
-            .collect();
+        let kinds: Vec<&str> = generate_header_variants().iter().map(|p| p.kind).collect();
         // The IP-spoofing surface — covered fully.
         for needed in [
             "x-real-ip-localhost",
@@ -603,10 +610,7 @@ mod tests {
 
     #[test]
     fn generate_header_variants_includes_http_method_override_attack_surface() {
-        let kinds: Vec<&str> = generate_header_variants()
-            .iter()
-            .map(|p| p.kind)
-            .collect();
+        let kinds: Vec<&str> = generate_header_variants().iter().map(|p| p.kind).collect();
         assert!(
             kinds.iter().any(|k| k.contains("method-override")),
             "must include X-HTTP-Method-Override probe family"
@@ -635,10 +639,7 @@ mod tests {
     fn render_curl_emits_dash_h_per_header() {
         let out = render_curl(
             "http://x/",
-            &[
-                ("X-Foo".into(), "1".into()),
-                ("X-Bar".into(), "2".into()),
-            ],
+            &[("X-Foo".into(), "1".into()), ("X-Bar".into(), "2".into())],
         );
         assert!(out.contains("-H 'X-Foo: 1'"), "got: {out}");
         assert!(out.contains("-H 'X-Bar: 2'"), "got: {out}");
@@ -655,9 +656,7 @@ mod tests {
 
     async fn spawn_mock_with_header_aware_dispatch() -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
@@ -670,13 +669,10 @@ mod tests {
                     let req = String::from_utf8_lossy(&buf[..n]).to_string();
                     // Simulate a parser that bypasses on X-Real-IP:
                     // 127.0.0.1 — returns a longer "internal" body.
-                    let internal_grant = req
-                        .lines()
-                        .any(|l| {
-                            let lo = l.to_ascii_lowercase();
-                            lo.starts_with("x-real-ip:")
-                                && lo.contains("127.0.0.1")
-                        });
+                    let internal_grant = req.lines().any(|l| {
+                        let lo = l.to_ascii_lowercase();
+                        lo.starts_with("x-real-ip:") && lo.contains("127.0.0.1")
+                    });
                     let body: String = if internal_grant {
                         "<html>internal admin panel — secret content</html>".into()
                     } else {

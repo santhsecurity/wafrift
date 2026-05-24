@@ -181,10 +181,7 @@ pub async fn run_scan_raw(
             Err(e) => {
                 errors += 1;
                 if scan_text {
-                    eprintln!(
-                        "  {} variant {idx}: error — {e}",
-                        "!".yellow().bold()
-                    );
+                    eprintln!("  {} variant {idx}: error — {e}", "!".yellow().bold());
                 }
             }
         }
@@ -232,8 +229,7 @@ pub async fn run_scan_raw(
                         if cancel.is_cancelled() {
                             return false;
                         }
-                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= cap
-                        {
+                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= cap {
                             return false;
                         }
                         let mutated = template.with_payload(&candidate);
@@ -314,10 +310,7 @@ fn build_http_client(args: &ScanArgs) -> Result<Client, ExitCode> {
         }
     };
     builder.build().map_err(|e| {
-        eprintln!(
-            "  {} {e}",
-            "✗ Failed to build HTTP client:".red().bold()
-        );
+        eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
     })
 }
@@ -330,9 +323,7 @@ async fn fire_one(http: &Client, raw: &RawRequest) -> Result<FireOutcome, String
         .map_err(|e| format!("invalid method {:?}: {e}", raw.method))?;
     let mut req = http.request(method, &raw.url);
     for (name, value) in &raw.headers {
-        if name.eq_ignore_ascii_case("host")
-            || name.eq_ignore_ascii_case("content-length")
-        {
+        if name.eq_ignore_ascii_case("host") || name.eq_ignore_ascii_case("content-length") {
             continue;
         }
         req = req.header(name.as_str(), value);
@@ -459,10 +450,7 @@ fn emit_json(
         Ok(s) => {
             if let Some(ref path) = args.output {
                 if let Err(e) = std::fs::write(path, &s) {
-                    eprintln!(
-                        "failed to write scan output to {}: {e}",
-                        path.display()
-                    );
+                    eprintln!("failed to write scan output to {}: {e}", path.display());
                     return;
                 }
                 eprintln!("scan results written to {}", path.display());
@@ -593,9 +581,7 @@ mod tests {
 
     async fn spawn_mock_waf() -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
@@ -731,7 +717,10 @@ mod tests {
         let template = RawRequest {
             method: "POST".into(),
             url: format!("http://{addr}/login"),
-            headers: vec![("Content-Type".into(), "application/x-www-form-urlencoded".into())],
+            headers: vec![(
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
             body: b"user=admin&pass=\xC2\xA7\xC2\xA7".to_vec(), // "§§" in UTF-8
         };
         let args = args_for(addr, "SAFEPASS", "json");

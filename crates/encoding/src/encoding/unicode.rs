@@ -807,8 +807,10 @@ mod tests {
         // The fix would silently regress if someone widened the
         // format string to %u{:05X} thinking it "supports" non-BMP.
         for hex_run in out.split("%u").skip(1) {
-            let hex_part: String =
-                hex_run.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            let hex_part: String = hex_run
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit())
+                .collect();
             assert!(
                 hex_part.len() == 4,
                 "every %u sequence must be exactly 4 hex digits (IIS spec); \
@@ -978,10 +980,7 @@ mod tests {
 
     #[test]
     fn sql_concat_split_admin() {
-        assert_eq!(
-            sql_concat_split("'admin'"),
-            "CONCAT('a','d','m','i','n')"
-        );
+        assert_eq!(sql_concat_split("'admin'"), "CONCAT('a','d','m','i','n')");
     }
 
     #[test]
@@ -1009,10 +1008,7 @@ mod tests {
     #[test]
     fn sql_concat_split_multiple_literals() {
         // Two separate strings get independent CONCAT calls
-        assert_eq!(
-            sql_concat_split("'a' OR 'b'"),
-            "CONCAT('a') OR CONCAT('b')"
-        );
+        assert_eq!(sql_concat_split("'a' OR 'b'"), "CONCAT('a') OR CONCAT('b')");
     }
 
     #[test]
@@ -1097,29 +1093,20 @@ mod tests {
     #[test]
     fn sql_char_decompose_multiple_literals() {
         // 'a'=97  'b'=98
-        assert_eq!(
-            sql_char_decompose("'a' OR 'b'"),
-            "CHAR(97) OR CHAR(98)"
-        );
+        assert_eq!(sql_char_decompose("'a' OR 'b'"), "CHAR(97) OR CHAR(98)");
     }
 
     #[test]
     fn sql_char_decompose_distinct_from_concat_split() {
         // CONCAT uses single-char strings; CHAR uses ints. Outputs differ.
-        assert_ne!(
-            sql_char_decompose("'admin'"),
-            sql_concat_split("'admin'")
-        );
+        assert_ne!(sql_char_decompose("'admin'"), sql_concat_split("'admin'"));
     }
 
     #[test]
     fn sql_char_decompose_real_injection() {
         let payload = "1 OR username='admin'--";
         let out = sql_char_decompose(payload);
-        assert_eq!(
-            out,
-            "1 OR username=CHAR(97,100,109,105,110)--"
-        );
+        assert_eq!(out, "1 OR username=CHAR(97,100,109,105,110)--");
     }
 
     // ── pg_chr_decompose tests ─────────────────────────────────────────
@@ -1139,19 +1126,13 @@ mod tests {
 
     #[test]
     fn pg_chr_decompose_in_where_clause() {
-        assert_eq!(
-            pg_chr_decompose("WHERE u='a'"),
-            "WHERE u=(CHR(97))"
-        );
+        assert_eq!(pg_chr_decompose("WHERE u='a'"), "WHERE u=(CHR(97))");
     }
 
     #[test]
     fn pg_chr_decompose_distinct_from_char_decompose() {
         // CHR() is unary + pipe-concat; CHAR() is variadic. Different shapes.
-        assert_ne!(
-            pg_chr_decompose("'admin'"),
-            sql_char_decompose("'admin'")
-        );
+        assert_ne!(pg_chr_decompose("'admin'"), sql_char_decompose("'admin'"));
     }
 
     #[test]
@@ -1299,8 +1280,10 @@ mod tests {
         );
         // Anti-regression: no 5-digit %u sequence.
         for hex_run in encoded.split("%u").skip(1) {
-            let hex_part: String =
-                hex_run.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            let hex_part: String = hex_run
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit())
+                .collect();
             assert_eq!(
                 hex_part.len(),
                 4,
@@ -1325,8 +1308,10 @@ mod tests {
             "U+20000 (CJK Supplement) must encode as %uD840%uDC00"
         );
         for hex_run in encoded.split("%u").skip(1) {
-            let hex_part: String =
-                hex_run.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            let hex_part: String = hex_run
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit())
+                .collect();
             assert_eq!(
                 hex_part.len(),
                 4,

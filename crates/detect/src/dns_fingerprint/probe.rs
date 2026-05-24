@@ -150,10 +150,11 @@ pub async fn probe_cname_chain(_host: &str) -> Result<DnsProbe, DnsProbeError> {
 /// Look up an IP's origin-AS via cymru.com's DNS service.
 ///
 /// Format per cymru docs (https://team-cymru.com/community-services/ip-asn-mapping/):
-///   - For IPv4 `1.2.3.4`: query `4.3.2.1.origin.asn.cymru.com TXT`.
-///   - For IPv6 `2001:db8::1`: nibble-reverse + append `.origin6.asn.cymru.com`.
+/// - For IPv4 `1.2.3.4`: query `4.3.2.1.origin.asn.cymru.com TXT`.
+/// - For IPv6 `2001:db8::1`: nibble-reverse + append `.origin6.asn.cymru.com`.
+///
 /// Response TXT format:
-///   `"AS_NUM | BGP_PREFIX | CC | REGISTRY | ALLOCATED"` (no AS name)
+/// `"AS_NUM | BGP_PREFIX | CC | REGISTRY | ALLOCATED"` (no AS name)
 ///
 /// We then chain to `AS<num>.asn.cymru.com TXT` for the ASN
 /// organisation name (`STRIPE-AS, US`, `CLOUDFLARENET, US`, etc.).
@@ -189,16 +190,13 @@ async fn lookup_asn(
 
     // Second-stage lookup for the AS NAME.
     let name_query = format!("AS{number}.asn.cymru.com");
-    let name_fut = resolver.lookup(
-        &name_query,
-        hickory_resolver::proto::rr::RecordType::TXT,
-    );
+    let name_fut = resolver.lookup(&name_query, hickory_resolver::proto::rr::RecordType::TXT);
     let name = match tokio::time::timeout(RESOLVER_TIMEOUT, name_fut).await {
         Ok(Ok(r)) => {
             let bytes = r.iter().next()?.as_txt()?.iter().next()?;
             let raw = std::str::from_utf8(bytes).ok()?;
             // Format: `AS_NUM | CC | REGISTRY | ALLOCATED | AS_NAME`.
-            raw.split('|').last().map(|s| s.trim().to_string())?
+            raw.split('|').next_back().map(|s| s.trim().to_string())?
         }
         _ => return None,
     };

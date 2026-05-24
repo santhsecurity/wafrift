@@ -1935,7 +1935,6 @@ fn truncate(s: &str, n: usize) -> String {
     format!("{}…", &s[..end])
 }
 
-
 #[cfg(test)]
 #[path = "bench_waf_tests.rs"]
 mod tests;

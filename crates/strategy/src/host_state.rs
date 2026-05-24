@@ -1006,11 +1006,9 @@ mod tests {
         let mut state = HostState::default();
         // Inject a stat entry already at (u32::MAX - 1, u32::MAX - 1)
         // to force the boundary on the very next success.
-        state.technique_stats.push((
-            "encoding:Test".to_string(),
-            u32::MAX - 1,
-            u32::MAX - 1,
-        ));
+        state
+            .technique_stats
+            .push(("encoding:Test".to_string(), u32::MAX - 1, u32::MAX - 1));
         // Record one more success — this used to plain-add, now saturates.
         state.bump_success_for_technique(&Technique::PayloadEncoding("Test".into()));
         let stat = state
@@ -1029,8 +1027,16 @@ mod tests {
             .iter()
             .find(|(n, _, _)| n == "encoding:Test")
             .expect("stat entry must exist");
-        assert_eq!(stat2.1, u32::MAX, "successes must remain at u32::MAX after second saturating add");
-        assert_eq!(stat2.2, u32::MAX, "attempts must remain at u32::MAX after second saturating add");
+        assert_eq!(
+            stat2.1,
+            u32::MAX,
+            "successes must remain at u32::MAX after second saturating add"
+        );
+        assert_eq!(
+            stat2.2,
+            u32::MAX,
+            "attempts must remain at u32::MAX after second saturating add"
+        );
     }
 
     #[test]
@@ -1042,7 +1048,9 @@ mod tests {
         let name = "encoding:Sym".to_string();
 
         // Start at u32::MAX - 2 so we can hit the boundary in two ops.
-        state.technique_stats.push((name.clone(), u32::MAX - 2, u32::MAX - 2));
+        state
+            .technique_stats
+            .push((name.clone(), u32::MAX - 2, u32::MAX - 2));
 
         // Two successes take successes+attempts to MAX then stick.
         state.bump_success_for_technique(&Technique::PayloadEncoding("Sym".into()));

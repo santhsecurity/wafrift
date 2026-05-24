@@ -243,11 +243,7 @@ impl WafGenome {
     /// then stays untouched, which is what callers want when they
     /// don't know the class (e.g. a generic scan against an unknown
     /// endpoint).
-    pub fn merge_session_for_class(
-        &mut self,
-        class: &str,
-        stats: &[(String, u32, u32)],
-    ) {
+    pub fn merge_session_for_class(&mut self, class: &str, stats: &[(String, u32, u32)]) {
         let class_key = class.trim().to_ascii_lowercase();
         if class_key.is_empty() {
             self.merge_session(stats);
@@ -567,11 +563,9 @@ impl GeneBank {
             waf: genome.waf_name.clone(),
             source: e,
         })?;
-        wafrift_types::loaders::write_atomic(path, json.as_bytes()).map_err(|e| {
-            GeneBankError::Io {
-                path: path.to_path_buf(),
-                source: e,
-            }
+        wafrift_types::loaders::write_atomic(path, json.as_bytes()).map_err(|e| GeneBankError::Io {
+            path: path.to_path_buf(),
+            source: e,
         })
     }
 

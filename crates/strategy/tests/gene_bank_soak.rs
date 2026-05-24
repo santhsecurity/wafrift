@@ -121,9 +121,7 @@ fn gene_bank_serde_round_trip_10k_no_drift() {
                 expected_technique_count,
                 "iter {i}: technique count changed"
             );
-            for (expected_name, expected_succ, expected_att, expected_tgt) in
-                &expected_techniques
-            {
+            for (expected_name, expected_succ, expected_att, expected_tgt) in &expected_techniques {
                 let found = decoded
                     .techniques
                     .iter()
@@ -181,14 +179,8 @@ fn merge_session_does_not_drift_on_repeated_merge() {
         .iter()
         .find(|t| t.name == "DoubleUrlEncode")
         .expect("DoubleUrlEncode missing");
-    assert_eq!(
-        du.total_successes, 300,
-        "100 merges × 3 successes = 300"
-    );
-    assert_eq!(
-        du.total_attempts, 500,
-        "100 merges × 5 attempts = 500"
-    );
+    assert_eq!(du.total_successes, 300, "100 merges × 3 successes = 300");
+    assert_eq!(du.total_attempts, 500, "100 merges × 5 attempts = 500");
 
     let sc = genome
         .techniques
@@ -250,9 +242,7 @@ fn waf_genome_seed_winners_stable_after_round_trip() {
 fn per_class_breakdowns_preserved_across_1000_round_trips() {
     let mut genome = WafGenome::new("Imperva");
 
-    let session: Vec<(String, u32, u32)> = vec![
-        ("HexLiteralKeyword".into(), 4, 5),
-    ];
+    let session: Vec<(String, u32, u32)> = vec![("HexLiteralKeyword".into(), 4, 5)];
     genome.merge_session_for_class("sql", &session);
 
     let expected_sql = genome
@@ -265,10 +255,8 @@ fn per_class_breakdowns_preserved_across_1000_round_trips() {
 
     let mut current = genome;
     for i in 0..1000u32 {
-        let json = serde_json::to_string(&current)
-            .unwrap_or_else(|e| panic!("iter {i}: {e}"));
-        current = serde_json::from_str(&json)
-            .unwrap_or_else(|e| panic!("iter {i}: {e}"));
+        let json = serde_json::to_string(&current).unwrap_or_else(|e| panic!("iter {i}: {e}"));
+        current = serde_json::from_str(&json).unwrap_or_else(|e| panic!("iter {i}: {e}"));
 
         if i % 100 == 0 {
             let got = current

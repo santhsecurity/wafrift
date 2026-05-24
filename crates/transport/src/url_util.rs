@@ -42,7 +42,9 @@ pub fn host_from_url(url: &str) -> Option<String> {
     }
     let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
     // Strip userinfo (rightmost `@` so passwords containing `@` work).
-    let host_path = after_scheme.rsplit_once('@').map_or(after_scheme, |(_, h)| h);
+    let host_path = after_scheme
+        .rsplit_once('@')
+        .map_or(after_scheme, |(_, h)| h);
     let host_port = host_path.split(['/', '?', '#']).next()?;
     let host = if let Some(stripped) = host_port.strip_prefix('[') {
         // IPv6 literal: take until ']', drop port suffix if any.
@@ -64,42 +66,66 @@ mod tests {
 
     #[test]
     fn plain_hostname() {
-        assert_eq!(host_from_url("https://example.com/path"), Some("example.com".into()));
+        assert_eq!(
+            host_from_url("https://example.com/path"),
+            Some("example.com".into())
+        );
     }
 
     #[test]
     fn scheme_optional() {
         assert_eq!(host_from_url("example.com"), Some("example.com".into()));
-        assert_eq!(host_from_url("example.com/path?q=1"), Some("example.com".into()));
+        assert_eq!(
+            host_from_url("example.com/path?q=1"),
+            Some("example.com".into())
+        );
     }
 
     #[test]
     fn lowercases() {
-        assert_eq!(host_from_url("https://EXAMPLE.COM/"), Some("example.com".into()));
+        assert_eq!(
+            host_from_url("https://EXAMPLE.COM/"),
+            Some("example.com".into())
+        );
     }
 
     #[test]
     fn strips_port() {
-        assert_eq!(host_from_url("https://example.com:8443/"), Some("example.com".into()));
+        assert_eq!(
+            host_from_url("https://example.com:8443/"),
+            Some("example.com".into())
+        );
         assert_eq!(host_from_url("example.com:80"), Some("example.com".into()));
     }
 
     #[test]
     fn strips_userinfo() {
-        assert_eq!(host_from_url("https://user:pass@example.com/"), Some("example.com".into()));
-        assert_eq!(host_from_url("user@example.com:443"), Some("example.com".into()));
+        assert_eq!(
+            host_from_url("https://user:pass@example.com/"),
+            Some("example.com".into())
+        );
+        assert_eq!(
+            host_from_url("user@example.com:443"),
+            Some("example.com".into())
+        );
     }
 
     #[test]
     fn ipv6_literal_brackets_stripped() {
         assert_eq!(host_from_url("https://[::1]:8443/"), Some("::1".into()));
         assert_eq!(host_from_url("[2001:db8::1]"), Some("2001:db8::1".into()));
-        assert_eq!(host_from_url("https://[2001:db8::1]:443/path"), Some("2001:db8::1".into()));
+        assert_eq!(
+            host_from_url("https://[2001:db8::1]:443/path"),
+            Some("2001:db8::1".into())
+        );
     }
 
     #[test]
     fn ipv4_passthrough() {
-        assert_eq!(host_from_url("https://192.168.1.1:8080/"), Some("192.168.1.1".into()));
+        assert_eq!(
+            host_from_url("https://192.168.1.1:8080/"),
+            Some("192.168.1.1".into())
+        );
         assert_eq!(host_from_url("10.0.0.1"), Some("10.0.0.1".into()));
     }
 
@@ -119,8 +145,14 @@ mod tests {
 
     #[test]
     fn fragment_and_query_stripped() {
-        assert_eq!(host_from_url("https://example.com?q=1"), Some("example.com".into()));
-        assert_eq!(host_from_url("https://example.com#section"), Some("example.com".into()));
+        assert_eq!(
+            host_from_url("https://example.com?q=1"),
+            Some("example.com".into())
+        );
+        assert_eq!(
+            host_from_url("https://example.com#section"),
+            Some("example.com".into())
+        );
     }
 
     #[test]
@@ -136,6 +168,9 @@ mod tests {
 
     #[test]
     fn trims_whitespace() {
-        assert_eq!(host_from_url("  https://example.com  "), Some("example.com".into()));
+        assert_eq!(
+            host_from_url("  https://example.com  "),
+            Some("example.com".into())
+        );
     }
 }

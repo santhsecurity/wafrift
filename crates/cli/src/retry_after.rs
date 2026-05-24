@@ -282,10 +282,7 @@ mod tests {
         // crate should reject it. If a future httpdate version
         // becomes lax, we want this test to fail loudly.
         let result = parse("Wed, 21 Oct 2015 07:28:00 +0530", t0());
-        assert_eq!(
-            result, None,
-            "non-GMT timezones in Retry-After must reject"
-        );
+        assert_eq!(result, None, "non-GMT timezones in Retry-After must reject");
     }
 
     #[test]

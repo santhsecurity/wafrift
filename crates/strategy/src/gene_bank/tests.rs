@@ -338,13 +338,22 @@ fn advisory_lock_blocks_concurrent_writers() {
 
 #[test]
 fn class_stat_success_rate_basic_and_zero_attempts() {
-    let a = ClassStat { successes: 7, attempts: 10 };
+    let a = ClassStat {
+        successes: 7,
+        attempts: 10,
+    };
     assert!((a.success_rate() - 0.7).abs() < f64::EPSILON);
-    let zero = ClassStat { successes: 0, attempts: 0 };
+    let zero = ClassStat {
+        successes: 0,
+        attempts: 0,
+    };
     assert!(zero.success_rate().abs() < f64::EPSILON);
     // Anti-rig: high successes with zero attempts is malformed input;
     // we return 0.0 rather than infinity or NaN.
-    let nonsensical = ClassStat { successes: 99, attempts: 0 };
+    let nonsensical = ClassStat {
+        successes: 99,
+        attempts: 0,
+    };
     assert!(nonsensical.success_rate().abs() < f64::EPSILON);
 }
 
@@ -371,8 +380,13 @@ fn technique_record_class_lookup_is_case_insensitive() {
         total_attempts: 10,
         ..Default::default()
     };
-    rec.per_class
-        .insert("sql".into(), ClassStat { successes: 5, attempts: 10 });
+    rec.per_class.insert(
+        "sql".into(),
+        ClassStat {
+            successes: 5,
+            attempts: 10,
+        },
+    );
     // Various caller-casings must all resolve to the lowercase key.
     assert!((rec.success_rate_for_class("sql").unwrap() - 0.5).abs() < f64::EPSILON);
     assert!((rec.success_rate_for_class("SQL").unwrap() - 0.5).abs() < f64::EPSILON);
@@ -605,10 +619,12 @@ fn merge_and_save_for_class_concurrent_safe_via_lock() {
     let _ = fs::remove_dir_all(&tmp);
     {
         let mut bank = GeneBank::open(&tmp).expect("open");
-        bank.merge_and_save("WAF", &[("A".into(), 1, 2)]).expect("class-less");
+        bank.merge_and_save("WAF", &[("A".into(), 1, 2)])
+            .expect("class-less");
         bank.merge_and_save_for_class("WAF", "sql", &[("A".into(), 3, 4)])
             .expect("class-aware");
-        bank.merge_and_save("WAF", &[("B".into(), 5, 5)]).expect("class-less B");
+        bank.merge_and_save("WAF", &[("B".into(), 5, 5)])
+            .expect("class-less B");
     }
     {
         let mut bank = GeneBank::open(&tmp).expect("re-open");
@@ -616,7 +632,7 @@ fn merge_and_save_for_class_concurrent_safe_via_lock() {
         let a = genome.techniques.iter().find(|t| t.name == "A").unwrap();
         assert_eq!(a.total_successes, 4, "1+3 from both merges");
         assert_eq!(a.total_attempts, 6, "2+4 from both merges");
-        assert!(a.per_class.get("sql").is_some(), "sql per-class persisted");
+        assert!(a.per_class.contains_key("sql"), "sql per-class persisted");
         let b = genome.techniques.iter().find(|t| t.name == "B").unwrap();
         assert_eq!(b.total_successes, 5);
         // B had no per-class merge, so its per_class is empty.
@@ -712,7 +728,11 @@ fn max_techniques_cap_prevents_unbounded_per_class_growth() {
     // But an EXISTING technique can still accumulate (cap is on
     // distinct names, not on aggregate data).
     genome.merge_session_for_class("sql", &[("Tech0".into(), 1, 1)]);
-    let tech0 = genome.techniques.iter().find(|t| t.name == "Tech0").unwrap();
+    let tech0 = genome
+        .techniques
+        .iter()
+        .find(|t| t.name == "Tech0")
+        .unwrap();
     assert_eq!(
         tech0.total_attempts, 2,
         "existing technique's accumulation continues past the cap"
@@ -759,9 +779,15 @@ fn seed_winners_for_class_does_not_recommend_a_class_with_zero_attempts() {
         name: "Phantom".into(),
         total_successes: 0,
         total_attempts: 0,
-        per_class: [("sql".into(), ClassStat { successes: 0, attempts: 0 })]
-            .into_iter()
-            .collect(),
+        per_class: [(
+            "sql".into(),
+            ClassStat {
+                successes: 0,
+                attempts: 0,
+            },
+        )]
+        .into_iter()
+        .collect(),
         ..Default::default()
     });
     let winners = g.seed_winners_for_class("sql");
@@ -782,23 +808,36 @@ fn seed_winners_for_class_ranks_by_per_class_rate_not_global() {
         name: "GoodGloballyBadOnSql".into(),
         total_successes: 90,
         total_attempts: 100,
-        per_class: [("sql".into(), ClassStat { successes: 3, attempts: 10 })]
-            .into_iter()
-            .collect(),
+        per_class: [(
+            "sql".into(),
+            ClassStat {
+                successes: 3,
+                attempts: 10,
+            },
+        )]
+        .into_iter()
+        .collect(),
         ..Default::default()
     });
     g.techniques.push(TechniqueRecord {
         name: "OnlyGoodOnSql".into(),
         total_successes: 5,
         total_attempts: 100, // global rate = 5%
-        per_class: [("sql".into(), ClassStat { successes: 5, attempts: 5 })]
-            .into_iter()
-            .collect(),
+        per_class: [(
+            "sql".into(),
+            ClassStat {
+                successes: 5,
+                attempts: 5,
+            },
+        )]
+        .into_iter()
+        .collect(),
         ..Default::default()
     });
     let winners = g.seed_winners_for_class("sql");
     assert_eq!(
-        winners, vec!["OnlyGoodOnSql".to_string()],
+        winners,
+        vec!["OnlyGoodOnSql".to_string()],
         "warm-start must rank by per-class rate, not global"
     );
 }
@@ -819,7 +858,10 @@ fn round_trip_genome_with_per_class_serialises_to_stable_json() {
     // BTreeMap also guarantees alphabetical key order: sql before xss.
     let sql_pos = j1.find("\"sql\"").expect("sql key present");
     let xss_pos = j1.find("\"xss\"").expect("xss key present");
-    assert!(sql_pos < xss_pos, "BTreeMap keys must serialise in alphabetical order");
+    assert!(
+        sql_pos < xss_pos,
+        "BTreeMap keys must serialise in alphabetical order"
+    );
 }
 
 #[test]

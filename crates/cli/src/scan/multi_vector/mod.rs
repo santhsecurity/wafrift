@@ -82,11 +82,22 @@ pub const VECTORS: &[Vector] = &[
     // JSON, XML, multipart. WAFs gate body inspection per
     // Content-Type; everything below stretches one or more of
     // those routing decisions until the gate breaks.
-    Vector { name: "POST-form", content_type: "application/x-www-form-urlencoded" },
-    Vector { name: "POST-json", content_type: "application/json" },
-    Vector { name: "POST-xml", content_type: "application/xml" },
-    Vector { name: "POST-multipart", content_type: "multipart/form-data" },
-
+    Vector {
+        name: "POST-form",
+        content_type: "application/x-www-form-urlencoded",
+    },
+    Vector {
+        name: "POST-json",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-xml",
+        content_type: "application/xml",
+    },
+    Vector {
+        name: "POST-multipart",
+        content_type: "multipart/form-data",
+    },
     // ──────── COMPRESSION-CONFUSION (Content-Encoding gap) ────
     // brotli is the headline class — almost no inspection
     // pipeline ships a brotli decoder. gzip is the control (most
@@ -95,108 +106,220 @@ pub const VECTORS: &[Vector] = &[
     // doc-comment flags it as "irregular WAF support".
     // Chain `gzip,br` per RFC 9110 §8.4 stacks both layers so
     // a WAF with ONE decoder still sees an opaque blob.
-    Vector { name: "POST-form-br", content_type: "application/x-www-form-urlencoded" },
-    Vector { name: "POST-json-br", content_type: "application/json" },
-    Vector { name: "POST-form-gz", content_type: "application/x-www-form-urlencoded" },
-    Vector { name: "POST-json-gz", content_type: "application/json" },
-    Vector { name: "POST-form-deflate", content_type: "application/x-www-form-urlencoded" },
-    Vector { name: "POST-json-deflate", content_type: "application/json" },
-    Vector { name: "POST-json-gz-br", content_type: "application/json" },
-    Vector { name: "POST-form-gz-br", content_type: "application/x-www-form-urlencoded" },
-
+    Vector {
+        name: "POST-form-br",
+        content_type: "application/x-www-form-urlencoded",
+    },
+    Vector {
+        name: "POST-json-br",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-form-gz",
+        content_type: "application/x-www-form-urlencoded",
+    },
+    Vector {
+        name: "POST-json-gz",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-form-deflate",
+        content_type: "application/x-www-form-urlencoded",
+    },
+    Vector {
+        name: "POST-json-deflate",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-json-gz-br",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-form-gz-br",
+        content_type: "application/x-www-form-urlencoded",
+    },
     // ──────── JSON PARSER-DISAGREEMENT ────────────────────────
     // Bytes that parse one way for the WAF and a different way
     // for the backend. UTF-8 BOM, duplicate keys, array root,
     // deep nesting past the WAF's recursion cap, payload-as-key.
-    Vector { name: "POST-json-bom", content_type: "application/json" },
-    Vector { name: "POST-json-dupkey", content_type: "application/json" },
-    Vector { name: "POST-json-array", content_type: "application/json" },
-    Vector { name: "POST-json-deeply-nested", content_type: "application/json" },
-    Vector { name: "POST-json-key-as-payload", content_type: "application/json" },
+    Vector {
+        name: "POST-json-bom",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-json-dupkey",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-json-array",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-json-deeply-nested",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-json-key-as-payload",
+        content_type: "application/json",
+    },
     // JSON5 / hjson — `{ /* comment */ "key": "value" }`. Strict
     // JSON parsers refuse the comment and skip body inspection;
     // permissive backends (Node `json5`, RethinkDB, several Go/
     // Python parsers configured for trailing-comma/comment) strip
     // the comment and read the real key/value.
-    Vector { name: "POST-json5-comment", content_type: "application/json" },
-
+    Vector {
+        name: "POST-json5-comment",
+        content_type: "application/json",
+    },
     // ──────── CONTENT-TYPE LYING / CHARSET ROUTING ────────────
     // The body is one shape; the declared Content-Type is
     // another. Lenient backends accept anyway; WAFs skip the
     // body-processor on the declared (wrong) shape.
-    Vector { name: "POST-json-as-plain", content_type: "text/plain" },
-    Vector { name: "POST-form-as-octet", content_type: "application/octet-stream" },
-    Vector { name: "POST-json-utf7", content_type: "application/json; charset=utf-7" },
-    Vector { name: "POST-form-utf7", content_type: "application/x-www-form-urlencoded; charset=utf-7" },
-    Vector { name: "POST-text-xml", content_type: "text/xml" },
-    Vector { name: "POST-yaml", content_type: "application/yaml" },
-    Vector { name: "POST-cbor", content_type: "application/cbor" },
+    Vector {
+        name: "POST-json-as-plain",
+        content_type: "text/plain",
+    },
+    Vector {
+        name: "POST-form-as-octet",
+        content_type: "application/octet-stream",
+    },
+    Vector {
+        name: "POST-json-utf7",
+        content_type: "application/json; charset=utf-7",
+    },
+    Vector {
+        name: "POST-form-utf7",
+        content_type: "application/x-www-form-urlencoded; charset=utf-7",
+    },
+    Vector {
+        name: "POST-text-xml",
+        content_type: "text/xml",
+    },
+    Vector {
+        name: "POST-yaml",
+        content_type: "application/yaml",
+    },
+    Vector {
+        name: "POST-cbor",
+        content_type: "application/cbor",
+    },
     // NDJSON / JSON-Lines — `application/x-ndjson` body, one JSON
     // doc per line. WAF processors that fan out ARGS from one
     // top-level JSON doc miss the multi-doc stream; backends that
     // accept NDJSON (logging endpoints, streaming APIs, ELK ingest)
     // parse each line independently.
-    Vector { name: "POST-ndjson", content_type: "application/x-ndjson" },
+    Vector {
+        name: "POST-ndjson",
+        content_type: "application/x-ndjson",
+    },
     // JSON body declared as form — reverse of `POST-form-as-octet`.
     // The body is real JSON; the declared Content-Type is
     // `application/x-www-form-urlencoded`. WAFs route to the form
     // processor and find no `=`-separated pairs; lenient backends
     // sniff the body or are configured to accept JSON regardless.
-    Vector { name: "POST-json-as-form", content_type: "application/x-www-form-urlencoded" },
-
+    Vector {
+        name: "POST-json-as-form",
+        content_type: "application/x-www-form-urlencoded",
+    },
     // ──────── METHOD-AXIS ────────────────────────────────────
     // WAF rule paths gated on REQUEST_METHOD for POST miss the
     // request entirely. PUT/PATCH/PUT-form ride the actual wire
     // method; method-override-* keeps POST on the request line
     // but signals the intended method via a header (Spring,
     // Rails, Express, Symfony all honour the header).
-    Vector { name: "PUT-json", content_type: "application/json" },
-    Vector { name: "PATCH-json", content_type: "application/json" },
-    Vector { name: "PUT-form", content_type: "application/x-www-form-urlencoded" },
-    Vector { name: "POST-method-override-GET", content_type: "application/x-www-form-urlencoded" },
-    Vector { name: "POST-method-override-PUT", content_type: "application/x-www-form-urlencoded" },
-
+    Vector {
+        name: "PUT-json",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "PATCH-json",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "PUT-form",
+        content_type: "application/x-www-form-urlencoded",
+    },
+    Vector {
+        name: "POST-method-override-GET",
+        content_type: "application/x-www-form-urlencoded",
+    },
+    Vector {
+        name: "POST-method-override-PUT",
+        content_type: "application/x-www-form-urlencoded",
+    },
     // ──────── MULTIPART VARIANTS ──────────────────────────────
     // The MIME parser is its own attack axis. Base64 CTE hides
     // the payload behind RFC 2045 §6.8 encoding; dup-boundary
     // splits the body across two boundary strings; filename=
     // routes the attack through the part metadata.
-    Vector { name: "POST-multipart-b64", content_type: "multipart/form-data" },
-    Vector { name: "POST-multipart-dupbound", content_type: "multipart/form-data" },
-    Vector { name: "POST-multipart-filename", content_type: "multipart/form-data" },
+    Vector {
+        name: "POST-multipart-b64",
+        content_type: "multipart/form-data",
+    },
+    Vector {
+        name: "POST-multipart-dupbound",
+        content_type: "multipart/form-data",
+    },
+    Vector {
+        name: "POST-multipart-filename",
+        content_type: "multipart/form-data",
+    },
     // Quoted-printable CTE per RFC 2045 §6.7 — sibling of the
     // base64 multipart vector. WAFs that decode neither QP nor
     // base64 see the encoded blob; backend MIME parsers decode
     // both. QP is rarer than base64 in WAF inspection pipelines
     // exactly because the encoding is so close to plain ASCII.
-    Vector { name: "POST-multipart-qp", content_type: "multipart/form-data" },
-
+    Vector {
+        name: "POST-multipart-qp",
+        content_type: "multipart/form-data",
+    },
     // ──────── HTTP PARAMETER POLLUTION (HPP) ──────────────────
     // Two values for one param, encoded so the WAF takes one
     // and the backend takes the other. `&` is the standard
     // separator; `;` is Tomcat/Jetty's parallel separator that
     // ModSec doesn't split on.
-    Vector { name: "hpp", content_type: "" },
-    Vector { name: "hpp-semicolon", content_type: "" },
-
+    Vector {
+        name: "hpp",
+        content_type: "",
+    },
+    Vector {
+        name: "hpp-semicolon",
+        content_type: "",
+    },
     // ──────── COMPOUND (STACKED-AXIS) ────────────────────────
     // Combining two axes defeats WAFs that handle either
     // alone but not the AND of both. Pair a parse-confusion
     // with a compression layer (BOM+br), a charset routing
     // with a compression layer (utf-7+gz), or stack two
     // parse-confusions (dupkey+BOM).
-    Vector { name: "POST-json-bom-br", content_type: "application/json" },
-    Vector { name: "POST-json-utf7-gz", content_type: "application/json; charset=utf-7" },
-    Vector { name: "POST-json-dupkey-bom", content_type: "application/json" },
-
+    Vector {
+        name: "POST-json-bom-br",
+        content_type: "application/json",
+    },
+    Vector {
+        name: "POST-json-utf7-gz",
+        content_type: "application/json; charset=utf-7",
+    },
+    Vector {
+        name: "POST-json-dupkey-bom",
+        content_type: "application/json",
+    },
     // ──────── URL POSITION ────────────────────────────────────
     // Payload lives in the URL itself — path segment or
     // header-driven proxy reverse-routing. WAFs scoped to
     // ARGS / REQUEST_URI miss either.
-    Vector { name: "path-segment", content_type: "" },
-    Vector { name: "x-original-url", content_type: "" },
-    Vector { name: "x-rewrite-url", content_type: "" },
-
+    Vector {
+        name: "path-segment",
+        content_type: "",
+    },
+    Vector {
+        name: "x-original-url",
+        content_type: "",
+    },
+    Vector {
+        name: "x-rewrite-url",
+        content_type: "",
+    },
     // ──────── HEADER CARRIERS ────────────────────────────────
     // Less-inspected headers that backends still log, render,
     // or use for routing decisions. Cookie + variants, the
@@ -204,16 +327,46 @@ pub const VECTORS: &[Vector] = &[
     // Referer, Origin), Range/From/Accept-Language for apps
     // that log them, Authorization-Basic for apps that log
     // decoded usernames.
-    Vector { name: "cookie", content_type: "" },
-    Vector { name: "cookie-hpp", content_type: "" },
-    Vector { name: "x-forwarded-for", content_type: "" },
-    Vector { name: "forwarded", content_type: "" },
-    Vector { name: "referer", content_type: "" },
-    Vector { name: "origin", content_type: "" },
-    Vector { name: "range", content_type: "" },
-    Vector { name: "from", content_type: "" },
-    Vector { name: "accept-language", content_type: "" },
-    Vector { name: "authorization-basic", content_type: "" },
+    Vector {
+        name: "cookie",
+        content_type: "",
+    },
+    Vector {
+        name: "cookie-hpp",
+        content_type: "",
+    },
+    Vector {
+        name: "x-forwarded-for",
+        content_type: "",
+    },
+    Vector {
+        name: "forwarded",
+        content_type: "",
+    },
+    Vector {
+        name: "referer",
+        content_type: "",
+    },
+    Vector {
+        name: "origin",
+        content_type: "",
+    },
+    Vector {
+        name: "range",
+        content_type: "",
+    },
+    Vector {
+        name: "from",
+        content_type: "",
+    },
+    Vector {
+        name: "accept-language",
+        content_type: "",
+    },
+    Vector {
+        name: "authorization-basic",
+        content_type: "",
+    },
 ];
 
 /// The phase's I/O surface — keeps callers from having to know the
@@ -258,7 +411,6 @@ pub struct PhaseOutcome {
     /// Per-vector tallies for the text-mode summary table.
     pub vector_results: Vec<(String, u32, u32)>,
 }
-
 
 /// Run the multi-vector phase. Returns a [`PhaseOutcome`] the
 /// caller merges into its running totals. Cancellable via the
@@ -351,7 +503,9 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
                 format!("vector::{}", vector.name)
             };
             vtechs.push(tag);
-            outcome.new_variant_outcomes.push((vtechs.clone(), is_blocked));
+            outcome
+                .new_variant_outcomes
+                .push((vtechs.clone(), is_blocked));
 
             if is_blocked {
                 outcome.blocked_delta += 1;
@@ -407,8 +561,6 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
 
     outcome
 }
-
-
 
 #[cfg(test)]
 mod tests;

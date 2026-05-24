@@ -94,8 +94,7 @@ mod tests {
 
     #[test]
     fn split_url_with_port_separates_authority_correctly() {
-        let (origin, path) =
-            split_url_for_mutation("http://10.0.0.5:8080/foo").expect("split ok");
+        let (origin, path) = split_url_for_mutation("http://10.0.0.5:8080/foo").expect("split ok");
         assert_eq!(origin, "http://10.0.0.5:8080");
         assert_eq!(path, "/foo");
     }

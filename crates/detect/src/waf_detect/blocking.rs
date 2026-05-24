@@ -51,8 +51,10 @@ static BLOCK_AC: Lazy<AhoCorasick> = Lazy::new(|| {
 ///
 /// **Do not unify** with the other two classifiers — they answer different
 /// questions with different cost asymmetries. See the doc comments on
-/// [`wafrift_transport::response::is_waf_block`] and
-/// [`wafrift_types::calibration::analyze_calibration`].
+/// `wafrift_transport::response::is_waf_block` and
+/// `wafrift_types::calibration::analyze_calibration` (intra-crate
+/// links not used to avoid pulling those crates into wafrift-detect's
+/// rustdoc dep graph).
 ///
 /// Status codes include common WAF and CDN error codes:
 /// - `401`, `403`, `405`, `406`, `407`, `429`

@@ -30,8 +30,8 @@ pub struct Variant {
 ///
 /// Returns a short error fragment ("missing ':' separator", "empty
 /// name") so callers can compose their own context — `"invalid
-/// header \`{raw}\`; <frag>"` for [`parse_headers`], `"-H/--header
-/// {raw:?} <frag>"` for [`crate::scan::pentest_client::parse_header`].
+/// header \`{raw}\`; {frag}"` for [`parse_headers`], `"-H/--header
+/// {raw:?} {frag}"` for [`crate::scan::pentest_client::parse_header`].
 pub fn parse_header_pair(raw: &str) -> Result<(String, String), String> {
     let (name, value) = raw
         .split_once(':')
@@ -545,7 +545,10 @@ mod tests {
         );
         assert_eq!(payload_type_label(PayloadType::Ldap), "LDAP Injection");
         assert_eq!(payload_type_label(PayloadType::Ssrf), "SSRF");
-        assert_eq!(payload_type_label(PayloadType::PathTraversal), "Path Traversal");
+        assert_eq!(
+            payload_type_label(PayloadType::PathTraversal),
+            "Path Traversal"
+        );
         assert_eq!(
             payload_type_label(PayloadType::TemplateInjection),
             "Template Injection"
@@ -643,10 +646,7 @@ mod tests {
             probe_target_label(&ProbeTarget::SqlComment("--".into())),
             "sql_comment:--"
         );
-        assert_eq!(
-            probe_target_label(&ProbeTarget::SqlQuote),
-            "sql_quote"
-        );
+        assert_eq!(probe_target_label(&ProbeTarget::SqlQuote), "sql_quote");
         assert_eq!(
             probe_target_label(&ProbeTarget::SqlTautology("1=1".into())),
             "sql_tautology:1=1"
@@ -873,9 +873,7 @@ mod tests {
         // Round-trip: splitting on `'\''` and reassembling gives back the original.
         // Simplified check: the quoted form, when unescaped by the Bourne rules,
         // yields the original string. We implement that manually.
-        let reconstructed = quoted
-            .trim_matches('\'')
-            .replace("'\\''", "'");
+        let reconstructed = quoted.trim_matches('\'').replace("'\\''", "'");
         assert_eq!(
             reconstructed, header_val,
             "shell_single_quote must round-trip: input={header_val:?}, \
@@ -931,7 +929,10 @@ mod tests {
     fn walk_error_surfaces_single_level() {
         // PRE-FIX: `format!("{e}")` returns only the top-level message.
         // POST-FIX: the walker also surfaces it (no regression for 1-level chain).
-        let e = ChainedError { msg: "outer error", cause: None };
+        let e = ChainedError {
+            msg: "outer error",
+            cause: None,
+        };
         let walked = walk_std_error(&e);
         assert_eq!(walked, "outer error");
     }
@@ -959,8 +960,10 @@ mod tests {
             "walk_std_error must join every level of the cause chain"
         );
         // Anti-regression: the result must NOT be just the top-level string.
-        assert_ne!(walked, "error sending request",
-            "bare top-level message means the cause chain was not walked");
+        assert_ne!(
+            walked, "error sending request",
+            "bare top-level message means the cause chain was not walked"
+        );
     }
 
     // ── url_query_repro_curl ──────────────────────────────────────
@@ -977,11 +980,7 @@ mod tests {
     fn url_query_repro_curl_protects_metacharacters_in_payload() {
         // `$(rm -rf /)` is the classic shell-injection canary. After
         // single-quoting it must appear verbatim, no expansion.
-        let curl = url_query_repro_curl(
-            "https://target",
-            "q",
-            "$(rm -rf /); `whoami`",
-        );
+        let curl = url_query_repro_curl("https://target", "q", "$(rm -rf /); `whoami`");
         assert!(curl.contains("'q=$(rm -rf /); `whoami`'"));
     }
 

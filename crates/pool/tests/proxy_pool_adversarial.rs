@@ -95,9 +95,12 @@ fn malformed_urls_fail_fast() {
 fn non_http_schemes_parse_but_are_unusual_proxy_urls() {
     // `url::Url` accepts many schemes; the pool does not whitelist. Document
     // adversarial input that parses yet is not a typical HTTP/SOCKS proxy.
-    let pool = ProxyPool::new(&["javascript:alert(1)".to_string(), "ftp://127.0.0.1:21".to_string()])
-        .expect("construction")
-        .expect("non-empty");
+    let pool = ProxyPool::new(&[
+        "javascript:alert(1)".to_string(),
+        "ftp://127.0.0.1:21".to_string(),
+    ])
+    .expect("construction")
+    .expect("non-empty");
     assert_eq!(pool.len(), 2);
     let u0 = pool.next_url();
     let scheme = u0.scheme().to_string();

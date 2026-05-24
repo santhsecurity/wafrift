@@ -58,20 +58,16 @@ async fn spawn_mock_modsec() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
                         Err(_) => break,
                     };
                     buf.extend_from_slice(&tmp[..n]);
-                    if !headers_done {
-                        if let Some(pos) = find_subseq(&buf, b"\r\n\r\n") {
-                            headers_done = true;
-                            header_end = pos + 4;
-                            let header_str = String::from_utf8_lossy(&buf[..pos]);
-                            for line in header_str.lines() {
-                                if let Some(v) = line
-                                    .to_ascii_lowercase()
-                                    .strip_prefix("content-length:")
-                                {
-                                    if let Ok(cl) = v.trim().parse::<usize>() {
-                                        content_length = cl;
-                                    }
-                                }
+                    if !headers_done && let Some(pos) = find_subseq(&buf, b"\r\n\r\n") {
+                        headers_done = true;
+                        header_end = pos + 4;
+                        let header_str = String::from_utf8_lossy(&buf[..pos]);
+                        for line in header_str.lines() {
+                            if let Some(v) =
+                                line.to_ascii_lowercase().strip_prefix("content-length:")
+                                && let Ok(cl) = v.trim().parse::<usize>()
+                            {
+                                content_length = cl;
                             }
                         }
                     }
@@ -120,10 +116,7 @@ fn classify_request_bytes(req: &[u8]) -> String {
 
     let first_line = headers.lines().next().unwrap_or("");
     let path = first_line.split_whitespace().nth(1).unwrap_or("/");
-    if path.starts_with("/admin")
-        || path.starts_with("/actuator")
-        || path.starts_with("/.env")
-    {
+    if path.starts_with("/admin") || path.starts_with("/actuator") || path.starts_with("/.env") {
         return apache_403();
     }
     let lower_path = path.to_ascii_lowercase();
@@ -394,8 +387,7 @@ async fn mock_modsec_benign_get_returns_gunicorn_200() {
 async fn mock_modsec_sqli_payload_returns_apache_403() {
     let (addr, _) = spawn_mock_modsec().await;
     // URL-encoded `' OR 1=1--`
-    let (status, server, body) =
-        fetch(&format!("http://{addr}/get?q=%27%20OR%201%3D1--")).await;
+    let (status, server, body) = fetch(&format!("http://{addr}/get?q=%27%20OR%201%3D1--")).await;
     assert_eq!(status, 403, "SQLi payload should be blocked");
     assert_eq!(
         server, "Apache",
@@ -423,8 +415,7 @@ async fn mock_modsec_actuator_path_returns_apache_403() {
 #[tokio::test(flavor = "current_thread")]
 async fn mock_modsec_log4shell_jndi_returns_apache_403() {
     let (addr, _) = spawn_mock_modsec().await;
-    let (status, _, _) =
-        fetch(&format!("http://{addr}/get?x=%24%7Bjndi%3Aldap")).await;
+    let (status, _, _) = fetch(&format!("http://{addr}/get?x=%24%7Bjndi%3Aldap")).await;
     assert_eq!(status, 403);
 }
 
@@ -757,11 +748,12 @@ async fn mock_modsec_application_cbor_body_bypasses() {
     let (addr, _) = spawn_mock_modsec().await;
     // Hand-build {"q": "' OR 1=1--"} in CBOR (RFC 8949).
     let payload = "' OR 1=1--";
-    let mut body: Vec<u8> = Vec::new();
-    body.push(0xA1); // map(1)
-    body.push(0x61); // text(1)
-    body.push(b'q');
-    body.push(0x60 | (payload.len() as u8)); // text(N) for N ≤ 23
+    let mut body: Vec<u8> = vec![
+        0xA1, // map(1)
+        0x61, // text(1)
+        b'q',
+        0x60 | (payload.len() as u8), // text(N) for N ≤ 23
+    ];
     body.extend_from_slice(payload.as_bytes());
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -1208,7 +1200,9 @@ mod wafrift_cli_test_harness {
             }
         }
         if bits > 0 {
-            out.push(char::from(ALPHABET[((buffer << (5 - bits)) & 0x1F) as usize]));
+            out.push(char::from(
+                ALPHABET[((buffer << (5 - bits)) & 0x1F) as usize],
+            ));
         }
         out
     }
@@ -1223,7 +1217,7 @@ mod wafrift_cli_test_harness {
             .ok()?;
         let benign = client.get(target_url).send().await.ok()?;
         let b_status = benign.status().as_u16();
-        let b_server = server_header(&benign.headers());
+        let b_server = server_header(benign.headers());
         let b_body = benign.bytes().await.unwrap_or_default().len();
 
         let attack_url = if target_url.contains('?') {
@@ -1233,16 +1227,14 @@ mod wafrift_cli_test_harness {
         };
         let attack = client.get(&attack_url).send().await.ok()?;
         let a_status = attack.status().as_u16();
-        let a_server = server_header(&attack.headers());
+        let a_server = server_header(attack.headers());
         let a_body = attack.bytes().await.unwrap_or_default().len();
 
         let mut reasons: Vec<String> = Vec::new();
         if b_status != a_status {
             reasons.push(format!("status flipped {b_status} → {a_status}"));
         }
-        if !b_server.is_empty()
-            && !a_server.is_empty()
-            && !b_server.eq_ignore_ascii_case(&a_server)
+        if !b_server.is_empty() && !a_server.is_empty() && !b_server.eq_ignore_ascii_case(&a_server)
         {
             reasons.push(format!(
                 "server header changed: '{b_server}' → '{a_server}'"
@@ -1311,8 +1303,7 @@ mod wafrift_cli_test_harness {
                     // Simulated inbound — record that this token
                     // was 'seen' by re-registering it (already in
                     // the registry, no-op for this test) and reply 200.
-                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        .to_string()
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
                 };
                 use tokio::io::AsyncWriteExt;
                 let _ = sock.write_all(resp.as_bytes()).await;

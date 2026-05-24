@@ -313,7 +313,9 @@ fn build_payload(
         "cl-0" => cl_zero(host, smuggled_prefix).map_err(|e| format!("{e}")),
         "dual-cl" => dual_cl(host, smuggled_prefix, 6, 5).map_err(|e| format!("{e}")),
         "multi-cl" => multi_value_cl(host, smuggled_prefix).map_err(|e| format!("{e}")),
-        other => Err(format!("variant `{other}` is in the catalogue but has no builder")),
+        other => Err(format!(
+            "variant `{other}` is in the catalogue but has no builder"
+        )),
     }
 }
 
@@ -374,9 +376,7 @@ async fn measure_baseline(
     if samples == 0 {
         return Ok(0);
     }
-    let benign = format!(
-        "GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
-    );
+    let benign = format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
     let mut measurements = Vec::with_capacity(samples as usize);
     for _ in 0..samples {
         let ms = time_first_byte(host, port, benign.as_bytes(), timeout_secs).await?;
@@ -451,20 +451,16 @@ async fn run_detect(args: DetectSmuggleArgs) -> ExitCode {
                 return ExitCode::from(1);
             }
         };
-        let elapsed = match time_first_byte(
-            &args.host,
-            args.port,
-            &payload.raw_bytes,
-            args.timeout_secs,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("{} fire {variant_key}: {e}", "error:".red());
-                return ExitCode::from(1);
-            }
-        };
+        let elapsed =
+            match time_first_byte(&args.host, args.port, &payload.raw_bytes, args.timeout_secs)
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("{} fire {variant_key}: {e}", "error:".red());
+                    return ExitCode::from(1);
+                }
+            };
         let mut f = classify_detection(elapsed, baseline_ms, args.threshold_ms);
         f.variant = variant_key.to_string();
         // TRACING: per-probe classification result — the key decision point.
@@ -561,7 +557,10 @@ fn run_list(format: &str) -> ExitCode {
         println!("{}", serde_json::to_string_pretty(&arr).unwrap_or_default());
         return ExitCode::SUCCESS;
     }
-    println!("{}", "── wafrift smuggle: variant catalogue ──".cyan().bold());
+    println!(
+        "{}",
+        "── wafrift smuggle: variant catalogue ──".cyan().bold()
+    );
     for v in VARIANTS {
         let tag = match v.tier {
             SafetyTier::Detection => "[detection]".green(),
@@ -601,7 +600,13 @@ fn run_dry(args: DryRunArgs) -> ExitCode {
                 .join(" ");
             let ascii: String = chunk
                 .iter()
-                .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' })
+                .map(|&b| {
+                    if (0x20..0x7f).contains(&b) {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
                 .collect();
             println!("{hex:<48}  {ascii}");
         }
@@ -1018,7 +1023,10 @@ mod tests {
         .await
         .unwrap();
         assert!(elapsed >= 900, "should have hung ~1s, got {elapsed}");
-        assert!(elapsed < 2500, "should not exceed timeout+margin, got {elapsed}");
+        assert!(
+            elapsed < 2500,
+            "should not exceed timeout+margin, got {elapsed}"
+        );
     }
 
     #[serial_test::serial]
@@ -1051,7 +1059,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(elapsed < 4000, "honest server should respond fast, got {elapsed}");
+        assert!(
+            elapsed < 4000,
+            "honest server should respond fast, got {elapsed}"
+        );
     }
 
     #[test]

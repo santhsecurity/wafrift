@@ -106,11 +106,7 @@ fn strip_outer_flag_group(src: &str) -> &str {
         }
         i += 1;
     }
-    if i < bytes.len() {
-        &src[i + 1..]
-    } else {
-        src
-    }
+    if i < bytes.len() { &src[i + 1..] } else { src }
 }
 
 fn clamped_snippet(s: &str, start: usize, max: usize) -> &str {
@@ -1084,7 +1080,10 @@ weight = 0.4
                 }
             }
         }
-        assert!(checked >= 30, "expected many CI-wrapped header rules, got {checked}");
+        assert!(
+            checked >= 30,
+            "expected many CI-wrapped header rules, got {checked}"
+        );
     }
 
     #[test]
@@ -1179,8 +1178,7 @@ weight = 0.4
         let mut missed: Vec<(String, String, String)> = Vec::new();
         for rule in engine.rules.values() {
             for sig in &rule.signatures {
-                let (Some(name), Some(re)) =
-                    (sig.header_name.as_ref(), sig.header_regex.as_ref())
+                let (Some(name), Some(re)) = (sig.header_name.as_ref(), sig.header_regex.as_ref())
                 else {
                     continue;
                 };
@@ -1192,19 +1190,14 @@ weight = 0.4
                 // digits, space, hyphen, period, underscore).
                 if literal.is_empty()
                     || !literal.chars().all(|c| {
-                        c.is_ascii_alphanumeric()
-                            || matches!(c, ' ' | '-' | '_' | '.' | '/')
+                        c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '/')
                     })
                 {
                     continue;
                 }
                 // Capitalize the literal as a server would emit it.
                 let value = literal.to_string();
-                let detected = classifier::detect(
-                    200,
-                    &[(name.clone(), value.clone())],
-                    b"",
-                );
+                let detected = classifier::detect(200, &[(name.clone(), value.clone())], b"");
                 if detected.iter().any(|r| r.name == rule.name) {
                     tested += 1;
                 } else {
@@ -1234,8 +1227,7 @@ weight = 0.4
         let mut sampled = 0;
         for rule in engine.rules.values() {
             for sig in &rule.signatures {
-                let (Some(name), Some(re)) =
-                    (sig.header_name.as_ref(), sig.header_regex.as_ref())
+                let (Some(name), Some(re)) = (sig.header_name.as_ref(), sig.header_regex.as_ref())
                 else {
                     continue;
                 };
@@ -1259,11 +1251,7 @@ weight = 0.4
                     .collect::<Vec<_>>()
                     .join("-");
                 let value: String = literal.to_string();
-                let detected = classifier::detect(
-                    200,
-                    &[(title_name, value)],
-                    b"",
-                );
+                let detected = classifier::detect(200, &[(title_name, value)], b"");
                 if detected.iter().any(|r| r.name == rule.name) {
                     sampled += 1;
                 }
@@ -1435,11 +1423,7 @@ weight = 0.6
         // regex engine being O(n) — which it is, by design).
         use crate::waf_detect::classifier;
         let value = "a".repeat(100 * 1024);
-        let detected = classifier::detect(
-            200,
-            &[("X-Junk".into(), value)],
-            b"",
-        );
+        let detected = classifier::detect(200, &[("X-Junk".into(), value)], b"");
         // Just must not panic / hang.
         let _ = detected;
     }

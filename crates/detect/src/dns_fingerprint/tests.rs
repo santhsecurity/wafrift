@@ -138,10 +138,7 @@ confidence_threshold = 0.5
   weight = 0.7
 "#;
     let eng = CnameRuleEngine::from_toml(toml).expect("parse");
-    let probe = probe_from_hosts(
-        "a.com",
-        &["edge.fastly.net", "origin.a.akamaiedge.net"],
-    );
+    let probe = probe_from_hosts("a.com", &["edge.fastly.net", "origin.a.akamaiedge.net"]);
     let r = eng.detect(&probe);
     let names: Vec<&str> = r.iter().map(|d| d.name.as_str()).collect();
     assert!(names.contains(&"Akamai") && names.contains(&"Fastly"));
@@ -271,15 +268,15 @@ fn embedded_ruleset_fires_on_aws_compute_ptr() {
     let probe = DnsProbe {
         chain: vec![],
         first_a: Some("35.81.85.251".parse().unwrap()),
-        final_ptr: Some(
-            "ec2-35-81-85-251.us-west-2.compute.amazonaws.com".to_string(),
-        ),
+        final_ptr: Some("ec2-35-81-85-251.us-west-2.compute.amazonaws.com".to_string()),
         asn: None,
     };
     let r = eng.detect(&probe);
     let names: Vec<&str> = r.iter().map(|d| d.name.as_str()).collect();
     assert!(
-        names.iter().any(|n| n.contains("AWS") || n.contains("Amazon")),
+        names
+            .iter()
+            .any(|n| n.contains("AWS") || n.contains("Amazon")),
         "AWS EC2 PTR must fire on canonical compute.amazonaws.com PTR: {r:?}"
     );
 }
@@ -307,9 +304,7 @@ fn embedded_ruleset_fires_on_akamai_ptr() {
     let probe = DnsProbe {
         chain: vec![],
         first_a: Some("23.209.84.185".parse().unwrap()),
-        final_ptr: Some(
-            "a23-209-84-185.deploy.static.akamaitechnologies.com".to_string(),
-        ),
+        final_ptr: Some("a23-209-84-185.deploy.static.akamaitechnologies.com".to_string()),
         asn: None,
     };
     let r = eng.detect(&probe);
@@ -480,10 +475,7 @@ fn ruleset_detect_is_deterministic_across_runs() {
     // vector every time.  Sort stability matters for downstream
     // consumers that fingerprint our output.
     let eng = engine();
-    let probe = probe_from_hosts(
-        "a.com",
-        &["edge.fastly.net", "origin.a.akamaiedge.net"],
-    );
+    let probe = probe_from_hosts("a.com", &["edge.fastly.net", "origin.a.akamaiedge.net"]);
     let a = eng.detect(&probe);
     let b = eng.detect(&probe);
     let c = eng.detect(&probe);
@@ -524,10 +516,7 @@ confidence_threshold = 0.5
     let legit = probe_from_hosts("a.com", &["edge.fastly.net"]);
     assert!(!eng.detect(&legit).is_empty());
     // Attacker-controlled suffix does NOT fire.
-    let attacker = probe_from_hosts(
-        "a.com",
-        &["edge.fastly.net.attacker.example.com"],
-    );
+    let attacker = probe_from_hosts("a.com", &["edge.fastly.net.attacker.example.com"]);
     assert!(
         eng.detect(&attacker).is_empty(),
         "anchored regex must not match a suffix-extension attack"

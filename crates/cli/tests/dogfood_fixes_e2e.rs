@@ -228,8 +228,8 @@ fn evade_format_jsonl_emits_per_line_ndjson_twin() {
     let (code, out, _e) = wafrift(&["evade", "--payload", "' OR 1=1 -- ", "--format", "jsonl"]);
     assert_eq!(code, 0, "evade --format jsonl must be accepted");
     let first_line = out.lines().next().unwrap_or("");
-    let v: serde_json::Value = serde_json::from_str(first_line)
-        .expect("jsonl mode: each line must be parseable JSON");
+    let v: serde_json::Value =
+        serde_json::from_str(first_line).expect("jsonl mode: each line must be parseable JSON");
     assert!(
         v.get("payload").is_some(),
         "jsonl variant needs a payload field: {first_line}"
@@ -528,13 +528,7 @@ fn origin_hints_accepts_positional_host() {
 
 #[test]
 fn origin_hints_still_accepts_legacy_host_flag() {
-    let (code, out, err) = wafrift(&[
-        "origin-hints",
-        "--host",
-        "localhost",
-        "--format",
-        "json",
-    ]);
+    let (code, out, err) = wafrift(&["origin-hints", "--host", "localhost", "--format", "json"]);
     assert_eq!(code, 0, "--host flag must still work: {err}");
     assert!(
         out.contains("localhost") || out.contains("127.0.0.1") || out.contains("::1"),
@@ -552,10 +546,7 @@ fn origin_hints_rejects_both_positional_and_host_flag_adversarial() {
         "--format",
         "json",
     ]);
-    assert_ne!(
-        code, 0,
-        "origin-hints with BOTH forms must be rejected"
-    );
+    assert_ne!(code, 0, "origin-hints with BOTH forms must be rejected");
     assert!(
         e.contains("cannot be used with") || e.contains("conflict"),
         "rejection must name the conflict: {e}"
@@ -614,7 +605,9 @@ fn scan_from_discovery_json_emits_single_envelope_not_concatenated_objects() {
         .get("discovery_scan")
         .expect("envelope must have a top-level `discovery_scan` key");
     assert!(
-        envelope.get("jobs").is_some_and(serde_json::Value::is_array),
+        envelope
+            .get("jobs")
+            .is_some_and(serde_json::Value::is_array),
         "discovery_scan.jobs must be an array (got: {envelope:?})"
     );
     let jobs_total = envelope
@@ -1034,7 +1027,8 @@ fn spawn_permissive_mock() -> (std::net::SocketAddr, std::sync::mpsc::Sender<()>
             }
             match listener.accept() {
                 Ok((mut sock, _)) => {
-                    sock.set_read_timeout(Some(std::time::Duration::from_millis(500))).ok();
+                    sock.set_read_timeout(Some(std::time::Duration::from_millis(500)))
+                        .ok();
                     let mut buf = [0u8; 4096];
                     let _ = sock.read(&mut buf);
                     let body = "ok";
@@ -1067,10 +1061,7 @@ fn scan_variants_cap_truncates_to_operator_supplied_limit() {
     // path at scan/mod.rs:~268-282.
     let (addr, shutdown) = spawn_permissive_mock();
     let target = format!("http://{addr}/cap");
-    let tmp = std::env::temp_dir().join(format!(
-        "wafrift-cap-test-{}.json",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("wafrift-cap-test-{}.json", std::process::id()));
     let _ = std::fs::remove_file(&tmp);
 
     let (code, _stdout, stderr) = wafrift(&[
@@ -1096,7 +1087,10 @@ fn scan_variants_cap_truncates_to_operator_supplied_limit() {
     ]);
     let _ = shutdown.send(());
 
-    assert_eq!(code, 0, "scan --variants-cap must succeed; stderr:\n{stderr}");
+    assert_eq!(
+        code, 0,
+        "scan --variants-cap must succeed; stderr:\n{stderr}"
+    );
     let body = std::fs::read_to_string(&tmp).expect("scan must write JSON");
     let v: serde_json::Value = serde_json::from_str(&body).expect("scan JSON parseable");
     // The cap bounds the INITIAL variant pool (`explore_variants`),
@@ -1178,8 +1172,7 @@ fn legendary_bypass_probe_phase_embeds_structured_divergences_into_markdown() {
     );
     // The re-run command footer must still appear.
     assert!(
-        stdout.contains("Reproduce the inline sweep")
-            || stdout.contains("wafrift bypass-probe"),
+        stdout.contains("Reproduce the inline sweep") || stdout.contains("wafrift bypass-probe"),
         "re-run command footer missing from section 3:\n{stdout}"
     );
 }
@@ -1237,8 +1230,7 @@ fn legendary_payload_subprocess_pipeline_embeds_bypasses_into_markdown() {
     // The re-run command block must still appear so the operator
     // can reproduce the inline scan.
     assert!(
-        stdout.contains("Reproduce the inline scan")
-            || stdout.contains("wafrift scan --target"),
+        stdout.contains("Reproduce the inline scan") || stdout.contains("wafrift scan --target"),
         "re-run command block missing from markdown:\n{stdout}"
     );
 }
@@ -1304,7 +1296,10 @@ fn dogfood_b1_toml_parse_error_exits_4_in_validate_only() {
         dir.to_str().unwrap(),
     ]);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(code, 4, "TOML parse error must exit 4, got {code}\nstderr:\n{stderr}");
+    assert_eq!(
+        code, 4,
+        "TOML parse error must exit 4, got {code}\nstderr:\n{stderr}"
+    );
     assert!(
         stderr.contains("corpus error") || stderr.contains("TOML parse error"),
         "stderr should mention the integrity error:\n{stderr}"
@@ -1329,19 +1324,17 @@ fn dogfood_b9_missing_field_exits_4_in_validate_only() {
         dir.to_str().unwrap(),
     ]);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(code, 4, "schema error must exit 4, got {code}\nstderr:\n{stderr}");
+    assert_eq!(
+        code, 4,
+        "schema error must exit 4, got {code}\nstderr:\n{stderr}"
+    );
 }
 
 // ─────────────────── B2: --class respected in --validate-only ─────────
 
 #[test]
 fn dogfood_b2_class_filter_respected_in_validate_only() {
-    let (code, stdout, _stderr) = wafrift(&[
-        "bench-waf",
-        "--validate-only",
-        "--class",
-        "sql",
-    ]);
+    let (code, stdout, _stderr) = wafrift(&["bench-waf", "--validate-only", "--class", "sql"]);
     assert_eq!(code, 0);
     // SQL corpus has 277 cases; full corpus has 901. The filter must
     // produce the 277-only count.
@@ -1382,7 +1375,10 @@ fn dogfood_b3_audit_json_format_emits_valid_json() {
     // total_holes matches array length.
     let holes_count = parsed["holes"].as_array().unwrap().len();
     let total_holes = parsed["total_holes"].as_u64().unwrap() as usize;
-    assert_eq!(holes_count, total_holes, "holes[].len() must match total_holes");
+    assert_eq!(
+        holes_count, total_holes,
+        "holes[].len() must match total_holes"
+    );
 }
 
 #[test]
@@ -1415,11 +1411,7 @@ fn dogfood_b4_techniques_list_json_format() {
 
 #[test]
 fn dogfood_b4_techniques_explain_known_tamper() {
-    let (code, stdout, _stderr) = wafrift(&[
-        "techniques",
-        "explain",
-        "tamper/json_unicode_alnum",
-    ]);
+    let (code, stdout, _stderr) = wafrift(&["techniques", "explain", "tamper/json_unicode_alnum"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("json_unicode_alnum"));
     assert!(stdout.contains("aggressiveness"));
@@ -1427,33 +1419,21 @@ fn dogfood_b4_techniques_explain_known_tamper() {
 
 #[test]
 fn dogfood_b4_techniques_explain_unknown_tamper_exits_2() {
-    let (code, _stdout, stderr) = wafrift(&[
-        "techniques",
-        "explain",
-        "tamper/does_not_exist_xyz",
-    ]);
+    let (code, _stdout, stderr) = wafrift(&["techniques", "explain", "tamper/does_not_exist_xyz"]);
     assert_eq!(code, 2);
     assert!(stderr.contains("unknown"));
 }
 
 #[test]
 fn dogfood_b4_techniques_explain_encoding_strategy() {
-    let (code, stdout, _stderr) = wafrift(&[
-        "techniques",
-        "explain",
-        "encoding/url/single",
-    ]);
+    let (code, stdout, _stderr) = wafrift(&["techniques", "explain", "encoding/url/single"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("encoding/url/single"));
 }
 
 #[test]
 fn dogfood_b4_techniques_explain_bad_prefix_exits_2() {
-    let (code, _stdout, stderr) = wafrift(&[
-        "techniques",
-        "explain",
-        "garbage/selector",
-    ]);
+    let (code, _stdout, stderr) = wafrift(&["techniques", "explain", "garbage/selector"]);
     assert_eq!(code, 2);
     assert!(stderr.contains("must start with"));
 }
@@ -1605,7 +1585,9 @@ fn dogfood_f28_evade_json_has_schema_version_and_wafrift_version() {
     assert_eq!(code, 0);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("must be valid JSON");
-    let schema = parsed.get("schema_version").expect("schema_version key required");
+    let schema = parsed
+        .get("schema_version")
+        .expect("schema_version key required");
     assert!(schema.is_number(), "schema_version must be a number");
     let version = parsed
         .get("wafrift_version")
@@ -1613,7 +1595,10 @@ fn dogfood_f28_evade_json_has_schema_version_and_wafrift_version() {
     assert!(version.is_string(), "wafrift_version must be a string");
     let v = version.as_str().unwrap();
     assert!(
-        v.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false),
+        v.chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false),
         "wafrift_version must start with a digit, got `{v}`"
     );
     // variants array still present.

@@ -89,9 +89,9 @@ fn body_diff_finds_divergences_against_body_aware_mock() {
     assert!(!results.is_empty(), "must have at least one probe result");
 
     // The token-carrying probes should diverge from baseline.
-    let any_diverged = results
-        .iter()
-        .any(|r| r["severity"].as_str() == Some("medium") || r["severity"].as_str() == Some("high"));
+    let any_diverged = results.iter().any(|r| {
+        r["severity"].as_str() == Some("medium") || r["severity"].as_str() == Some("high")
+    });
     assert!(
         any_diverged,
         "at least one probe must diverge against a body-aware mock: {parsed}"
@@ -100,10 +100,7 @@ fn body_diff_finds_divergences_against_body_aware_mock() {
     // Every probe must carry a curl reproducer of shape `curl -i -X POST …`.
     for r in results {
         let curl = r["curl_cmd"].as_str().expect("curl_cmd string");
-        assert!(
-            curl.starts_with("curl -i -X POST "),
-            "got: {curl}"
-        );
+        assert!(curl.starts_with("curl -i -X POST "), "got: {curl}");
         assert!(curl.contains("Content-Type"), "got: {curl}");
         assert!(curl.contains("--data-binary"), "got: {curl}");
     }
@@ -120,7 +117,10 @@ fn body_diff_against_unreachable_target_exits_1() {
         "--timeout-secs",
         "2",
     ]);
-    assert_eq!(code, 1, "unreachable target must exit 1 — stderr:\n{stderr}");
+    assert_eq!(
+        code, 1,
+        "unreachable target must exit 1 — stderr:\n{stderr}"
+    );
 }
 
 #[test]

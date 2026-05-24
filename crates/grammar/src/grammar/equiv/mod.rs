@@ -567,7 +567,7 @@ impl DeliveryShape {
             Self::JsonNestedDeep { param, depth } => {
                 // Build {"a":{"a":...{"a":{"<param>":"<payload>"}}...}}
                 // bottom-up so we never have to count braces.
-                let depth = (*depth).max(1).min(64); // cap so a hostile config can't OOM the renderer
+                let depth = (*depth).clamp(1, 64); // cap so a hostile config can't OOM the renderer
                 let inner = format!(
                     "{{\"{}\":\"{}\"}}",
                     json_escape(param),
@@ -586,9 +586,7 @@ impl DeliveryShape {
                 // attacker bytes there would mis-parse the query.
                 let f_safe = sanitize_graphql_name(field, "search");
                 let v_safe = sanitize_graphql_name(var, "v");
-                let query = format!(
-                    "query Q(${v_safe}:String!){{{f_safe}(q:${v_safe})}}"
-                );
+                let query = format!("query Q(${v_safe}:String!){{{f_safe}(q:${v_safe})}}");
                 let body = format!(
                     "{{\"query\":\"{}\",\"variables\":{{\"{}\":\"{}\"}}}}",
                     json_escape(&query),
@@ -1247,9 +1245,7 @@ mod delivery_roundtrip_tests {
             assert!(body.contains("<?xml"), "XML prolog missing");
             assert!(ct(&r).contains("application/xml"));
             // <q>...</q> — extract inner text and entity-decode.
-            let (_, after_open) = body
-                .split_once("<q>")
-                .expect("inner field open tag");
+            let (_, after_open) = body.split_once("<q>").expect("inner field open tag");
             let (text, _) = after_open
                 .split_once("</q>")
                 .expect("inner field close tag");
@@ -1320,9 +1316,7 @@ mod delivery_roundtrip_tests {
                 // Walk `depth` outer "a" wrappers, then the final "q":"...".
                 let mut s = body.as_str();
                 for _ in 0..depth {
-                    s = s
-                        .strip_prefix("{\"a\":")
-                        .expect("nested 'a' wrapper");
+                    s = s.strip_prefix("{\"a\":").expect("nested 'a' wrapper");
                     assert!(s.ends_with('}'), "missing closing brace");
                     s = &s[..s.len() - 1];
                 }
@@ -1377,9 +1371,7 @@ mod delivery_roundtrip_tests {
                 "GraphQL envelope missing: {body}"
             );
             // Extract `"v":"..."` value from variables.
-            let var_start = body
-                .find("\"v\":\"")
-                .expect("variable v key");
+            let var_start = body.find("\"v\":\"").expect("variable v key");
             let after = &body[var_start + 5..];
             let end = after.find("\"}").expect("variable value close");
             let val = &after[..end];

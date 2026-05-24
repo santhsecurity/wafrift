@@ -360,7 +360,12 @@ fn emit_output(
     for r in results.iter().filter(|r| r.severity != "none") {
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
-        println!("  [{badge}] {} ({}) — {}", r.kind.bold(), r.method, r.description);
+        println!(
+            "  [{badge}] {} ({}) — {}",
+            r.kind.bold(),
+            r.method,
+            r.description
+        );
         println!(
             "    {} baseline GET HTTP {} ({} bytes) → {} {} HTTP {} ({} bytes, Δ {:+.1}%)",
             "↘".bright_black(),
@@ -441,7 +446,10 @@ mod tests {
             .iter()
             .map(|p| p.method)
             .collect();
-        assert!(methods.contains(&"BANANA"), "should test custom verb tolerance");
+        assert!(
+            methods.contains(&"BANANA"),
+            "should test custom verb tolerance"
+        );
     }
 
     #[test]
