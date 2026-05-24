@@ -217,20 +217,29 @@ impl UpstreamClient {
                 // we can clone it directly.
                 let headers = resp.headers().clone();
                 // Bound body read.
+                // Previously the loop silently truncated at max_body bytes and
+                // returned Ok(truncated_body) — UpstreamError::BodyTooLarge was
+                // defined but never emitted, making it impossible for callers to
+                // distinguish a complete response from a truncated one. A WAF
+                // block that happens to produce a large body would be silently
+                // truncated, potentially making the response look like a pass
+                // when the real indicator was cut off. Now we return the explicit
+                // error so callers can treat it as a failed scan / skip.
                 let mut buf = Vec::new();
                 let mut stream = resp.bytes_stream();
                 use futures_util::StreamExt;
                 while let Some(chunk) = stream.next().await {
                     let chunk = chunk.map_err(|e| UpstreamError::Request(e.to_string()))?;
-                    let remaining = max_body.saturating_sub(buf.len());
-                    if remaining == 0 {
-                        break;
+                    if buf.len().saturating_add(chunk.len()) > max_body {
+                        // We've hit the cap. Return a hard error so callers know
+                        // the body was not fully read rather than silently lying
+                        // about the truncated content.
+                        return Err(UpstreamError::BodyTooLarge {
+                            got: buf.len().saturating_add(chunk.len()),
+                            cap: max_body,
+                        });
                     }
-                    let take = chunk.len().min(remaining);
-                    buf.extend_from_slice(&chunk[..take]);
-                    if chunk.len() > remaining {
-                        break;
-                    }
+                    buf.extend_from_slice(&chunk);
                 }
                 Ok(UpstreamResponse {
                     status,
