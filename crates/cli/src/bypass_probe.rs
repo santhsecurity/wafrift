@@ -338,11 +338,34 @@ async fn probe_one_url(
         }
     };
     let baseline_status = baseline.status().as_u16();
-    // Bounded read — decompression-bomb defence on the baseline.
-    let baseline_body =
-        crate::safe_body::read_bounded(baseline, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
-            .await
-            .unwrap_or_default();
+    // Bounded read — decompression-bomb defence on the baseline (F136).
+    // If the baseline body hits the cap the probe run MUST abort, not
+    // silently proceed with baseline_len == 0.  A zero-byte baseline
+    // causes every probe response body to appear as a 100% divergence
+    // (body_delta_pct(0, n) == 100.0 for any n > 0), generating a
+    // massive false-positive storm with no indication of the root cause.
+    let baseline_body = match crate::safe_body::read_bounded(
+        baseline,
+        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+    )
+    .await
+    {
+        Ok(b) => b,
+        Err(crate::safe_body::ReadError::Overrun {
+            cap_bytes,
+            observed_bytes,
+        }) => {
+            return Err(format!(
+                "baseline GET {url} body exceeded the {cap_bytes}-byte safety cap \
+                 ({observed_bytes}+ bytes read before abort); the baseline length \
+                 would be 0 which makes every subsequent probe appear as a divergence. \
+                 Reduce the response size or raise DEFAULT_MAX_RESPONSE_BYTES."
+            ));
+        }
+        Err(crate::safe_body::ReadError::Transport(e)) => {
+            return Err(format!("baseline GET {url} body read failed: {e}"));
+        }
+    };
     let baseline_len = baseline_body.len();
 
     // TRACING: baseline captured — confirms what the probe run considers
@@ -1425,5 +1448,112 @@ mod tests {
         assert!(severity_rank("HIGH") > severity_rank("MEDIUM"));
         assert!(severity_rank("MEDIUM") > severity_rank("LOW"));
         assert_eq!(severity_rank("garbage"), 0);
+    }
+
+    // ── F136: baseline-overrun abort tests ────────────────────────────
+    //
+    // Verify that an overrun on the baseline body causes `probe_one_url`
+    // to return Err rather than silently setting baseline_len to 0 and
+    // flooding the divergence list with false positives.
+
+    /// Build a mock HTTP response whose body is exactly `n` bytes of 'X'.
+    fn big_body_response(n: usize) -> String {
+        let body: String = "X".repeat(n);
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n{body}",
+        )
+    }
+
+    #[serial_test::serial]
+    #[tokio::test(flavor = "current_thread")]
+    async fn baseline_overrun_returns_error_not_zero_length() {
+        // Server sends a body of exactly DEFAULT_MAX_RESPONSE_BYTES + 1 so
+        // read_bounded triggers Overrun on the very first read (the baseline).
+        // probe_one_url must return Err rather than continuing with
+        // baseline_len == 0.
+        let cap = crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES;
+        // The body is cap+1 bytes — just enough to push past the limit.
+        let addr = spawn_mock_server(move |_| big_body_response(cap + 1)).await;
+        let url = format!("http://{addr}/resource");
+        let args = methods_only_args(url.clone());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let result = probe_one_url(&client, &url, &args, 1).await;
+        assert!(
+            result.is_err(),
+            "probe_one_url must return Err when baseline body exceeds cap; got Ok"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("cap") || msg.contains("exceeded") || msg.contains("safety"),
+            "error message must mention the cap/exceeded: {msg}"
+        );
+    }
+
+    #[serial_test::serial]
+    #[tokio::test(flavor = "current_thread")]
+    async fn baseline_exactly_at_cap_is_not_an_error() {
+        // A body of exactly DEFAULT_MAX_RESPONSE_BYTES bytes must NOT
+        // trigger the overrun — only strictly-over-cap bodies abort.
+        let cap = crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES;
+        let addr = spawn_mock_server(move |n| {
+            if n == 0 {
+                big_body_response(cap) // exactly at cap — must succeed
+            } else {
+                ok_response("probe body")
+            }
+        })
+        .await;
+        let url = format!("http://{addr}/resource");
+        let args = methods_only_args(url.clone());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let result = probe_one_url(&client, &url, &args, 1).await;
+        assert!(
+            result.is_ok(),
+            "baseline body exactly at cap must not abort: {result:?}"
+        );
+        let report = result.unwrap();
+        assert_eq!(
+            report.baseline_body_len, cap,
+            "baseline_body_len must equal cap, got {}",
+            report.baseline_body_len
+        );
+    }
+
+    #[test]
+    fn zero_baseline_len_with_full_probe_body_would_be_100pct_divergence() {
+        // Documents the bug behaviour (before F136) so a future reader
+        // understands WHY aborting on overrun is correct: a zero-len
+        // baseline causes every non-empty probe body to appear as a
+        // 100% divergence, regardless of the actual probe status.
+        use crate::probe_classify::body_delta_pct;
+        let delta = body_delta_pct(0, 500);
+        assert!(
+            (delta - 100.0).abs() < f64::EPSILON,
+            "zero baseline with 500-byte probe must be 100% — the false-positive storm"
+        );
+        // And the classify gate would fire on this:
+        let d = classify(
+            "methods",
+            "POST",
+            "method override",
+            200,
+            0,   // baseline_len = 0 (the overrun-corrupted value)
+            200,
+            500, // any non-empty probe body
+            10.0,
+            || "curl -X POST http://x/".to_string(),
+        );
+        assert!(
+            d.is_some(),
+            "classify MUST fire on zero-baseline + non-empty probe (the bug being prevented)"
+        );
     }
 }
