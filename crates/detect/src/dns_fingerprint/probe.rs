@@ -96,9 +96,23 @@ pub async fn probe_cname_chain(host: &str) -> Result<DnsProbe, DnsProbeError> {
     // least one A record back, we know the resolver itself works
     // and any empty chain means "no CNAME exists" rather than
     // "DNS broken."
+    //
+    // Prefer an IPv4 address over IPv6. `lookup_ip` returns whichever
+    // record type the resolver fields first — modern resolvers often
+    // return AAAA first — and `lookup_asn` cannot lookup ASN for
+    // IPv6 (cymru's v6 nibble service requires a separate code path
+    // we don't model). Pre-fix every dual-stack target (Cloudflare,
+    // Fastly, CloudFront, ...) silently lost its ASN signal whenever
+    // the resolver happened to return AAAA first.
     let a_lookup = resolver.lookup_ip(&current);
     let first_a = match tokio::time::timeout(RESOLVER_TIMEOUT, a_lookup).await {
-        Ok(Ok(ips)) => ips.iter().next(),
+        Ok(Ok(ips)) => {
+            // Prefer V4 if present; otherwise fall back to whatever
+            // we got (typically V6 on v6-only hosts).
+            ips.iter()
+                .find(|ip| ip.is_ipv4())
+                .or_else(|| ips.iter().next())
+        }
         _ => None,
     };
 
