@@ -1511,6 +1511,37 @@ fn dogfood_b7_parent_child_overlap_also_caught() {
     assert!(stderr.contains("contradictory") || stderr.contains("appear in both"));
 }
 
+// ─────────────────── B8: egress-example --format flag ────────────────
+//
+// Pre-fix the command always wrote a comment to stderr alongside the
+// JSON on stdout. Callers doing `2>&1 | jq` got mixed content. Adds
+// --format json (default, pure JSON, no stderr noise) and --format
+// human (comment on stderr, JSON on stdout — interactive use).
+
+#[test]
+fn dogfood_b8_egress_example_json_no_stderr_noise() {
+    let (code, stdout, stderr) = wafrift(&["egress-example", "--format", "json"]);
+    assert_eq!(code, 0);
+    // stdout is valid JSON.
+    let _: serde_json::Value = serde_json::from_str(stdout.trim()).expect("must be JSON");
+    // stderr must be EMPTY in json mode (no comment header).
+    assert!(
+        stderr.trim().is_empty(),
+        "json mode must emit no stderr, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn dogfood_b8_egress_example_human_emits_comment_to_stderr() {
+    let (code, stdout, stderr) = wafrift(&["egress-example", "--format", "human"]);
+    assert_eq!(code, 0);
+    let _: serde_json::Value = serde_json::from_str(stdout.trim()).expect("must be JSON");
+    assert!(
+        stderr.contains("#") || stderr.contains("Tor"),
+        "human mode must emit comment header on stderr, got: {stderr:?}"
+    );
+}
+
 // ─────────────────── N01: exit code doc covers dual-usage of code 2 ───
 //
 // Pre-fix the docs said exit 2 means only "bench-waf zero bypasses /
