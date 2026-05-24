@@ -623,6 +623,28 @@ async fn run_probe_job(
     };
     match job {
         ProbeJob::Header(probe) => {
+            // F132: reqwest's HeaderName::try_from rejects HTTP/1.1-illegal
+            // shapes (leading whitespace, embedded non-ASCII, tabs) BEFORE
+            // the request hits the wire. The auth_bypass probe set includes
+            // RFC-illegal variants on purpose for raw-TCP / legacy-stack
+            // hunting, but via reqwest they noop silently — the operator's
+            // probe count overstates reality with no signal. Pre-validate
+            // and warn loudly when the client refuses a probe header so
+            // the report distinguishes "fired and no divergence" from
+            // "never fired at all."
+            if reqwest::header::HeaderName::try_from(probe.header.as_str()).is_err() {
+                tracing::warn!(
+                    target: "wafrift::bypass_probe",
+                    header = %probe.header.escape_debug(),
+                    value = %probe.value,
+                    label = probe.label,
+                    "probe header is rejected by HTTP/1.1 client validation \
+                     (RFC-illegal token, embedded non-ASCII, or whitespace) — \
+                     reqwest will not send it. Use raw-TCP transport to probe \
+                     non-compliant origins for this variant."
+                );
+                return None;
+            }
             let resp = client
                 .get(url)
                 .header(probe.header.clone(), probe.value.clone())
