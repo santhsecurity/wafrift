@@ -45,6 +45,12 @@ use thiserror::Error;
 /// would be a DoS-on-self for every blocked-up upstream.
 const CT_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Hard cap on crt.sh response body size. A real CT-log JSON for a
+/// busy domain is a few MB at most; an adversarial / misbehaving
+/// mirror that streams multi-GB nonsense would otherwise OOM the
+/// scanner before `serde_json::from_str` ever sees the payload.
+const CT_RESPONSE_MAX_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
+
 /// Public error type for the recon crate. Library callers should pattern-
 /// match on this rather than `anyhow::Error` so they can react to
 /// transport vs parse vs status failures distinctly.
@@ -58,6 +64,12 @@ pub enum ReconError {
 
     #[error("failed to parse crt.sh response: {0}")]
     Parse(#[from] serde_json::Error),
+
+    #[error(
+        "crt.sh response exceeded {limit} byte cap (got {got}+ bytes) — \
+         refusing to buffer; aborting"
+    )]
+    ResponseTooLarge { limit: usize, got: usize },
 }
 
 pub type Result<T> = std::result::Result<T, ReconError>;
@@ -78,13 +90,32 @@ pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
         .build()?;
     let url = format!("https://crt.sh/?q=%.{domain}&output=json");
 
-    let res = client.get(&url).send().await?;
+    let mut res = client.get(&url).send().await?;
 
     if !res.status().is_success() {
         return Err(ReconError::BadStatus(res.status()));
     }
 
-    let body = res.text().await?;
+    // Stream-bounded read: pull chunks until either EOF or we exceed
+    // the cap. Avoids `res.text()` which buffers the full body before
+    // returning — a malicious / runaway mirror could OOM us there
+    // because reqwest happily allocates for any Content-Length.
+    let mut body_bytes = Vec::with_capacity(64 * 1024);
+    while let Some(chunk) = res.chunk().await? {
+        if body_bytes.len() + chunk.len() > CT_RESPONSE_MAX_BYTES {
+            return Err(ReconError::ResponseTooLarge {
+                limit: CT_RESPONSE_MAX_BYTES,
+                got: body_bytes.len() + chunk.len(),
+            });
+        }
+        body_bytes.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8(body_bytes).map_err(|e| {
+        ReconError::Parse(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("crt.sh response was not valid UTF-8: {e}"),
+        )))
+    })?;
     let subdomains = parse_crtsh_response(&body, domain)?;
 
     tracing::info!(

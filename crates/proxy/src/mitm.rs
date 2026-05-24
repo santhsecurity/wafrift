@@ -423,18 +423,32 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
 /// Ensure a MITM CA exists at `dir`, generating one if needed.
 ///
 /// Returns the loaded `CertificateAuthority`.
+///
+/// Race-free: attempts the load directly and only falls through to
+/// `generate()` on `ErrorKind::NotFound`. The prior `exists() &&
+/// exists() → load_from_dir` pattern had two windows for a symlink
+/// swap to redirect the load to an attacker-controlled cert file
+/// between the checks and the open.
 pub fn ensure_ca(dir: &std::path::Path) -> anyhow::Result<CertificateAuthority> {
-    let cert_path = dir.join(CA_CERT_FILE);
-    let key_path = dir.join(CA_KEY_FILE);
-
-    if cert_path.exists() && key_path.exists() {
-        return CertificateAuthority::load_from_dir(dir);
+    match CertificateAuthority::load_from_dir(dir) {
+        Ok(ca) => Ok(ca),
+        Err(err) => {
+            // Treat any I/O NotFound on cert OR key as "needs generation".
+            // Other errors (permission denied, malformed PEM, parse failure)
+            // surface as-is so we never silently overwrite a real CA.
+            let is_missing = err
+                .chain()
+                .filter_map(|e| e.downcast_ref::<std::io::Error>())
+                .any(|io| io.kind() == std::io::ErrorKind::NotFound);
+            if !is_missing {
+                return Err(err);
+            }
+            tracing::info!(dir = %dir.display(), "generating new MITM CA");
+            let ca = CertificateAuthority::generate()?;
+            ca.write_to_dir(dir)?;
+            Ok(ca)
+        }
     }
-
-    tracing::info!(dir = %dir.display(), "generating new MITM CA");
-    let ca = CertificateAuthority::generate()?;
-    ca.write_to_dir(dir)?;
-    Ok(ca)
 }
 
 #[cfg(test)]

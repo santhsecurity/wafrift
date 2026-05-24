@@ -460,14 +460,22 @@ impl ChallengeStore {
         let now = Instant::now();
         // Garbage-collect the global rolling window: drop entries
         // older than 60 s before checking the cap.
-        let cutoff = now.checked_sub(GLOBAL_PROMPT_WINDOW);
-        if let Some(cut) = cutoff {
-            while let Some((_, ts)) = inner.global_prompt_window.front() {
-                if *ts < cut {
-                    inner.global_prompt_window.pop_front();
-                } else {
-                    break;
-                }
+        //
+        // `Instant::checked_sub` returns None when `now` is less than
+        // GLOBAL_PROMPT_WINDOW after boot — the prior `if let Some`
+        // guard silently skipped GC for the first 60 s, so the entire
+        // cap could be exhausted before a single drain fired. On
+        // underflow, any existing entries are necessarily fresh (the
+        // window hasn't elapsed yet), so the loop is a no-op anyway —
+        // but we still enter it to keep behaviour uniform.
+        let cutoff = now
+            .checked_sub(GLOBAL_PROMPT_WINDOW)
+            .unwrap_or(now);
+        while let Some((_, ts)) = inner.global_prompt_window.front() {
+            if *ts < cutoff {
+                inner.global_prompt_window.pop_front();
+            } else {
+                break;
             }
         }
         if inner.global_prompt_window.len() >= OPERATOR_PROMPT_GLOBAL_CAP_PER_MIN {

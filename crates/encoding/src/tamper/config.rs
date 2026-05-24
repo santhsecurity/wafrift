@@ -24,16 +24,40 @@ pub struct TamperConfig {
     pub strategies: Vec<StrategyConfig>,
 }
 
+/// Hard cap on a single strategy-config TOML file. Real configs are
+/// hundreds of bytes to a few KB; a pathological multi-MB file (or
+/// an adversarial deeply-nested-table file aimed at the parser's
+/// quadratic edge cases) would otherwise be loaded whole into RAM
+/// and shoved at `toml::from_str` with no guardrail.
+const STRATEGY_FILE_MAX_BYTES: u64 = 256 * 1024; // 256 KiB
+
 impl TamperRegistry {
     /// Loads strategy configurations from a TOML file.
     ///
     /// # Errors
-    /// Returns an error if the file cannot be read or parsed.
+    /// Returns an error if the file cannot be read, exceeds
+    /// `STRATEGY_FILE_MAX_BYTES`, or fails TOML parsing.
     pub fn load_toml<P: AsRef<std::path::Path>>(
         &mut self,
         path: P,
     ) -> Result<TamperConfig, TamperError> {
-        let content = std::fs::read_to_string(path.as_ref())
+        let path_ref = path.as_ref();
+
+        // Cheap pre-check via file metadata — avoids ever opening
+        // a multi-GB tar pretending to be a TOML file.
+        let meta = std::fs::metadata(path_ref).map_err(|e| {
+            TamperError::LoadError(format!("Failed to stat {}: {e}", path_ref.display()))
+        })?;
+        if meta.len() > STRATEGY_FILE_MAX_BYTES {
+            return Err(TamperError::InvalidConfig(format!(
+                "strategy file {} is {} bytes, exceeds {}-byte cap",
+                path_ref.display(),
+                meta.len(),
+                STRATEGY_FILE_MAX_BYTES,
+            )));
+        }
+
+        let content = std::fs::read_to_string(path_ref)
             .map_err(|e| TamperError::LoadError(format!("Failed to read file: {e}")))?;
 
         let config: TamperConfig = toml::from_str(&content)
