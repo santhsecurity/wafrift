@@ -49,28 +49,25 @@ fn url_schemes() -> &'static [String] {
 /// Compile-time embedded TOML rules for SSRF indicators.
 const SSRF_INDICATORS_TOML: &str = include_str!("../rules/ssrf/indicators.toml");
 
+// Per consolidation F13: `description` is a TOML doc field, not
+// consumed at runtime. Serde ignores unknown fields by default.
+
 /// Indicator host definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct IndicatorHost {
     host: String,
-    #[allow(dead_code)]
-    description: String,
 }
 
 /// Private IP prefix definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct PrivateIpPrefix {
     prefix: String,
-    #[allow(dead_code)]
-    description: String,
 }
 
 /// Internal path definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct InternalPath {
     path: String,
-    #[allow(dead_code)]
-    description: String,
 }
 
 /// Root structure for indicators.toml.

@@ -23,24 +23,21 @@ pub struct PathOracle;
 /// Compile-time embedded TOML rules for path traversal.
 const PATH_TRAVERSAL_TOML: &str = include_str!("../rules/path_traversal/sequences.toml");
 
+// Per consolidation F13/F30: `description`/`encoding`/`os` TOML fields
+// are human-readable docs not consumed at runtime. Serde silently
+// ignores unknown TOML fields by default — drop them from the struct
+// rather than allocating a heap String per rule on every parse.
+
 /// Traversal sequence definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct TraversalSequence {
     sequence: String,
-    #[allow(dead_code)]
-    description: String,
-    #[allow(dead_code)]
-    encoding: String,
 }
 
 /// Target file definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct TargetFile {
     path: String,
-    #[allow(dead_code)]
-    description: String,
-    #[allow(dead_code)]
-    os: String,
 }
 
 /// Root structure for sequences.toml.

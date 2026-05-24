@@ -23,28 +23,30 @@ pub struct CmdiOracle;
 /// Compile-time embedded TOML rules for CMDI oracle.
 const CMD_ORACLE_TOML: &str = include_str!("../rules/cmd/oracle.toml");
 
+// Per consolidation F13: the TOML rule files carry a `description`
+// field for human readability that the Rust code never consumes.
+// Previously each struct held `#[allow(dead_code)] description: String`
+// which allocated a heap String per rule on every TOML parse for data
+// that was never read. Now serde's default unknown-field behavior
+// silently skips the description bytes — zero allocations, the TOML
+// docs stay intact, the dead_code lint is no longer needed.
+
 /// Command separator definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct CmdSeparator {
     pattern: String,
-    #[allow(dead_code)]
-    description: String,
 }
 
 /// Shell command definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct ShellCommand {
     name: String,
-    #[allow(dead_code)]
-    description: String,
 }
 
 /// Shell trick definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct ShellTrick {
     pattern: String,
-    #[allow(dead_code)]
-    description: String,
 }
 
 /// Root structure for oracle.toml.
