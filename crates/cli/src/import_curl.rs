@@ -216,10 +216,36 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                     i += 1; // skip the file argument too
                 }
             }
+            // Common value-taking flags from Burp / Chrome / mitmproxy
+            // "Copy as cURL" output. Each consumes the next token as
+            // its argument. Without this whitelist, an invocation like
+            // `curl --url https://target` would route into the long-
+            // option heuristic below, which would correctly skip
+            // `https://target` as the flag value — and the URL would
+            // never be recorded. Listed explicitly so the right
+            // behaviour stays right when the heuristic changes.
+            "--url" | "--max-time" | "--connect-timeout" | "--cacert" | "--cert" | "--key"
+            | "--user" | "-u" | "--proxy-user" | "--resolve" | "--unix-socket" | "--referer"
+            | "-e" => {
+                let v = tokens
+                    .get(i + 1)
+                    .ok_or_else(|| format!("{tok} needs a value"))?
+                    .clone();
+                // `--url <URL>` is the only one where we capture
+                // the value — every other flag's value is operator-
+                // facing config we don't model.
+                if tok == "--url" && p.url.is_none() {
+                    p.url = Some(v);
+                }
+                i += 1;
+            }
             other if other.starts_with("--") => {
                 // Long option: skip the option AND its argument if it
                 // looks like one (heuristic: next token doesn't start
                 // with -). Keeps unknown options from misparsing.
+                // This is the LAST resort — extend the explicit
+                // whitelist above whenever an operator hits a flag
+                // that breaks here so the misparse can't recur.
                 if i + 1 < tokens.len() && !tokens[i + 1].starts_with('-') {
                     i += 1;
                 }
@@ -236,7 +262,13 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
         i += 1;
     }
     if p.url.is_none() {
-        return Err("no URL found in curl invocation".to_string());
+        return Err(
+            "no URL found in curl invocation — possibly an unrecognised \
+             curl flag consumed the URL token. If a `--longflag value` \
+             pattern is being mistaken for a flag-then-URL pair, add \
+             the flag to the explicit whitelist in parse_curl."
+                .to_string(),
+        );
     }
     Ok(p)
 }
@@ -681,6 +713,60 @@ mod tests {
         let toks = shell_tokenize("curl -H 'noColon' https://x").unwrap();
         let err = parse_curl(&toks).unwrap_err();
         assert!(err.contains("malformed header"));
+    }
+
+    // ── Value-taking long-flag whitelist ─────────────────────────
+
+    #[test]
+    fn parse_url_flag_captures_url() {
+        // `curl --url https://target` — the URL is the value of
+        // --url, not a positional token. Pre-fix, the long-option
+        // heuristic skipped `https://target` and we returned
+        // "no URL found".
+        let toks = shell_tokenize("curl --url https://target/api").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/api"));
+    }
+
+    #[test]
+    fn parse_max_time_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl --max-time 30 https://target/api").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/api"));
+    }
+
+    #[test]
+    fn parse_user_flag_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl --user admin:pw https://target/").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/"));
+    }
+
+    #[test]
+    fn parse_referer_flag_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl -e https://ref/ https://target/").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/"));
+    }
+
+    #[test]
+    fn parse_resolve_flag_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl --resolve target:443:10.0.0.1 https://target/api").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/api"));
+    }
+
+    #[test]
+    fn parse_no_url_error_message_hints_at_flag_consumption() {
+        let toks = shell_tokenize("curl -H 'A: 1'").unwrap();
+        let err = parse_curl(&toks).unwrap_err();
+        // The hint should mention the flag-consumption scenario so
+        // the operator knows where to look — pre-fix the bare
+        // "no URL found" gave no diagnostic at all.
+        assert!(
+            err.to_lowercase().contains("flag"),
+            "error must hint at flag-consumption: {err}"
+        );
     }
 
     // ── Differential auto-promote on no-payload path ─────────────
