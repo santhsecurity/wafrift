@@ -188,16 +188,17 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         evasion.techniques.iter().map(ToString::to_string).collect()
     };
 
-    let client = match wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, None)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{} reqwest client build failed: {e}", "error:".red().bold());
-            return ExitCode::from(1);
-        }
-    };
+    let client =
+        match wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, None)
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{} reqwest client build failed: {e}", "error:".red().bold());
+                return ExitCode::from(1);
+            }
+        };
 
     let reqwest_method =
         match reqwest::Method::from_bytes(evasion.request.method.as_str().as_bytes()) {
