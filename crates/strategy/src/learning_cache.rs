@@ -156,23 +156,41 @@ impl LearningCache {
     }
 
     /// Record a successful bypass.
+    ///
+    /// The stored pipeline is ALWAYS overwritten with the
+    /// just-succeeded pipeline. Pre-fix this used `or_insert`
+    /// which left the existing entry's pipeline untouched — if
+    /// the first interaction for a key was a `record_failure`,
+    /// the failing pipeline got stored permanently and every
+    /// subsequent `record_success` (with a DIFFERENT, working
+    /// pipeline) silently kept the loser as the cached winner.
+    /// The planner then promoted the known-failing pipeline to
+    /// the top of every future scan.
     pub fn record_success(&mut self, key: CacheKey, pipeline: EvasionPipeline) {
         let now = current_epoch();
         let entry = self
             .entries
             .entry(cache_key_str(&key))
-            .or_insert(CacheEntry {
-                pipeline,
+            .or_insert_with(|| CacheEntry {
+                pipeline: pipeline.clone(),
                 successes: 0,
                 attempts: 0,
                 last_success_epoch: 0,
             });
+        // Always update to the just-succeeded pipeline — even if
+        // it's the same shape as the cached one, this is cheap.
+        entry.pipeline = pipeline;
         entry.successes = entry.successes.saturating_add(1);
         entry.attempts = entry.attempts.saturating_add(1);
         entry.last_success_epoch = now;
     }
 
     /// Record a failed attempt.
+    ///
+    /// Failures DO NOT overwrite the stored pipeline — the cached
+    /// winner is set by `record_success`. If no success has been
+    /// recorded yet, the failing pipeline is what's stored, but
+    /// the next success will replace it.
     pub fn record_failure(&mut self, key: CacheKey, pipeline: EvasionPipeline) {
         let entry = self
             .entries
@@ -338,5 +356,41 @@ mod tests {
         assert_eq!(entry.attempts, 1);
 
         let _ = fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn record_success_after_failure_overwrites_stored_pipeline() {
+        // Regression for F44: pre-fix record_success used
+        // or_insert which left the existing entry's pipeline
+        // untouched. If the first call was record_failure with a
+        // losing pipeline, the loser became permanent — the
+        // planner promoted it to every future scan.
+        let mut cache = LearningCache::default();
+        let loser = EvasionPipeline::new("LOSER", vec![], 1);
+        let winner = EvasionPipeline::new("WINNER", vec![], 1);
+        let key = CacheKey::new("cloudflare", "xss");
+        cache.record_failure(key.clone(), loser);
+        cache.record_success(key.clone(), winner);
+        let entry = cache.get(&key).expect("entry present");
+        assert_eq!(
+            entry.pipeline.name, "WINNER",
+            "post-success the winning pipeline must be cached"
+        );
+        assert_eq!(entry.successes, 1);
+        assert_eq!(entry.attempts, 2);
+    }
+
+    #[test]
+    fn second_record_success_overwrites_first_pipeline() {
+        // Newer better pipeline must replace the older one.
+        let mut cache = LearningCache::default();
+        let first = EvasionPipeline::new("FIRST", vec![], 1);
+        let second = EvasionPipeline::new("SECOND", vec![], 1);
+        let key = CacheKey::new("awswaf", "sql");
+        cache.record_success(key.clone(), first);
+        cache.record_success(key.clone(), second);
+        let entry = cache.get(&key).unwrap();
+        assert_eq!(entry.pipeline.name, "SECOND");
+        assert_eq!(entry.successes, 2);
     }
 }

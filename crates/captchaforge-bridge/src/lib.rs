@@ -35,8 +35,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use chromiumoxide::{Browser, BrowserConfig};
-use futures::StreamExt;
+use runtime_headless::{BrowserLaunchOptions, BrowserRuntime};
 use tokio::sync::Mutex;
 
 use wafrift_transport::challenge::{ChallengeKind, ChallengeStore};
@@ -95,38 +94,44 @@ pub async fn solve_in_browser(
 ) -> Result<Option<BridgeOutcome>> {
     let started = std::time::Instant::now();
 
-    let mut browser_cfg_builder = BrowserConfig::builder();
-    if !cfg.headless {
-        browser_cfg_builder = browser_cfg_builder.with_head();
-    }
-    if let Ok(path) = std::env::var("CHROMIUM_PATH") {
-        browser_cfg_builder = browser_cfg_builder.chrome_executable(path);
-    }
-    let browser_cfg = browser_cfg_builder
-        .build()
-        .map_err(|e| anyhow!("chromium config: {e}"))?;
-
-    let (mut browser, mut handler) = Browser::launch(browser_cfg)
-        .await
-        .context("launch chromium")?;
-    let handler_task = tokio::spawn(async move {
-        while let Some(_evt) = handler.next().await {
-            // drain CDP events; we don't care about specific ones for
-            // the bridge happy path.
-        }
-    });
+    let runtime = BrowserRuntime::launch(&BrowserLaunchOptions {
+        no_sandbox: true,
+        // Cloudflare's managed challenge fingerprints HeadlessChrome —
+        // honour cfg.headless so callers can flip visible on targets
+        // that block it.
+        headed: !cfg.headless,
+        chrome_executable: std::env::var("CHROMIUM_PATH")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(runtime_headless::find_browser_executable),
+        ..Default::default()
+    })
+    .await
+    .map_err(|e| anyhow!("launch chromium: {e}"))?;
+    let browser = runtime.browser();
 
     let solve_fut = async {
         let page = browser.new_page("about:blank").await.context("new_page")?;
         // Inject the challenge HTML directly so we don't depend on
         // the original origin being reachable; chromium evaluates
         // its scripts as if served from `target_url`.
-        let escaped = serde_json_escape(challenge_html);
+        //
+        // Both target_url and challenge_html are routed through the
+        // serde_json_escape helper so they land in the evaluated JS
+        // as proper JSON string literals. Pre-fix target_url used
+        // a manual `replace('\\'', "\\\\'")` that handled single quotes
+        // only — a target_url containing `"`, `\\`, or control
+        // characters could break out of the JS literal and execute
+        // arbitrary code in the chromium page context. Most relevant
+        // when the challenge response 302s to an attacker-controlled
+        // URL (open redirect / DNS rebind) which then becomes the
+        // target_url on the next call.
+        let escaped_html = serde_json_escape(challenge_html);
+        let escaped_url = serde_json_escape(target_url);
         let setup = format!(
             "Object.defineProperty(window, 'location', \
-                 {{ value: {{ href: '{}' }}, writable: false }}); \
-             document.open(); document.write({escaped}); document.close();",
-            target_url.replace('\'', "\\'")
+                 {{ value: {{ href: {escaped_url} }}, writable: false }}); \
+             document.open(); document.write({escaped_html}); document.close();"
         );
         if let Err(e) = page.evaluate(setup).await {
             tracing::warn!(error = %e, "captchaforge-bridge page.evaluate best-effort failed");
@@ -176,9 +181,8 @@ pub async fn solve_in_browser(
             )
         })??;
 
-    // Best-effort tidy.
-    let _ = browser.close().await;
-    handler_task.abort();
+    // BrowserRuntime's Drop aborts the CDP handler task + tears down chrome.
+    drop(runtime);
     Ok(result)
 }
 
