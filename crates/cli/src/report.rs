@@ -214,16 +214,13 @@ fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
 
 /// Reduce a target URL to a bare host (the gene-bank/report key).
 fn host_from_target(target: &str) -> String {
-    let no_scheme = target.split_once("://").map_or(target, |(_, rest)| rest);
-    let host_port = no_scheme.split(['/', '?', '#']).next().unwrap_or(no_scheme);
-    // Strip userinfo and port.
-    let host = host_port.rsplit_once('@').map_or(host_port, |(_, h)| h);
-    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
-    if host.is_empty() {
-        "unknown-host".to_string()
-    } else {
-        host.to_ascii_lowercase()
-    }
+    // Delegate to the shared transport extractor — it handles
+    // IPv6 brackets correctly. Pre-fix the local naive
+    // rsplit_once(':') split `[::1]` on the LAST `:` of the
+    // address itself, yielding `[:` instead of `[::1]`. Report
+    // aggregation against an IPv6-target scan was effectively
+    // broken (host-keyed buckets used the mangled string).
+    wafrift_transport::host_from_url(target).unwrap_or_else(|| "unknown-host".to_string())
 }
 
 /// Parse a `wafrift scan --format json` blob into the same host-keyed
