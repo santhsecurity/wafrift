@@ -189,20 +189,15 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
 }
 
 /// Extract the bare host (no scheme, port, path, fragment, or query)
-/// from a URL string.  Used by `fetch_cname_chain` — we don't pull
-/// in the `url` crate here because the parsing is trivial and the
-/// dep would propagate through every CLI consumer.
-pub(crate) fn host_from_url(url: &str) -> Option<&str> {
-    let after_scheme = url.split("://").nth(1).unwrap_or(url);
-    let host_with_port = after_scheme.split(['/', '?', '#']).next()?;
-    // IPv6 literal: `[::1]:8080` — keep the bracketed form.
-    let host = if let Some(stripped) = host_with_port.strip_prefix('[') {
-        let end = stripped.find(']')?;
-        &stripped[..end]
-    } else {
-        host_with_port.split(':').next()?
-    };
-    if host.is_empty() { None } else { Some(host) }
+/// from a URL string.  Used by `fetch_cname_chain`.
+///
+/// Thin wrapper around [`wafrift_transport::host_from_url`] — the
+/// shared canonical impl (4 sites collapsed). Returns an owned String
+/// because the upstream helper lowercases the host, so a borrowed
+/// `&str` into the input would carry the wrong case for callers that
+/// compare against DNS names.
+pub(crate) fn host_from_url(url: &str) -> Option<String> {
+    wafrift_transport::host_from_url(url)
 }
 
 /// Resolve a URL's CNAME chain to a `DnsProbe`.  Synchronous wrapper
@@ -228,7 +223,7 @@ pub(crate) fn fetch_cname_chain(url: &str) -> Option<DnsProbe> {
         .enable_all()
         .build()
         .ok()?;
-    match rt.block_on(wafrift_detect::probe_cname_chain(host)) {
+    match rt.block_on(wafrift_detect::probe_cname_chain(&host)) {
         Ok(probe) => Some(probe),
         Err(e) => {
             // Tracing-subscriber is initialised in main() with

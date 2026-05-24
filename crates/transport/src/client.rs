@@ -573,35 +573,15 @@ pub enum EvasionError {
 
 /// Extract host from URL.
 ///
-/// Properly handles IPv6 addresses (e.g., `[::1]`) and IPv4/hostname.
+/// Thin Result-returning wrapper around
+/// [`crate::url_util::host_from_url`] (shared with the 3 cli sites
+/// that previously had their own copy). The Option → Result mapping
+/// converts the canonical None into the existing EvasionError
+/// variant so this call's contract is unchanged.
 fn extract_host(url: &str) -> Result<String, EvasionError> {
-    let url = url.trim();
-    if url.is_empty() {
-        return Err(EvasionError::InvalidUrl("Empty URL provided".into()));
-    }
-
-    // Ensure scheme exists for parsing
-    let parse_url = if !url.starts_with("http://") && !url.starts_with("https://") {
-        std::borrow::Cow::Owned(format!("https://{url}"))
-    } else {
-        std::borrow::Cow::Borrowed(url)
-    };
-
-    let parsed =
-        reqwest::Url::parse(&parse_url).map_err(|e| EvasionError::InvalidUrl(e.to_string()))?;
-
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| EvasionError::InvalidUrl("missing host component".into()))?;
-
-    let mut h = host.to_ascii_lowercase();
-    if h.starts_with('[') && h.ends_with(']') {
-        h = h[1..h.len() - 1].to_string();
-    }
-
-    if h.is_empty() {
-        return Err(EvasionError::InvalidUrl("empty host parsed".into()));
-    }
+    let h = crate::url_util::host_from_url(url).ok_or_else(|| {
+        EvasionError::InvalidUrl(format!("could not extract host from {url:?}"))
+    })?;
 
     Ok(h)
 }

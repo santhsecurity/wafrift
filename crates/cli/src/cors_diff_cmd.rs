@@ -437,15 +437,9 @@ fn render_curl(
 }
 
 fn extract_host(url: &str) -> Option<String> {
-    let after_scheme = url.split_once("://").map(|x| x.1).unwrap_or(url);
-    let host_port = after_scheme.split(['/', '?', '#']).next()?;
-    let host = host_port.rsplit_once('@').map_or(host_port, |(_, h)| h);
-    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
-    if host.is_empty() {
-        None
-    } else {
-        Some(host.to_string())
-    }
+    // Shared canonical impl in wafrift_transport — handles IPv6
+    // brackets + userinfo + lowercase + port strip + scheme-optional.
+    wafrift_transport::host_from_url(url)
 }
 
 fn emit_output(args: &CorsDiffArgs, results: &[CorsDiffResult], errors: u32) {
