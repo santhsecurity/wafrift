@@ -48,7 +48,7 @@ fn draw_request_list(f: &mut Frame, area: Rect, state: &State) {
     let visible = state.visible_indices();
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(crate::tui::style::DIM)
         .title(Span::styled(
             format!(" Requests · {} of {} ", visible.len(), state.recent.len()),
             Style::default()
@@ -60,13 +60,13 @@ fn draw_request_list(f: &mut Frame, area: Rect, state: &State) {
 
     if state.recent.is_empty() {
         let p = Paragraph::new("(no requests yet — proxy a request through this address)")
-            .style(Style::default().fg(Color::DarkGray));
+            .style(crate::tui::style::DIM);
         f.render_widget(p, inner);
         return;
     }
     if visible.is_empty() {
         let p = Paragraph::new("(filter matches nothing — `/` to edit, `o` to cycle outcome)")
-            .style(Style::default().fg(Color::DarkGray));
+            .style(crate::tui::style::DIM);
         f.render_widget(p, inner);
         return;
     }
@@ -99,7 +99,7 @@ fn draw_request_list(f: &mut Frame, area: Rect, state: &State) {
         let host_disp = truncate(&rec.host, 22);
         let line = Line::from(vec![
             Span::styled(marker, Style::default().fg(outcome_color(rec))),
-            Span::styled(rec.timestamp.clone(), Style::default().fg(Color::DarkGray)),
+            Span::styled(rec.timestamp.clone(), crate::tui::style::DIM),
             Span::raw(" "),
             Span::styled(
                 format!("{:>5}", rec.method),
@@ -127,7 +127,7 @@ fn draw_request_list(f: &mut Frame, area: Rect, state: &State) {
             Span::raw(" "),
             Span::styled(
                 format!("{}ms", rec.upstream_latency_ms),
-                Style::default().fg(Color::DarkGray),
+                crate::tui::style::DIM,
             ),
             Span::raw(" "),
             Span::styled(
@@ -155,7 +155,7 @@ fn draw_sparklines(f: &mut Frame, area: Rect, state: &State) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
+                .border_style(crate::tui::style::DIM)
                 .title(Span::styled(
                     format!(" req/s · 60s · max {max_req} "),
                     Style::default().fg(Color::Cyan),
@@ -169,7 +169,7 @@ fn draw_sparklines(f: &mut Frame, area: Rect, state: &State) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
+                .border_style(crate::tui::style::DIM)
                 .title(Span::styled(
                     format!(" bypasses/s · 60s · max {max_byp} "),
                     Style::default().fg(Color::LightGreen),
@@ -286,7 +286,7 @@ pub fn render_detail_lines(rec: &RequestRecord) -> Vec<Line<'static>> {
     ];
     for (k, v) in &rec.req_headers {
         lines.push(Line::from(vec![
-            Span::styled(format!("{k}: "), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{k}: "), crate::tui::style::DIM),
             Span::styled(v.clone(), Style::default().fg(Color::White)),
         ]));
     }
@@ -325,7 +325,7 @@ pub fn render_detail_lines(rec: &RequestRecord) -> Vec<Line<'static>> {
     )]));
     for (k, v) in &rec.resp_headers {
         lines.push(Line::from(vec![
-            Span::styled(format!("{k}: "), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{k}: "), crate::tui::style::DIM),
             Span::styled(v.clone(), Style::default().fg(Color::White)),
         ]));
     }
@@ -390,14 +390,14 @@ fn render_mutation_diff(rec: &RequestRecord) -> Vec<Line<'static>> {
         out.push(Line::from(vec![
             Span::styled("- ", Style::default().fg(Color::LightRed)),
             Span::styled(format!("{k}: "), Style::default().fg(Color::Red)),
-            Span::styled(v.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(v.to_string(), crate::tui::style::DIM),
         ]));
     }
     for (k, prev, cur) in &changed {
         out.push(Line::from(vec![
             Span::styled("~ ", Style::default().fg(Color::Yellow)),
             Span::styled(format!("{k}: "), Style::default().fg(Color::Yellow)),
-            Span::styled(prev.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(prev.to_string(), crate::tui::style::DIM),
             Span::raw(" → "),
             Span::styled(cur.to_string(), Style::default().fg(Color::White)),
         ]));
@@ -425,7 +425,7 @@ fn render_mutation_diff(rec: &RequestRecord) -> Vec<Line<'static>> {
             Color::Yellow
         };
         out.push(Line::from(vec![
-            Span::styled("body ", Style::default().fg(Color::DarkGray)),
+            Span::styled("body ", crate::tui::style::DIM),
             Span::styled(symbol.to_string(), Style::default().fg(body_color)),
             Span::raw(" "),
             Span::styled(
@@ -442,14 +442,14 @@ fn render_mutation_diff(rec: &RequestRecord) -> Vec<Line<'static>> {
     {
         out.push(Line::from(vec![Span::styled(
             "(no mutation — request passed through unchanged)",
-            Style::default().fg(Color::DarkGray),
+            crate::tui::style::DIM,
         )]));
     }
     out
 }
 
 fn label(s: &str) -> Span<'static> {
-    Span::styled(format!("{s} "), Style::default().fg(Color::DarkGray))
+    Span::styled(format!("{s} "), crate::tui::style::DIM)
 }
 
 fn spacer() -> Span<'static> {

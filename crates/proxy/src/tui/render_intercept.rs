@@ -50,7 +50,7 @@ pub fn draw(f: &mut Frame, area: Rect, _state: &State) {
         } else {
             "(intercept mode is OFF — press `i` to toggle ON)"
         })
-        .style(Style::default().fg(Color::DarkGray));
+        .style(crate::tui::style::DIM);
         f.render_widget(p, inner);
         return;
     }
@@ -79,7 +79,7 @@ pub fn draw(f: &mut Frame, area: Rect, _state: &State) {
                 _ => Color::Red,
             };
             Row::new(vec![
-                Cell::from(p.id.to_string()).style(Style::default().fg(Color::DarkGray)),
+                Cell::from(p.id.to_string()).style(crate::tui::style::DIM),
                 Cell::from(p.method.clone()).style(Style::default().fg(Color::Cyan)),
                 Cell::from(truncate(&p.path, 36).to_string())
                     .style(Style::default().fg(Color::White)),

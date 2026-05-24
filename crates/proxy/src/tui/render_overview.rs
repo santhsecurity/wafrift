@@ -101,7 +101,7 @@ fn draw_counters(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &State
     let p = Paragraph::new(body).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_style(crate::tui::style::DIM)
             .title(Span::styled(
                 " Counters ",
                 Style::default().fg(Color::LightCyan),
@@ -131,13 +131,13 @@ fn draw_latency(f: &mut Frame, area: Rect, state: &State) {
         spacer(),
         Span::styled(
             format!("({} samples)", state.latency_samples.len()),
-            Style::default().fg(Color::DarkGray),
+            crate::tui::style::DIM,
         ),
     ])];
     let p = Paragraph::new(body).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_style(crate::tui::style::DIM)
             .title(Span::styled(
                 " Upstream latency (recent 1024) ",
                 Style::default().fg(Color::LightCyan),
@@ -162,7 +162,7 @@ fn pct_color(ms: u64) -> Style {
 fn draw_status_ribbon(f: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(crate::tui::style::DIM)
         .title(Span::styled(
             " Status code mix ",
             Style::default().fg(Color::LightCyan),
@@ -172,7 +172,7 @@ fn draw_status_ribbon(f: &mut Frame, area: Rect, state: &State) {
 
     let total: u64 = state.status_buckets.iter().sum();
     if total == 0 {
-        let p = Paragraph::new("(no responses yet)").style(Style::default().fg(Color::DarkGray));
+        let p = Paragraph::new("(no responses yet)").style(crate::tui::style::DIM);
         f.render_widget(p, inner);
         return;
     }
@@ -207,7 +207,7 @@ fn draw_tls(f: &mut Frame, area: Rect, state: &State) {
     let total = state.tls.total();
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(crate::tui::style::DIM)
         .title(Span::styled(
             " TLS Rotation ",
             Style::default().fg(Color::LightCyan),
@@ -217,7 +217,7 @@ fn draw_tls(f: &mut Frame, area: Rect, state: &State) {
 
     if total == 0 || state.tls.counts.is_empty() {
         let p = Paragraph::new("(no TLS rotation active — start with --tls-impersonate-rotate)")
-            .style(Style::default().fg(Color::DarkGray));
+            .style(crate::tui::style::DIM);
         f.render_widget(p, inner);
         return;
     }
@@ -244,7 +244,7 @@ fn draw_tls(f: &mut Frame, area: Rect, state: &State) {
 fn draw_wafs(f: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(crate::tui::style::DIM)
         .title(Span::styled(
             " WAFs Identified ",
             Style::default().fg(Color::LightCyan),
@@ -254,7 +254,7 @@ fn draw_wafs(f: &mut Frame, area: Rect, state: &State) {
 
     if state.waf_seen.is_empty() {
         let p = Paragraph::new("(no WAFs identified yet — proxy more requests)")
-            .style(Style::default().fg(Color::DarkGray));
+            .style(crate::tui::style::DIM);
         f.render_widget(p, inner);
         return;
     }
@@ -274,7 +274,7 @@ fn draw_wafs(f: &mut Frame, area: Rect, state: &State) {
                 Span::raw("  "),
                 Span::styled(
                     format!("{hosts} host(s)"),
-                    Style::default().fg(Color::DarkGray),
+                    crate::tui::style::DIM,
                 ),
             ])
         })
@@ -283,7 +283,7 @@ fn draw_wafs(f: &mut Frame, area: Rect, state: &State) {
 }
 
 fn label(s: &str) -> Span<'static> {
-    Span::styled(format!("{s} "), Style::default().fg(Color::DarkGray))
+    Span::styled(format!("{s} "), crate::tui::style::DIM)
 }
 
 fn spacer() -> Span<'static> {

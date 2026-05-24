@@ -65,12 +65,12 @@ fn draw_leaderboard(f: &mut Frame, area: Rect, state: &State) {
             };
             let last = format_last_bypass(t.last_bypass_unix_secs);
             Row::new(vec![
-                Cell::from((i + 1).to_string()).style(Style::default().fg(Color::DarkGray)),
+                Cell::from((i + 1).to_string()).style(crate::tui::style::DIM),
                 Cell::from((*name).clone()).style(Style::default().fg(Color::White)),
                 Cell::from(t.tried.to_string()),
                 Cell::from(t.bypassed.to_string()).style(Style::default().fg(Color::LightGreen)),
                 Cell::from(format!("{rate:.1}%")).style(Style::default().fg(rate_color)),
-                Cell::from(last).style(Style::default().fg(Color::DarkGray)),
+                Cell::from(last).style(crate::tui::style::DIM),
             ])
         })
         .collect();
@@ -87,7 +87,7 @@ fn draw_leaderboard(f: &mut Frame, area: Rect, state: &State) {
     ];
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(crate::tui::style::DIM)
         .title(Span::styled(title, Style::default().fg(Color::LightCyan)));
     if rows.is_empty() {
         let inner = block.inner(area);
@@ -95,7 +95,7 @@ fn draw_leaderboard(f: &mut Frame, area: Rect, state: &State) {
         let p = Paragraph::new(format!(
             "(no technique has reached {MIN_TRIES_FOR_RANK} tries yet — proxy more requests)"
         ))
-        .style(Style::default().fg(Color::DarkGray));
+        .style(crate::tui::style::DIM);
         f.render_widget(p, inner);
     } else {
         let table = Table::new(rows, widths).header(header).block(block);
@@ -106,10 +106,10 @@ fn draw_leaderboard(f: &mut Frame, area: Rect, state: &State) {
 fn draw_low_confidence(f: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(crate::tui::style::DIM)
         .title(Span::styled(
             format!(" Low-confidence (<{MIN_TRIES_FOR_RANK} tries) "),
-            Style::default().fg(Color::DarkGray),
+            crate::tui::style::DIM,
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -122,7 +122,7 @@ fn draw_low_confidence(f: &mut Frame, area: Rect, state: &State) {
     low.sort_by_key(|(_, t)| std::cmp::Reverse(t.tried));
 
     if low.is_empty() {
-        let p = Paragraph::new("(none)").style(Style::default().fg(Color::DarkGray));
+        let p = Paragraph::new("(none)").style(crate::tui::style::DIM);
         f.render_widget(p, inner);
         return;
     }
@@ -132,12 +132,12 @@ fn draw_low_confidence(f: &mut Frame, area: Rect, state: &State) {
         .take(max_rows)
         .map(|(name, t)| {
             Line::from(vec![
-                Span::styled("• ", Style::default().fg(Color::DarkGray)),
+                Span::styled("• ", crate::tui::style::DIM),
                 Span::styled((*name).clone(), Style::default().fg(Color::Gray)),
                 Span::raw("  "),
                 Span::styled(
                     format!("{}/{}", t.bypassed, t.tried),
-                    Style::default().fg(Color::DarkGray),
+                    crate::tui::style::DIM,
                 ),
             ])
         })

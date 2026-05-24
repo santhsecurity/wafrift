@@ -51,6 +51,7 @@ pub mod render_intercept;
 pub mod render_overview;
 pub mod render_techniques;
 pub mod state;
+pub mod style;
 #[cfg(test)]
 mod state_coverage;
 pub mod yank;

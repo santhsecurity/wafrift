@@ -67,7 +67,7 @@ pub fn draw(f: &mut Frame, area: Rect, state: &State) {
     let table = Table::new(rows, widths).header(header).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_style(crate::tui::style::DIM)
             .title(Span::styled(
                 " Per-Host (top 20 by volume) ",
                 Style::default().fg(Color::LightCyan),
