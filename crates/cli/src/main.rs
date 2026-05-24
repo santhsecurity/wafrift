@@ -70,11 +70,10 @@ mod wafmodel_cmd;
     long_about = "WAF evasion toolkit — run without arguments for interactive mode.\n\n\
                   Exit codes (CI-friendly):\n\
                     0  success\n\
-                    1  generic error (bad input, IO, etc.)\n\
-                    2  bench-waf: zero bypasses across ALL corpus cases in --evade mode\n\
-                    2  replay:    saved bypass got blocked (regression signal)\n\
+                    1  generic error (IO failure, runtime error, etc.)\n\
+                    2  argument / input error (unknown flag, contradictory selectors, malformed value, unknown technique selector, unrecognised algorithm, missing required field) — clap convention; ALSO used by bench-waf for 'zero bypasses' and by replay for 'saved bypass blocked' (legacy: per perf-hunt N01 the dual usage is documented rather than split because the bench-waf/replay overload is well-established in CI scripts)\n\
                     3  bench-diff: regression vs baseline (see --bypass-drop-pp)\n\
-                    4  bench-waf --validate-only: corpus integrity errors\n\
+                    4  bench-waf --validate-only: corpus integrity errors (duplicate id, TOML parse failure, missing required field)\n\
                     5  scan: aborted — target rate-limited the probes (inconclusive, not 'no bypass')",
     version
 )]

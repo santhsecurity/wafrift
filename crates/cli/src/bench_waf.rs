@@ -318,6 +318,7 @@ const KNOWN_CLASSES: &[&str] = &[
     "xxe",
     "log4shell",
     "cve_pocs",
+    "graphql",
 ];
 
 fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
