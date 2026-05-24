@@ -64,6 +64,8 @@ pub enum ParseError {
     BodyTooLarge,
     #[error("invalid chunk size")]
     InvalidChunkSize,
+    #[error("chunk data not followed by CRLF terminator")]
+    InvalidChunkTerminator,
 }
 
 /// Bounded chunked-body parser to prevent OOM from infinite chunks.
@@ -117,11 +119,58 @@ impl ChunkedParser {
             if data.len() < size.saturating_add(2) {
                 return Err(ParseError::Incomplete);
             }
+            // RFC 7230 §4.1: each chunk-data MUST be followed by CRLF.
+            // Silently skipping without verifying lets malformed chunk
+            // terminators (e.g. \x00\x00) pass the parser undetected.
+            if &data[size..size + 2] != b"\r\n" {
+                return Err(ParseError::InvalidChunkTerminator);
+            }
             out.extend_from_slice(&data[..size]);
             data = &data[size + 2..];
             chunks += 1;
         }
         Ok(out)
+    }
+}
+
+/// Byte-level shingle Jaccard similarity in `[0.0, 1.0]`.
+///
+/// Splits each slice into overlapping `n`-byte windows (shingles), puts
+/// them in a set, then computes `|intersection| / |union|`. Returns 1.0
+/// when both slices are identical and 0.0 when they share no shingles.
+/// For very short bodies (fewer than `n` bytes) the whole slice is used
+/// as a single shingle — so two empty bodies return 1.0 and an empty vs
+/// non-empty pair returns 0.0.
+///
+/// No external dependency: uses `std::collections::HashSet` on `[u8; 3]`
+/// keys (or whatever `n` is ≤ 8; usize-keyed for larger n).
+fn shingle_jaccard(a: &[u8], b: &[u8], n: usize) -> f64 {
+    use std::collections::HashSet;
+
+    if a == b {
+        return 1.0;
+    }
+
+    fn shingles(data: &[u8], n: usize) -> HashSet<Vec<u8>> {
+        if data.len() < n {
+            // Body shorter than shingle window: treat the whole thing as one shingle.
+            let mut s = HashSet::new();
+            s.insert(data.to_vec());
+            return s;
+        }
+        data.windows(n).map(|w| w.to_vec()).collect()
+    }
+
+    let sa = shingles(a, n);
+    let sb = shingles(b, n);
+
+    let intersection = sa.intersection(&sb).count();
+    let union = sa.union(&sb).count();
+
+    if union == 0 {
+        1.0 // both empty — identical
+    } else {
+        intersection as f64 / union as f64
     }
 }
 
@@ -151,7 +200,11 @@ impl ResponseDiff {
             }
             a_map != b_map
         };
-        let similarity = if body_differs { 0.0 } else { 1.0 };
+        // Compute 3-byte shingle Jaccard similarity.
+        // Binary 0.0/1.0 was only distinguishing identical from any-change,
+        // making ResponseDiff useless for partial-match detection (e.g.
+        // timing-based body truncation, WAF-injected error prefix, etc.).
+        let similarity = shingle_jaccard(&a.body, &b.body, 3);
         Self {
             status_differs,
             header_differs,
@@ -162,26 +215,48 @@ impl ResponseDiff {
 }
 
 /// Header canonicalization fingerprint.
+///
+/// Both maps use `Vec<String>` values so that duplicate header names
+/// (e.g. multiple `Set-Cookie` lines) are preserved. Previously both
+/// maps used `String` and silently dropped all but the last occurrence
+/// of any repeated header — making fingerprinting blind to duplicate-
+/// header injection attacks.
 #[derive(Debug, Clone, Default)]
 pub struct HeaderFingerprint {
-    pub lowercased: HashMap<String, String>,
-    pub trimmed: HashMap<String, String>,
+    pub lowercased: HashMap<String, Vec<String>>,
+    pub trimmed: HashMap<String, Vec<String>>,
 }
 
 impl HeaderFingerprint {
     /// Build a fingerprint from a set of headers.
     #[must_use]
     pub fn from_headers(headers: &[(String, String)]) -> Self {
-        let mut lowercased = HashMap::new();
-        let mut trimmed = HashMap::new();
+        let mut lowercased: HashMap<String, Vec<String>> = HashMap::new();
+        let mut trimmed: HashMap<String, Vec<String>> = HashMap::new();
         for (k, v) in headers {
-            lowercased.insert(k.to_ascii_lowercase(), v.clone());
-            trimmed.insert(k.trim().to_string(), v.trim().to_string());
+            lowercased
+                .entry(k.to_ascii_lowercase())
+                .or_default()
+                .push(v.clone());
+            trimmed
+                .entry(k.trim().to_string())
+                .or_default()
+                .push(v.trim().to_string());
         }
         Self {
             lowercased,
             trimmed,
         }
+    }
+
+    /// Return the first value for a header name (lowercased lookup).
+    ///
+    /// Convenience helper for callers that only care about the first
+    /// occurrence of a header — e.g. `Content-Type`, which browsers and
+    /// RFC-compliant servers treat as first-wins.
+    #[must_use]
+    pub fn first<'a>(map: &'a HashMap<String, Vec<String>>, key: &str) -> Option<&'a String> {
+        map.get(key).and_then(|v| v.first())
     }
 }
 
@@ -275,7 +350,82 @@ mod tests {
     #[test]
     fn header_fingerprint_normalization() {
         let fp = HeaderFingerprint::from_headers(&[("Content-Type".into(), " text/html ".into())]);
-        assert_eq!(fp.lowercased.get("content-type").unwrap(), " text/html ");
-        assert_eq!(fp.trimmed.get("Content-Type").unwrap(), "text/html");
+        assert_eq!(
+            fp.lowercased.get("content-type").unwrap(),
+            &vec![" text/html ".to_string()]
+        );
+        assert_eq!(
+            fp.trimmed.get("Content-Type").unwrap(),
+            &vec!["text/html".to_string()]
+        );
+    }
+
+    #[test]
+    fn header_fingerprint_preserves_duplicate_headers() {
+        // Two Set-Cookie lines must both survive — previously the second
+        // overwrote the first, making duplicate-header injection invisible.
+        let fp = HeaderFingerprint::from_headers(&[
+            ("Set-Cookie".into(), "session=abc".into()),
+            ("Set-Cookie".into(), "track=xyz".into()),
+        ]);
+        let cookies = fp.lowercased.get("set-cookie").unwrap();
+        assert_eq!(cookies.len(), 2, "both Set-Cookie values must survive");
+        assert!(cookies.contains(&"session=abc".to_string()));
+        assert!(cookies.contains(&"track=xyz".to_string()));
+    }
+
+    #[test]
+    fn chunked_parser_invalid_terminator() {
+        // 5\r\nHELLO followed by \x00\x00 instead of \r\n — must error.
+        let data = b"5\r\nHELLO\x00\x000\r\n\r\n";
+        let parser = ChunkedParser::default();
+        assert!(matches!(
+            parser.parse(data),
+            Err(ParseError::InvalidChunkTerminator)
+        ));
+    }
+
+    #[test]
+    fn similarity_partial_overlap() {
+        // "hello world" vs "hello there" — some 3-byte shingles overlap
+        // ("hel", "ell", "llo", "lo ") but not all.
+        // Exact Jaccard: intersection={hel,ell,llo,lo }=4, union=14 → 4/14 ≈ 0.286.
+        // Must be strictly between 0.0 and 1.0 and non-trivially above zero.
+        let a = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: b"hello world".to_vec(),
+        };
+        let b = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: b"hello there".to_vec(),
+        };
+        let diff = ResponseDiff::compare(&a, &b);
+        assert!(
+            diff.similarity > 0.1 && diff.similarity < 0.9,
+            "partial-match similarity should be between 0.1 and 0.9, got {}",
+            diff.similarity
+        );
+    }
+
+    #[test]
+    fn similarity_totally_different_bodies() {
+        let a = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: b"AAAAAAA".to_vec(),
+        };
+        let b = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: b"BBBBBBB".to_vec(),
+        };
+        let diff = ResponseDiff::compare(&a, &b);
+        assert_eq!(diff.similarity, 0.0, "no shared shingles → 0.0");
     }
 }

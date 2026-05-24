@@ -527,11 +527,26 @@ pub fn detect_cl_te(host: &str) -> Result<SmugglingPayload, crate::safety::Safet
 /// Safe detection probe for TE.CL.
 pub fn detect_te_cl(host: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
-    // Valid chunked prefix but CL shorter than chunk data → back-end hangs
+    // Valid chunked prefix but CL shorter than chunk data → back-end hangs.
+    //
+    // Byte accounting for the body section:
+    //   "5\r\n" = 3 bytes  (chunk-size line: '5', CR, LF)
+    //   "\r\n"  = 2 bytes  (that is the chunk-data — 5 is the chunk-size but
+    //                        the body here uses "\r\n" as placeholder data,
+    //                        followed by the terminating chunk)
+    //   "0\r\n\r\n" = 5 bytes
+    //
+    // The CL-following front-end reads exactly Content-Length bytes from the
+    // body: setting CL=3 makes it read only "5\r\n" and stop, while the
+    // TE-following back-end reads the full chunked sequence and hangs waiting
+    // for more data that the front-end never forwards.
+    //
+    // Previous value was CL=4 (off-by-one: counted '5', CR, LF, and a
+    // phantom fourth byte that doesn't exist in "5\r\n").
     let raw = format!(
         "POST / HTTP/1.1\r\n\
          Host: {host}\r\n\
-         Content-Length: 4\r\n\
+         Content-Length: 3\r\n\
          Transfer-Encoding: chunked\r\n\
          \r\n\
          5\r\n\r\n\
