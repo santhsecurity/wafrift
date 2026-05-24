@@ -69,6 +69,7 @@ async fn solve_and_record_does_not_pollute_store_on_err() {
         let cfg = BridgeConfig {
             solve_timeout_ms: 2_000,
             headless: true,
+            no_sandbox: false,
         };
 
         let result = solve_and_record(

@@ -423,6 +423,14 @@ async fn handle_conn(
 
     let mut headers: Vec<(String, String)> = Vec::new();
     let mut content_length: usize = 0;
+    // F101: pre-fix every `Content-Length:` header overwrote the
+    // value, so a hostile client sending `Content-Length: 100\r\n
+    // Content-Length: 0` set the listener to read 0 body bytes and
+    // interpret the real body as the NEXT request — log-injection
+    // attack on the callback registry via classic request smuggling.
+    // Take the FIRST value; ignore subsequent duplicates (RFC 7230
+    // §3.3.2 forbids them outright).
+    let mut content_length_seen = false;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -430,8 +438,9 @@ async fn handle_conn(
         if let Some((k, v)) = line.split_once(':') {
             let k_lc = k.trim().to_ascii_lowercase();
             let v_trim = v.trim().to_string();
-            if k_lc == "content-length" {
+            if k_lc == "content-length" && !content_length_seen {
                 content_length = v_trim.parse().unwrap_or(0);
+                content_length_seen = true;
             }
             headers.push((k_lc, v_trim));
         }

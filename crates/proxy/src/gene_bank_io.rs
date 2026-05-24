@@ -50,7 +50,13 @@ pub struct PersistedGeneBank {
 #[must_use]
 pub fn default_gene_bank_path(supplied: &str) -> Option<PathBuf> {
     if supplied.is_empty() {
-        let home = std::env::var_os("HOME")?;
+        // F98: was `HOME`-only — on Windows `HOME` is typically unset
+        // and the function silently returned `None`, disabling gene-bank
+        // persistence for every Windows user with no warning. The
+        // sibling `trust.rs::default_path()` already falls back to
+        // `USERPROFILE`; matching here.
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))?;
         let p = PathBuf::from(home).join(".wafrift").join("gene-bank.json");
         Some(p)
     } else if supplied == "off" || supplied == "-" {
