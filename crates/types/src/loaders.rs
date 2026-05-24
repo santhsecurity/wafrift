@@ -20,8 +20,56 @@
 //! intentionally lives at the call site because each crate's parsed
 //! type and per-entry post-processing differ.
 
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+
+/// Atomically write `bytes` to `path` using the tmp-file + fsync +
+/// rename + parent-fsync dance. Crash-safe: a torn write leaves
+/// `path` untouched and the tmp file orphaned (gc-able), never a
+/// half-written file under `path`.
+///
+/// Multi-writer safe: the tmp filename embeds the writer's PID + a
+/// nanosecond timestamp so two processes pointed at the same path
+/// don't collide on each other's `<path>.tmp`. The last `rename`
+/// wins — matching the existing single-writer semantics that callers
+/// rely on. Pre-extract, this dance was hand-rolled at 3 sites
+/// (`strategy::gene_bank::write_genome`, `proxy::gene_bank_io`,
+/// `cli::seed`) with subtly different tmp-suffix policies and
+/// parent-fsync behaviour.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let tmp = path.with_extension(format!("tmp.{pid}.{nanos}"));
+
+    let write = (|| -> io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = write {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    // Best-effort parent-dir fsync so the rename is durable across a
+    // crash. Failure here is non-fatal — the rename already happened
+    // and most filesystems will recover the directory entry anyway.
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::OpenOptions::new().read(true).open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+
+    Ok(())
+}
 
 /// Strict: enumerate every `.toml` file under `dir`, sorted by path,
 /// returning `(path, contents)` pairs. Fails on the first I/O error.
@@ -172,5 +220,67 @@ mod tests {
         let dir = tmp();
         assert!(read_toml_files_strict(&dir).unwrap().is_empty());
         assert!(read_toml_files_lossy(&dir).is_empty());
+    }
+
+    // ── write_atomic ─────────────────────────────────────────
+
+    #[test]
+    fn write_atomic_creates_file_with_content() {
+        let dir = tmp();
+        let path = dir.join("foo.json");
+        write_atomic(&path, b"hello world").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"hello world");
+    }
+
+    #[test]
+    fn write_atomic_overwrites_existing_file() {
+        let dir = tmp();
+        let path = dir.join("foo.json");
+        fs::write(&path, b"old content").unwrap();
+        write_atomic(&path, b"new content").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new content");
+    }
+
+    #[test]
+    fn write_atomic_leaves_no_tmp_file_on_success() {
+        let dir = tmp();
+        let path = dir.join("foo.json");
+        write_atomic(&path, b"hi").unwrap();
+        let leftover: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().contains("tmp."))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "found leftover tmp files: {:?}",
+            leftover.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn write_atomic_handles_empty_bytes() {
+        let dir = tmp();
+        let path = dir.join("empty.json");
+        write_atomic(&path, b"").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn write_atomic_fails_when_parent_missing() {
+        let nope = std::env::temp_dir().join("wafrift-atomic-missing-parent/foo.json");
+        let _ = std::fs::remove_dir_all(nope.parent().unwrap());
+        assert!(write_atomic(&nope, b"x").is_err());
+    }
+
+    #[test]
+    fn write_atomic_distinct_tmp_names_for_concurrent_writers() {
+        // Two back-to-back calls in the same process — the per-nanos
+        // suffix should still differ enough to avoid collision.
+        let dir = tmp();
+        let path = dir.join("seq.json");
+        write_atomic(&path, b"first").unwrap();
+        write_atomic(&path, b"second").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
     }
 }

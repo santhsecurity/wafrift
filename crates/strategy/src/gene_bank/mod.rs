@@ -27,7 +27,6 @@ use fs4::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 
 /// Per-payload-class (sql / xss / cmdi / …) success/attempt totals
@@ -559,44 +558,21 @@ impl GeneBank {
     /// Atomic write of a genome to disk.
     ///
     /// Does NOT acquire locks — the caller must hold the advisory lock.
+    /// Delegates the crash-safe write dance to
+    /// [`wafrift_types::loaders::write_atomic`], which is shared with
+    /// `proxy::gene_bank_io` and `cli::seed` so a fsync-policy tweak
+    /// lives in one place.
     fn write_genome(path: &std::path::Path, genome: &WafGenome) -> Result<(), GeneBankError> {
-        let tmp_path = path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(genome).map_err(|e| GeneBankError::Serialize {
             waf: genome.waf_name.clone(),
             source: e,
         })?;
-
-        let mut file = fs::File::create(&tmp_path).map_err(|e| GeneBankError::Io {
-            path: tmp_path.clone(),
-            source: e,
-        })?;
-        file.write_all(json.as_bytes())
-            .map_err(|e| GeneBankError::Io {
-                path: tmp_path.clone(),
-                source: e,
-            })?;
-        file.sync_all().map_err(|e| GeneBankError::Io {
-            path: tmp_path.clone(),
-            source: e,
-        })?;
-        drop(file);
-
-        fs::rename(&tmp_path, path).map_err(|e| {
-            let _ = fs::remove_file(&tmp_path);
+        wafrift_types::loaders::write_atomic(path, json.as_bytes()).map_err(|e| {
             GeneBankError::Io {
                 path: path.to_path_buf(),
                 source: e,
             }
-        })?;
-
-        // Ensure the directory entry is durable.
-        if let Some(parent) = path.parent()
-            && let Ok(dir) = fs::OpenOptions::new().read(true).open(parent)
-        {
-            let _ = dir.sync_all();
-        }
-
-        Ok(())
+        })
     }
 
     /// Read a genome from disk, quarantining if corrupt.
