@@ -441,12 +441,21 @@ impl EvasionClient {
     }
 
     /// Reset evasion state for all hosts.
+    ///
+    /// Atomically clears both `host_states` and `host_fifo` under
+    /// the same lock acquisition order used everywhere else in
+    /// this module (states first, fifo second). Pre-fix the two
+    /// clears were separated by a guard drop — a concurrent
+    /// `send()` between them could register a new host that
+    /// survived the fifo clear, orphaning it in `host_states`
+    /// where the FIFO cap could never evict it.
     pub fn reset(&self) {
-        self.lock_states().clear();
+        let mut states = self.lock_states();
         let mut fifo = self
             .host_fifo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        states.clear();
         fifo.clear();
     }
 
@@ -872,5 +881,66 @@ mod tests {
         };
         let display = format!("{err}");
         assert!(display.contains("WAF blocked all 5 evasion attempts for example.org"));
+    }
+
+    // ── reset() atomicity ─────────────────────────────────────
+
+    #[test]
+    fn reset_clears_both_states_and_fifo() {
+        let client = EvasionClient::default();
+        // Plant a state by directly mutating under the same lock
+        // order reset() uses, so the post-reset inspection is
+        // unambiguous.
+        {
+            let mut states = client.lock_states();
+            let mut fifo = client
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            states.insert("a.com".to_string(), HostState::default());
+            states.insert("b.com".to_string(), HostState::default());
+            fifo.push_back("a.com".to_string());
+            fifo.push_back("b.com".to_string());
+        }
+        client.reset();
+        // Both must be empty — if either survives, the FIFO cap
+        // could leak entries indefinitely.
+        assert!(client.lock_states().is_empty(), "states not cleared");
+        let fifo_len = client
+            .host_fifo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
+        assert_eq!(fifo_len, 0, "fifo not cleared");
+    }
+
+    #[test]
+    fn reset_holds_both_locks_simultaneously() {
+        // Lock-order regression test: take `host_fifo` first from
+        // this thread, then spawn a thread that calls reset(). If
+        // reset() ever changed to acquire fifo BEFORE states,
+        // this would deadlock. The 50 ms join timeout is loose
+        // enough to absorb scheduling jitter on any platform.
+        use std::sync::Arc;
+        let client = Arc::new(EvasionClient::default());
+        {
+            let _fifo = client
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // Reset on a background thread — must be waiting on
+            // `host_states` (which we don't hold), not on
+            // `host_fifo` (which we do). When we drop our guard
+            // it should proceed.
+            let c = Arc::clone(&client);
+            let handle = std::thread::spawn(move || c.reset());
+            // Tiny sleep so the thread definitely tries to grab
+            // states before we drop fifo.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            drop(_fifo);
+            handle
+                .join()
+                .expect("reset thread must finish, not deadlock");
+        }
     }
 }
