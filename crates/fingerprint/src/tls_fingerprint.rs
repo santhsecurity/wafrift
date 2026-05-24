@@ -57,41 +57,19 @@ const TLS13_CHROME_CIPHERS: &[u16] = &[
     0x1303, // TLS_CHACHA20_POLY1305_SHA256
 ];
 
-/// TLS 1.2 cipher suites used by Chrome (in Chrome's exact order).
-#[allow(dead_code)] // Used when transport layer integrates full TLS handshake
-const TLS12_CHROME_CIPHERS: &[u16] = &[
-    0xC02B, // TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-    0xC02F, // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-    0xC02C, // TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-    0xC030, // TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-    0xCCA9, // TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
-    0xCCA8, // TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
-    0xC013, // TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
-    0xC014, // TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
-    0x009C, // TLS_RSA_WITH_AES_128_GCM_SHA256
-    0x009D, // TLS_RSA_WITH_AES_256_GCM_SHA384
-    0x002F, // TLS_RSA_WITH_AES_128_CBC_SHA
-    0x0035, // TLS_RSA_WITH_AES_256_CBC_SHA
-];
+// TLS 1.2 cipher constants removed 2026-05-23 — they were
+// #[allow(dead_code)] for "when transport integrates full TLS
+// handshake" with no caller and no tracking issue. When that
+// integration ships, the canonical source is
+// `crates/transport`'s actual handshake code, not a const here. The
+// TLS 1.3 chrome/firefox lists below stay because they ARE consumed
+// by the JA3 hash builder.
 
 /// TLS 1.3 cipher suites used by Firefox.
 const TLS13_FIREFOX_CIPHERS: &[u16] = &[
     0x1301, // TLS_AES_128_GCM_SHA256
     0x1303, // TLS_CHACHA20_POLY1305_SHA256
     0x1302, // TLS_AES_256_GCM_SHA384
-];
-
-/// TLS 1.2 cipher suites used by Firefox (different order from Chrome).
-#[allow(dead_code)] // Used when transport layer integrates full TLS handshake
-const TLS12_FIREFOX_CIPHERS: &[u16] = &[
-    0xC02B, // TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-    0xC02F, // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-    0xC02C, // TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-    0xC030, // TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-    0xCCA9, // TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
-    0xCCA8, // TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
-    0xC013, // TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
-    0xC014, // TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
 ];
 
 // ──────────────────────────────────────────────

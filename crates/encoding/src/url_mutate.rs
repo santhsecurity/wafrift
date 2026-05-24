@@ -21,7 +21,6 @@
 //! mutation should round-trip through `wafrift_strategy::evade` with
 //! the parameter value lifted into the request body.
 
-use std::borrow::Cow;
 
 /// Knobs for [`mutate_url`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -333,18 +332,12 @@ fn mutate_query_string(query: &str, strategy: UrlStrategy) -> (String, Option<&'
     (out.join("&"), last_label)
 }
 
-/// Aggressive percent-encoding: every byte that is not `[A-Za-z0-9]`
-/// is encoded. Drops the URL safe-list (`-._~`) intentionally — those
-/// are the bytes signatures most often fail to canonicalise.
-#[allow(dead_code)]
-fn percent_encode_aggressive(s: &str) -> String {
-    percent_encode_aggressive_bytes(s.as_bytes())
-}
-
-/// Byte-clean variant of [`percent_encode_aggressive`]. Used by the
-/// byte-pipeline paths so non-UTF-8 input bytes (which a real
-/// `%FF%FE`-style WAF-bypass payload contains) survive end-to-end
-/// instead of being silently rewritten to U+FFFD.
+/// Aggressive percent-encoding of raw bytes: every byte that is not
+/// `[A-Za-z0-9]` is encoded. Drops the URL safe-list (`-._~`)
+/// intentionally — those are the bytes signatures most often fail to
+/// canonicalise. Used by the byte-pipeline paths so non-UTF-8 input
+/// bytes (which a real `%FF%FE`-style WAF-bypass payload contains)
+/// survive end-to-end instead of being silently rewritten to U+FFFD.
 fn percent_encode_aggressive_bytes(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().saturating_mul(3));
     for &b in bytes {
@@ -428,31 +421,6 @@ fn percent_decode_bytes(s: &str) -> Vec<u8> {
         i += 1;
     }
     out
-}
-
-/// Decode `%xx` escapes lossily, treating invalid sequences as
-/// literal. Returns `Cow::Borrowed` when nothing needed decoding.
-#[allow(dead_code)]
-fn percent_decode_lossy(s: &str) -> Cow<'_, str> {
-    if !s.contains('%') {
-        return Cow::Borrowed(s);
-    }
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let (Some(h), Some(l)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2]))
-        {
-            out.push(h * 16 + l);
-            i += 3;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    Cow::Owned(String::from_utf8_lossy(&out).into_owned())
 }
 
 fn hex_digit(b: u8) -> Option<u8> {
