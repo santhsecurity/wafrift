@@ -173,9 +173,6 @@ pub struct RuleEngine {
 struct BodyPatternRef {
     /// WAF rule name (key into `RuleEngine::rules`).
     waf_name: String,
-    /// Index of the signature within the WAF rule.
-    #[allow(dead_code)]
-    sig_index: usize,
     /// Weight of this signature.
     weight: f64,
 }
@@ -449,7 +446,7 @@ impl RuleEngine {
 
         for name in &self.names {
             let rule = &self.rules[name];
-            for (sig_idx, sig) in rule.signatures.iter().enumerate() {
+            for sig in &rule.signatures {
                 if let Some(ref re) = sig.body_regex {
                     if patterns.len() >= MAX_BODY_REGEX_PATTERNS {
                         tracing::warn!(
@@ -461,7 +458,6 @@ impl RuleEngine {
                     patterns.push(re.as_str().to_string());
                     map.push(BodyPatternRef {
                         waf_name: name.clone(),
-                        sig_index: sig_idx,
                         weight: sig.weight,
                     });
                     regexes.push(re.clone());

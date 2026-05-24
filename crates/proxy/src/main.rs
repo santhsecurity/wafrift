@@ -81,8 +81,6 @@ const X_WAFRIFT_BLOCKED: &str = "x-wafrift-blocked";
 type SharedLogger = Option<Arc<RequestLogger>>;
 
 struct RequestLogger {
-    #[allow(dead_code)] // kept for future log rotation
-    dir: PathBuf,
     /// Append-only file, protected by a tokio mutex for async writes.
     writer: tokio::sync::Mutex<std::io::BufWriter<std::fs::File>>,
 }
@@ -107,7 +105,6 @@ impl RequestLogger {
             .open(&path)?;
         info!(path = %path.display(), "request/response log opened");
         Ok(Self {
-            dir: dir.to_path_buf(),
             writer: tokio::sync::Mutex::new(std::io::BufWriter::new(file)),
         })
     }

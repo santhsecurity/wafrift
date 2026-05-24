@@ -901,11 +901,17 @@ fn jittered_wait(base: Duration) -> Duration {
     use std::time::SystemTime;
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos() as u64);
-    // jitter ∈ [-25%, +25%]
-    let quarter_range = base.as_millis() as u64 / 4; // 25% of base in ms
-    let offset = (nanos % (quarter_range.saturating_mul(2).max(1))) as i64 - quarter_range as i64;
-    let new_ms = (base.as_millis() as i64 + offset).max(1) as u64;
+        .map_or(0, |d| d.subsec_nanos());
+    // jitter ∈ [-25%, +25%]. Arithmetic in i128 throughout so a future
+    // caller that wires `base` to a server-supplied `Retry-After` value
+    // (vs. today's hardcoded 2s / 5s) can't wrap the intermediate
+    // u64→i64 casts. The final clamp to u64 keeps Duration::from_millis
+    // well-defined regardless of input scale.
+    let base_ms = base.as_millis() as i128;
+    let quarter = base_ms / 4;
+    let range = (quarter * 2).max(1);
+    let offset = (i128::from(nanos) % range) - quarter;
+    let new_ms = (base_ms + offset).clamp(1, u64::MAX as i128) as u64;
     Duration::from_millis(new_ms)
 }
 
