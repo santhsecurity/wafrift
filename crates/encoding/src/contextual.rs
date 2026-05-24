@@ -279,10 +279,23 @@ pub fn validate_in_context(
                         reason: "unescaped double quote in XML attribute".into(),
                     });
                 }
+                // Single-quoted XML attributes (attr='...') are equally valid in
+                // XML 1.0 §3.1. An unescaped `'` inside such an attribute breaks
+                // out of the value just as `"` does in a double-quoted attribute.
+                // The previous validator missed this, allowing `' onclick='alert(1)`
+                // to pass as a well-formed XML attribute value.
+                if c == '\'' {
+                    return Err(ContextualEncodeError::ContextIncompatible {
+                        strategy: "validate".into(),
+                        context,
+                        reason: "unescaped single quote in XML attribute".into(),
+                    });
+                }
                 if c == '&' {
                     // Allow known entity references; anything else starting with & is suspicious
                     let remainder: String = chars.by_ref().take(6).collect();
                     if !remainder.starts_with("quot;")
+                        && !remainder.starts_with("apos;")
                         && !remainder.starts_with("amp;")
                         && !remainder.starts_with("lt;")
                         && !remainder.starts_with("gt;")
@@ -537,6 +550,45 @@ mod tests {
         // &quot; should be allowed (the validator doesn't fully validate entities,
         // but it shouldn't error on well-formed entity references)
         assert!(validate_in_context("hello&quot;world", InjectionContext::XmlAttribute).is_ok());
+    }
+
+    #[test]
+    fn xml_attribute_validates_unescaped_single_quote() {
+        // A single-quoted XML attribute (attr='...') breaks out on an unescaped `'`.
+        // Previously the validator only checked `"`, so `' onclick='alert(1)` passed
+        // as "valid" despite being an injection vector.
+        let err = validate_in_context("foo' onclick='alert(1)", InjectionContext::XmlAttribute)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("single quote"),
+            "error must mention single quote, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_escape_encodes_single_quote() {
+        // escape_for_context must produce &apos; for `'` so that the escaped
+        // output then passes validate_in_context.
+        let escaped =
+            escape_for_context("don't break my attribute", InjectionContext::XmlAttribute)
+                .unwrap();
+        assert!(
+            escaped.contains("&apos;"),
+            "expected &apos; in escaped output, got: {escaped}"
+        );
+        // The round-trip must also pass validation.
+        validate_in_context(&escaped, InjectionContext::XmlAttribute)
+            .expect("escaped output must pass validation");
+    }
+
+    #[test]
+    fn xml_attribute_allows_escaped_apos() {
+        // &apos; is a well-formed entity reference and must not trigger the
+        // single-quote validator.
+        assert!(
+            validate_in_context("don&apos;t", InjectionContext::XmlAttribute).is_ok(),
+            "&apos; must be accepted by the XmlAttribute validator"
+        );
     }
 
     #[test]
