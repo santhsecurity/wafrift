@@ -58,23 +58,42 @@ fi
 
 echo "[apply-waf] ruleset id: $ENTRY"
 
-# 2. Install rules — POST with the full ruleset replaces atomically.
+# 2. Install rules — PUT with the full ruleset replaces atomically.
+# F85: prior expression used `any(... or ...)` which is invalid CF
+# Ruleset Language — `any()` takes an ARRAY field (e.g.
+# `http.request.uri.args.values[*]`), not a boolean expression. The
+# old form was rejected by the API or matched nothing. Switched to
+# `lower(http.request.uri.query)` for case-folded substring matching
+# on the raw query string, which is the documented idiom.
+RESULT_FILE=$(mktemp)
+trap 'rm -f "$RESULT_FILE"' EXIT
+
 curl -sS -H "$AUTH" -H "$CT" -X PUT \
   "$API/zones/$CF_ZONE_ID/rulesets/$ENTRY" \
   --data '{
     "rules": [
       {
-        "description": "wafrift-bench: block union select in any query",
-        "expression": "(any(http.request.uri.query_string contains \"union select\" or http.request.uri.query_string contains \"UNION SELECT\"))",
+        "description": "wafrift-bench: block union select in query string",
+        "expression": "(lower(http.request.uri.query) contains \"union select\")",
         "action": "block"
       },
       {
         "description": "wafrift-bench: block <script> in request body",
-        "expression": "(http.request.body.raw contains \"<script>\")",
+        "expression": "(lower(http.request.body.raw) contains \"<script>\")",
         "action": "block"
       }
     ]
-  }' | jq '.success, (.errors // [])'
+  }' > "$RESULT_FILE"
+
+# F86: prior `| jq '.success, (.errors // [])'` exited 0 on every
+# valid JSON — including API failures. Operator saw "[apply-waf] done."
+# with a broken zone config. Check `.success == true` explicitly and
+# fail loudly with the error body if not.
+if ! jq -e '.success == true' "$RESULT_FILE" > /dev/null; then
+  echo "[apply-waf] FAILED. CF API response:" >&2
+  jq '.' "$RESULT_FILE" >&2
+  exit 1
+fi
 
 echo "[apply-waf] done. Verify in dashboard or via:"
 echo "  curl -sS -H \"\$AUTH\" \"$API/zones/$CF_ZONE_ID/rulesets/$ENTRY\" | jq ."

@@ -444,7 +444,15 @@ impl StealthClient {
     }
 
     pub fn profile(&self) -> ImpersonateProfile {
-        ImpersonateProfile::Chrome131
+        // F87: `StealthClient::new()` (above) always returns Err in
+        // this stub, so no `&self` instance is ever constructed. If
+        // we ever reach here, the type-system invariant is broken
+        // upstream — better to panic loudly than to silently mis-tag
+        // a TLS fingerprint as Chrome131 in findings telemetry.
+        unreachable!(
+            "stub StealthClient cannot be instantiated; \
+             rebuild with `--features tls-impersonate`"
+        )
     }
 
     pub async fn send(

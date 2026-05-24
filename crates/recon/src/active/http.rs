@@ -26,9 +26,21 @@ pub async fn probe_http_headers_with_rules(
     config: &ActiveProbeConfig,
     rules: &HeaderRules,
 ) -> Result<HttpHeaderProbeSnapshot, ReconProbeError> {
+    // F89: send a browser-shaped User-Agent. The reqwest default
+    // (`reqwest/<ver>`) is on every WAF bot-detection signature list
+    // — the WAF returns a challenge page instead of normal response
+    // headers, so the recon probe ends up classifying CHALLENGE
+    // headers, not the WAF's actual response stack. Use a generic
+    // Chrome-on-Windows UA: matches the majority of legit traffic
+    // and is what wafrift's stealth client emits.
     let client = reqwest::Client::builder()
         .connect_timeout(config.http_timeout)
         .timeout(config.http_timeout)
+        .user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+             AppleWebKit/537.36 (KHTML, like Gecko) \
+             Chrome/131.0.0.0 Safari/537.36",
+        )
         .build()?;
 
     let resp = match client.get(url).send().await {

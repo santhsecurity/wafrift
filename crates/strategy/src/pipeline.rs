@@ -72,7 +72,15 @@ impl EvasionPlanOutput {
     /// Create a new plan output.
     #[must_use]
     pub fn new(pipelines: Vec<EvasionPipeline>) -> Self {
-        let total_cost = pipelines.iter().map(|p| p.cost).sum();
+        // F83: widen to u64 mid-sum and saturate back to u32 so a
+        // multi-thousand-entry learning cache can't silently wrap the
+        // exposed budget. With cost u32 + 4B entries the worst-case
+        // accumulator fits comfortably in u64.
+        let total_cost: u32 = pipelines
+            .iter()
+            .map(|p| u64::from(p.cost))
+            .sum::<u64>()
+            .min(u64::from(u32::MAX)) as u32;
         Self {
             pipelines,
             total_cost,
