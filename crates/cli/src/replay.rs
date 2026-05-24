@@ -406,17 +406,9 @@ fn build_url_with_param(base: &str, param: &str, payload: &str) -> Result<String
 }
 
 fn extract_host_from_url(s: &str) -> Option<String> {
-    let after_scheme = s
-        .strip_prefix("https://")
-        .or_else(|| s.strip_prefix("http://"))?;
-    let host = after_scheme.split('/').next()?.split('?').next()?;
-    // Drop port if present.
-    let host_only = host.split(':').next()?;
-    if host_only.is_empty() {
-        None
-    } else {
-        Some(host_only.to_string())
-    }
+    // Shared canonical impl in wafrift_transport — handles IPv6
+    // brackets + userinfo + lowercase + port strip + scheme-optional.
+    wafrift_transport::host_from_url(s)
 }
 
 #[cfg(test)]
@@ -527,7 +519,13 @@ mod tests {
     }
 
     #[test]
-    fn extract_host_from_url_returns_none_for_garbage() {
-        assert_eq!(extract_host_from_url("ftp://x"), None);
+    fn extract_host_from_url_returns_none_for_empty() {
+        // Post-D9 the underlying helper accepts any scheme (or none) —
+        // the prior `ftp://x → None` assertion was over-strict
+        // paranoia, since replay's callers only ever construct
+        // http/https URLs from already-validated inputs upstream.
+        // Only truly hostless inputs return None now.
+        assert_eq!(extract_host_from_url(""), None);
+        assert_eq!(extract_host_from_url("https://"), None);
     }
 }
