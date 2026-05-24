@@ -187,8 +187,16 @@ impl ResponseOracle {
             ));
         }
 
-        // If 503 with challenge markers → ChallengeRequired
-        if ctx.status == 503 && has_challenge {
+        // ChallengeRequired regardless of status — pre-fix this was
+        // gated on `ctx.status == 503`, which missed Cloudflare
+        // challenges served on 403, Akamai _abck challenges on
+        // 200/403, and AWS WAF Challenge action on 202/401. The
+        // status gate caused the evade loop to burn evasion budget
+        // on a challenge page instead of entering the cookie-replay
+        // /solve path. `has_challenge` already requires concrete
+        // ChallengePlatform or "challenge" body markers, so widening
+        // the status doesn't introduce false positives.
+        if has_challenge {
             let platform = signals.iter().find_map(|s| match s {
                 Signal::ChallengePlatform(p) => Some(p.clone()),
                 _ => None,
