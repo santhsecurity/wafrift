@@ -1278,6 +1278,8 @@ async fn forward_with_evade_retry(
             Arc::clone(&policy),
             Arc::clone(&limits),
             Arc::clone(&response_profiles),
+            // 1-based: the first attempt reports `1`, not `0`.
+            u32::try_from(attempt).unwrap_or(u32::MAX).saturating_add(1),
         )
         .await?;
         let status = resp.status().as_u16();
@@ -1314,6 +1316,11 @@ async fn forward_wafrift_request(
     policy: Arc<UpstreamPolicy>,
     limits: Arc<ProxyLimits>,
     response_profiles: Arc<ResponseProfileDb>,
+    // 1-based attempt counter, threaded from
+    // `forward_with_evade_retry`. The TUI Event::Request reports
+    // this so the dashboard accurately shows how many retries
+    // landed each bypass instead of permanently showing 0.
+    attempt_idx: u32,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // Snapshot the state needed for evasion, then DROP the lock before
     // running evade() / evade_smart() — those calls do regex-heavy
@@ -1986,11 +1993,7 @@ async fn forward_wafrift_request(
             resp_headers: header_pairs.clone(),
             resp_body_excerpt,
             resp_body_total,
-            // attempts is not currently threaded through from
-            // forward_with_evade_retry — would need a return-tuple
-            // change. Leaving 0 until that refactor lands; the TUI
-            // tolerates 0 (just shows "0" in the detail pane).
-            attempts: 0,
+            attempts: attempt_idx,
         });
     }
 
