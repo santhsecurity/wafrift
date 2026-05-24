@@ -21,9 +21,23 @@ pub fn space_to_dash(payload: &str) -> String {
     payload.replace(' ', "--\n")
 }
 
-/// Replace spaces with hash comments (`#`).
+/// Replace spaces with MySQL hash line comments (`#\n`).
+///
+/// `#` is MySQL's line-comment marker and extends to end-of-line.
+/// Pre-fix this replaced spaces with bare `#`, which CONSUMED THE
+/// REST OF THE PAYLOAD as a single comment — `SELECT * FROM users`
+/// became `SELECT#*#FROM#users` which the SQL parser reads as just
+/// `SELECT` followed by one giant comment to end-of-input. The
+/// payload effectively shipped as `SELECT` (invalid SQL, no
+/// injection delivered).
+///
+/// Adding the trailing `\n` makes `#\n` a zero-content line comment
+/// that ends immediately, leaving the following token outside —
+/// the same pattern `space_to_dash` uses with `--\n`. Result:
+/// MySQL parses the payload as whitespace-separated tokens that
+/// happen to have inline line-comment fillers between them.
 pub fn space_to_hash(payload: &str) -> String {
-    payload.replace(' ', "#")
+    payload.replace(' ', "#\n")
 }
 
 /// Replace spaces with plus signs (`+`).
@@ -66,8 +80,22 @@ mod tests {
     }
 
     #[test]
-    fn space_to_hash_replaces_spaces() {
-        assert_eq!(space_to_hash("SELECT * FROM"), "SELECT#*#FROM");
+    fn space_to_hash_replaces_spaces_with_terminated_line_comment() {
+        // Each space becomes `#\n` (hash + newline). The newline
+        // terminates MySQL's line comment so subsequent tokens
+        // survive — pre-fix this used bare `#` which consumed the
+        // rest of the payload as a single comment, leaving only
+        // the first token. Regression test for F53(b).
+        assert_eq!(
+            space_to_hash("SELECT * FROM"),
+            "SELECT#\n*#\nFROM",
+            "must end the # comment with a newline so * and FROM survive"
+        );
+        // Sanity: the output still contains every original keyword.
+        let out = space_to_hash("UNION SELECT 1 FROM users");
+        for kw in ["UNION", "SELECT", "1", "FROM", "users"] {
+            assert!(out.contains(kw), "{kw} dropped from payload: {out}");
+        }
     }
 
     #[test]

