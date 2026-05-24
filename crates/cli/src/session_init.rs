@@ -26,7 +26,7 @@ use std::fmt;
 use std::path::Path;
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::import_curl::{ParsedCurl, parse_curl, shell_tokenize};
 
@@ -186,10 +186,12 @@ pub async fn establish_from_curl(
     // An Authorization header explicitly set in the curl carries
     // forward — bearer tokens / basic-auth need to be replayed on
     // every attack request the same way they were set on the init.
+    // Routed through the shared parse_header_kv so the
+    // HeaderName/HeaderValue conversion policy stays in lock-step
+    // with the pentest -H/--header path.
     for (k, v) in &parsed.headers {
         if k.eq_ignore_ascii_case("authorization")
-            && let (Ok(name), Ok(val)) =
-                (HeaderName::try_from(k.as_str()), HeaderValue::from_str(v))
+            && let Some((name, val)) = crate::scan::pentest_client::parse_header_kv(k, v)
         {
             headers.insert(name, val);
         }
