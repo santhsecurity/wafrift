@@ -451,6 +451,16 @@ impl HostState {
             // Success attribution is handled by the caller via
             // record_success_for_many() since it needs the full
             // Technique objects, not just string keys.
+            //
+            // Defensive: also run evaluate_pools here so the winner
+            // pool populates EVEN IF a future caller forgets to
+            // invoke record_success_for_many. record_success_for_many
+            // also calls evaluate_pools so the existing
+            // proxy/transport call paths just run it twice (cheap).
+            // Without this, a caller that ONLY invoked record_signal
+            // would never see discovery_complete flip to true and
+            // the next_winner() rotation would never start.
+            self.evaluate_pools();
         }
 
         // Ingest WAF profile hints (only update, never downgrade).
