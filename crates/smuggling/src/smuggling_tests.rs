@@ -494,4 +494,124 @@ mod tests {
                 .is_ok()
         );
     }
+
+    // ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+    #[test]
+    fn sanitize_blocks_null_byte() {
+        // NULL byte should be rejected by sanitize_input — it causes many
+        // HTTP/1 stacks to truncate header values, enabling header injection.
+        assert!(sanitize_input("host\x00injected.com").is_err());
+        assert!(sanitize_input("safe-host.com").is_ok());
+    }
+
+    #[test]
+    fn cl_te_host_appears_exactly_once() {
+        let p = cl_te("example.com", "GET /admin HTTP/1.1").unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        let count = s.matches("Host: example.com").count();
+        assert_eq!(count, 1, "Host header must appear exactly once");
+    }
+
+    #[test]
+    fn te_cl_host_appears_exactly_once() {
+        let p = te_cl("example.com", "GET /admin HTTP/1.1").unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        let count = s.matches("Host: example.com").count();
+        assert_eq!(count, 1, "Host header must appear exactly once in TE.CL");
+    }
+
+    #[test]
+    fn cl_te_smuggled_prefix_in_raw_bytes() {
+        let prefix = "GET /internal HTTP/1.1";
+        let p = cl_te("example.com", prefix).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains(prefix),
+            "smuggled prefix must appear verbatim in raw_bytes"
+        );
+    }
+
+    #[test]
+    fn te_cl_smuggled_prefix_in_raw_bytes() {
+        let prefix = "GET /secret HTTP/1.1";
+        let p = te_cl("example.com", prefix).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains(prefix),
+            "TE.CL smuggled prefix must appear verbatim in raw_bytes"
+        );
+    }
+
+    #[test]
+    fn guard_prefix_len_at_exact_limit_succeeds() {
+        // Exactly at the limit (64 KiB) should succeed.
+        let exactly_limit = "A".repeat(64 * 1024);
+        assert!(guard_prefix_len(&exactly_limit, 64 * 1024).is_ok());
+    }
+
+    #[test]
+    fn guard_prefix_len_one_over_limit_fails() {
+        // One byte over the limit must fail.
+        let over_limit = "A".repeat(64 * 1024 + 1);
+        assert!(guard_prefix_len(&over_limit, 64 * 1024).is_err());
+    }
+
+    #[test]
+    fn detect_cl_te_body_exactly_6_bytes() {
+        let p = detect_cl_te("example.com").unwrap();
+        // Find the header/body separator.
+        let sep = b"\r\n\r\n";
+        let pos = p
+            .raw_bytes
+            .windows(sep.len())
+            .position(|w| w == sep)
+            .expect("header separator must be present");
+        let body = &p.raw_bytes[pos + sep.len()..];
+        assert_eq!(
+            body.len(),
+            6,
+            "detect_cl_te body must be exactly 6 bytes (0\\r\\n\\r\\nX), got {}",
+            body.len()
+        );
+    }
+
+    #[test]
+    fn detect_te_cl_content_length_is_3() {
+        // CL=3 covers exactly the first chunk-size line "5\r\n" (3 bytes).
+        let p = detect_te_cl("example.com").unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains("Content-Length: 3\r\n"),
+            "detect_te_cl CL must be 3 (covers only the chunk-size line), got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn h2c_smuggle_contains_upgrade_header() {
+        let p = h2c_smuggle("example.com", None).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains("Upgrade: h2c"));
+        assert!(s.contains("HTTP2-Settings:"));
+    }
+
+    #[test]
+    fn h2c_post_smuggle_body_appended() {
+        let body = b"payload=test";
+        let p = h2c_post_smuggle("example.com", body, None).unwrap();
+        assert!(
+            p.raw_bytes.ends_with(body),
+            "H2C POST body must be appended at the end of raw_bytes"
+        );
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains(&format!("Content-Length: {}", body.len())));
+    }
+
+    #[test]
+    fn cl_te_custom_content_length_overrides() {
+        // A caller-specified CL=99 must appear verbatim.
+        let p = cl_te_custom("example.com", "SMUGGLED", 99).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains("Content-Length: 99"));
+    }
 }

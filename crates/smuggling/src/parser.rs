@@ -428,4 +428,242 @@ mod tests {
         let diff = ResponseDiff::compare(&a, &b);
         assert_eq!(diff.similarity, 0.0, "no shared shingles → 0.0");
     }
+
+    // ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+    #[test]
+    fn chunked_parser_crlf_terminator_accepted() {
+        // Exactly \r\n after chunk data — the RFC-compliant form.
+        let data = b"3\r\nabc\r\n0\r\n\r\n";
+        let parser = ChunkedParser::default();
+        assert_eq!(parser.parse(data).unwrap(), b"abc");
+    }
+
+    #[test]
+    fn chunked_parser_lf_only_terminator_rejected() {
+        // \n\n instead of \r\n — RFC non-compliant; must error.
+        let data = b"3\r\nabc\n\n0\r\n\r\n";
+        let parser = ChunkedParser::default();
+        assert!(matches!(
+            parser.parse(data),
+            Err(ParseError::InvalidChunkTerminator)
+        ));
+    }
+
+    #[test]
+    fn chunked_parser_null_null_terminator_rejected() {
+        // \x00\x00 instead of \r\n — must be InvalidChunkTerminator.
+        let data = b"3\r\nabc\x00\x000\r\n\r\n";
+        let parser = ChunkedParser::default();
+        assert!(matches!(
+            parser.parse(data),
+            Err(ParseError::InvalidChunkTerminator)
+        ));
+    }
+
+    #[test]
+    fn chunked_parser_cr_lf_vs_lf_only() {
+        // \r followed by something-not-\n is not a valid CRLF; must error.
+        let data = b"3\r\nabc\rX0\r\n\r\n";
+        let parser = ChunkedParser::default();
+        assert!(matches!(
+            parser.parse(data),
+            Err(ParseError::InvalidChunkTerminator)
+        ));
+    }
+
+    #[test]
+    fn chunked_parser_body_too_large_at_limit_plus_one() {
+        let cap = 16;
+        let parser = ChunkedParser {
+            max_total_size: cap,
+            max_chunk_count: 10_000,
+        };
+        // Exactly cap bytes: should succeed.
+        let mut ok = format!("{:x}\r\n", cap).into_bytes();
+        ok.extend(b"A".repeat(cap));
+        ok.extend(b"\r\n0\r\n\r\n");
+        assert!(parser.parse(&ok).is_ok());
+
+        // cap+1 bytes: must error.
+        let size = cap + 1;
+        let mut too_big = format!("{:x}\r\n", size).into_bytes();
+        too_big.extend(b"A".repeat(size));
+        too_big.extend(b"\r\n0\r\n\r\n");
+        assert!(matches!(
+            parser.parse(&too_big),
+            Err(ParseError::BodyTooLarge)
+        ));
+    }
+
+    #[test]
+    fn chunked_parser_empty_input_is_incomplete() {
+        let parser = ChunkedParser::default();
+        assert!(matches!(
+            parser.parse(b""),
+            Err(ParseError::Incomplete)
+        ));
+    }
+
+    #[test]
+    fn header_fingerprint_three_via_headers_preserved() {
+        let fp = HeaderFingerprint::from_headers(&[
+            ("Via".into(), "1.1 proxy1".into()),
+            ("Via".into(), "1.1 proxy2".into()),
+            ("Via".into(), "1.1 proxy3".into()),
+        ]);
+        let vias = fp.lowercased.get("via").unwrap();
+        assert_eq!(vias.len(), 3, "all three Via values must survive");
+        assert!(vias.contains(&"1.1 proxy1".to_string()));
+        assert!(vias.contains(&"1.1 proxy2".to_string()));
+        assert!(vias.contains(&"1.1 proxy3".to_string()));
+    }
+
+    #[test]
+    fn header_fingerprint_two_transfer_encoding_headers_preserved() {
+        let fp = HeaderFingerprint::from_headers(&[
+            ("Transfer-Encoding".into(), "chunked".into()),
+            ("Transfer-Encoding".into(), "identity".into()),
+        ]);
+        let vals = fp.lowercased.get("transfer-encoding").unwrap();
+        assert_eq!(vals.len(), 2, "both Transfer-Encoding values must survive");
+    }
+
+    #[test]
+    fn header_fingerprint_first_helper_returns_first_occurrence() {
+        let fp = HeaderFingerprint::from_headers(&[
+            ("Set-Cookie".into(), "first=1".into()),
+            ("Set-Cookie".into(), "second=2".into()),
+        ]);
+        let first = HeaderFingerprint::first(&fp.lowercased, "set-cookie");
+        assert_eq!(first, Some(&"first=1".to_string()));
+    }
+
+    #[test]
+    fn similarity_identical_bodies_returns_one() {
+        let body = b"The quick brown fox jumps over the lazy dog".to_vec();
+        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: body.clone() };
+        let b = HttpResponse { version: 1, status: 200, headers: vec![], body };
+        assert_eq!(ResponseDiff::compare(&a, &b).similarity, 1.0);
+    }
+
+    #[test]
+    fn similarity_prefix_match_above_zero() {
+        // Shared first 20 bytes of a 22-byte string — Jaccard must be > 0.0
+        // (there is substantial overlap), even if < 0.5 (two bytes differ).
+        let a = HttpResponse {
+            version: 1, status: 200, headers: vec![],
+            body: b"AAAAAAAAAAAAAAAAAAAA__".to_vec(),
+        };
+        let b = HttpResponse {
+            version: 1, status: 200, headers: vec![],
+            body: b"AAAAAAAAAAAAAAAAAAAA++".to_vec(),
+        };
+        let diff = ResponseDiff::compare(&a, &b);
+        assert!(
+            diff.similarity > 0.0,
+            "prefix-heavy similarity must be > 0.0, got {}",
+            diff.similarity
+        );
+        // The strings are NOT fully different, so it must be < 1.0.
+        assert!(
+            diff.similarity < 1.0,
+            "prefix-heavy similarity must be < 1.0, got {}",
+            diff.similarity
+        );
+    }
+
+    #[test]
+    fn similarity_suffix_match_above_zero() {
+        let a = HttpResponse {
+            version: 1, status: 200, headers: vec![],
+            body: b"__AAAAAAAAAAAAAAAAAA".to_vec(),
+        };
+        let b = HttpResponse {
+            version: 1, status: 200, headers: vec![],
+            body: b"++AAAAAAAAAAAAAAAAAA".to_vec(),
+        };
+        let diff = ResponseDiff::compare(&a, &b);
+        assert!(
+            diff.similarity > 0.0,
+            "suffix-heavy similarity must be > 0.0, got {}",
+            diff.similarity
+        );
+        assert!(
+            diff.similarity < 1.0,
+            "suffix-heavy similarity must be < 1.0, got {}",
+            diff.similarity
+        );
+    }
+
+    #[test]
+    fn similarity_single_byte_difference_above_095() {
+        // Strings differing in only one byte out of many should be very similar.
+        let body_a = b"The quick brown fox jumps over the lazy dog".to_vec();
+        let mut body_b = body_a.clone();
+        body_b[0] = b'X'; // single byte change
+        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: body_a };
+        let b = HttpResponse { version: 1, status: 200, headers: vec![], body: body_b };
+        let diff = ResponseDiff::compare(&a, &b);
+        assert!(
+            diff.similarity > 0.95,
+            "single-byte diff should yield similarity > 0.95, got {}",
+            diff.similarity
+        );
+    }
+
+    #[test]
+    fn similarity_empty_bodies_are_identical() {
+        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: vec![] };
+        let b = HttpResponse { version: 1, status: 200, headers: vec![], body: vec![] };
+        assert_eq!(ResponseDiff::compare(&a, &b).similarity, 1.0);
+    }
+
+    #[test]
+    fn similarity_one_empty_body_returns_zero() {
+        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: b"nonempty".to_vec() };
+        let b = HttpResponse { version: 1, status: 200, headers: vec![], body: vec![] };
+        assert_eq!(ResponseDiff::compare(&a, &b).similarity, 0.0);
+    }
+
+    #[test]
+    fn response_diff_same_body_different_status() {
+        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: b"ok".to_vec() };
+        let b = HttpResponse { version: 1, status: 403, headers: vec![], body: b"ok".to_vec() };
+        let diff = ResponseDiff::compare(&a, &b);
+        assert!(diff.status_differs);
+        assert!(!diff.body_differs);
+        assert_eq!(diff.similarity, 1.0);
+    }
+
+    #[test]
+    fn chunked_parser_concurrent_ten_tasks() {
+        use std::thread;
+        let payloads: Vec<Vec<u8>> = (0..10)
+            .map(|i| {
+                let body = format!("body_{}", i);
+                let mut data = format!("{:x}\r\n", body.len()).into_bytes();
+                data.extend_from_slice(body.as_bytes());
+                data.extend_from_slice(b"\r\n0\r\n\r\n");
+                data
+            })
+            .collect();
+
+        let handles: Vec<_> = payloads
+            .into_iter()
+            .map(|data| {
+                thread::spawn(move || {
+                    let parser = ChunkedParser::default();
+                    let result = parser.parse(&data);
+                    assert!(result.is_ok(), "concurrent chunked parse failed: {:?}", result);
+                    let body = result.unwrap();
+                    assert!(!body.is_empty());
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
 }
