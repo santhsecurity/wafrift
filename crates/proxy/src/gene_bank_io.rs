@@ -183,6 +183,15 @@ pub fn save(state: &ProxyState, path: &Path) -> std::io::Result<()> {
 /// under the lock matters.
 pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
     let mut restored = 0usize;
+    // Track FIFO membership in a HashSet — pre-fix this used
+    // `host_fifo.contains(&host)` which is O(n) on VecDeque, so a
+    // gene-bank with N hosts forced N² scans during restore. For
+    // a corrupted-or-large bank (millions of hosts) the proxy
+    // would take minutes to come up. The set is built once from
+    // the existing fifo (typically empty on cold start) and kept
+    // in lockstep with push_back.
+    let mut fifo_seen: std::collections::HashSet<String> =
+        state.host_fifo.iter().cloned().collect();
     for (host, persisted) in bank.hosts {
         let hs = state.hosts.entry(host.clone()).or_default();
         if !persisted.proven_winners.is_empty() {
@@ -197,7 +206,7 @@ pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
             hs.waf_name = persisted.waf_name;
             hs.waf_confirmed = true;
         }
-        if !state.host_fifo.contains(&host) {
+        if fifo_seen.insert(host.clone()) {
             state.host_fifo.push_back(host);
         }
     }

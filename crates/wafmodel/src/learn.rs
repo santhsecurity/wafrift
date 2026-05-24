@@ -201,6 +201,17 @@ impl EquivalenceOracle for BoundedExhaustiveEq {
                 if hyp.accepts(&alpha.concretize(w)) != truth {
                     return Ok(Some(w.clone()));
                 }
+                // Stop EXPANDING (but keep evaluating the current
+                // depth) once the next frontier crosses the cap.
+                // Without this guard the frontier grows as k^len,
+                // so a 256-symbol alphabet at max_len=10 would
+                // allocate ~10^24 entries — instant OOM before any
+                // counterexample is checked. With the cap the
+                // search returns whatever it found within the
+                // memory budget.
+                if next.len() >= Self::FRONTIER_CAP {
+                    continue;
+                }
                 for sym in 0..k {
                     let mut e = w.clone();
                     e.push(sym);
@@ -211,6 +222,15 @@ impl EquivalenceOracle for BoundedExhaustiveEq {
         }
         Ok(None)
     }
+}
+
+impl BoundedExhaustiveEq {
+    /// Hard upper bound on the BFS frontier size between depth
+    /// levels. ~1M entries × max_len bytes per entry caps memory
+    /// at tens of MiB on a realistic max_len. Past this we stop
+    /// expanding and return whatever we found — the oracle is
+    /// best-effort by design.
+    pub const FRONTIER_CAP: usize = 1_000_000;
 }
 
 /// What a learning run produced and what it cost.
