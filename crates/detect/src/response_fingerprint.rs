@@ -228,7 +228,12 @@ fn check_block_markers(body: &str) -> bool {
                 "your request has been blocked",
                 "this request was blocked",
                 "suspicious activity",
-                "waf",
+                // F95: bare 3-char "waf" matched "wafer", "WAFER",
+                // and any case-insensitive substring with those
+                // three letters in sequence — flipped likely_blocked
+                // to true on completely benign pages. The "web
+                // application firewall" pattern above covers the
+                // intended phrase; drop the 3-char form.
                 "challenge-platform",
                 "just a moment",
                 "checking your browser",
