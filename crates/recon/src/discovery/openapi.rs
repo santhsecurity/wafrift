@@ -208,6 +208,13 @@ fn parameter_to_point(p: &Value, version: VersionKind) -> Option<InjectionPoint>
     })
 }
 
+/// F107: per-schema property cap. An adversarial OpenAPI spec with
+/// `MAX_OPENAPI_PATHS` paths × an unbounded properties map per body
+/// schema would allocate N × 10_000 `InjectionPoint` structs before
+/// any caller could react. The sibling GraphQL parser caps args per
+/// field at 1_000; mirror that here.
+pub const MAX_OPENAPI_PROPS_PER_SCHEMA: usize = 1_000;
+
 fn request_body_to_points(rb: &Value) -> Vec<InjectionPoint> {
     let mut out = Vec::new();
     let Some(content) = rb.get("content").and_then(Value::as_object) else {
@@ -240,7 +247,11 @@ fn request_body_to_points(rb: &Value) -> Vec<InjectionPoint> {
                     .collect()
             })
             .unwrap_or_default();
-        for (prop_name, _) in properties {
+        // F107: silently truncate at the per-schema cap rather than
+        // erroring — request_body_to_points returns a Vec (no Result),
+        // and a partial enumeration is still useful for discovery.
+        // The cap is high enough that no realistic spec hits it.
+        for (prop_name, _) in properties.iter().take(MAX_OPENAPI_PROPS_PER_SCHEMA) {
             out.push(InjectionPoint {
                 name: prop_name.clone(),
                 location: ParameterLocation::Body,
@@ -248,6 +259,14 @@ fn request_body_to_points(rb: &Value) -> Vec<InjectionPoint> {
                 content_type_hint: Some(media_type.clone()),
                 required: required_set.contains(prop_name),
             });
+        }
+        if properties.len() > MAX_OPENAPI_PROPS_PER_SCHEMA {
+            tracing::warn!(
+                got = properties.len(),
+                cap = MAX_OPENAPI_PROPS_PER_SCHEMA,
+                media_type = %media_type,
+                "OpenAPI body schema exceeded per-schema property cap; truncated"
+            );
         }
     }
     out

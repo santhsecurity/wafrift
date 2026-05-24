@@ -148,10 +148,20 @@ fn seed_host(
 ) -> ExitCode {
     let path = match custom_path {
         Some(p) => p.to_path_buf(),
-        None => match std::env::var_os("HOME") {
+        None => match std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+        {
+            // F110: pre-fix consulted `$HOME` only — on Windows that's
+            // typically unset and the operator got "$HOME unset" with
+            // no hint that `--proxy-bank` was the unblock path. Fall
+            // back to `%USERPROFILE%` (matches gene_bank_io.rs F98 /
+            // trust.rs idiom); error message names both vars.
             Some(home) => PathBuf::from(home).join(".wafrift").join("gene-bank.json"),
             None => {
-                eprintln!("error: $HOME unset; pass --proxy-bank explicitly");
+                eprintln!(
+                    "error: $HOME and %USERPROFILE% both unset; \
+                     pass --proxy-bank explicitly"
+                );
                 return ExitCode::from(1);
             }
         },
