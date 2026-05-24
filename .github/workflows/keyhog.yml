@@ -32,6 +32,17 @@ jobs:
         with:
           fetch-depth: 0   # full history for git-source scans
 
+      - name: install vectorscan runtime
+        # keyhog v0.5.12 dynamically links to libhs.so.5 (Vectorscan,
+        # the Hyperscan-API-compatible regex engine). Ubuntu runners
+        # ship `libhyperscan5` on Ubuntu 22.04+; install it explicitly
+        # so the release binary loads.
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libhyperscan5 || \
+            sudo apt-get install -y --no-install-recommends libhyperscan-dev
+
       - name: install keyhog
         env:
           KEYHOG_VERSION: v0.5.12
