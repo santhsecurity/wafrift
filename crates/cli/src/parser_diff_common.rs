@@ -329,6 +329,95 @@ mod tests {
         assert!(client.is_ok());
     }
 
+    // ── fire_get_status_len ───────────────────────────────────
+
+    /// Spawn a one-shot HTTP/1.1 mock that responds with `status` +
+    /// a body of exactly `body_len` `'x'` bytes. Returns the bound
+    /// address so the test can build a URL.
+    async fn spawn_oneshot_mock(status: u16, body_len: usize) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                // Drain the request — minimum is one read; we
+                // don't care about the bytes.
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let body = "x".repeat(body_len);
+                let reason = match status {
+                    200 => "OK",
+                    403 => "Forbidden",
+                    500 => "Internal Server Error",
+                    _ => "STATUS",
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Length: {body_len}\r\n\r\n{body}"
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_returns_200_and_body_length() {
+        let addr = spawn_oneshot_mock(200, 7).await;
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let (status, len) = fire_get_status_len(&client, &url)
+            .await
+            .expect("mock responded");
+        assert_eq!(status, 200);
+        assert_eq!(len, 7);
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_surfaces_non_2xx_status_as_value_not_error() {
+        // Contract: HTTP-level errors (403, 500, etc.) are NOT
+        // reqwest errors — they're values the caller classifies.
+        // The fn must return Ok((status, len)) even for 5xx so
+        // the parser-diff classifier sees the real status.
+        let addr = spawn_oneshot_mock(500, 0).await;
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let (status, len) = fire_get_status_len(&client, &url)
+            .await
+            .expect("HTTP 500 is still Ok at the reqwest level");
+        assert_eq!(status, 500);
+        assert_eq!(len, 0);
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_errors_on_connection_refused() {
+        // Port 1 reliably refuses connections on every test
+        // platform. The reqwest error surfaces as Err(String) per
+        // the fn's contract.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .expect("build client");
+        let err = fire_get_status_len(&client, "http://127.0.0.1:1/")
+            .await
+            .expect_err("connection-refused must surface as Err");
+        assert!(
+            !err.is_empty(),
+            "error message must carry the underlying reason"
+        );
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_errors_on_malformed_url() {
+        let client = reqwest::Client::new();
+        let err = fire_get_status_len(&client, "not a url at all")
+            .await
+            .expect_err("invalid URL must Err, not panic");
+        assert!(!err.is_empty());
+    }
+
     // ── body_delta_pct ────────────────────────────────────────
 
     #[test]
