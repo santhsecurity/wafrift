@@ -387,9 +387,9 @@ async fn handle_conn(
     // an infinite read loop without ever sending the header
     // terminator. 64 KiB is more than enough for any header section.
     let mut total_read = 0_usize;
-    let mut header_end: Option<usize> = None;
+    let mut found: Option<(usize, usize)> = None;
     let header_cap = 64 * 1024;
-    while header_end.is_none() {
+    while found.is_none() {
         let read_fut = sock.read(&mut buf[total_read..]);
         let n = tokio::time::timeout(read_timeout, read_fut)
             .await
@@ -399,8 +399,8 @@ async fn handle_conn(
             return Err("EOF before headers complete".into());
         }
         total_read += n;
-        if let Some(pos) = find_double_crlf(&buf[..total_read]) {
-            header_end = Some(pos);
+        if let Some(loc) = find_double_crlf(&buf[..total_read]) {
+            found = Some(loc);
             break;
         }
         if total_read >= header_cap {
@@ -410,7 +410,7 @@ async fn handle_conn(
             buf.resize(buf.len() * 2, 0);
         }
     }
-    let header_end = header_end.expect("loop exited only when found");
+    let (header_end, header_terminator_len) = found.expect("loop exited only when found");
     let head =
         std::str::from_utf8(&buf[..header_end]).map_err(|e| format!("non-utf8 headers: {e}"))?;
     let mut lines = head.split("\r\n");
@@ -438,7 +438,8 @@ async fn handle_conn(
     }
 
     // Body = (bytes already in buf past the header terminator) + the rest.
-    let header_terminator_len = 4; // CRLF CRLF
+    // `header_terminator_len` is 4 for \r\n\r\n, 2 for \n\n — computed
+    // alongside `header_end` so non-CRLF clients don't lose body bytes.
     let body_start = header_end + header_terminator_len;
     let already_have = total_read.saturating_sub(body_start);
     let mut body_truncated = 0_usize;
@@ -545,14 +546,20 @@ async fn handle_conn(
     }))
 }
 
-fn find_double_crlf(buf: &[u8]) -> Option<usize> {
-    // Standard HTTP header terminator is `\r\n\r\n`; tolerate the
-    // `\n\n` form some clients send.
+/// Locate the end-of-headers double-CRLF (or bare-LF tolerated form).
+/// Returns `Some((offset, terminator_len))` so the caller knows where
+/// the body starts — `body_start = offset + terminator_len`. The
+/// terminator_len is 4 for the canonical `\r\n\r\n` and 2 for the
+/// `\n\n` form some scripted clients (curl with `--data-raw`,
+/// hand-rolled Python `urllib`) emit. Returning a fixed `4` for the
+/// `\n\n` case would silently truncate the first 2 bytes of every
+/// body from non-CRLF clients.
+fn find_double_crlf(buf: &[u8]) -> Option<(usize, usize)> {
     if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-        return Some(pos);
+        return Some((pos, 4));
     }
     if let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
-        return Some(pos);
+        return Some((pos, 2));
     }
     None
 }
@@ -725,9 +732,12 @@ mod tests {
     fn find_double_crlf_handles_canonical_and_loose_forms() {
         // `GET / HTTP/1.1` is 14 bytes, so `\r\n\r\n` starts at
         // position 14. `\n\n` starts at position 14 in the lf-only
-        // form too (request line is still 14 bytes).
-        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\r\n\r\n"), Some(14));
-        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\n\n"), Some(14));
+        // form too (request line is still 14 bytes). The second
+        // return field is the terminator byte length — 4 for CRLF,
+        // 2 for bare LF; the caller adds this to `pos` to find the
+        // body start.
+        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\r\n\r\n"), Some((14, 4)));
+        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\n\n"), Some((14, 2)));
         assert_eq!(find_double_crlf(b"no terminator here"), None);
     }
 
@@ -735,8 +745,25 @@ mod tests {
     fn find_double_crlf_locates_terminator_at_buffer_end() {
         let mut buf = vec![b'X'; 100];
         buf.extend_from_slice(b"\r\n\r\n");
-        let pos = find_double_crlf(&buf).expect("must find");
+        let (pos, terminator_len) = find_double_crlf(&buf).expect("must find");
         assert_eq!(pos, 100);
+        assert_eq!(terminator_len, 4);
+    }
+
+    #[test]
+    fn find_double_crlf_lf_only_terminator_reports_two_byte_length() {
+        // Regression test: pre-fix, callers hardcoded
+        // header_terminator_len=4 unconditionally and ate the first
+        // 2 bytes of every \n\n-terminated callback body. The bare-
+        // LF case must report 2.
+        let mut buf = b"POST /cb HTTP/1.1\nHost: x\n\n".to_vec();
+        buf.extend_from_slice(b"BODYDATA");
+        let (pos, terminator_len) = find_double_crlf(&buf).expect("must find");
+        assert_eq!(terminator_len, 2);
+        // Body must start exactly at pos + 2 — verify the first
+        // body byte is the 'B' of BODYDATA, not '0' / 'D' (which
+        // the old off-by-two would have dropped to).
+        assert_eq!(buf[pos + terminator_len], b'B');
     }
 
     // ── end-to-end: real TCP listener answers a real callback ────
