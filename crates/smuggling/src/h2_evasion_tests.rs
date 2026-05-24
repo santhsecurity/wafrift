@@ -50,7 +50,7 @@ mod tests {
 
     #[test]
     fn authority_host_mismatch_has_both() {
-        let evasion = authority_host_mismatch("safe.example.com", "malicious.internal");
+        let evasion = authority_host_mismatch("safe.example.com", "malicious.internal").unwrap();
         assert!(
             evasion
                 .pseudo_headers
@@ -63,6 +63,14 @@ mod tests {
                 .iter()
                 .any(|(n, v)| n == "host" && v == "malicious.internal")
         );
+    }
+
+    #[test]
+    fn authority_host_mismatch_rejects_crlf_host() {
+        // A host containing CRLF would silently produce an empty-host probe
+        // before the fix (unwrap_or_default). Now it propagates the error.
+        let err = authority_host_mismatch("safe.com", "evil.com\r\nX-Injected: 1");
+        assert!(err.is_err(), "CRLF in target_host must be rejected");
     }
 
     #[test]
@@ -405,7 +413,7 @@ mod tests {
 
     #[test]
     fn double_host_targets_pseudo_mismatch() {
-        let evasion = double_host("a.com", "b.com");
+        let evasion = double_host("a.com", "b.com").unwrap();
         assert_eq!(evasion.target_flaw, H2TargetFlaw::PseudoHeaderMismatch);
     }
 }

@@ -51,7 +51,7 @@ fn regular_header_crlf_builder_present() {
 
 #[test]
 fn authority_host_mismatch_builder_sets_both_hosts() {
-    let evasion = authority_host_mismatch("safe.example.com", "malicious.internal");
+    let evasion = authority_host_mismatch("safe.example.com", "malicious.internal").unwrap();
     assert!(
         evasion
             .pseudo_headers

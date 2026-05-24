@@ -2,6 +2,15 @@
 
 use crate::safety::{SafetyError, sanitize_input};
 
+/// Errors specific to H2 evasion builders.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum H2EvasionError {
+    /// A host or authority string failed sanitization (contained CRLF,
+    /// null bytes, or exceeded the safety length limit).
+    #[error("invalid host for H2 evasion: {0}")]
+    InvalidHost(String),
+}
+
 /// An HTTP/2 evasion technique descriptor.
 #[derive(Debug, Clone)]
 pub struct H2Evasion {
@@ -201,7 +210,20 @@ pub fn mixed_case_headers() -> Vec<H2Evasion> {
     .collect()
 }
 
-pub fn authority_host_mismatch(safe_host: &str, target_host: &str) -> H2Evasion {
+/// Build an H2 Authority/Host mismatch evasion.
+///
+/// # Errors
+///
+/// Returns [`H2EvasionError::InvalidHost`] if either host string contains
+/// characters that would produce an invalid or injected header value
+/// (CRLF, null bytes, etc.). Previously both inputs silently fell back to
+/// an empty string on sanitization failure, generating probes with no host
+/// information — causing desync attempts against `""` instead of the
+/// intended target.
+pub fn authority_host_mismatch(
+    safe_host: &str,
+    target_host: &str,
+) -> Result<H2Evasion, H2EvasionError> {
     // Sanitise both host inputs — every other public function in this
     // module that takes user strings runs sanitize_input first, except
     // crlf_in_regular_header / crlf_in_pseudo_headers which deliberately
@@ -209,27 +231,38 @@ pub fn authority_host_mismatch(safe_host: &str, target_host: &str) -> H2Evasion 
     // passing `safe_host = "example.com\r\nX-Injected: 1"` would get a
     // CRLF-injected header pair through the `headers` Vec, bypassing
     // the same sanitisation used everywhere else.
-    let safe_host = sanitize_input(safe_host).unwrap_or_default();
-    let target_host = sanitize_input(target_host).unwrap_or_default();
-    H2Evasion {
+    let safe_host = sanitize_input(safe_host)
+        .map_err(|_| H2EvasionError::InvalidHost(safe_host.to_string()))?;
+    let target_host = sanitize_input(target_host)
+        .map_err(|_| H2EvasionError::InvalidHost(target_host.to_string()))?;
+    Ok(H2Evasion {
         name: "H2 Authority/Host Mismatch",
         description: "Set :authority to safe host but add Host header pointing to target",
         pseudo_headers: vec![(":authority".into(), safe_host)],
         headers: vec![("host".into(), target_host)],
         ..evasion("", "", H2TargetFlaw::PseudoHeaderMismatch)
-    }
+    })
 }
 
-pub fn double_host(primary: &str, secondary: &str) -> H2Evasion {
-    let primary = sanitize_input(primary).unwrap_or_default();
-    let secondary = sanitize_input(secondary).unwrap_or_default();
-    H2Evasion {
+/// Build an H2 double-Host evasion (`:authority` vs `host` header mismatch).
+///
+/// # Errors
+///
+/// Returns [`H2EvasionError::InvalidHost`] if either host string fails
+/// sanitization. Previously invalid inputs silently produced empty-host
+/// probes.
+pub fn double_host(primary: &str, secondary: &str) -> Result<H2Evasion, H2EvasionError> {
+    let primary = sanitize_input(primary)
+        .map_err(|_| H2EvasionError::InvalidHost(primary.to_string()))?;
+    let secondary = sanitize_input(secondary)
+        .map_err(|_| H2EvasionError::InvalidHost(secondary.to_string()))?;
+    Ok(H2Evasion {
         name: "H2 Double Host",
         description: "Send :authority and Host header with different values",
         pseudo_headers: vec![(":authority".into(), primary)],
         headers: vec![("host".into(), secondary)],
         ..evasion("", "", H2TargetFlaw::PseudoHeaderMismatch)
-    }
+    })
 }
 
 pub fn split_header_to_continuation(
@@ -731,9 +764,20 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
     let mut evasions = vec![
         crlf_in_regular_header("user-agent", "Mozilla/5.0"),
         crlf_in_header_name("x", "foo: bar"),
-        authority_host_mismatch(host, "localhost"),
-        authority_host_mismatch(host, "127.0.0.1"),
-        double_host(host, "internal.service"),
+    ];
+    // authority_host_mismatch / double_host now return Result — propagate
+    // the error (invalid host) mapped to the closest SafetyError variant
+    // so the existing all_evasions signature stays stable.
+    evasions.push(
+        authority_host_mismatch(host, "localhost").map_err(|_| SafetyError::HeaderInjection)?,
+    );
+    evasions.push(
+        authority_host_mismatch(host, "127.0.0.1").map_err(|_| SafetyError::HeaderInjection)?,
+    );
+    evasions.push(
+        double_host(host, "internal.service").map_err(|_| SafetyError::HeaderInjection)?,
+    );
+    evasions.extend([
         method_override(path, host, "POST"),
         method_override(path, host, "PUT"),
         method_anomaly(path, host, "CONNECT"),
@@ -750,7 +794,7 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
         h2_cl(host),
         h2_te(host),
         alpn_h2c(),
-    ];
+    ]);
     evasions.push(crlf_in_pseudo_headers(
         path,
         "X-Forwarded-For",
