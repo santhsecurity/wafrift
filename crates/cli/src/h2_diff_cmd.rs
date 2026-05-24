@@ -86,6 +86,21 @@ pub struct H2DiffArgs {
     #[arg(long)]
     pub insecure: bool,
 
+    /// HTTP proxy (Burp on `http://127.0.0.1:8080` is typical).
+    /// h2-diff is the protocol-divergence cmd most likely to be
+    /// run mid-engagement against an internal target — the
+    /// corporate Burp proxy and operator auth headers are exactly
+    /// what the operator needs to thread through.
+    #[arg(long, value_name = "URL")]
+    pub proxy: Option<String>,
+
+    /// Operator-supplied baseline headers — applied to BOTH the
+    /// H1 and H2 client. Each `-H 'Name: Value'` is repeatable;
+    /// `Authorization`, `Cookie`, `X-Forwarded-For`, custom CSRF
+    /// tokens, etc. travel with every probe.
+    #[arg(long, short = 'H', value_name = "HEADER", num_args = 0..)]
+    pub header: Vec<String>,
+
     /// Output format: `text` (default, colored summary) or `json`.
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
@@ -94,6 +109,8 @@ pub struct H2DiffArgs {
     #[arg(long, default_value_t = false)]
     pub quiet: bool,
 }
+
+crate::impl_parser_diff_http_args!(H2DiffArgs);
 
 /// Result of one H1-vs-H2 differential probe.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -230,10 +247,10 @@ fn build_diff_result(
 
 fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
     let ua = crate::config::shared_user_agent();
-    let builder =
+    let mut builder =
         wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, Some(&ua))
             .redirect(reqwest::redirect::Policy::limited(5));
-    let builder = if want_h2 {
+    builder = if want_h2 {
         // HTTPS targets: reqwest negotiates H2 via TLS ALPN as long
         // as both ends advertise h2. For HTTP, prior-knowledge skips
         // the (rare-and-unimplemented) h2c upgrade.
@@ -246,6 +263,16 @@ fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
         // H1-only — disables ALPN h2 advertisement entirely.
         builder.http1_only()
     };
+    // Burp / corporate proxy + operator headers MUST thread
+    // through both legs so the H1 vs H2 comparison is apples-to-
+    // apples. Pre-fix the cmd silently ignored --proxy / -H,
+    // making it the least useful parser-diff in real engagements.
+    builder = crate::scan::pentest_client::apply_pentest_flags_or_print(
+        builder,
+        args.proxy.as_deref(),
+        &args.header,
+        None,
+    )?;
     builder.build().map_err(|e| {
         eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
