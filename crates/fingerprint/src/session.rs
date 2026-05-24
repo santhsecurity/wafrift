@@ -314,21 +314,27 @@ impl SessionPool {
         if self.profiles.is_empty() {
             panic!("SessionPool: empty profile set — caller must supply at least one");
         }
-        // Fast path: existing binding under bump.
-        {
-            let bindings = self.bindings.read().expect("bindings RwLock poisoned");
-            if let Some(&(idx, count)) = bindings.get(host)
-                && count + 1 < self.rotate_after_requests
-            {
-                drop(bindings);
-                let mut bindings = self.bindings.write().expect("bindings RwLock poisoned");
-                if let Some(entry) = bindings.get_mut(host) {
-                    entry.1 += 1;
-                }
+        // Take the write lock for the whole operation.  A
+        // read-then-upgrade pattern looks cheaper but introduces a TOCTOU
+        // race: two threads can both pass the read-lock check on the same
+        // count, both drop the read lock, and both increment under the
+        // write lock — letting the counter silently exceed
+        // `rotate_after_requests` and suppressing eviction (F134).
+        // A single write lock eliminates the race at negligible cost
+        // (contention is low: one write per outbound request, typically
+        // < µs per call vs µs+ per network round-trip).
+        let mut bindings = self.bindings.write().expect("bindings RwLock poisoned");
+        if let Some(entry) = bindings.get_mut(host) {
+            let (idx, count) = *entry;
+            if count + 1 < self.rotate_after_requests {
+                entry.1 += 1;
                 return self.profiles[idx];
             }
+            // Counter would reach rotate_after_requests — fall through to
+            // eviction below (drop the mutable reference first).
         }
-        // Slow path: either no binding or the count is about to roll over.
+        // Slow path: either no binding or count reached the rotation limit.
+        drop(bindings); // release before taking cursor write lock
         let mut cursor = self.cursor.write().expect("cursor RwLock poisoned");
         let idx = *cursor % self.profiles.len();
         *cursor = cursor.wrapping_add(1);
@@ -760,6 +766,79 @@ mod tests {
             let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
             for s in slots {
                 assert!(seen.insert(*s), "{name}: duplicate slot `{s}`");
+            }
+        }
+    }
+
+    // ── F134: TOCTOU rotation tests ───────────────────────────────
+
+    #[test]
+    fn session_pool_counter_never_exceeds_rotate_after_requests() {
+        // Before F134 two concurrent callers could both pass the
+        // read-lock threshold check, both drop the read lock, and both
+        // increment under the write lock — letting the counter exceed
+        // rotate_after_requests without triggering eviction.
+        // Spin up many threads against the same host and assert the
+        // snapshot counter never exceeds rotate_after_requests.
+        use std::sync::Arc;
+        let rotate_at = 5u32;
+        let pool = Arc::new(SessionPool::new(PROFILES.iter().collect(), rotate_at));
+        let mut handles = Vec::new();
+        for _ in 0..40 {
+            let pool = pool.clone();
+            handles.push(std::thread::spawn(move || {
+                pool.profile_for("toctou.com");
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let snap = pool.snapshot();
+        // The surviving binding must have a count < rotate_after_requests.
+        if let Some((_, _, count)) = snap.iter().find(|(h, _, _)| h == "toctou.com") {
+            assert!(
+                *count < rotate_at,
+                "counter {count} should be < rotate_at={rotate_at}; suggests race-condition bypass"
+            );
+        }
+        // If there's no binding the last call triggered eviction — also fine.
+    }
+
+    #[test]
+    fn session_pool_counter_resets_after_rotation_boundary() {
+        // Call profile_for rotate_after_requests times. The final call
+        // MUST trigger eviction and reset the counter. This is a
+        // deterministic (single-thread) regression for F134.
+        let rotate_at = 3u32;
+        let pool = SessionPool::new(PROFILES.iter().collect(), rotate_at);
+        // First call: binding created with count = 1.
+        let _ = pool.profile_for("boundary.com");
+        // Second call: count reaches 2.
+        let _ = pool.profile_for("boundary.com");
+        // Third call (count+1 == rotate_at): must evict and recreate at 1.
+        let _ = pool.profile_for("boundary.com");
+        let snap = pool.snapshot();
+        let (_, _, count) = snap
+            .iter()
+            .find(|(h, _, _)| h == "boundary.com")
+            .expect("binding must exist after third call");
+        assert_eq!(*count, 1, "count must be 1 after eviction/recreation, got {count}");
+    }
+
+    #[test]
+    fn session_pool_single_host_many_calls_stays_within_rotate_limit() {
+        // Single-threaded: the counter must never exceed rotate_at - 1
+        // between evictions, across many calls.
+        let rotate_at = 4u32;
+        let pool = SessionPool::new(PROFILES.iter().collect(), rotate_at);
+        for i in 0..50u32 {
+            let _ = pool.profile_for("single.com");
+            let snap = pool.snapshot();
+            if let Some((_, _, count)) = snap.iter().find(|(h, _, _)| h == "single.com") {
+                assert!(
+                    *count < rotate_at,
+                    "call {i}: counter {count} must be < rotate_at={rotate_at}"
+                );
             }
         }
     }
