@@ -131,6 +131,12 @@ pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
 fn parse_crtsh_response(body: &str, domain: &str) -> Result<Vec<String>> {
     let entries: Vec<CrtShEntry> = serde_json::from_str(body)?;
 
+    // Normalise the caller-supplied domain once so it can be compared
+    // against the already-lowercased subdomain entries. Without this,
+    // passing domain="Example.COM" would cause s="example.com" != domain
+    // (case mismatch) and the base domain would leak into the results.
+    let domain_lower = domain.to_ascii_lowercase();
+
     let mut subdomains: Vec<String> = entries
         .into_iter()
         .flat_map(|e| {
@@ -139,7 +145,7 @@ fn parse_crtsh_response(body: &str, domain: &str) -> Result<Vec<String>> {
                 .map(|s| s.trim().to_lowercase())
                 .collect::<Vec<_>>()
         })
-        .filter(|s| !s.is_empty() && !s.contains('*') && s != domain)
+        .filter(|s| !s.is_empty() && !s.contains('*') && s.as_str() != domain_lower)
         .collect();
 
     subdomains.sort();
@@ -281,6 +287,51 @@ mod tests {
 
         let result = parse_crtsh_response(json, "example.com").unwrap();
         assert_eq!(result, vec!["api.example.com", "www.example.com",]);
+    }
+
+    // ── F132: domain case-normalisation regression tests ──────────────
+
+    #[test]
+    fn mixed_case_domain_excludes_base() {
+        // Caller passes "Example.COM" — crt.sh entries are normalised to
+        // lowercase. Before F132 the comparison s != domain was always
+        // true (case mismatch), causing "example.com" to appear in results.
+        let json = r#"[
+            {"name_value": "sub.example.com"},
+            {"name_value": "example.com"}
+        ]"#;
+        let result = parse_crtsh_response(json, "Example.COM").unwrap();
+        assert_eq!(result, vec!["sub.example.com"]);
+        assert!(!result.contains(&"example.com".to_string()));
+    }
+
+    #[test]
+    fn all_caps_domain_excludes_base() {
+        let json = r#"[{"name_value": "EXAMPLE.COM"},{"name_value": "api.example.com"}]"#;
+        let result = parse_crtsh_response(json, "EXAMPLE.COM").unwrap();
+        assert_eq!(result, vec!["api.example.com"]);
+    }
+
+    #[test]
+    fn camel_case_domain_excludes_base() {
+        let json = r#"[{"name_value": "mail.ExAmPlE.cOm"},{"name_value": "ExAmPlE.cOm"}]"#;
+        let result = parse_crtsh_response(json, "ExAmPlE.cOm").unwrap();
+        assert_eq!(result, vec!["mail.example.com"]);
+    }
+
+    #[test]
+    fn lowercase_domain_still_works() {
+        // Regression guard: existing lowercase behaviour must be unchanged.
+        let json = r#"[{"name_value": "api.example.com"},{"name_value": "example.com"}]"#;
+        let result = parse_crtsh_response(json, "example.com").unwrap();
+        assert_eq!(result, vec!["api.example.com"]);
+    }
+
+    #[test]
+    fn mixed_case_domain_empty_result_when_only_base() {
+        let json = r#"[{"name_value": "Example.COM"}]"#;
+        let result = parse_crtsh_response(json, "Example.COM").unwrap();
+        assert!(result.is_empty());
     }
 
     // ── is_edge_ip tests ───────────────────────────────────────────────
