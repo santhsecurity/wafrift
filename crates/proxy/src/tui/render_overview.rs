@@ -272,10 +272,7 @@ fn draw_wafs(f: &mut Frame, area: Rect, state: &State) {
                     Style::default().fg(Color::White),
                 ),
                 Span::raw("  "),
-                Span::styled(
-                    format!("{hosts} host(s)"),
-                    crate::tui::style::DIM,
-                ),
+                Span::styled(format!("{hosts} host(s)"), crate::tui::style::DIM),
             ])
         })
         .collect();

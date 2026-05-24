@@ -14,8 +14,9 @@ use super::types::{
 /// A/AAAA record directly with no CNAME indirection.
 #[cfg(feature = "dns-cname")]
 pub async fn probe_cname_chain(host: &str) -> Result<DnsProbe, DnsProbeError> {
-    use hickory_resolver::TokioAsyncResolver;
-    use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+    use hickory_resolver::TokioResolver;
+    use hickory_resolver::config::{CLOUDFLARE, ResolverConfig, ResolverOpts};
+    use hickory_resolver::net::runtime::TokioRuntimeProvider;
 
     // Resolver-construction strategy:
     //
@@ -36,7 +37,13 @@ pub async fn probe_cname_chain(host: &str) -> Result<DnsProbe, DnsProbeError> {
     let mut opts = ResolverOpts::default();
     opts.timeout = RESOLVER_TIMEOUT;
     opts.attempts = 2;
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::cloudflare(), opts);
+    let resolver = TokioResolver::builder_with_config(
+        ResolverConfig::udp_and_tcp(&CLOUDFLARE),
+        TokioRuntimeProvider::default(),
+    )
+    .with_options(opts)
+    .build()
+    .map_err(|_| DnsProbeError::ResolverInitFailed)?;
 
     let mut chain: Vec<CnameHop> = Vec::new();
     let mut current = host.trim_end_matches('.').to_string();
@@ -61,8 +68,8 @@ pub async fn probe_cname_chain(host: &str) -> Result<DnsProbe, DnsProbeError> {
         };
 
         let mut next: Option<String> = None;
-        for record in result.iter() {
-            if let Some(c) = record.as_cname() {
+        for record in result.answers() {
+            if let hickory_resolver::proto::rr::RData::CNAME(c) = &record.data {
                 next = Some(c.to_string().trim_end_matches('.').to_string());
                 break;
             }
@@ -108,13 +115,20 @@ pub async fn probe_cname_chain(host: &str) -> Result<DnsProbe, DnsProbeError> {
     // Dropbox) the PTR is often the only vendor anchor left.  PTR
     // lookups frequently fail with NoRecords — that's fine, we
     // just don't get the extra signal.
+    //
+    // hickory 0.26's `reverse_lookup` takes `impl IntoName` (was
+    // `IpAddr` in 0.24), so we hand-build the in-addr.arpa /
+    // ip6.arpa name. `Name::from_str` accepts the dotted form.
     let final_ptr = if let Some(ip) = first_a {
-        let ptr_fut = resolver.reverse_lookup(ip);
+        let arpa = ptr_name(ip);
+        let ptr_fut = resolver.reverse_lookup(arpa.as_str());
         match tokio::time::timeout(RESOLVER_TIMEOUT, ptr_fut).await {
-            Ok(Ok(records)) => records
-                .iter()
-                .next()
-                .map(|n| n.to_string().trim_end_matches('.').to_string()),
+            Ok(Ok(records)) => records.answers().iter().find_map(|rec| match &rec.data {
+                hickory_resolver::proto::rr::RData::PTR(p) => {
+                    Some(p.to_string().trim_end_matches('.').to_string())
+                }
+                _ => None,
+            }),
             _ => None,
         }
     } else {
@@ -158,9 +172,45 @@ pub async fn probe_cname_chain(_host: &str) -> Result<DnsProbe, DnsProbeError> {
 ///
 /// We then chain to `AS<num>.asn.cymru.com TXT` for the ASN
 /// organisation name (`STRIPE-AS, US`, `CLOUDFLARENET, US`, etc.).
+/// Build the reverse-DNS query name for an IP. IPv4 `1.2.3.4`
+/// becomes `4.3.2.1.in-addr.arpa.`; IPv6 nibble-reverses into
+/// `....ip6.arpa.`. Caller passes the resulting string straight
+/// to `resolver.reverse_lookup()`.
+#[cfg(feature = "dns-cname")]
+fn ptr_name(ip: std::net::IpAddr) -> String {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            format!("{}.{}.{}.{}.in-addr.arpa.", o[3], o[2], o[1], o[0])
+        }
+        std::net::IpAddr::V6(v6) => {
+            // Each 16-bit segment expands to 4 nibbles, all reversed.
+            let mut nibbles = String::with_capacity(73);
+            for byte in v6.octets().iter().rev() {
+                use std::fmt::Write;
+                let _ = write!(nibbles, "{:x}.{:x}.", byte & 0x0f, (byte >> 4) & 0x0f);
+            }
+            nibbles.push_str("ip6.arpa.");
+            nibbles
+        }
+    }
+}
+
+/// Pull the first character-string chunk out of the first TXT
+/// answer in a Lookup, or None when no TXT answer is present.
+/// hickory 0.26 removed `Record::as_txt()` and `Lookup::iter()`,
+/// so this hides the pattern-match boilerplate at every call site.
+#[cfg(feature = "dns-cname")]
+fn first_txt_chunk(lookup: &hickory_resolver::lookup::Lookup) -> Option<&[u8]> {
+    lookup.answers().iter().find_map(|rec| match &rec.data {
+        hickory_resolver::proto::rr::RData::TXT(t) => t.txt_data.first().map(|b| &**b),
+        _ => None,
+    })
+}
+
 #[cfg(feature = "dns-cname")]
 async fn lookup_asn(
-    resolver: &hickory_resolver::TokioAsyncResolver,
+    resolver: &hickory_resolver::TokioResolver,
     ip: std::net::IpAddr,
 ) -> Option<AsnInfo> {
     let query = match ip {
@@ -182,7 +232,7 @@ async fn lookup_asn(
         Ok(Ok(r)) => r,
         _ => return None,
     };
-    let first = txt.iter().next()?.as_txt()?.iter().next()?;
+    let first = first_txt_chunk(&txt)?;
     // TXT records are byte-arrays; cymru's payload is ASCII.
     let raw = std::str::from_utf8(first).ok()?;
     let parts: Vec<&str> = raw.split('|').map(str::trim).collect();
@@ -193,7 +243,7 @@ async fn lookup_asn(
     let name_fut = resolver.lookup(&name_query, hickory_resolver::proto::rr::RecordType::TXT);
     let name = match tokio::time::timeout(RESOLVER_TIMEOUT, name_fut).await {
         Ok(Ok(r)) => {
-            let bytes = r.iter().next()?.as_txt()?.iter().next()?;
+            let bytes = first_txt_chunk(&r)?;
             let raw = std::str::from_utf8(bytes).ok()?;
             // Format: `AS_NUM | CC | REGISTRY | ALLOCATED | AS_NAME`.
             raw.split('|').next_back().map(|s| s.trim().to_string())?
@@ -201,4 +251,34 @@ async fn lookup_asn(
         _ => return None,
     };
     Some(AsnInfo { number, name })
+}
+
+#[cfg(all(test, feature = "dns-cname"))]
+mod tests {
+    use super::ptr_name;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn ipv4_ptr_name_reverses_octets() {
+        let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        assert_eq!(ptr_name(ip), "4.3.2.1.in-addr.arpa.");
+    }
+
+    #[test]
+    fn ipv4_ptr_handles_loopback() {
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        assert_eq!(ptr_name(ip), "1.0.0.127.in-addr.arpa.");
+    }
+
+    #[test]
+    fn ipv6_ptr_name_uses_nibble_reversal() {
+        // 2001:db8::1 — the canonical doc example.
+        let ip = IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0001));
+        let arpa = ptr_name(ip);
+        // 32 nibbles + ".ip6.arpa." suffix; ends with the high-order bytes
+        // of the doc prefix (2001:0db8 → "8.b.d.0.1.0.0.2" reversed-leading).
+        assert!(arpa.ends_with(".8.b.d.0.1.0.0.2.ip6.arpa."), "got {arpa}");
+        // Starts with the low-order nibble of the trailing ::1.
+        assert!(arpa.starts_with("1.0.0.0."), "got {arpa}");
+    }
 }

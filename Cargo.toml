@@ -132,7 +132,7 @@ tokio-rustls = "0.26"
 # the origin strips every HTTP header — `www.ebay.com → akamaiedge.net`
 # is the canonical example. Resolution happens once per `wafrift detect`
 # probe, in parallel with the HTTP fetch, so the latency cost is hidden.
-hickory-resolver = { version = "0.24", default-features = false, features = ["tokio-runtime", "system-config"] }
+hickory-resolver = { version = "0.26", default-features = false, features = ["tokio", "system-config"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

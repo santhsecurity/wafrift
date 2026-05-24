@@ -299,19 +299,15 @@ mod tests {
     fn exclude_swallowing_only_still_errors() {
         // --only encoding/url/double + --exclude encoding/url should
         // still fail: exclude is the ancestor and drowns only.
-        let err = TechniqueFilter::parse(
-            &["encoding/url/double".into()],
-            &["encoding/url".into()],
-        )
-        .expect_err("rejected");
+        let err = TechniqueFilter::parse(&["encoding/url/double".into()], &["encoding/url".into()])
+            .expect_err("rejected");
         assert!(err.contains("contradictory"), "got: {err}");
     }
 
     #[test]
     fn exact_match_in_both_lists_still_errors() {
-        let err =
-            TechniqueFilter::parse(&["encoding/url".into()], &["encoding/url".into()])
-                .expect_err("rejected");
+        let err = TechniqueFilter::parse(&["encoding/url".into()], &["encoding/url".into()])
+            .expect_err("rejected");
         assert!(err.contains("contradictory"), "got: {err}");
     }
 
