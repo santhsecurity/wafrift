@@ -2,13 +2,14 @@
 //!
 //! This crate contains the foundational types that every other wafrift
 //! crate depends on: HTTP request representation, evasion technique
-//! identifiers, result types, configuration, and error handling.
+//! identifiers, result types, and configuration. (Each crate carries
+//! its own domain error — a shared error was attempted and removed
+//! 2026-05-23 because no caller wanted it.)
 
 pub mod bogon;
 pub mod calibration;
 pub mod config;
 pub mod discovery;
-pub mod error;
 pub mod escalation;
 pub mod explanation;
 pub mod format;
@@ -47,8 +48,11 @@ pub const DEFAULT_MAX_REDIRECTS: usize = 5;
 pub use bogon::ip_addr_is_bogon;
 pub use calibration::CalibrationResult;
 pub use config::EvasionConfig;
-pub use error::{Result, WafRiftError};
 pub use escalation::EscalationLevel;
+// `WafRiftError` + `Result` alias removed 2026-05-23 (consolidation
+// F09/F23) — no external caller; every other crate defines its own
+// domain error. If a shared error is needed later, design it from
+// actual call-site needs, not from a stub.
 pub use request::{Method, Request};
 pub use result::EvasionResult;
 pub use technique::Technique;
