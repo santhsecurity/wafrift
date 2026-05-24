@@ -49,13 +49,28 @@ pub fn iis_unicode_encode(payload: &str) -> String {
     out
 }
 
-/// JSON string encoding — wraps the payload in a JSON string with proper escaping.
+/// JSON string-content escape — produces the escaped INTERIOR of a
+/// JSON string literal (no surrounding `"..."` quotes).
 ///
-/// **Context**: ONLY safe when the target parser performs JSON decoding.
+/// Pre-fix this wrapped the output in double quotes. The wrapping
+/// broke every common use case: the encoder is called by the
+/// variant builder which substitutes the result into the operator's
+/// payload at an injection point inside an EXISTING string field
+/// (typical: `{"q": "<wrapped>"}`). Adding our own quotes produced
+/// `{"q": ""actual\"escaped""}` — two strings concatenated, malformed
+/// JSON, server returns 400. The escape characters survived but the
+/// host JSON was broken.
+///
+/// Removing the wrapping quotes makes the encoder do what its name
+/// says — escape the content. Callers that need a full standalone
+/// JSON-string literal can prepend `"` themselves.
+///
+/// **Context**: Inject INSIDE an existing JSON string field. Backend
+/// JSON parser unescapes the sequence; the WAF sees the escaped
+/// form (e.g. `<` instead of `<`) and misses the keyword.
 #[must_use]
 pub fn json_string_encode(payload: &str) -> String {
-    let mut out = String::with_capacity(payload.len() * 2 + 2);
-    out.push('"');
+    let mut out = String::with_capacity(payload.len() * 2);
     for ch in payload.chars() {
         match ch {
             '\\' => out.push_str("\\\\"),
@@ -71,7 +86,6 @@ pub fn json_string_encode(payload: &str) -> String {
             c => out.push(c),
         }
     }
-    out.push('"');
     out
 }
 
@@ -843,15 +857,19 @@ mod tests {
 
     #[test]
     fn json_encode_basic() {
-        assert_eq!(json_string_encode("A"), "\"A\"");
-        assert_eq!(json_string_encode("A\\B"), "\"A\\\\B\"");
-        assert_eq!(json_string_encode("A\"B"), "\"A\\\"B\"");
-        assert_eq!(json_string_encode("A\nB"), "\"A\\nB\"");
+        // F67: encoder produces escaped CONTENT only (no
+        // surrounding double-quotes). Callers inject into an
+        // existing JSON string field; wrapping our own quotes
+        // would break the host JSON document.
+        assert_eq!(json_string_encode("A"), "A");
+        assert_eq!(json_string_encode("A\\B"), "A\\\\B");
+        assert_eq!(json_string_encode("A\"B"), "A\\\"B");
+        assert_eq!(json_string_encode("A\nB"), "A\\nB");
     }
 
     #[test]
     fn json_encode_control_chars() {
-        assert_eq!(json_string_encode("\x01"), "\"\\u0001\"");
+        assert_eq!(json_string_encode("\x01"), "\\u0001");
     }
 
     #[test]

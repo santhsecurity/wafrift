@@ -211,6 +211,28 @@ impl CertificateAuthority {
 /// any practitioner who installed the wafrift CA in a real browser
 /// would see TLS errors on every MITM session before traffic flowed.
 fn leaf_params_for(tls_server_name: &str) -> anyhow::Result<CertificateParams> {
+    // Refuse to mint a wildcard leaf — the MITM CA must never sign a
+    // cert that covers more than the specific SNI it was asked for.
+    // A malformed CONNECT authority or a hostile-source SNI containing
+    // `*` would otherwise produce a wildcard dNSName SAN, and any
+    // client that accepts the wafrift CA would then accept that cert
+    // for every subdomain. Reject explicitly so a `CONNECT *.evil.tld`
+    // can't widen the CA's blast radius.
+    if tls_server_name.contains('*') {
+        anyhow::bail!(
+            "refusing to issue wildcard cert for SNI {tls_server_name:?} — \
+             MITM CA must mint host-specific leaves only"
+        );
+    }
+    // Also reject obviously malformed inputs that would produce an
+    // invalid cert: bare `[` (unclosed IPv6), embedded null/CR/LF
+    // (header smuggling into the cert name).
+    if tls_server_name.is_empty()
+        || tls_server_name.contains(['\0', '\r', '\n'])
+        || (tls_server_name.starts_with('[') && !tls_server_name.contains(']'))
+    {
+        anyhow::bail!("refusing malformed SNI {tls_server_name:?}");
+    }
     let mut leaf_params =
         CertificateParams::new(vec![tls_server_name.to_string()]).context("leaf params")?;
     // Browsers (and rustls) require iPAddress SAN for IP literals; dNSName
@@ -466,6 +488,35 @@ mod tests {
         let ca = CertificateAuthority::generate().unwrap();
         let (leaf_pem, _) = ca.issue_server_cert("example.com").unwrap();
         assert_ne!(ca.cert_pem.as_bytes(), leaf_pem.as_slice());
+    }
+
+    #[test]
+    fn leaf_params_refuses_wildcard_sni() {
+        // Regression for F66: a wildcard SNI must not produce a
+        // wildcard leaf cert. Any client trusting the wafrift CA
+        // would then accept the cert for every matching subdomain
+        // — widens the MITM blast radius beyond the specific host
+        // the operator targeted.
+        let err = leaf_params_for("*.evil.example.com")
+            .expect_err("wildcard SNI must be rejected");
+        assert!(format!("{err}").contains("wildcard"));
+    }
+
+    #[test]
+    fn leaf_params_refuses_empty_or_malformed_sni() {
+        assert!(leaf_params_for("").is_err());
+        assert!(leaf_params_for("host\nwith-newline").is_err());
+        assert!(leaf_params_for("host\rcr").is_err());
+        assert!(leaf_params_for("host\0nul").is_err());
+        // Unclosed IPv6 bracket.
+        assert!(leaf_params_for("[::1").is_err());
+    }
+
+    #[test]
+    fn leaf_params_accepts_normal_hostname_and_ipv6() {
+        assert!(leaf_params_for("api.example.com").is_ok());
+        assert!(leaf_params_for("[::1]").is_ok());
+        assert!(leaf_params_for("127.0.0.1").is_ok());
     }
 
     #[test]

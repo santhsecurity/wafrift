@@ -21,22 +21,28 @@ pub fn encode_layered(
         payload,
         strategies.first().copied().unwrap_or(Strategy::UrlEncode),
     )?;
+    // Check size IMMEDIATELY after the first encoding too — the
+    // pre-fix guard only ran before the SECOND layer, so a single
+    // strategy that expands dramatically (HexEncode 2×,
+    // TripleUrlEncode up to 3×, GzipEncode + base64 ~1.33×) could
+    // produce up to expansion_factor × MAX_PAYLOAD_SIZE bytes
+    // (potentially 24 MiB from an 8 MiB input) before any guard
+    // fired.
+    if result.len() > MAX_LAYERED_OUTPUT_SIZE {
+        return Err(EncodeError::LayeredOutputTooLarge {
+            max: MAX_LAYERED_OUTPUT_SIZE,
+            actual: result.len(),
+        });
+    }
 
     for strategy in strategies.iter().skip(1) {
+        result = encode(&result, *strategy)?;
         if result.len() > MAX_LAYERED_OUTPUT_SIZE {
             return Err(EncodeError::LayeredOutputTooLarge {
                 max: MAX_LAYERED_OUTPUT_SIZE,
                 actual: result.len(),
             });
         }
-        result = encode(&result, *strategy)?;
-    }
-
-    if result.len() > MAX_LAYERED_OUTPUT_SIZE {
-        return Err(EncodeError::LayeredOutputTooLarge {
-            max: MAX_LAYERED_OUTPUT_SIZE,
-            actual: result.len(),
-        });
     }
 
     Ok(result)

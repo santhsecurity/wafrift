@@ -44,7 +44,8 @@ fn iis_unicode_encode_basic() {
 
 #[test]
 fn json_encode_basic() {
-    assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "\"A<\"");
+    // F67: no wrapping quotes (encoder escapes string content only).
+    assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "A<");
 }
 
 #[test]

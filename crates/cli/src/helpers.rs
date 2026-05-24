@@ -93,10 +93,21 @@ pub fn shell_single_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
     for ch in s.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
+        match ch {
+            // `'` is the standard close-and-reopen escape.
+            '\'' => out.push_str("'\\''"),
+            // NUL inside a single-quoted shell token would
+            // terminate the C string in libc and silently
+            // truncate the argument. CR resets the terminal
+            // cursor and can hide preceding output (operator
+            // copies a curl from logs that looks shorter than
+            // it is). Bash's `$'\\x00'` / `$'\\r'` ANSI-C
+            // quoting is the safe form — fall out of the
+            // single-quote run, splice the ANSI-C literal,
+            // reopen the run.
+            '\0' => out.push_str("'$'\\x00''"),
+            '\r' => out.push_str("'$'\\r''"),
+            _ => out.push(ch),
         }
     }
     out.push('\'');
@@ -769,6 +780,32 @@ mod tests {
             shell_single_quote("$(rm -rf /); `whoami`"),
             "'$(rm -rf /); `whoami`'"
         );
+    }
+
+    #[test]
+    fn shell_single_quote_escapes_nul_byte() {
+        // Regression for F72: NUL inside a single-quoted shell
+        // token silently truncates the argument at the libc layer.
+        // Use bash ANSI-C quoting to splice the NUL safely.
+        let out = shell_single_quote("a\0b");
+        // Output must not contain a raw NUL — every byte must be
+        // representable in a shell here-doc / copy-paste.
+        assert!(
+            !out.contains('\0'),
+            "raw NUL must be escaped, got: {out:?}"
+        );
+        // Bash form: `'a'$'\x00''b'` (close + ANSI-C + reopen).
+        assert!(out.contains("$'\\x00'"), "got: {out:?}");
+    }
+
+    #[test]
+    fn shell_single_quote_escapes_carriage_return() {
+        // Regression for F72: CR resets the terminal cursor and
+        // can hide preceding output when the operator copies a
+        // curl from logs. Escape via ANSI-C `\r`.
+        let out = shell_single_quote("a\rb");
+        assert!(!out.contains('\r'), "raw CR must be escaped: {out:?}");
+        assert!(out.contains("$'\\r'"), "got: {out:?}");
     }
 
     #[cfg(unix)]

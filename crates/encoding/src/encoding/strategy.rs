@@ -443,7 +443,15 @@ mod tests {
 
     #[test]
     fn encode_json() {
-        assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "\"A<\"");
+        // F67: encoder now produces escaped CONTENT only, no
+        // surrounding quotes — the variant builder substitutes
+        // into an existing JSON string field.
+        assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "A<");
+        // Real escape: backslash + control char.
+        assert_eq!(
+            encode("a\\\nb", Strategy::JsonEncode).unwrap(),
+            "a\\\\\\nb"
+        );
     }
 
     #[test]
