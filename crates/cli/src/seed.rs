@@ -83,7 +83,14 @@ pub fn run_seed(args: SeedArgs) -> ExitCode {
 
 fn seed_waf(waf_name: &str, techniques: &[String], dry_run: bool) -> ExitCode {
     if dry_run {
-        eprintln!(
+        // Dry-run output goes to STDOUT (it IS the data the operator
+        // asked for via --dry-run) — not stderr. Pre-fix (per perf-hunt
+        // N06) both the dry-run preview and the post-write confirmation
+        // went to stderr, so a CI job piping `2>/dev/null` would lose
+        // the dry-run preview entirely. The post-write confirmation
+        // below stays on stderr (it's progress, not the data the
+        // operator requested).
+        println!(
             "DRY RUN: would seed WAF {waf_name:?} with {} technique(s): {}",
             techniques.len(),
             techniques.join(", ")

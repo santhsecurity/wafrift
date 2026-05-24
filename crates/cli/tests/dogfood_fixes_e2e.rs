@@ -1511,6 +1511,72 @@ fn dogfood_b7_parent_child_overlap_also_caught() {
     assert!(stderr.contains("contradictory") || stderr.contains("appear in both"));
 }
 
+// ─────────────────── N05: bank list --format json includes hosts ──────
+//
+// Pre-fix the JSON output emitted only summary counters
+// (proxy_hosts_with_bypasses, waf_genome_count). Red-team automation
+// scripts that called `wafrift bank list --format json` to enumerate
+// proven techniques got no actionable detail. The text path printed
+// per-host info but the JSON path didn't.
+
+#[test]
+fn dogfood_n05_bank_list_json_emits_hosts_array() {
+    let (code, stdout, _stderr) = wafrift(&["bank", "list", "--format", "json"]);
+    assert_eq!(code, 0);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("must be valid JSON");
+    assert!(
+        parsed.get("hosts").is_some(),
+        "bank list --format json must include `hosts` key, got:\n{stdout}"
+    );
+    assert!(
+        parsed["hosts"].is_array(),
+        "hosts must be a JSON array, got: {}",
+        parsed["hosts"]
+    );
+    // Schema version is pinned.
+    assert!(parsed.get("schema_version").is_some());
+    // Counter consistency: proxy_hosts_with_bypasses == hosts.len().
+    let count = parsed["proxy_hosts_with_bypasses"].as_u64().unwrap() as usize;
+    let array_len = parsed["hosts"].as_array().unwrap().len();
+    assert_eq!(
+        count, array_len,
+        "proxy_hosts_with_bypasses counter must match hosts array length"
+    );
+}
+
+// ─────────────────── N06: seed --dry-run output to stdout ─────────────
+//
+// Pre-fix the dry-run preview went to stderr, so a CI job piping
+// `2>/dev/null` got nothing. The post-write confirmation correctly
+// stayed on stderr (progress, not data).
+
+#[test]
+fn dogfood_n06_seed_dry_run_writes_preview_to_stdout() {
+    let (code, stdout, stderr) = wafrift(&[
+        "seed",
+        "--waf",
+        "cloudflare",
+        "--technique",
+        "EncodingDoubleUrl",
+        "--dry-run",
+    ]);
+    assert_eq!(
+        code, 0,
+        "seed --dry-run must exit 0\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    // The "DRY RUN:" preview must be on stdout, NOT stderr.
+    assert!(
+        stdout.contains("DRY RUN"),
+        "dry-run preview must land on stdout, got stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    // Negative twin: dry-run preview must NOT also be on stderr.
+    assert!(
+        !stderr.contains("DRY RUN"),
+        "dry-run preview must not be duplicated on stderr, got stderr:\n{stderr}"
+    );
+}
+
 #[test]
 fn dogfood_b5_negative_twin_no_escape_unchanged_behavior() {
     // Negative twin: a literal WITHOUT `''` escape must still shatter
