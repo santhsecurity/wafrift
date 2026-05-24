@@ -423,7 +423,15 @@ fn stealth() -> Option<&'static wafrift_transport::stealth::StealthClient> {
 use crate::warn_throttle::WarnThrottle;
 
 /// Mutable proxy state shared across connections.
-#[derive(Default)]
+///
+/// `Clone` is derived so the periodic-flush + shutdown + TUI-quit
+/// paths can snapshot the state under the async lock, drop the
+/// guard, and then run the synchronous `save_gene_bank` (which
+/// performs an fsync + atomic rename) WITHOUT holding the lock
+/// across the disk I/O. Pre-fix every concurrent forwarded
+/// request stalled for the full fsync window — easy to provoke
+/// on a slow disk or NFS mount.
+#[derive(Default, Clone)]
 pub(crate) struct ProxyState {
     /// Per-host evasion state.
     pub(crate) hosts: HashMap<String, HostState>,
@@ -1034,13 +1042,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tick.tick().await; // skip the immediate first tick
                 loop {
                     tick.tick().await;
-                    // `lock().await` + `save_gene_bank` both run on the
-                    // tokio task; wrap the synchronous save in a
-                    // panic-catching closure. `lock()` can panic only
-                    // on poison, also captured here.
+                    // Snapshot under the lock, drop the guard, THEN
+                    // run save_gene_bank (synchronous fsync). The
+                    // lock is held only for the clone — every
+                    // concurrent forwarded request that hits
+                    // shared_state can proceed during the actual
+                    // disk write. Pre-fix the fsync stalled every
+                    // concurrent request for tens to hundreds of
+                    // milliseconds on slow disks.
+                    let snapshot = { flush_state.lock().await.clone() };
                     let result = std::panic::AssertUnwindSafe(async {
-                        let st = flush_state.lock().await;
-                        save_gene_bank(&st, &flush_path)
+                        save_gene_bank(&snapshot, &flush_path)
                     });
                     use futures_util::FutureExt;
                     match result.catch_unwind().await {
@@ -1112,8 +1124,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("received Ctrl-C");
         }
         if let Some(path) = &shutdown_path {
-            let st = shutdown_state.lock().await;
-            match save_gene_bank(&st, path) {
+            // Same snapshot-then-drop pattern as the periodic
+            // flush — hold the lock only for the clone, never
+            // across the fsync.
+            let snapshot = { shutdown_state.lock().await.clone() };
+            match save_gene_bank(&snapshot, path) {
                 Ok(()) => info!(path = %path.display(), "gene bank flushed on shutdown"),
                 Err(e) => {
                     warn!(path = %path.display(), error = %e, "gene bank flush on shutdown failed");
@@ -1164,8 +1179,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::spawn(async move {
                 if quit_rx.await.is_ok() {
                     if let Some(path) = &quit_path {
-                        let st = quit_state.lock().await;
-                        if let Err(e) = save_gene_bank(&st, path) {
+                        // Snapshot-then-drop — never fsync under the lock.
+                        let snapshot = { quit_state.lock().await.clone() };
+                        if let Err(e) = save_gene_bank(&snapshot, path) {
                             warn!(path = %path.display(), error = %e, "gene bank flush from TUI quit failed");
                         }
                     }
