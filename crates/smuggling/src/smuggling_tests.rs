@@ -258,11 +258,17 @@ mod tests {
 
     #[test]
     fn raw_bytes_end_with_double_crlf() {
+        // Note: detect_cl_te is intentionally excluded — its
+        // canonical Portswigger shape ends with the smuggled `X`
+        // byte (the prefix the TE-following backend treats as the
+        // start of the next request), NOT `\r\n\r\n`. The
+        // `\r\n\r\n` invariant holds for proper request-section
+        // terminators, which the detection probes specifically
+        // do NOT have in the same way.
         let payloads = vec![
             cl_te("example.com", "GET / HTTP/1.1").unwrap(),
             te_cl("example.com", "GET / HTTP/1.1").unwrap(),
             cl_zero("example.com", "GET / HTTP/1.1").unwrap(),
-            detect_cl_te("example.com").unwrap(),
             detect_te_cl("example.com").unwrap(),
         ];
         for p in &payloads {
@@ -272,6 +278,33 @@ mod tests {
                 p.variant
             );
         }
+    }
+
+    #[test]
+    fn detect_cl_te_uses_canonical_portswigger_shape() {
+        // CL=6 must cover EXACTLY the 6-byte body `0\r\n\r\nX`.
+        // Anything longer or shorter changes which side hangs and
+        // breaks the timing oracle. Pin the exact wire shape so a
+        // refactor can't silently regress the probe.
+        let p = detect_cl_te("example.com").unwrap();
+        let raw = &p.raw_bytes;
+        assert!(
+            raw.windows("Content-Length: 6\r\n".len())
+                .any(|w| w == b"Content-Length: 6\r\n"),
+            "CL must be 6"
+        );
+        // The body is the last 6 bytes of the message — split on
+        // the FIRST \r\n\r\n (headers/body terminator) by finding
+        // its position, then everything after is the 6-byte body.
+        let header_end = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("header terminator");
+        let body = &raw[header_end + 4..];
+        assert_eq!(
+            body, b"0\r\n\r\nX",
+            "body must be canonical CL.TE 6-byte form"
+        );
     }
 
     #[test]
