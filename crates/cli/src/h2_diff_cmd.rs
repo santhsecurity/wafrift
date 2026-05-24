@@ -164,7 +164,29 @@ pub async fn run_h2_diff(args: H2DiffArgs) -> ExitCode {
         results.push(r);
     }
 
+    // F78 inconclusive-exit: when EVERY H2 probe failed to
+    // negotiate (mock that only speaks H1, ALPN mismatch,
+    // network drops the QUIC handshake, etc.) the diff result
+    // is structurally "no divergence" — but only because every
+    // H2 measurement is missing. Pre-fix the command exit-0'd
+    // with `divergences: {high: 0, medium: 0}` and a pentester
+    // would silently conclude "no H2 gap" rather than "result
+    // inconclusive — H2 wasn't reachable". Emit the output as
+    // before, then return exit code 6 (distinct from 0=clean,
+    // 1=transport, 2=invalid args) to signal "ran cleanly but
+    // the H2 leg never produced any data".
+    let total = results.len();
+    let h2_errors = results.iter().filter(|r| r.h2_error.is_some()).count();
     emit_output(&args, &results);
+    if total > 0 && h2_errors == total {
+        if !args.quiet && args.format == "text" {
+            eprintln!(
+                "{} all H2 probes failed — exit 6 (inconclusive, not 0)",
+                "[wafrift h2-diff]".yellow().bold()
+            );
+        }
+        return ExitCode::from(6);
+    }
     ExitCode::SUCCESS
 }
 
@@ -503,10 +525,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_h2_diff_against_h1_only_mock_succeeds_and_marks_h2_errors() {
-        // Our mock only speaks H1 — H2 probes will fail. h2-diff
-        // should exit 0 (informational) and mark every probe with
-        // h2_error.
+    async fn run_h2_diff_against_h1_only_mock_marks_inconclusive_with_exit_6() {
+        // F78: when EVERY H2 probe fails to negotiate, exit 6
+        // (inconclusive). Pre-fix this exited 0 with
+        // `divergences: {high: 0, medium: 0}` — silently false-
+        // negative on H1-only targets.
         let addr = spawn_mock().await;
         let args = H2DiffArgs {
             url: format!("http://{addr}/"),
@@ -521,11 +544,11 @@ mod tests {
             quiet: true,
         };
         let code = run_h2_diff(args).await;
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(6)));
     }
 
     #[tokio::test]
-    async fn run_h2_diff_against_unreachable_target_still_exits_cleanly() {
+    async fn run_h2_diff_against_unreachable_target_returns_inconclusive() {
         let args = H2DiffArgs {
             url: "http://127.0.0.1:1/".into(),
             param: "q".into(),
@@ -539,8 +562,9 @@ mod tests {
             quiet: true,
         };
         let code = run_h2_diff(args).await;
-        // Even with H1 ALSO failing, we exit 0 — the scanner is
-        // informational; failures are recorded per-probe.
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        // F78: H1 also fails here, but the H2 leg is what triggers
+        // the inconclusive exit (all_h2_errors == total_probes).
+        // Exit code 6 surfaces "not a clean run" to CI.
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(6)));
     }
 }

@@ -2287,26 +2287,35 @@ pub(crate) async fn run_scan(
         }
     }
 
-    // Text output.
-    print!(
-        "{}",
-        render_summary_text_block(
-            &waf_name,
-            total_fired,
-            requests_completed,
-            blocked,
-            bypassed,
-            errors,
-            bypass_rate,
-            elapsed.as_secs_f64(),
-        )
-    );
-
-    if !bypass_variants.is_empty() {
+    // Text output. F77: --quiet now suppresses the final text
+    // summary too. Pre-fix --quiet only silenced the pre-scan
+    // banner + per-phase progress; the final 100KB+ report still
+    // dumped to stdout, breaking the --quiet docstring contract
+    // ("a script piping the JSON to disk sees only the JSON
+    // blob"). When --format is text AND --quiet is set, suppress
+    // the report entirely — operators who want a clean summary
+    // should pass --format json explicitly.
+    if !args.quiet {
         print!(
             "{}",
-            render_bypass_variants_text_block(&bypass_variants, &args.param, target)
+            render_summary_text_block(
+                &waf_name,
+                total_fired,
+                requests_completed,
+                blocked,
+                bypassed,
+                errors,
+                bypass_rate,
+                elapsed.as_secs_f64(),
+            )
         );
+
+        if !bypass_variants.is_empty() {
+            print!(
+                "{}",
+                render_bypass_variants_text_block(&bypass_variants, &args.param, target)
+            );
+        }
     }
 
     // ── Gene Bank: per-technique successes and attempts across all fired variants ─────────
@@ -2524,7 +2533,12 @@ pub(crate) async fn run_scan(
         }
     }
 
-    println!();
+    if scan_text {
+        // Trailing blank line for terminal-friendly spacing.
+        // Gated on scan_text so --quiet truly produces NO stdout
+        // (the F77 contract fix).
+        println!();
+    }
     if aborted_rate_limited {
         ExitCode::from(5)
     } else {

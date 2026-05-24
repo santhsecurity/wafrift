@@ -64,7 +64,19 @@ mod tests {
         let raw_str = String::from_utf8_lossy(&payload.raw_bytes);
         let split = raw_str.split_once("\r\n\r\n").expect("separator missing");
         assert!(split.1.starts_with("0\r\n\r\nGET /admin HTTP/1.1"));
-        assert!(raw_str.contains("Content-Length: 0"));
+        // F76: CL is now the FULL body length (5 for `0\r\n\r\n` +
+        // prefix bytes), not the pre-fix CL=0 stub. The body for the
+        // 'GET /admin HTTP/1.1\r\nHost: internal' prefix is
+        // `0\r\n\r\n` (5) + prefix (35) + ensure_double_crlf padding
+        // → CL is non-zero and matches the byte length of the body
+        // that follows the blank header line.
+        let body_start = split.1;
+        let expected_cl = body_start.len();
+        assert!(
+            raw_str.contains(&format!("Content-Length: {expected_cl}\r\n")),
+            "Content-Length must match body length ({expected_cl}); got: {raw_str}"
+        );
+        assert!(expected_cl > 0, "F76: CL must not be 0");
     }
 
     #[test]
