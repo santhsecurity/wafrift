@@ -785,17 +785,32 @@ fn apply_header_obfuscation(
         techniques.push(Technique::HeaderObfuscation("DuplicateHopByHop".into()));
     }
 
-    // 3. Add Transfer-Encoding with obs-fold style whitespace (HIGH FIX #5)
-    // This exploits parser differences in how TE headers are handled
-    let has_te = req
-        .headers
-        .iter()
-        .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"));
-    if !has_te {
-        // Add TE header with tab prefix (some parsers strip it, others don't)
-        req.headers
-            .push(("Transfer-Encoding".into(), "\tchunked".into()));
-        techniques.push(Technique::HeaderObfuscation("TEAmbiguity".into()));
+    // 3. Add Transfer-Encoding with obs-fold-style whitespace.
+    // This is a CL+TE desync primitive — when paired with a
+    // Content-Length body, an intermediary that strips the tab
+    // and accepts `Transfer-Encoding: chunked` will frame the
+    // request as chunked while a CL-only intermediary keeps
+    // reading the declared bytes. That's request smuggling, not
+    // header obfuscation. Pre-gate it ran on every non-TE request
+    // at every level — including Light against production
+    // endpoints that were NOT being tested for smuggling — which
+    // could desync HTTP/1.1 keep-alive connection pools and
+    // corrupt unrelated subsequent requests on the same TCP
+    // connection.
+    //
+    // Now gated behind smuggling_enabled: the operator has to
+    // explicitly opt in to smuggling experiments before this
+    // technique fires.
+    if config.smuggling_enabled {
+        let has_te = req
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"));
+        if !has_te {
+            req.headers
+                .push(("Transfer-Encoding".into(), "\tchunked".into()));
+            techniques.push(Technique::HeaderObfuscation("TEAmbiguity".into()));
+        }
     }
 
     // 4. Apply obs-fold (obsolete line folding) to User-Agent if present (HIGH FIX #5)
