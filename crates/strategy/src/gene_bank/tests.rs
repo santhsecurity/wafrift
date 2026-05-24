@@ -924,3 +924,93 @@ fn merge_and_save_for_class_under_shared_bank_thread_contention() {
     );
     let _ = fs::remove_dir_all(&tmp);
 }
+
+// ── F137: genome file-size cap tests ──────────────────────────────────────
+
+#[test]
+fn oversized_genome_is_quarantined_on_load_not_read() {
+    // A genome file that exceeds MAX_GENOME_FILE_BYTES must be quarantined
+    // and NOT read into memory — defending against OOM on crafted files.
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_oversize_load_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    let _ = fs::create_dir_all(&tmp);
+
+    // Write a file of exactly MAX_GENOME_FILE_BYTES + 1 bytes.
+    // Content doesn't matter — the cap check fires before the read.
+    let genome_path = tmp.join("cloudflare.json");
+    let oversized: Vec<u8> = vec![b'x'; GeneBank::MAX_GENOME_FILE_BYTES as usize + 1];
+    fs::write(&genome_path, &oversized).unwrap();
+
+    let mut bank = GeneBank::open(tmp.clone()).unwrap();
+    let result = bank.load("Cloudflare");
+
+    // Must return None (file too large — not read).
+    assert!(
+        result.is_none(),
+        "oversized genome must be rejected, not loaded"
+    );
+
+    // The oversized file must have been quarantined (renamed or removed).
+    assert!(
+        !genome_path.exists(),
+        "oversized genome file must be quarantined/removed, not left in place"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn oversized_genome_is_quarantined_on_merge_and_save() {
+    // The merge_and_save path calls read_genome_from_disk, which now
+    // has the same cap. An oversized genome on disk must be quarantined
+    // and the merge must create a fresh genome from the session data.
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_oversize_merge_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    let _ = fs::create_dir_all(&tmp);
+
+    // Write oversized file.
+    let genome_path = tmp.join("cloudflare.json");
+    let oversized: Vec<u8> = vec![b'x'; GeneBank::MAX_GENOME_FILE_BYTES as usize + 1];
+    fs::write(&genome_path, &oversized).unwrap();
+
+    let mut bank = GeneBank::open(tmp.clone()).unwrap();
+    // merge_and_save must succeed: oversized file is dropped, fresh
+    // genome is created with the session stats.
+    bank.merge_and_save("cloudflare", &[("TestTech".into(), 1u32, 1u32)])
+        .unwrap();
+
+    // The genome must now be loadable with the session data.
+    let mut bank2 = GeneBank::open(tmp.clone()).unwrap();
+    let loaded = bank2.load("cloudflare").expect("post-merge genome must load");
+    assert_eq!(loaded.techniques.len(), 1);
+    assert_eq!(loaded.techniques[0].name, "TestTech");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn max_genome_file_bytes_constant_is_in_sane_range() {
+    // Documents the constant's value and prevents a future change to a
+    // too-small number (less than any real genome) or too-large number
+    // (defeats the OOM protection).
+    assert!(
+        GeneBank::MAX_GENOME_FILE_BYTES >= 1024 * 1024,
+        "cap must be at least 1 MiB (real genomes can be several hundred KiB)"
+    );
+    assert!(
+        GeneBank::MAX_GENOME_FILE_BYTES <= 256 * 1024 * 1024,
+        "cap must be ≤ 256 MiB (otherwise OOM protection is meaningless)"
+    );
+}

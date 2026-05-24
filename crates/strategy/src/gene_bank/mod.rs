@@ -370,6 +370,13 @@ impl GeneBank {
     /// a warning is emitted.  This prevents a single corrupt file from
     /// silently destroying accumulated knowledge — the quarantined file
     /// can be inspected and recovered manually.
+    /// Maximum genome file size we will load into memory (F137).
+    /// Mirrors the `LearningCache` cap (16 MiB) — a crafted or
+    /// corrupted genome file that exceeds this is quarantined, not
+    /// read. Without the cap, `fs::read_to_string` on a multi-GB file
+    /// causes an OOM abort before any JSON-parse error can fire.
+    const MAX_GENOME_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
     pub fn load(&mut self, waf_name: &str) -> Option<&WafGenome> {
         let key = normalize_name(waf_name);
         if self.cache.contains_key(&key) {
@@ -379,6 +386,21 @@ impl GeneBank {
         let path = self.genome_path(&key);
         if !path.exists() {
             return None;
+        }
+
+        // F137: guard against OOM on oversized / crafted genome files.
+        if let Ok(meta) = fs::metadata(&path) {
+            if meta.len() > Self::MAX_GENOME_FILE_BYTES {
+                tracing::warn!(
+                    path = %path.display(),
+                    bytes = meta.len(),
+                    cap = Self::MAX_GENOME_FILE_BYTES,
+                    "genome file exceeds size cap — quarantining to prevent OOM"
+                );
+                let fake_err = serde_json::from_str::<WafGenome>("").unwrap_err();
+                Self::quarantine_corrupt(&path, &fake_err);
+                return None;
+            }
         }
 
         match fs::read_to_string(&path) {
@@ -573,6 +595,22 @@ impl GeneBank {
     fn read_genome_from_disk(path: &std::path::Path) -> Option<WafGenome> {
         if !path.exists() {
             return None;
+        }
+        // F137: same OOM guard as `load` — an adversarial file here
+        // would be consumed by the merge_and_save / merge_and_save_for_class
+        // path, which is equally reachable from the scan loop.
+        if let Ok(meta) = fs::metadata(path) {
+            if meta.len() > Self::MAX_GENOME_FILE_BYTES {
+                tracing::warn!(
+                    path = %path.display(),
+                    bytes = meta.len(),
+                    cap = Self::MAX_GENOME_FILE_BYTES,
+                    "genome file exceeds size cap during merge — quarantining to prevent OOM"
+                );
+                let fake_err = serde_json::from_str::<WafGenome>("").unwrap_err();
+                Self::quarantine_corrupt(path, &fake_err);
+                return None;
+            }
         }
         match fs::read_to_string(path) {
             Ok(contents) => match serde_json::from_str(&contents) {
