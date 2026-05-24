@@ -40,10 +40,19 @@ static BLOCK_AC: Lazy<AhoCorasick> = Lazy::new(|| {
         .expect("block indicators are valid AC patterns")
 });
 
-/// Returns `true` when an HTTP response looks like a WAF block page.
+/// Returns `true` when an HTTP response looks like a WAF block page —
+/// **broad, learning-phase** classifier.
 ///
-/// This heuristic does not identify the vendor. It only answers whether the
-/// response likely represents an interception event.
+/// Used by the detection/learning pipeline to decide "is this response
+/// WAF-ish enough to feed into the model?". Sits between the two siblings
+/// on the FP↔FN spectrum: status-code list is wide (every CDN error a WAF
+/// might emit) and the body indicators are TOML-driven so contributors
+/// can extend them without touching code.
+///
+/// **Do not unify** with the other two classifiers — they answer different
+/// questions with different cost asymmetries. See the doc comments on
+/// [`wafrift_transport::response::is_waf_block`] and
+/// [`wafrift_types::calibration::analyze_calibration`].
 ///
 /// Status codes include common WAF and CDN error codes:
 /// - `401`, `403`, `405`, `406`, `407`, `429`

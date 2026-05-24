@@ -52,10 +52,25 @@ pub fn is_waf_block_status(status: u16) -> bool {
     matches!(status, 403 | 406 | 503)
 }
 
-/// Check if a response looks like a WAF block.
+/// Check if a response looks like a WAF block — **strict, post-request** classifier.
 ///
-/// Combines status code detection with body content analysis. The body
-/// is scanned up to the first 4 KiB for known WAF fingerprints.
+/// Used by the transport retry loop to decide "did THIS request get blocked,
+/// should I rotate technique?". This is the **FN-cheap** end of the spectrum:
+/// a false positive here means the engine wastes a request rotating evasion
+/// when the response was actually fine, so the rules are deliberately tight
+/// (no bare vendor names; 200 OK blog posts mentioning Cloudflare must NOT
+/// trigger).
+///
+/// **Do not unify** with the other two classifiers — they answer different
+/// questions with different cost asymmetries (see below). Past consolidation
+/// attempts regressed evasion behaviour. The three diverge by design.
+///
+/// See also:
+/// - [`wafrift_detect::waf_detect::is_blocked_response`] — broad WAF-ish
+///   detection for the learning phase (FN-balanced; TOML-driven indicators).
+/// - [`wafrift_types::calibration::analyze_calibration`] — calibration probe
+///   classification (FN-EXPENSIVE → broad, bare vendor names ARE wanted; an
+///   FN here means scanning a real WAF with no evasion).
 #[must_use]
 pub fn is_waf_block(status: u16, body: &[u8]) -> bool {
     // Status-based detection
