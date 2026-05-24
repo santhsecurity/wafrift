@@ -103,7 +103,28 @@ fn xss_payload_rules() -> &'static XssPayloadRules {
     static RULES: std::sync::OnceLock<XssPayloadRules> = std::sync::OnceLock::new();
     RULES.get_or_init(|| {
         let raw = include_str!("../../rules/xss/payloads.toml");
-        toml::from_str(raw).expect("rules/xss/payloads.toml must parse")
+        // Graceful fallback instead of panic: the embedded ruleset
+        // is baked at compile time so a TOML parse failure here is
+        // theoretically unreachable, but a future toml-crate
+        // tightening (stricter validation, schema change) could
+        // surface one. A panic in the initializer permanently
+        // breaks every XSS mutation call for the lifetime of the
+        // process — and inside the proxy, that's an unhandled
+        // crash on every request that reaches the mutator. Degrade
+        // to "no XSS mutations" with a logged error instead.
+        toml::from_str(raw).unwrap_or_else(|e| {
+            tracing::error!(
+                error = %e,
+                "rules/xss/payloads.toml failed to parse — XSS grammar mutations disabled"
+            );
+            XssPayloadRules {
+                exec_function: Vec::new(),
+                uri_scheme: Vec::new(),
+                svg: Vec::new(),
+                mathml: Vec::new(),
+                markdown: Vec::new(),
+            }
+        })
     })
 }
 
