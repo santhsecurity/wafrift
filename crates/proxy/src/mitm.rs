@@ -453,7 +453,35 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
 /// between the checks and the open.
 pub fn ensure_ca(dir: &std::path::Path) -> anyhow::Result<CertificateAuthority> {
     match CertificateAuthority::load_from_dir(dir) {
-        Ok(ca) => Ok(ca),
+        Ok(ca) => {
+            // Age check: regenerate if the on-disk CA file is older
+            // than CA_REGEN_AFTER. The CA validity window is 397
+            // days (`CertificateAuthority::generate`); past that
+            // every leaf we sign chains to an expired root and
+            // browsers reject the MITM handshake. Pre-fix the only
+            // regenerate trigger was ErrorKind::NotFound, so a
+            // long-lived install silently broke after ~13 months
+            // with no log line pointing at the cause.
+            //
+            // We use mtime rather than parsing X.509 NotAfter so
+            // this fix doesn't pull an x509-parser dep into proxy.
+            // The mtime check is a generous proxy for issuance
+            // time — close enough since `write_to_dir` is the
+            // only thing that writes the file.
+            if ca_is_stale(dir) {
+                tracing::warn!(
+                    dir = %dir.display(),
+                    "loaded MITM CA is older than {} days — regenerating to avoid \
+                     expired-root TLS errors. Re-install the new CA in any client \
+                     trust store that pinned the old one.",
+                    CA_REGEN_AFTER_DAYS
+                );
+                let ca = CertificateAuthority::generate()?;
+                ca.write_to_dir(dir)?;
+                return Ok(ca);
+            }
+            Ok(ca)
+        }
         Err(err) => {
             // Treat any I/O NotFound on cert OR key as "needs generation".
             // Other errors (permission denied, malformed PEM, parse failure)
@@ -471,6 +499,29 @@ pub fn ensure_ca(dir: &std::path::Path) -> anyhow::Result<CertificateAuthority> 
             Ok(ca)
         }
     }
+}
+
+/// Regenerate the CA when its on-disk file is older than this. The
+/// leaf cert validity window is 397 days; pick a generous 360 to
+/// leave a one-month safety margin for the CA + leaf to remain
+/// chain-valid even when the leaf is freshly issued.
+const CA_REGEN_AFTER_DAYS: u64 = 360;
+
+fn ca_is_stale(dir: &std::path::Path) -> bool {
+    let path = dir.join("wafrift-mitm-ca.pem");
+    let Ok(meta) = std::fs::metadata(&path) else {
+        // Caller already handled NotFound; any other metadata error
+        // means we can't decide → keep the existing file rather
+        // than thrash by overwriting on a transient FS hiccup.
+        return false;
+    };
+    let Ok(modified) = meta.modified() else {
+        return false;
+    };
+    let Ok(age) = std::time::SystemTime::now().duration_since(modified) else {
+        return false;
+    };
+    age.as_secs() > CA_REGEN_AFTER_DAYS * 24 * 60 * 60
 }
 
 #[cfg(test)]
@@ -517,6 +568,30 @@ mod tests {
         assert!(leaf_params_for("api.example.com").is_ok());
         assert!(leaf_params_for("[::1]").is_ok());
         assert!(leaf_params_for("127.0.0.1").is_ok());
+    }
+
+    #[test]
+    fn ca_is_stale_returns_false_for_missing_file() {
+        // F70: missing file is handled by the NotFound branch in
+        // ensure_ca, not by ca_is_stale. ca_is_stale must return
+        // false (caller-defined "don't regenerate yet") rather
+        // than panic.
+        let dir = std::env::temp_dir().join(format!("wafrift_ca_missing_{}", std::process::id()));
+        assert!(!ca_is_stale(&dir));
+    }
+
+    #[test]
+    fn ca_is_stale_returns_false_for_freshly_written_file() {
+        // A CA we just wrote must NOT be flagged as stale —
+        // otherwise ensure_ca would regenerate-and-load on every
+        // process startup.
+        let dir = std::env::temp_dir().join(format!("wafrift_ca_fresh_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ca = CertificateAuthority::generate().unwrap();
+        ca.write_to_dir(&dir).unwrap();
+        assert!(!ca_is_stale(&dir), "freshly-written CA must not be stale");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
