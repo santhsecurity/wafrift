@@ -167,8 +167,25 @@ pub(crate) fn nested_comment_mutations(
         if let Some(position) = lower.find(&keyword.to_ascii_lowercase()) {
             let original = &payload[position..position + keyword.len()];
 
-            // Nested comment: if WAF strips outer comments, keyword survives
-            let nested = format!("/*/**/*/{keyword}/*/**/ */");
+            // Nested comment via MySQL conditional + inner empty-
+            // comment padding: `/*!/**/{keyword}/**/*/`.
+            //
+            // Pre-fix this used `/*/**/*/{keyword}/*/**/ */` which
+            // SQL parsers read as:
+            //   /*/**/  — first comment (body `/`), closes at
+            //             the first `*/`
+            //   */      — ORPHAN close token, SQL syntax error
+            //   ...     — rest of payload
+            // Engines 400 on the orphan `*/`, the WAF never saw
+            // the keyword, and the bypass-rate counter recorded
+            // a phantom block.
+            //
+            // The new form is MySQL-specific (`/*!...*/` is a
+            // MySQL conditional-comment extension) — caller
+            // already gates this whole family behind the
+            // dialect contract documented on
+            // `keyword_comment_mutations`.
+            let nested = format!("/*!/**/{keyword}/**/*/");
             let mutated = payload.replacen(original, &nested, 1);
             if mutated != payload {
                 results.push((mutated, format!("Nested comment: {keyword} → {nested}")));
