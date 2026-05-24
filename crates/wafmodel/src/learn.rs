@@ -233,6 +233,14 @@ impl BoundedExhaustiveEq {
     pub const FRONTIER_CAP: usize = 1_000_000;
 }
 
+/// Hard cap on the number of states `passive_learn` materialises.
+/// Defends against a non-regular / flaky oracle that yields a novel
+/// row at every depth and would otherwise grow up to Σ k^i states
+/// (1.1B at depth=10 over a 10-symbol alphabet). Past the cap the
+/// learner folds the post-cap rows to existing states — the model
+/// is less precise but bounded.
+pub const PASSIVE_LEARN_MAX_STATES: usize = 100_000;
+
 /// What a learning run produced and what it cost.
 #[derive(Debug)]
 pub struct LearnReport {
@@ -400,13 +408,26 @@ where
                 match id_of.entry(r.clone()) {
                     Entry::Occupied(e) => *e.get(),
                     Entry::Vacant(e) => {
-                        let id = access.len();
-                        e.insert(id);
-                        access.push(pa.clone());
-                        accept.push(r[0]);
-                        delta.push(Vec::new());
-                        work.push(id);
-                        id
+                        // State-count cap: defends against a non-
+                        // regular / flaky oracle that yields a
+                        // novel row at every depth and would
+                        // otherwise materialise Σ_{i=0}^{depth} k^i
+                        // states (1.1B at depth=10, k=10). Past the
+                        // cap, fall back to the post-horizon "fold
+                        // to existing state" branch — bounded
+                        // memory at the cost of a less-precise
+                        // model. Caller can raise PASSIVE_LEARN_MAX_STATES.
+                        if access.len() >= PASSIVE_LEARN_MAX_STATES {
+                            *id_of.get(&r).unwrap_or(&0)
+                        } else {
+                            let id = access.len();
+                            e.insert(id);
+                            access.push(pa.clone());
+                            accept.push(r[0]);
+                            delta.push(Vec::new());
+                            work.push(id);
+                            id
+                        }
                     }
                 }
             } else {
