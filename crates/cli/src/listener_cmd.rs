@@ -664,6 +664,44 @@ mod tests {
         assert_eq!(cbs.front().unwrap().received_at, 0);
     }
 
+    #[serial_test::serial]
+    #[tokio::test(flavor = "current_thread")]
+    async fn registry_eviction_storm_completes_within_perf_budget() {
+        // Anti-rig (per perf-hunt N02): a regression that swaps
+        // VecDeque back to Vec would silently work for correctness
+        // but turn the eviction O(n). Test that pushing 3× the cap
+        // (twice the eviction budget) completes within a generous
+        // wall-clock budget — the test would time out if some future
+        // patch made every push do an O(n) shift again.
+        //
+        // Conservative budget: 3s for ~300k push+evict operations.
+        // VecDeque does this in well under 100 ms in a debug build;
+        // Vec::remove(0) would take 30+ seconds.
+        let r = Registry::new();
+        let storm = MAX_CALLBACK_LOG * 3;
+        let started = std::time::Instant::now();
+        for i in 0..storm {
+            let cb = Callback {
+                received_at: i as u64,
+                source: "127.0.0.1:0".into(),
+                method: "GET".into(),
+                path: "/p".into(),
+                matched_token: Some("TOK".into()),
+                headers: vec![],
+                body_preview: String::new(),
+                body_truncated_bytes: 0,
+            };
+            r.push(cb).await;
+        }
+        let elapsed = started.elapsed();
+        let cbs = r.callbacks.read().await;
+        assert_eq!(cbs.len(), MAX_CALLBACK_LOG, "log must stay capped under flood");
+        assert!(
+            elapsed.as_secs() < 30,
+            "eviction storm took {elapsed:?} — suspect O(n) eviction regression"
+        );
+    }
+
     #[test]
     fn callback_log_cap_is_at_least_one_thousand() {
         // Floor: a refactor that accidentally set MAX_CALLBACK_LOG=10

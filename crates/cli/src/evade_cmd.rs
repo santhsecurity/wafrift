@@ -307,7 +307,17 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
                     })
                 })
                 .collect();
-            let mut top = json!({ "variants": variant_objs });
+            // schema_version + wafrift_version for downstream parsers
+            // (per perf-hunt F28). Schema version bumps when a field
+            // is removed or renamed — pure additive changes leave it
+            // unchanged. Pinned at 1 today; integration tests assert
+            // these keys exist so a regression that drops them lights
+            // up at PR time.
+            let mut top = json!({
+                "schema_version": 1u32,
+                "wafrift_version": env!("CARGO_PKG_VERSION"),
+                "variants": variant_objs,
+            });
             if let Some(t) = trace.as_ref() {
                 let explain = t.to_json();
                 top["explain"] = explain["explain"].clone();

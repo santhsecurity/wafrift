@@ -1511,6 +1511,42 @@ fn dogfood_b7_parent_child_overlap_also_caught() {
     assert!(stderr.contains("contradictory") || stderr.contains("appear in both"));
 }
 
+// ─────────────────── F28: schema_version on evade JSON output ─────────
+//
+// Stabilises the contract for downstream JSON consumers — a schema
+// version bump signals breaking change, additive field additions don't
+// bump it. Pre-fix the evade JSON envelope had no version field, so a
+// downstream consumer had no way to detect a breaking schema change.
+
+#[test]
+fn dogfood_f28_evade_json_has_schema_version_and_wafrift_version() {
+    let (code, stdout, _stderr) = wafrift(&[
+        "evade",
+        "--only",
+        "tamper/json_unicode_alnum",
+        "--payload",
+        "UNION",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code, 0);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("must be valid JSON");
+    let schema = parsed.get("schema_version").expect("schema_version key required");
+    assert!(schema.is_number(), "schema_version must be a number");
+    let version = parsed
+        .get("wafrift_version")
+        .expect("wafrift_version key required");
+    assert!(version.is_string(), "wafrift_version must be a string");
+    let v = version.as_str().unwrap();
+    assert!(
+        v.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false),
+        "wafrift_version must start with a digit, got `{v}`"
+    );
+    // variants array still present.
+    assert!(parsed.get("variants").is_some());
+}
+
 // ─────────────────── N05: bank list --format json includes hosts ──────
 //
 // Pre-fix the JSON output emitted only summary counters

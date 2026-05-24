@@ -167,6 +167,14 @@ fn rw_cmd_obf(s: &str, rng: &mut Rng) -> Option<String> {
         return None;
     }
     let word = &rest[st..i];
+    // Defensive (per perf-hunt N03): the inner while loop only
+    // advances `i` past ASCII-only bytes (`is_ascii_alphanumeric` plus
+    // a small ASCII punctuation set), so `word` is guaranteed ASCII
+    // and `split_at(cut)` is byte-safe. If a future change to the
+    // char class in the loop above ever admits a multi-byte
+    // codepoint, `split_at` on a non-char-boundary would panic — make
+    // the invariant explicit.
+    debug_assert!(word.is_ascii(), "cmd-shell word slice must be ASCII");
     let cut = 1 + rng.below(word.len() - 1);
     let (l, r) = word.split_at(cut);
     let obf = match rng.below(4) {
