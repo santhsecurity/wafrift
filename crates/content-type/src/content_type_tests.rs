@@ -2,21 +2,21 @@
 #[allow(clippy::module_inception)]
 mod tests {
     use crate::content_type::{
-        ContentTypeTechnique, MAX_FORM_BODY_SIZE, generate_variants, generate_variants_from_body,
-        parse_form_body, unique_boundary, xml_safe_name,
+        ContentTypeError, ContentTypeTechnique, MAX_FORM_BODY_SIZE, generate_variants,
+        generate_variants_from_body, parse_form_body, unique_boundary, xml_safe_name,
     };
 
     #[test]
     fn parse_form_body_basic() {
         let body = b"user=admin&pass=secret";
-        let params = parse_form_body(body);
+        let params = parse_form_body(body).unwrap();
         assert_eq!(params.len(), 2);
         assert_eq!(params[0], ("user".into(), "admin".into()));
     }
 
     #[test]
     fn parse_form_body_empty() {
-        assert!(parse_form_body(b"").is_empty());
+        assert!(parse_form_body(b"").unwrap().is_empty());
     }
 
     #[test]
@@ -217,14 +217,19 @@ mod tests {
     #[test]
     fn parse_form_body_rejects_oversized() {
         let huge = vec![b'A'; MAX_FORM_BODY_SIZE + 1];
-        assert!(parse_form_body(&huge).is_empty());
+        let err = parse_form_body(&huge).unwrap_err();
+        assert!(matches!(
+            err,
+            ContentTypeError::BodyTooLarge { got, cap }
+            if got == MAX_FORM_BODY_SIZE + 1 && cap == MAX_FORM_BODY_SIZE
+        ));
     }
 
     #[test]
     fn parse_form_body_accepts_max_size() {
         let body = vec![b'a'; MAX_FORM_BODY_SIZE];
         // No '=' delimiters → empty result, but must not panic or allocate huge vecs.
-        assert!(parse_form_body(&body).is_empty());
+        assert!(parse_form_body(&body).unwrap().is_empty());
     }
 
     #[test]

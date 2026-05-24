@@ -13,6 +13,14 @@
 use rand::Rng;
 use std::fmt::Write as _;
 
+/// Errors produced by content-type parsing and variant generation.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum ContentTypeError {
+    /// The input body exceeded the maximum allowed size for form parsing.
+    #[error("form body too large: {got} bytes exceeds cap of {cap} bytes")]
+    BodyTooLarge { got: usize, cap: usize },
+}
+
 /// A Content-Type variant with the transformed body.
 #[derive(Debug, Clone)]
 pub struct ContentTypeVariant {
@@ -132,17 +140,24 @@ fn bound_params(params: &[(String, String)]) -> std::borrow::Cow<'_, [(String, S
 /// credibility audit.)
 ///
 /// **Size guarding.** Bodies larger than `MAX_FORM_BODY_SIZE` (8 MiB) are
-/// rejected (empty vector returned) to prevent memory exhaustion on
-/// adversarial inputs.
-#[must_use]
-pub fn parse_form_body(body: &[u8]) -> Vec<(String, String)> {
+/// rejected with [`ContentTypeError::BodyTooLarge`] to prevent memory
+/// exhaustion on adversarial inputs. Use [`parse_form_body_lossy`] if
+/// you need the old empty-Vec-on-oversize behaviour.
+///
+/// # Errors
+///
+/// Returns [`ContentTypeError::BodyTooLarge`] when `body.len() > MAX_FORM_BODY_SIZE`.
+pub fn parse_form_body(body: &[u8]) -> Result<Vec<(String, String)>, ContentTypeError> {
     if body.len() > MAX_FORM_BODY_SIZE {
-        return Vec::new();
+        return Err(ContentTypeError::BodyTooLarge {
+            got: body.len(),
+            cap: MAX_FORM_BODY_SIZE,
+        });
     }
     let Ok(body_str) = std::str::from_utf8(body) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    body_str
+    Ok(body_str
         .split('&')
         .filter_map(|pair| {
             let mut parts = pair.splitn(2, '=');
@@ -155,7 +170,21 @@ pub fn parse_form_body(body: &[u8]) -> Vec<(String, String)> {
                 Some((key, value))
             }
         })
-        .collect()
+        .collect())
+}
+
+/// Backwards-compatible wrapper around [`parse_form_body`] that returns an
+/// empty `Vec` on any error (including oversized bodies) instead of `Result`.
+///
+/// Prefer [`parse_form_body`] for new code so oversized inputs are
+/// handled explicitly.
+#[deprecated(
+    since = "0.2.22",
+    note = "Use `parse_form_body` which returns `Result` and surfaces `BodyTooLarge` explicitly"
+)]
+#[must_use]
+pub fn parse_form_body_lossy(body: &[u8]) -> Vec<(String, String)> {
+    parse_form_body(body).unwrap_or_default()
 }
 
 /// Generate a random boundary string.
@@ -384,7 +413,16 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
     // 5. Multipart with DUPLICATE boundary parameter (first vs last wins)
     {
         let real_boundary = unique_boundary(&value_refs);
-        let fake_boundary = unique_boundary(&value_refs);
+        // Loop until fake_boundary differs from real_boundary. unique_boundary
+        // generates 128-bit hex tails so this terminates on the first attempt
+        // with overwhelming probability — the loop is a correctness guard, not
+        // a performance concern.
+        let fake_boundary = loop {
+            let candidate = unique_boundary(&value_refs);
+            if candidate != real_boundary {
+                break candidate;
+            }
+        };
         let body = build_multipart_body(params, &real_boundary);
         variants.push(ContentTypeVariant {
             content_type: format!(
@@ -536,9 +574,15 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
 }
 
 /// Generate Content-Type variants from a raw form-encoded body.
+///
+/// Returns an empty `Vec` if the body is not valid form-encoded data,
+/// is too large, or contains no parseable key-value pairs.
 #[must_use]
 pub fn generate_variants_from_body(body: &[u8]) -> Vec<ContentTypeVariant> {
-    let params = parse_form_body(body);
+    let params = match parse_form_body(body) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
     if params.is_empty() {
         return Vec::new();
     }
