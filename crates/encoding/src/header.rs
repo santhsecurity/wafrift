@@ -100,13 +100,24 @@ pub fn tab_separator(header_name: &str, value: &str) -> String {
 }
 
 /// Apply whitespace padding around the value.
+///
+/// F136: pad count is derived deterministically from `header_name + value`
+/// via FNV-1a, NOT `rand::random`. A non-deterministic encoder cannot be
+/// regression-pinned and makes a successful bypass impossible to reproduce
+/// (every other tamper in this crate is deterministic for exactly this
+/// reason — see `parameter_pollute`'s F114 fix). The output pad range
+/// (2–5 spaces) is unchanged.
 #[must_use]
 pub fn whitespace_pad(header_name: &str, value: &str) -> String {
     let value = sanitize_header_value(value);
-    let pad_count = rand::random::<usize>() % 4 + 2; // 2–5 spaces
-    let left = " ".repeat(pad_count);
-    let right = " ".repeat(pad_count);
-    format!("{header_name}:{left}{value}{right}")
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in header_name.bytes().chain(value.bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let pad_count = (h as usize % 4) + 2; // 2–5 spaces, deterministic
+    let pad = " ".repeat(pad_count);
+    format!("{header_name}:{pad}{value}{pad}")
 }
 
 fn char_boundary_near(s: &str, byte_idx: usize) -> usize {

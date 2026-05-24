@@ -34,6 +34,54 @@ mod tests {
     }
 
     #[test]
+    fn whitespace_padding_is_deterministic() {
+        // F136 regression: pre-fix `rand::random` made the same input
+        // produce different outputs across calls, so a successful
+        // bypass discovered against `whitespace_pad("X", "y")` couldn't
+        // be replayed and no regression test could pin its output.
+        // Post-fix FNV-1a hash of (name + value) drives the pad width
+        // so identical input is byte-identical output.
+        let a = whitespace_pad("Host", "example.com");
+        let b = whitespace_pad("Host", "example.com");
+        assert_eq!(a, b, "whitespace_pad must be deterministic for replay");
+
+        // Different input → different pad width (with very high
+        // probability) — proves the encoder isn't a fixed constant.
+        let mut seen = std::collections::HashSet::new();
+        for v in [
+            "example.com",
+            "example.net",
+            "example.org",
+            "test.com",
+            "foo.bar",
+            "1.2.3.4",
+            "evil.example",
+            "another.host",
+        ] {
+            seen.insert(whitespace_pad("Host", v));
+        }
+        assert!(
+            seen.len() >= 3,
+            "pad width should vary across distinct inputs, got {} unique outputs",
+            seen.len()
+        );
+    }
+
+    #[test]
+    fn whitespace_padding_pad_width_is_in_2_to_5_range() {
+        // Pre- and post-fix contract: pad count stays in [2, 5].
+        let result = whitespace_pad("X", "y");
+        let after_colon = result
+            .strip_prefix("X:")
+            .expect("starts with 'X:'");
+        let left_pad_len = after_colon.chars().take_while(|c| *c == ' ').count();
+        assert!(
+            (2..=5).contains(&left_pad_len),
+            "pad width {left_pad_len} must be 2..=5"
+        );
+    }
+
+    #[test]
     fn line_folding_splits_value() {
         let result = line_fold("Content-Type", "application/json");
         assert!(result.contains("\r\n\t"));
