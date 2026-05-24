@@ -69,6 +69,15 @@ webpki-roots = { workspace = true }
 # crates.io 0.2.0 (santhsecurity org).
 respdiff = "=0.2.0"
 
+# Santh-owned HTTP error classification + target-error modelling. The
+# canonical primitive for "is this response a WAF block / rate-limit /
+# real app error / generic 404", subsuming the three duplicated
+# implementations in wafrift (`transport/response.rs::is_waf_block`,
+# `detect/blocking.rs::is_blocked_response`, `types/calibration.rs::
+# analyze_calibration`) — consolidation findings F01 / F10 / F20 / F21.
+# crates.io 0.2.0 (santhsecurity org).
+erroracle = "=0.2.0"
+
 # SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
 # instead of panicking.
 [target.'cfg(unix)'.dependencies]
