@@ -41,7 +41,23 @@ pub fn calibration_request(base_url: &str) -> Request {
     ))
 }
 
-/// Analyze a calibration response to determine if WAF is present.
+/// Analyze a calibration response to determine if WAF is present —
+/// **broad, FN-expensive** classifier.
+///
+/// Used by the one-shot calibration probe to decide "should I turn evasion
+/// ON for this target?". This is the **FN-EXPENSIVE** end of the spectrum:
+/// a false negative here means wafrift scans a real WAF with evasion OFF
+/// and gets 100% blocked. A false positive only wastes some CPU. So the
+/// indicator list is **deliberately broad** (bare vendor names like
+/// `cloudflare`/`akamai`/`incapsula` ARE wanted) — do **not** apply the
+/// 2026-05-10 `transport::is_waf_block` audit here.
+///
+/// **Do not unify** with the other two classifiers. See the doc comments
+/// on [`crate::Request`]-adjacent siblings:
+/// - `wafrift_transport::response::is_waf_block` — strict post-request
+///   retry-loop classifier (FN-cheap, NO bare vendor names).
+/// - `wafrift_detect::waf_detect::is_blocked_response` — broad learning-
+///   phase classifier (TOML-driven, FN-balanced).
 ///
 /// # Decision logic
 ///
