@@ -620,13 +620,37 @@ fn run_dry(args: DryRunArgs) -> ExitCode {
             }
         }
     }
-    eprintln!(
-        "\n{} variant={} canary={} bytes={}",
-        "── meta ──".bright_black(),
+    // F79: meta line routing.
+    // Pre-fix this was unconditionally eprintln! regardless of
+    // --format. PowerShell treats any native-cmd stderr write as
+    // NativeCommandError and surfaces it even when exit code is
+    // 0; bash/zsh pipelines also can't grep the canary out of
+    // stdout because it lives on stderr.
+    //
+    // For --format raw or --format hex, the meta belongs on
+    // STDOUT (in a comment-style prefix so it doesn't corrupt
+    // hex/raw parsing). For --format json (if ever added), we
+    // skip the meta entirely — the JSON envelope carries the
+    // canary already.
+    let meta = format!(
+        "── meta ── variant={} canary={} bytes={}",
         args.variant.info.key,
         payload.canary.token,
         payload.raw_bytes.len()
     );
+    match args.format.as_str() {
+        "hex" => {
+            // hex output is line-oriented; meta as a leading
+            // `#` comment doesn't break hexdump-style parsers.
+            println!("# {meta}");
+        }
+        _ => {
+            // raw / text: append meta as a trailing comment line
+            // on stdout so curl-pasting + scripting both work.
+            println!();
+            println!("# {meta}");
+        }
+    }
     ExitCode::SUCCESS
 }
 
