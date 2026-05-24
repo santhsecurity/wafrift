@@ -541,10 +541,18 @@ impl EvolutionEngine {
     /// Seed the underlying algorithm with an explicit population —
     /// the public path callers use to warm-start search from a known
     /// good corpus (or to inject a synthetic population from tests).
+    ///
+    /// Previously this method cloned `self.rng` before passing it to
+    /// `initialize`, so the engine's owned RNG was never advanced. Any
+    /// random draws made by `initialize` (e.g. MapElites grid placement,
+    /// initial mutation in SimulatedAnnealing) were "used up" in the
+    /// clone and the engine remained at the same RNG state — making two
+    /// successive `seed_population` calls (or a `seed_population` + an
+    /// `evolve`) produce identical random sequences and identical
+    /// chromosomes.
     pub fn seed_population(&mut self, population: Vec<Chromosome>) {
-        let mut rng = self.rng.clone();
         self.algorithm
-            .initialize(population, &self.gene_pool, &mut rng);
+            .initialize(population, &self.gene_pool, &mut self.rng);
     }
 
     /// Snapshot the algorithm's live population (test/diagnostic
