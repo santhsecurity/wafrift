@@ -338,6 +338,31 @@ pub fn classify_differential(
     }
 }
 
+/// Inject a canonical SQLi probe into the `q` query parameter of a
+/// URL, preserving fragment placement. Naive `?q=...` concatenation
+/// breaks for fragmented URLs (`https://t/p#sec`) because the `?`
+/// would land INSIDE the fragment, and the query never reaches the
+/// server. Splits the fragment first, mutates the URL portion, then
+/// re-attaches the fragment. Pure / testable.
+#[must_use]
+pub fn inject_sqli_probe(url: &str) -> String {
+    const PROBE: &str = "q=%27+OR+1%3D1--";
+    // Split off the fragment (only the first `#` counts per RFC 3986).
+    let (base, frag) = match url.split_once('#') {
+        Some((b, f)) => (b, Some(f)),
+        None => (url, None),
+    };
+    let mutated_base = if base.contains('?') {
+        format!("{base}&{PROBE}")
+    } else {
+        format!("{base}?{PROBE}")
+    };
+    match frag {
+        Some(f) => format!("{mutated_base}#{f}"),
+        None => mutated_base,
+    }
+}
+
 /// Fire two probes against `url`: a benign GET, then an attack
 /// GET with a canonical SQLi payload in the `q` parameter.
 /// Returns `Some(evidence)` when the responses differ enough to
@@ -348,11 +373,7 @@ pub(crate) fn fetch_differential(
     insecure: bool,
 ) -> Result<Option<DifferentialEvidence>, String> {
     let (b_status, b_headers, b_body) = fetch_for_detect(url, timeout_secs, insecure)?;
-    let attack_url = if url.contains('?') {
-        format!("{url}&q=%27+OR+1%3D1--")
-    } else {
-        format!("{url}?q=%27+OR+1%3D1--")
-    };
+    let attack_url = inject_sqli_probe(url);
     let (a_status, a_headers, a_body) = fetch_for_detect(&attack_url, timeout_secs, insecure)?;
     Ok(classify_differential(
         b_status,
@@ -876,6 +897,51 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // F127 regression: inject_sqli_probe must place the query before
+    // the fragment. Pre-fix code naively appended `?q=...` whenever the
+    // URL had no `?`, but `https://t/p#sec` has no `?` — the appended
+    // text landed INSIDE the fragment and the probe never reached the
+    // server. Silent false-negative for any fragmented URL.
+    #[test]
+    fn inject_sqli_probe_appends_query_when_no_query() {
+        let out = inject_sqli_probe("https://t/p");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--");
+    }
+
+    #[test]
+    fn inject_sqli_probe_uses_ampersand_when_query_present() {
+        let out = inject_sqli_probe("https://t/p?a=1");
+        assert_eq!(out, "https://t/p?a=1&q=%27+OR+1%3D1--");
+    }
+
+    #[test]
+    fn inject_sqli_probe_preserves_fragment_no_existing_query() {
+        // Pre-fix would produce "https://t/p#sec?q=..." — query inside
+        // the fragment, never reaches the server.
+        let out = inject_sqli_probe("https://t/p#sec");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--#sec");
+    }
+
+    #[test]
+    fn inject_sqli_probe_preserves_fragment_with_existing_query() {
+        let out = inject_sqli_probe("https://t/p?a=1#sec");
+        assert_eq!(out, "https://t/p?a=1&q=%27+OR+1%3D1--#sec");
+    }
+
+    #[test]
+    fn inject_sqli_probe_handles_url_with_multiple_hashes() {
+        // Only the FIRST `#` counts per RFC 3986; the rest are
+        // fragment characters.
+        let out = inject_sqli_probe("https://t/p#sec#more");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--#sec#more");
+    }
+
+    #[test]
+    fn inject_sqli_probe_handles_empty_fragment() {
+        let out = inject_sqli_probe("https://t/p#");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--#");
+    }
 
     #[test]
     fn parse_http_status_accepts_canonical_codes() {
