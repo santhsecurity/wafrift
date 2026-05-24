@@ -231,9 +231,34 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         }
     };
     let status = resp.status().as_u16();
-    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
-        .await
-        .unwrap_or_default();
+    // F135: do NOT swallow ReadError::Overrun with unwrap_or_default().
+    // An Overrun means the target sent a decompression bomb — treating it
+    // as an empty body would call is_waf_block(status, &[]) and potentially
+    // report a false "BYPASS" verdict while the actual body was never read.
+    // Surface the overrun to the operator so they know the target misbehaved.
+    let body = match crate::safe_body::read_bounded(
+        resp,
+        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+    )
+    .await
+    {
+        Ok(b) => b,
+        Err(crate::safe_body::ReadError::Overrun {
+            cap_bytes,
+            observed_bytes,
+        }) => {
+            eprintln!(
+                "{} decompression-bomb defence triggered: response body exceeded \
+                 {cap_bytes}-byte cap ({observed_bytes}+ bytes) — verdict is unreliable",
+                "warning:".yellow().bold()
+            );
+            Vec::new()
+        }
+        Err(crate::safe_body::ReadError::Transport(e)) => {
+            eprintln!("{} reading response body: {e}", "error:".red().bold());
+            return ExitCode::from(1);
+        }
+    };
     let elapsed = started.elapsed();
     let blocked = is_waf_block(status, &body);
 
