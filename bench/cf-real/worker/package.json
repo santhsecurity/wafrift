@@ -1,0 +1,17 @@
+{
+  "name": "wafrift-bench-cf-real-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "wafrift bench/cf-real Cloudflare Worker — intentionally-vulnerable surface for WAF-bypass testing",
+  "main": "src/index.ts",
+  "scripts": {
+    "deploy": "wrangler deploy --config ../wrangler.toml",
+    "dev": "wrangler dev --config ../wrangler.toml",
+    "tail": "wrangler tail --config ../wrangler.toml"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "typescript": "^5",
+    "wrangler": "^3"
+  }
+}
