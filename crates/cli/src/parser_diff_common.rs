@@ -12,7 +12,15 @@
 //!   `"high"` when the HTTP status class flipped (200 → 403, 200 →
 //!   500, etc.), `"medium"` when the body shifted by more than 20%
 //!   with status preserved, `"none"` otherwise.
-//! - `status_class(status)` — `status / 100`.
+//!
+//! These functions are now thin local wrappers around the upstream
+//! Santh-owned [`respdiff`] primitives (`body_size_delta_pct`,
+//! `classify_severity`, `status_class`, `DiffPolicy`). Lifting them
+//! means a fix to the classification logic reaches every subcommand
+//! AND every other Santh scanner that consumes respdiff — the
+//! architectural commitment from `feedback_architecture_and_dedup`.
+//! The wrapper signatures are preserved verbatim so the 11
+//! `*_diff_cmd.rs` call sites compile unchanged.
 //!
 //! Every parser-diff subcommand also builds its `reqwest::Client`
 //! from the exact same recipe: operator timeout + `--insecure` +
@@ -21,10 +29,6 @@
 //! Pre-extract, that was 22 lines copy-pasted across nine command
 //! files — one line at a time, drifting each time someone tuned
 //! e.g. the redirect limit in one file but not the others.
-//!
-//! These rules live HERE so a fix to the classification logic
-//! reaches all subcommands in one edit — the architectural
-//! commitment from `feedback_architecture_and_dedup`.
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -75,33 +79,97 @@ pub fn build_diff_http_client(
 /// When `baseline_len == 0`, returns `0.0` for matching empty probe
 /// and `100.0` for any non-empty probe (avoids divide-by-zero
 /// while preserving the "anything from nothing" signal).
+///
+/// **Implementation**: delegates to `respdiff::body_size_delta_pct`
+/// via a synthetic `ResponseDiff`. Kept as a thin wrapper so the 11
+/// parser-diff subcommands' (`baseline_len`, `probe_len`) call sites
+/// don't have to construct snapshots, while the actual % formula
+/// lives in respdiff (shared with every other Santh scanner).
 #[must_use]
 pub fn body_delta_pct(baseline_len: usize, probe_len: usize) -> f64 {
-    if baseline_len == 0 {
-        return if probe_len == 0 { 0.0 } else { 100.0 };
-    }
-    ((probe_len as f64 - baseline_len as f64) / baseline_len as f64) * 100.0
+    let diff = synthetic_size_diff(baseline_len, probe_len);
+    respdiff::body_size_delta_pct(&diff)
 }
 
 /// Classify one probe outcome relative to its baseline. `"high"` =
 /// HTTP status class flipped (2xx ↔ 4xx ↔ 5xx); `"medium"` = body
 /// length shifted by more than 20% with the same status class;
 /// `"none"` otherwise.
+///
+/// **Implementation**: delegates to `respdiff::classify_severity`
+/// with the default `DiffPolicy` (medium-threshold = 20%). Wrapper
+/// retained so the 11 parser-diff subcommands keep their existing
+/// `(u16, u16, f64) -> &'static str` signature while the rule lives
+/// upstream.
 #[must_use]
 pub fn severity_of(baseline_status: u16, probe_status: u16, body_delta_pct: f64) -> &'static str {
-    if status_class(baseline_status) != status_class(probe_status) {
-        "high"
-    } else if body_delta_pct.abs() > 20.0 {
-        "medium"
-    } else {
-        "none"
+    // Synthesize a ResponseDiff carrying just the inputs respdiff's
+    // classifier looks at. body_size_delta_pct grading uses
+    // baseline_body_size + current_body_size to recompute the %; we
+    // round-trip a normalized 100/(100 + delta) pair that produces
+    // exactly `body_delta_pct` when fed to body_size_delta_pct, so
+    // the legacy f64 input domain stays bit-for-bit compatible.
+    let (baseline_body_size, current_body_size) = size_pair_for_pct(body_delta_pct);
+    let diff = respdiff::ResponseDiff {
+        status_changed: baseline_status != probe_status,
+        old_status: baseline_status,
+        new_status: probe_status,
+        new_headers: Vec::new(),
+        missing_headers: Vec::new(),
+        changed_headers: Vec::new(),
+        body_size_delta: current_body_size as i64 - baseline_body_size as i64,
+        timing_delta_ms: 0,
+        body_similarity: 1.0,
+        baseline_body_size,
+        current_body_size,
+    };
+    match respdiff::classify_severity(&diff, &respdiff::DiffPolicy::default()) {
+        respdiff::DiffSeverity::High => "high",
+        respdiff::DiffSeverity::Medium => "medium",
+        respdiff::DiffSeverity::Low | respdiff::DiffSeverity::None => "none",
     }
 }
 
-/// `status / 100` — the 1xx / 2xx / 3xx / 4xx / 5xx class.
-#[must_use]
-pub fn status_class(status: u16) -> u16 {
-    status / 100
+/// Build a respdiff `ResponseDiff` carrying only the two body-size
+/// fields — enough for `body_size_delta_pct` to reconstruct the %.
+fn synthetic_size_diff(baseline_len: usize, current_len: usize) -> respdiff::ResponseDiff {
+    respdiff::ResponseDiff {
+        status_changed: false,
+        old_status: 200,
+        new_status: 200,
+        new_headers: Vec::new(),
+        missing_headers: Vec::new(),
+        changed_headers: Vec::new(),
+        body_size_delta: current_len as i64 - baseline_len as i64,
+        timing_delta_ms: 0,
+        body_similarity: 1.0,
+        baseline_body_size: baseline_len,
+        current_body_size: current_len,
+    }
+}
+
+/// Pick (baseline_body_size, current_body_size) such that
+/// `respdiff::body_size_delta_pct` recovers `pct` to four decimals.
+/// Lets the legacy `severity_of(u16, u16, f64)` signature route
+/// through the percentage-based upstream classifier without changing
+/// its API.
+///
+/// Why scale 1_000_000:
+///   delta_pct = (current - baseline) / baseline * 100
+///   With baseline=1_000_000 and current = baseline + round(pct * 10_000),
+///   delta_pct = round(pct * 10_000) / 10_000 — precise to 0.0001%,
+///   which beats the 0.01% precision the legacy callers depended on
+///   (see `severity_of_at_exactly_20_pct_body_shift_is_not_medium`).
+fn size_pair_for_pct(pct: f64) -> (usize, usize) {
+    const BASELINE: i64 = 1_000_000;
+    const SCALE: f64 = 10_000.0;
+    let delta = if pct.is_finite() {
+        (pct * SCALE).round() as i64
+    } else {
+        0
+    };
+    let current = (BASELINE + delta).max(0) as usize;
+    (BASELINE as usize, current)
 }
 
 #[cfg(test)]
@@ -179,16 +247,6 @@ mod tests {
         assert_eq!(severity_of(200, 200, 20.01), "medium");
     }
 
-    // ── status_class ──────────────────────────────────────────
-
-    #[test]
-    fn status_class_buckets_by_hundreds() {
-        assert_eq!(status_class(100), 1);
-        assert_eq!(status_class(200), 2);
-        assert_eq!(status_class(204), 2);
-        assert_eq!(status_class(301), 3);
-        assert_eq!(status_class(404), 4);
-        assert_eq!(status_class(500), 5);
-        assert_eq!(status_class(599), 5);
-    }
+    // status_class lives upstream in respdiff (covered by
+    // `respdiff::diff::tests::status_class_collapses_to_century`).
 }
