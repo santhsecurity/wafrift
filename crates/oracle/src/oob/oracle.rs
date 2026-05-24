@@ -22,17 +22,24 @@
 //! pentester running scan in parallel.
 
 use crate::oob::provider::{OobError, OobProviderTrait};
+use std::sync::Arc;
 use std::time::Duration;
 use wafrift_types::oob::{OobCanary, OobConfig, OobConfirmation};
 
 pub struct OobOracle {
-    provider: Box<dyn OobProviderTrait>,
+    /// `Arc` rather than `Box` so `confirm_background` can clone a
+    /// handle into the polling task — otherwise the spawned future
+    /// couldn't outlive the `&self` borrow.
+    provider: Arc<dyn OobProviderTrait>,
     config: OobConfig,
 }
 
 impl OobOracle {
     pub fn new(provider: Box<dyn OobProviderTrait>, config: OobConfig) -> Self {
-        Self { provider, config }
+        Self {
+            provider: Arc::from(provider),
+            config,
+        }
     }
 
     /// Register a canary, then poll until the provider sees an
@@ -77,24 +84,25 @@ impl OobOracle {
     ) -> Result<(OobCanary, tokio::sync::mpsc::Receiver<OobConfirmation>), OobError> {
         let canary = self.provider.register().await?;
         let (tx, rx) = tokio::sync::mpsc::channel(1);
-        // Note: spawning requires the provider be Clone-able. Trait
-        // objects don't allow Clone, so the polling closure captures
-        // an Arc + spawns it. Callers that need true background mode
-        // should hold the OobOracle in an Arc and call from there.
-        // This in-place loop runs synchronously on the caller task
-        // until first interaction OR timeout — then sends and returns.
-        let canary_clone = canary.clone();
+        // Spawn the polling loop on tokio so this function returns
+        // IMMEDIATELY with the canary. Pre-fix the loop ran inline
+        // on the caller's task and blocked for the full timeout
+        // before yielding — any caller that embedded the canary
+        // AFTER receiving (canary, rx) was guaranteed to time out
+        // because the polling window had already elapsed. The
+        // Arc-stored provider is cheap to clone into the task.
+        let provider = Arc::clone(&self.provider);
+        let canary_for_task = canary.clone();
         let timeout = self.config.timeout_secs;
         let interval_secs = self.config.poll_interval_secs.max(1);
-        // Borrow the provider for the duration of the inline loop.
-        let interactions = poll_until(
-            self.provider.as_ref(),
-            &canary_clone,
-            timeout,
-            interval_secs,
-        )
-        .await;
-        let _ = tx.send(interactions).await;
+        tokio::spawn(async move {
+            let outcome =
+                poll_until(provider.as_ref(), &canary_for_task, timeout, interval_secs).await;
+            // Receiver may have been dropped — that's the caller's
+            // choice (e.g. scan completed early). Silently swallow
+            // the send error; the poll loop has done its job.
+            let _ = tx.send(outcome).await;
+        });
         Ok((canary, rx))
     }
 }
@@ -213,6 +221,39 @@ mod tests {
         assert_eq!(canary.expected_dns, "abc.fake.oast");
         let outcome = rx.recv().await.unwrap();
         assert_eq!(outcome, OobConfirmation::Confirmed);
+    }
+
+    #[tokio::test]
+    async fn confirm_background_returns_before_polling_completes() {
+        // Regression for F43: pre-fix the function blocked the
+        // caller for the full timeout window inline before yielding
+        // the canary. Caller-supplied embedding could never run in
+        // time → guaranteed Timeout. Post-fix the canary returns
+        // immediately, polling runs on a spawned task. We measure
+        // wall-clock to prove it.
+        let provider = Box::new(FakeProvider {
+            polls: AtomicUsize::new(0),
+            confirm_after: 100, // won't fire within the test window
+        });
+        let oracle = OobOracle::new(
+            provider,
+            OobConfig {
+                provider: OobProvider::Interactsh {
+                    server: "test".into(),
+                },
+                poll_interval_secs: 1,
+                timeout_secs: 30, // long, so a sync impl would block ~30s
+            },
+        );
+        let start = std::time::Instant::now();
+        let (_canary, _rx) = oracle.confirm_background().await.unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "confirm_background must return immediately (background poll) — \
+             took {elapsed:?} which suggests inline blocking"
+        );
+        // Don't await the receiver — we proved the return-fast contract.
     }
 
     /// Atomic counters threaded through Arc keep the provider alive
