@@ -86,6 +86,16 @@ pub struct ResponseProfile {
     pub avoid: Vec<String>,
     #[serde(default)]
     pub rate_limit_status: Vec<u16>,
+    /// Status codes this WAF returns when serving an interactive
+    /// challenge (vs. a hard block). Cloudflare uses 200 + 503 for
+    /// JS challenges; others vary. Combined with `challenge_markers`.
+    #[serde(default)]
+    pub challenge_status_codes: Vec<u16>,
+    /// Body markers that, when matched on a `challenge_status_codes`
+    /// response, classify it as a Challenge (not a HardBlock or Pass).
+    /// Replaces the prior hardcoded `if name == "Cloudflare"` branch.
+    #[serde(default)]
+    pub challenge_markers: Vec<ChallengeMarker>,
     #[serde(default)]
     pub notes: Option<String>,
 }
@@ -100,6 +110,32 @@ pub struct HeaderMarker {
     /// If true, just check that the header exists.
     #[serde(default)]
     pub exists: bool,
+}
+
+/// Body-marker rule for challenge-page detection.
+///
+/// Untagged enum lets TOML express either a single substring (OR
+/// semantics across the `challenge_markers` array) or a conjunction
+/// of substrings (`{ all = [..] }`, AND semantics within one entry).
+/// The Cloudflare profile uses both forms — `"challenge-platform"`
+/// is a single substring; `{ all = ["captcha", "cloudflare"] }`
+/// preserves the legacy detector for pre-challenge-platform pages.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ChallengeMarker {
+    /// Single substring; matches when the body contains it (lower-case).
+    Phrase(String),
+    /// All listed substrings must appear in the body (lower-case).
+    All { all: Vec<String> },
+}
+
+impl ChallengeMarker {
+    fn matches(&self, body_lower: &str) -> bool {
+        match self {
+            Self::Phrase(p) => body_lower.contains(p),
+            Self::All { all } => all.iter().all(|s| body_lower.contains(s)),
+        }
+    }
 }
 
 /// Container for TOML deserialization.
@@ -211,21 +247,30 @@ impl ResponseProfileDb {
             }
         }
 
-        // Check for JS challenges (200 + challenge markers)
-        if (status == 200 || status == 503)
-            && (body_str.contains("challenge-platform")
-                || (body_str.contains("captcha") && body_str.contains("cloudflare")))
-        {
-            let cf_profile = self.profiles.iter().find(|p| p.name == "Cloudflare");
-            return ResponseSignal {
-                classification: BlockClass::Challenge,
-                matched_waf: Some("Cloudflare".to_string()),
-                prioritize: cf_profile.map(|p| p.prioritize.clone()).unwrap_or_default(),
-                avoid: cf_profile.map(|p| p.avoid.clone()).unwrap_or_default(),
-                status,
-                body_size: body.len(),
-                inspection_model: cf_profile.and_then(|p| p.inspection_model.clone()),
-            };
+        // Check for interactive challenges via each profile's own
+        // `challenge_status_codes` + `challenge_markers`. First match
+        // wins, matching the prior hardcoded behaviour. Profiles with
+        // empty challenge_markers silently skip this loop — only WAFs
+        // that ship interactive challenges (Cloudflare today; Akamai /
+        // PerimeterX / hCaptcha when those profiles get markers) opt
+        // in.
+        for profile in &self.profiles {
+            if profile.challenge_status_codes.contains(&status)
+                && profile
+                    .challenge_markers
+                    .iter()
+                    .any(|m| m.matches(&body_str))
+            {
+                return ResponseSignal {
+                    classification: BlockClass::Challenge,
+                    matched_waf: Some(profile.name.clone()),
+                    prioritize: profile.prioritize.clone(),
+                    avoid: profile.avoid.clone(),
+                    status,
+                    body_size: body.len(),
+                    inspection_model: profile.inspection_model.clone(),
+                };
+            }
         }
 
         // Score each profile against the response. Track header-marker
