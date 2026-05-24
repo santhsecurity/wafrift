@@ -65,6 +65,15 @@ pub struct BridgeConfig {
     /// challenges fingerprint headless detection — set to false on
     /// targets that block it.
     pub headless: bool,
+    /// Whether to launch chromium with `--no-sandbox` (process
+    /// isolation OFF). F97: pre-fix the bridge hardcoded
+    /// `no_sandbox: true`, meaning a malicious challenge page — or
+    /// any URL the operator pointed the solver at — could execute
+    /// JS with full OS privileges on the wafrift host. Default
+    /// `false` (sandbox ON, the secure choice); set `true` only on
+    /// CI runners and rootless containers where the sandbox can't
+    /// initialize.
+    pub no_sandbox: bool,
 }
 
 impl Default for BridgeConfig {
@@ -72,6 +81,7 @@ impl Default for BridgeConfig {
         Self {
             solve_timeout_ms: 60_000,
             headless: true,
+            no_sandbox: false,
         }
     }
 }
@@ -95,7 +105,7 @@ pub async fn solve_in_browser(
     let started = std::time::Instant::now();
 
     let runtime = BrowserRuntime::launch(&BrowserLaunchOptions {
-        no_sandbox: true,
+        no_sandbox: cfg.no_sandbox,
         // Cloudflare's managed challenge fingerprints HeadlessChrome —
         // honour cfg.headless so callers can flip visible on targets
         // that block it.
@@ -306,6 +316,7 @@ mod tests {
         let custom = BridgeConfig {
             solve_timeout_ms: 12345,
             headless: false,
+            no_sandbox: false,
         };
         set_global_config(custom.clone()).await;
         let read_back = current_config().await;
@@ -331,6 +342,7 @@ mod tests {
         let cfg = BridgeConfig {
             solve_timeout_ms: 200,
             headless: true,
+            no_sandbox: false,
         };
         let _ = solve_in_browser("<html></html>", "https://example.com/", &cfg).await;
         // No assertion on outcome — chromium availability varies in

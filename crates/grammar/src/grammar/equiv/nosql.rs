@@ -195,7 +195,16 @@ fn rw_to_bracket(s: &str) -> Option<String> {
         if i > 0 {
             q.push('&');
         }
-        q.push_str(&format!("{param}[{op}]={val}"));
+        // F100: pre-fix `val` was raw-interpolated. A `$regex` or
+        // `$where` operand containing `&` / `=` / `#` / `+` would
+        // split the bracket form into multiple query params,
+        // expressing a different query than the original and
+        // failing `still_injects`. Percent-encode so any operand
+        // byte parses back to a single value.
+        q.push_str(&format!(
+            "{param}[{op}]={}",
+            urlencoding::encode(val)
+        ));
     }
     Some(q)
 }

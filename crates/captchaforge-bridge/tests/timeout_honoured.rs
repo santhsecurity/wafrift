@@ -33,6 +33,7 @@ async fn timeout_honoured_against_unresponsive_html() {
     let cfg = BridgeConfig {
         solve_timeout_ms: TIMEOUT_MS,
         headless: true,
+        no_sandbox: false,
     };
 
     // An HTML page with no captcha widgets and no external resources —

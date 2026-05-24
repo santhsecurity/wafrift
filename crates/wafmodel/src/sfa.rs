@@ -250,16 +250,18 @@ impl Sfa {
                 return *t;
             }
         }
-        debug_assert!(
-            false,
+        // F99: pre-fix this returned `s` (self-loop) in release
+        // builds, silently corrupting `accepts()` results — a word
+        // that should have reached an accepting state stayed in a
+        // non-accepting one. The SFA is constructed totality-checked,
+        // so reaching this branch means a programmer error in
+        // `Sfa::minimize` or `Sfa::import`. Panic loudly instead of
+        // silently producing wrong acceptance — a wrong "accepts"
+        // verdict is a false-negative bypass (the model "missed" a
+        // hole) and is worse than crashing.
+        panic!(
             "SFA totality invariant broken: no transition for byte {b} in state {s}"
         );
-        tracing::error!(
-            state = s,
-            byte = b,
-            "SFA missing transition; treating as non-progress (reject path)"
-        );
-        s
     }
 
     /// Does the automaton accept `word`?

@@ -40,16 +40,32 @@ fn body(bytes: &[u8]) -> Request {
     Request::post("https://h/p", bytes.to_vec()).header("Content-Type", "application/json")
 }
 
+/// Enumeration cap for hole-search. Bounded to keep memory + WAF
+/// query count predictable on huge attack grammars. A hit at this
+/// boundary means the enumeration was TRUNCATED, not exhaustive —
+/// see `holes()` for how that fact propagates into `proven_closed`.
+const HOLES_ENUM_CAP: usize = 4096;
+
 /// Enumerate attack-class members (bounded) that `waf` lets through.
-fn holes(waf: &SimRegexWaf, attack: &Sfa, max_len: usize) -> Vec<Vec<u8>> {
+/// Returns `(holes, truncated)`. `truncated == true` means the
+/// enumerator hit `HOLES_ENUM_CAP` and there may be more attack-class
+/// members beyond what we examined — callers MUST NOT claim
+/// "proven_closed" when this flag is set.
+fn holes(
+    waf: &SimRegexWaf,
+    attack: &Sfa,
+    max_len: usize,
+) -> (Vec<Vec<u8>>, bool) {
     // `enumerate_accepted` yields concrete bytes already (the Sfa is
     // byte-level; its witnesses are the alphabet's representative
     // bytes), so these go straight to the WAF.
-    attack
-        .enumerate_accepted(4096, max_len)
+    let enumerated = attack.enumerate_accepted(HOLES_ENUM_CAP, max_len);
+    let truncated = enumerated.len() >= HOLES_ENUM_CAP;
+    let filtered = enumerated
         .into_iter()
         .filter(|bytes| waf.classify_uncounted(&body(bytes)) == Outcome::Pass)
-        .collect()
+        .collect();
+    (filtered, truncated)
 }
 
 /// Synthesize the minimal rules that close every hole for the attack
@@ -72,7 +88,7 @@ pub fn synthesize_closure(
     max_len: usize,
 ) -> ClosureReport {
     let grammar = attack_grammar(alpha, needles);
-    let before = holes(waf, &grammar, max_len);
+    let (before, _before_truncated) = holes(waf, &grammar, max_len);
 
     // One closing rule per needle: match the (lowercased) token after
     // CRS-grade decoding, scoring at the inbound threshold so a single
@@ -111,13 +127,22 @@ pub fn synthesize_closure(
 
     // Closure proof: re-enumerate the attack class against the
     // hardened WAF — every member must now be blocked.
-    let after = holes(&hardened, &grammar, max_len);
+    let (after, after_truncated) = holes(&hardened, &grammar, max_len);
 
     ClosureReport {
         added_rules: added,
         holes_before: before.len(),
         holes_after: after.len(),
         benign_false_positives: benign_fp,
-        proven_closed: after.is_empty() && benign_fp == 0,
+        // F102: pre-fix `proven_closed = after.is_empty() && benign_fp
+        // == 0`. If the post-hardening enumeration hit the 4096-cap
+        // and ALL 4096 examined were blocked, the flag flipped true —
+        // but longer attack members beyond the cap might still pass.
+        // A defender deploys the synthesized rules trusting a proof
+        // that doesn't hold. Require the enumeration to have been
+        // exhaustive (`!after_truncated`) before claiming closure.
+        proven_closed: after.is_empty()
+            && benign_fp == 0
+            && !after_truncated,
     }
 }
