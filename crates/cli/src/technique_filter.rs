@@ -207,7 +207,14 @@ fn tamper_path_static(name: &'static str) -> &'static str {
         std::sync::Mutex<std::collections::HashMap<&'static str, &'static str>>,
     > = OnceLock::new();
     let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    let mut guard = cache.lock().expect("tamper-path cache poisoned");
+    // PoisonError recovery: a prior panic while holding this lock
+    // shouldn't permanently brick `TechniqueFilter::parse` for the
+    // rest of the process. The critical section just inserts into
+    // a HashMap, so resuming with the (consistent) inner state is
+    // safe. Matches the rest of the codebase's poison policy.
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(&path) = guard.get(name) {
         return path;
     }
