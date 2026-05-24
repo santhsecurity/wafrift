@@ -197,8 +197,15 @@ fn seed_host(
 
     // Atomic write: tmp + sync_all + rename + parent fsync (mirrors the
     // proxy's save_gene_bank pattern).
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        eprintln!(
+            "error: create seed-bank dir {}: {e}",
+            parent.display()
+        );
+        return ExitCode::from(1);
     }
     let tmp = path.with_extension("json.tmp");
     let json = match serde_json::to_string_pretty(&bank) {

@@ -349,8 +349,15 @@ fn run_export(args: BankExportArgs) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    if let Some(parent) = args.output.parent() {
-        let _ = fs::create_dir_all(parent);
+    if let Some(parent) = args.output.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        eprintln!(
+            "error: create output dir {}: {e}",
+            parent.display()
+        );
+        return ExitCode::from(1);
     }
     if let Err(e) = fs::write(&args.output, &json) {
         eprintln!("error: write {}: {e}", args.output.display());
@@ -448,8 +455,15 @@ fn run_import(args: BankImportArgs) -> ExitCode {
             hosts_added += 1;
         }
     }
-    if let Some(parent) = proxy_path.parent() {
-        let _ = fs::create_dir_all(parent);
+    if let Some(parent) = proxy_path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        eprintln!(
+            "error: create proxy-bank dir {}: {e}",
+            parent.display()
+        );
+        return ExitCode::from(1);
     }
     let proxy_json = match serde_json::to_string_pretty(&current) {
         Ok(s) => s,
@@ -464,7 +478,13 @@ fn run_import(args: BankImportArgs) -> ExitCode {
     }
 
     // ── Per-WAF genome merge ────────────────────────────────────────
-    let _ = fs::create_dir_all(&genome_dir);
+    if let Err(e) = fs::create_dir_all(&genome_dir) {
+        eprintln!(
+            "error: create genome dir {}: {e}",
+            genome_dir.display()
+        );
+        return ExitCode::from(1);
+    }
     let mut wafs_written = 0usize;
     for (waf, contents) in envelope.waf_genomes {
         let path = genome_dir.join(format!("{waf}.json"));

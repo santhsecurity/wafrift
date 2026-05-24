@@ -370,13 +370,27 @@ impl EvasionClient {
                             state.waf_name = Some(waf.clone());
                             state.waf_confirmed = true;
                         }
-                        for tech in prioritize.iter().take(200) {
+                        // 200 cap is both the per-event source slice cap
+                        // AND the cumulative cap on the per-host Vec.
+                        // Without the cumulative cap, a long-running scan
+                        // session against a heavily-blocked host would
+                        // accumulate hundreds of KB of unique technique
+                        // names in HostState; the contains() guard only
+                        // prevents duplicates within one push batch.
+                        const HOST_TECHNIQUE_CAP: usize = 200;
+                        for tech in prioritize.iter().take(HOST_TECHNIQUE_CAP) {
                             if !state.prioritized_techniques.contains(tech) {
+                                if state.prioritized_techniques.len() >= HOST_TECHNIQUE_CAP {
+                                    state.prioritized_techniques.remove(0);
+                                }
                                 state.prioritized_techniques.push(tech.clone());
                             }
                         }
-                        for tech in avoid.iter().take(200) {
+                        for tech in avoid.iter().take(HOST_TECHNIQUE_CAP) {
                             if !state.avoided_techniques.contains(tech) {
+                                if state.avoided_techniques.len() >= HOST_TECHNIQUE_CAP {
+                                    state.avoided_techniques.remove(0);
+                                }
                                 state.avoided_techniques.push(tech.clone());
                             }
                         }
