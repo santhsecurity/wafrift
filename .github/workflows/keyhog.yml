@@ -79,7 +79,13 @@ jobs:
           if-no-files-found: warn
 
       - name: upload to Code Scanning
+        # Non-blocking: SARIF v2.1.0 validation is strict (e.g.
+        # `relatedLocations contains duplicate item`), and a single
+        # validation hiccup in a single result should not turn the
+        # whole scan red. The artifact above always lands, so the
+        # SARIF is still reachable for triage.
         if: always() && hashFiles('keyhog.sarif') != ''
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: keyhog.sarif
