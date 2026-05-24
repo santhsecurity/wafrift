@@ -157,7 +157,12 @@ impl HostState {
             // the same technique in a long-running proxy session).
             stat.1 = stat.1.saturating_add(1);
             stat.2 = stat.2.saturating_add(1);
-        } else {
+        } else if self.technique_stats.len() < MAX_TECHNIQUE_STATS {
+            // Audit (F133 2026-05-24): the block path already capped new
+            // insertions at MAX_TECHNIQUE_STATS; the success path did not,
+            // allowing unbounded growth if an adversary stream produced
+            // unlimited distinct technique names that all "pass".  Mirror
+            // the same guard here.
             self.technique_stats.push((name.clone(), 1, 1));
         }
 
@@ -1075,5 +1080,129 @@ mod tests {
             .unwrap();
         assert_eq!(stat.1, u32::MAX);
         assert_eq!(stat.2, u32::MAX);
+    }
+
+    // ── F133: technique_stats cap on success path ───────────────────────
+
+    #[test]
+    fn bump_success_respects_max_technique_stats_cap() {
+        // Before F133 the success path had no cap; the block path did.
+        // Fill technique_stats to exactly MAX_TECHNIQUE_STATS entries via
+        // the block path (which is already capped), then attempt to add a
+        // brand-new unique technique via the success path.  The cap must
+        // prevent the vector growing beyond MAX_TECHNIQUE_STATS.
+        let mut state = HostState::default();
+
+        // Fill to the cap using direct insertion (bypasses both code paths).
+        for i in 0..MAX_TECHNIQUE_STATS {
+            state
+                .technique_stats
+                .push((format!("dummy:{i}"), 0, 1));
+        }
+        assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
+
+        // Now attempt to add a new technique via the success path.
+        // The name "encoding:NewTech" does NOT exist in technique_stats yet.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("NewTech".into()));
+
+        // Vector must NOT have grown.
+        assert_eq!(
+            state.technique_stats.len(),
+            MAX_TECHNIQUE_STATS,
+            "technique_stats grew past MAX_TECHNIQUE_STATS on success path"
+        );
+        // And the new entry must NOT be present.
+        assert!(
+            !state
+                .technique_stats
+                .iter()
+                .any(|(n, _, _)| n == "encoding:NewTech"),
+            "new entry was inserted despite cap being reached"
+        );
+    }
+
+    #[test]
+    fn bump_success_updates_existing_entry_at_capacity() {
+        // Even when at capacity, updating an EXISTING entry must still work.
+        let mut state = HostState::default();
+
+        // Insert the target entry first.
+        state
+            .technique_stats
+            .push(("encoding:Existing".to_string(), 1, 2));
+
+        // Fill the rest to the cap.
+        for i in 0..(MAX_TECHNIQUE_STATS - 1) {
+            state
+                .technique_stats
+                .push((format!("filler:{i}"), 0, 1));
+        }
+        assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
+
+        // Record a success for the already-present entry.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("Existing".into()));
+
+        // Stats for the existing entry must have incremented.
+        let stat = state
+            .technique_stats
+            .iter()
+            .find(|(n, _, _)| n == "encoding:Existing")
+            .expect("entry must exist");
+        assert_eq!(stat.1, 2, "success count must increment");
+        assert_eq!(stat.2, 3, "attempt count must increment");
+
+        // Length unchanged.
+        assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
+    }
+
+    #[test]
+    fn success_and_block_paths_symmetric_cap_enforcement() {
+        // Both paths must refuse to insert beyond MAX_TECHNIQUE_STATS.
+        // Fill to cap, then try one of each — neither may grow the vec.
+        let mut state = HostState::default();
+
+        for i in 0..MAX_TECHNIQUE_STATS {
+            state
+                .technique_stats
+                .push((format!("pre:{i}"), 0, 1));
+        }
+
+        // Success path — new technique.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("SuccessNew".into()));
+        // Block path — new technique name.
+        state.bump_block_attempt_for_technique("BlockNew");
+
+        assert_eq!(
+            state.technique_stats.len(),
+            MAX_TECHNIQUE_STATS,
+            "neither path may grow technique_stats past the cap"
+        );
+    }
+
+    #[test]
+    fn record_success_for_many_capped_at_max_technique_stats() {
+        // record_success_for_many calls bump_success_for_technique in a loop;
+        // the cap must hold even when multiple unique techniques are passed.
+        let mut state = HostState::default();
+
+        for i in 0..MAX_TECHNIQUE_STATS {
+            state
+                .technique_stats
+                .push((format!("existing:{i}"), 0, 1));
+        }
+
+        // Pass four brand-new unique techniques at once.
+        state.record_success_for_many(&[
+            Technique::PayloadEncoding("Bulk1".into()),
+            Technique::PayloadEncoding("Bulk2".into()),
+            Technique::PayloadEncoding("Bulk3".into()),
+            Technique::PayloadEncoding("Bulk4".into()),
+        ]);
+
+        assert_eq!(
+            state.technique_stats.len(),
+            MAX_TECHNIQUE_STATS,
+            "record_success_for_many must not bypass the per-technique cap"
+        );
     }
 }
