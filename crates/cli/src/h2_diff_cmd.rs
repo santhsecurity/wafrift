@@ -515,6 +515,8 @@ mod tests {
             delay_ms: 0,
             timeout_secs: 3,
             insecure: false,
+            proxy: None,
+            header: vec![],
             format: "json".into(),
             quiet: true,
         };
@@ -531,6 +533,8 @@ mod tests {
             delay_ms: 0,
             timeout_secs: 1,
             insecure: false,
+            proxy: None,
+            header: vec![],
             format: "json".into(),
             quiet: true,
         };
