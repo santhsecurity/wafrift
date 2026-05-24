@@ -229,11 +229,10 @@ fn build_diff_result(
 }
 
 fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
-    let builder = Client::builder()
-        .timeout(Duration::from_secs(args.timeout_secs))
-        .danger_accept_invalid_certs(args.insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(crate::config::shared_user_agent());
+    let ua = crate::config::shared_user_agent();
+    let builder =
+        wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, Some(&ua))
+            .redirect(reqwest::redirect::Policy::limited(5));
     let builder = if want_h2 {
         // HTTPS targets: reqwest negotiates H2 via TLS ALPN as long
         // as both ends advertise h2. For HTTP, prior-knowledge skips
