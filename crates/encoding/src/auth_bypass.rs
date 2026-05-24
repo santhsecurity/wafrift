@@ -353,6 +353,54 @@ mod tests {
         }
     }
 
+    // F132 documentation test: the header-smuggle-LWS family DOES
+    // contain HTTP/1.1-illegal shapes that any compliant client
+    // (reqwest included) will refuse to send. They are kept in the
+    // probe set because raw-TCP / legacy-stack transports CAN deliver
+    // them and that is where the bypass lives. CLI consumers using
+    // reqwest must pre-validate via HeaderName::try_from and warn so
+    // the operator can distinguish "fired and no divergence" from
+    // "client refused to send." This test pins which ones are illegal
+    // — if a future cleanup quietly removes one, this fails first.
+    #[test]
+    fn header_smuggle_lws_family_contains_known_rfc_illegal_shapes() {
+        let probes = auth_bypass_probes("/admin");
+        let smuggle: Vec<&AuthBypassProbe> = probes
+            .iter()
+            .filter(|p| p.label == "header-smuggle-lws")
+            .collect();
+        // Pre-fix this whole batch was ~4; lock that floor so a
+        // refactor doesn't silently drop the family.
+        assert!(
+            smuggle.len() >= 4,
+            "header-smuggle-lws family must contain at least 4 variants"
+        );
+        // Leading-space and trailing-tab variants are RFC 7230 §3.2-
+        // illegal — every compliant HTTP/1.1 parser rejects them.
+        // The probe set keeps them anyway for raw-TCP delivery to
+        // non-compliant origins.
+        assert!(
+            smuggle.iter().any(|p| p.header == " X-Real-IP"),
+            "leading-space variant missing"
+        );
+        assert!(
+            smuggle.iter().any(|p| p.header == "X-Real-IP\t"),
+            "trailing-tab variant missing"
+        );
+        // Soft-hyphen (U+00AD) is non-ASCII; HeaderName requires
+        // ASCII visible chars per RFC 7230 token grammar.
+        assert!(
+            smuggle.iter().any(|p| p.header.contains('\u{00ad}')),
+            "soft-hyphen variant missing"
+        );
+        // X-Real_IP (underscore) is RFC-LEGAL — origin-side normalization
+        // gap. This one SHOULD pass HeaderName validation.
+        assert!(
+            smuggle.iter().any(|p| p.header == "X-Real_IP"),
+            "underscore variant missing"
+        );
+    }
+
     #[test]
     fn total_probe_count_locked() {
         // Lock the count so a future edit doesn't silently drop a probe
