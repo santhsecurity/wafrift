@@ -78,6 +78,18 @@ pub async fn mine_params(
     if wordlist.is_empty() {
         return Err(DiscoveryError::WordlistEmpty);
     }
+    // Cap defends against an operator typo
+    // (`--wordlist /dev/urandom`) or a hostile-source wordlist:
+    // one tokio::spawn task per entry would queue tens of millions
+    // of futures BEFORE the Semaphore-limited concurrency lets any
+    // actual probe land, OOMing the process.
+    if wordlist.len() > super::openapi::MAX_PARAM_WORDLIST {
+        return Err(super::openapi::DiscoveryError::InputCapExceeded {
+            what: "param_miner.wordlist",
+            got: wordlist.len(),
+            cap: super::openapi::MAX_PARAM_WORDLIST,
+        });
+    }
 
     let baseline = collect_baseline(target, client, config.baseline_requests.max(1)).await?;
 

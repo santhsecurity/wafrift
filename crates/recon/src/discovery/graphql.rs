@@ -87,6 +87,17 @@ pub fn parse_introspection_response(
             };
             let mut points = Vec::new();
             if let Some(args) = field.get("args").and_then(Value::as_array) {
+                // Cap defends against an adversarial introspection
+                // response that lists a million args per operation —
+                // each would allocate an InjectionPoint (~120 bytes)
+                // and OOM the process well before any real probe.
+                if args.len() > super::openapi::MAX_GRAPHQL_ARGS_PER_FIELD {
+                    return Err(super::openapi::DiscoveryError::InputCapExceeded {
+                        what: "graphql.field.args",
+                        got: args.len(),
+                        cap: super::openapi::MAX_GRAPHQL_ARGS_PER_FIELD,
+                    });
+                }
                 for arg in args {
                     let Some(arg_name) = arg.get("name").and_then(Value::as_str) else {
                         continue;
