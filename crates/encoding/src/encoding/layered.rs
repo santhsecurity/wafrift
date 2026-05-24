@@ -17,10 +17,19 @@ pub fn encode_layered(
     strategies: &[Strategy],
 ) -> Result<String, EncodeError> {
     let payload = payload.as_ref();
-    let mut result = encode(
-        payload,
-        strategies.first().copied().unwrap_or(Strategy::UrlEncode),
-    )?;
+    // F135: empty strategies = no-op. Pre-fix used
+    // `unwrap_or(Strategy::UrlEncode)` which silently URL-encoded the
+    // payload when callers passed `&[]`. The existing
+    // `encode_layered_empty_strategies` test passed only because
+    // `"hello"` happens to be all-unreserved (`[A-Za-z0-9-_.~]`) and
+    // therefore a fixed point under url_encode — any non-unreserved
+    // byte (e.g. `!` → `%21`, space → `%20`) would have caught the
+    // divergence. Returning the payload as a lossy UTF-8 string
+    // matches the documented contract and what the test asserts.
+    if strategies.is_empty() {
+        return Ok(String::from_utf8_lossy(payload).into_owned());
+    }
+    let mut result = encode(payload, strategies[0])?;
     // Check size IMMEDIATELY after the first encoding too — the
     // pre-fix guard only ran before the SECOND layer, so a single
     // strategy that expands dramatically (HexEncode 2×,
@@ -215,6 +224,33 @@ mod tests {
     fn encode_layered_empty_strategies() {
         let result = encode_layered("hello", &[]).unwrap();
         assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn encode_layered_empty_strategies_preserves_non_unreserved_chars() {
+        // F135 regression: pre-fix this returned "hello%21%20world%21"
+        // because the empty-strategy path silently fell through to
+        // Strategy::UrlEncode. The legacy `encode_layered_empty_strategies`
+        // test passed by accident — its `"hello"` input has zero
+        // non-unreserved bytes so url_encode is a no-op on it. Any byte
+        // outside `[A-Za-z0-9-_.~]` exposes the divergence.
+        let result = encode_layered("hello! world!", &[]).unwrap();
+        assert_eq!(
+            result, "hello! world!",
+            "empty strategies must be a true no-op, not silently UrlEncode"
+        );
+    }
+
+    #[test]
+    fn encode_layered_empty_strategies_with_invalid_utf8_is_lossy() {
+        // No-op path uses from_utf8_lossy so invalid bytes don't panic
+        // and don't produce an error — they become U+FFFD. Callers that
+        // need byte-preserving no-op should avoid the empty-strategy
+        // call site entirely.
+        let invalid: &[u8] = &[0xC3, 0x28, b'!']; // 0xC3 0x28 = invalid UTF-8 pair
+        let result = encode_layered(invalid, &[]).unwrap();
+        assert!(result.contains('\u{FFFD}'));
+        assert!(result.ends_with('!'));
     }
 
     #[test]
