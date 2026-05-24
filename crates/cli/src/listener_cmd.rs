@@ -146,7 +146,13 @@ pub const MAX_CALLBACK_LOG: usize = 100_000;
 #[derive(Debug, Default)]
 pub struct Registry {
     tokens: RwLock<HashMap<String, ()>>,
-    callbacks: RwLock<Vec<Callback>>,
+    // VecDeque (not Vec) so the FIFO eviction at the MAX_CALLBACK_LOG
+    // cap is O(1) via pop_front() instead of O(n) via Vec::remove(0).
+    // Critical under the exact DoS scenario the cap defends against —
+    // token-replay flood — where holding the write-guard for an O(n)
+    // shift of up to 100 000 entries would starve every concurrent
+    // /_wafrift/check poll from the scan engine. Per perf-hunt N02.
+    callbacks: RwLock<std::collections::VecDeque<Callback>>,
 }
 
 impl Registry {
@@ -189,7 +195,10 @@ impl Registry {
     /// `/_wafrift/check/<token>` management endpoint to answer the
     /// scan-side oracle's poll, "has this token been received yet?"
     pub async fn callbacks(&self) -> Vec<Callback> {
-        self.callbacks.read().await.clone()
+        // Materialize the VecDeque snapshot into a Vec so callers keep
+        // their existing API — the internal storage type changed for
+        // O(1) eviction but the wire/IPC contract is unchanged.
+        self.callbacks.read().await.iter().cloned().collect()
     }
 
     /// Count of callbacks that matched a registered token. Test-only
@@ -228,9 +237,10 @@ impl Registry {
     async fn push(&self, cb: Callback) {
         let mut cbs = self.callbacks.write().await;
         if cbs.len() >= MAX_CALLBACK_LOG {
-            cbs.remove(0);
+            // O(1) FIFO eviction — see VecDeque rationale on the field.
+            cbs.pop_front();
         }
-        cbs.push(cb);
+        cbs.push_back(cb);
     }
 }
 
@@ -628,8 +638,8 @@ mod tests {
         let cbs = r.callbacks.read().await;
         assert_eq!(cbs.len(), MAX_CALLBACK_LOG, "log must be capped");
         // First 50 entries (oldest) evicted; remaining start at 50.
-        assert_eq!(cbs.first().unwrap().received_at, 50);
-        assert_eq!(cbs.last().unwrap().received_at, (total - 1) as u64);
+        assert_eq!(cbs.front().unwrap().received_at, 50);
+        assert_eq!(cbs.back().unwrap().received_at, (total - 1) as u64);
     }
 
     #[serial_test::serial]
@@ -651,7 +661,7 @@ mod tests {
         }
         let cbs = r.callbacks.read().await;
         assert_eq!(cbs.len(), 10);
-        assert_eq!(cbs.first().unwrap().received_at, 0);
+        assert_eq!(cbs.front().unwrap().received_at, 0);
     }
 
     #[test]

@@ -232,17 +232,36 @@ fn run_list(args: BankListArgs) -> ExitCode {
     };
 
     if args.format == "json" {
+        // Per perf-hunt N05: previously this output only the summary
+        // counters; downstream automation (red-team scripts that
+        // enumerate proven techniques before a scan) had nothing
+        // actionable. Now emit a `hosts` array with per-host detail
+        // matching the text path. Additive — no schema bump.
+        let mut hosts: Vec<(&String, &PersistedHostState)> = proxy_bank
+            .hosts
+            .iter()
+            .filter(|(_, hs)| !hs.proven_winners.is_empty())
+            .collect();
+        hosts.sort_by(|a, b| a.0.cmp(b.0));
+        let host_array: Vec<serde_json::Value> = hosts
+            .iter()
+            .map(|(host, hs)| {
+                serde_json::json!({
+                    "host": host,
+                    "winner_count": hs.proven_winners.len(),
+                    "blocklisted_count": hs.blocklisted.len(),
+                    "waf": hs.waf_name.as_deref().unwrap_or(""),
+                })
+            })
+            .collect();
         let out = serde_json::json!({
             "schema_version": ENVELOPE_SCHEMA_VERSION,
             "wafrift_version": env!("CARGO_PKG_VERSION"),
             "proxy_bank_path": proxy_path.display().to_string(),
             "genome_dir": genome_dir.display().to_string(),
-            "proxy_hosts_with_bypasses": proxy_bank
-                .hosts
-                .iter()
-                .filter(|(_, hs)| !hs.proven_winners.is_empty())
-                .count(),
+            "proxy_hosts_with_bypasses": host_array.len(),
             "waf_genome_count": waf_genomes.len(),
+            "hosts": host_array,
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         return ExitCode::SUCCESS;
