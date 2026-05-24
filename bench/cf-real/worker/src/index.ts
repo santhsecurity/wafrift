@@ -111,8 +111,22 @@ export default {
         }
 
         if (path === '/json' && req.method === 'POST') {
-            const body = await req.json().catch(() => null);
-            if (body === null) return json({ error: 'bad json' }, 400);
+            // F88: cap the input by raw text first. `json({...})`
+            // calls `clamp(JSON.stringify(...))`, which truncates the
+            // SERIALIZED form mid-token if `body` is a large nested
+            // object — leaving the response as invalid JSON (e.g.
+            // `{"received":{"a":"AAAA...`). Bound at the text level
+            // before parse so the truncation contract holds.
+            const raw = await req.text();
+            if (raw.length > MAX_BYTES) {
+                return json({ error: 'body too large' }, 413);
+            }
+            let body: unknown;
+            try {
+                body = JSON.parse(raw);
+            } catch {
+                return json({ error: 'bad json' }, 400);
+            }
             return json({ received: body });
         }
 

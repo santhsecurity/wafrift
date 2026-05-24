@@ -216,6 +216,15 @@ pub fn json_unescape(input: &[u8]) -> Vec<u8> {
                         let cp = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
                         push_utf8(&mut out, cp);
                         i += 12;
+                    } else if (0xD800..=0xDFFF).contains(&hi) {
+                        // F84: lone UTF-16 surrogate. Encoding it as UTF-8
+                        // would produce WTF-8 / CESU-8 — invalid UTF-8 that
+                        // downstream `from_utf8` will reject or replace
+                        // differently than the framework would. Emit
+                        // U+FFFD to match `String::from_utf8_lossy`, which
+                        // is what every sensible downstream framework does.
+                        push_utf8(&mut out, 0xFFFD);
+                        i += 6;
                     } else {
                         push_utf8(&mut out, hi);
                         i += 6;
