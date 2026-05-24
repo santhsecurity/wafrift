@@ -31,6 +31,7 @@
 //! e.g. the redirect limit in one file but not the others.
 
 use std::process::ExitCode;
+#[cfg(test)]
 use std::time::Duration;
 
 use colored::{ColoredString, Colorize};
@@ -95,18 +96,10 @@ pub fn build_diff_http_client(
     proxy: Option<&str>,
     headers: &[String],
 ) -> Result<Client, ExitCode> {
-    let mut builder = Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .danger_accept_invalid_certs(insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(crate::config::shared_user_agent());
-    builder = match pentest_client::apply_pentest_flags(builder, proxy, headers, None) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("  {} {e}", "✗ pentest flag invalid:".red().bold());
-            return Err(ExitCode::from(1));
-        }
-    };
+    let ua = crate::config::shared_user_agent();
+    let mut builder = wafrift_transport::base_client_builder(timeout_secs, insecure, Some(&ua))
+        .redirect(reqwest::redirect::Policy::limited(5));
+    builder = pentest_client::apply_pentest_flags_or_print(builder, proxy, headers, None)?;
     builder.build().map_err(|e| {
         eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)

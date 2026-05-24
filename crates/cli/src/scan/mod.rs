@@ -664,17 +664,14 @@ pub(crate) async fn run_scan(
     }
     // Pentest pivot: --proxy + -H/--header. See `pentest_client`
     // for the validation grammar and unit tests.
-    http_builder = match pentest_client::apply_pentest_flags(
+    http_builder = match pentest_client::apply_pentest_flags_or_print(
         http_builder,
         args.proxy.as_deref(),
         &args.header,
         session_state.as_ref().map(|s| &s.headers),
     ) {
         Ok(b) => b,
-        Err(e) => {
-            eprintln!("  {} {e}", "✗ pentest flag invalid:".red().bold(),);
-            return ExitCode::from(1);
-        }
+        Err(code) => return code,
     };
     let http = match http_builder.build() {
         Ok(client) => client,

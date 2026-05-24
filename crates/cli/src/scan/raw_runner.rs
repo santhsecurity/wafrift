@@ -297,18 +297,12 @@ fn build_http_client(args: &ScanArgs) -> Result<Client, ExitCode> {
         Some(&ua),
     )
     .redirect(reqwest::redirect::Policy::limited(5));
-    builder = match pentest_client::apply_pentest_flags(
+    builder = pentest_client::apply_pentest_flags_or_print(
         builder,
         args.proxy.as_deref(),
         &args.header,
         None,
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("  {} {e}", "✗ pentest flag invalid:".red().bold());
-            return Err(ExitCode::from(1));
-        }
-    };
+    )?;
     builder.build().map_err(|e| {
         eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
