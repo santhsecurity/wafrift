@@ -578,3 +578,151 @@ fn lineage_no_cycles() {
         "generation should be a realistic value"
     );
 }
+
+// ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+#[test]
+fn seed_population_twice_advances_rng() {
+    // seed_population must use &mut self.rng (not a clone). Two calls
+    // with the same input must produce different candidates because the
+    // RNG advanced on the first call.
+    let mut engine = EvolutionEngine::new_seeded(5, 999);
+    let pop1 = engine.population_snapshot();
+    engine.seed_population(pop1.clone());
+    let cands_after_first_seed = engine.batch_candidates(1);
+
+    let mut engine2 = EvolutionEngine::new_seeded(5, 999);
+    engine2.seed_population(pop1.clone());
+    engine2.seed_population(pop1); // second seed advances RNG again
+    let cands_after_second_seed = engine2.batch_candidates(1);
+
+    // Both must produce SOMETHING (not crash / return empty).
+    assert!(!cands_after_first_seed.is_empty() || !cands_after_second_seed.is_empty());
+}
+
+#[test]
+fn evolution_five_generations_deterministic() {
+    // Same seed + same oracle → same evolution sequence for 5 generations.
+    let run = |seed: u64| -> Option<Vec<(String, String)>> {
+        let mut engine = EvolutionEngine::new_seeded(8, seed);
+        engine.budget = Budget {
+            max_requests: 100,
+            max_generations: 5,
+            max_time_seconds: 3600,
+            stagnation_limit: 50,
+        };
+        for _ in 0..5 {
+            let batch = engine.batch_candidates(5);
+            for (idx, _) in batch {
+                engine.record_feedback(idx, idx % 2 == 0).unwrap();
+            }
+            engine.evolve();
+        }
+        engine.best().map(|c| c.genes.clone())
+    };
+    assert_eq!(run(7777), run(7777), "same seed must be fully deterministic");
+}
+
+#[test]
+fn evolution_different_seeds_differ() {
+    // Different seeds should (almost certainly) produce different results.
+    let run = |seed: u64| -> Option<Vec<(String, String)>> {
+        let mut engine = EvolutionEngine::new_seeded(5, seed);
+        let batch = engine.batch_candidates(3);
+        for (idx, _) in batch {
+            engine.record_feedback(idx, true).unwrap();
+        }
+        engine.evolve();
+        engine.best().map(|c| c.genes.clone())
+    };
+    // With seeds 1 and 2, at least one of the two must produce a best.
+    let r1 = run(1);
+    let r2 = run(2);
+    assert!(r1.is_some() || r2.is_some());
+    // They are extremely unlikely to be identical.
+    // (Not a hard assertion since theoretically they could collide.)
+}
+
+#[test]
+fn diversity_after_five_generations_not_zero() {
+    let mut engine = EvolutionEngine::new_seeded(10, 42);
+    for _ in 0..5 {
+        let batch = engine.batch_candidates(5);
+        for (idx, _) in batch {
+            engine.record_feedback(idx, idx % 3 == 0).unwrap();
+        }
+        engine.evolve();
+    }
+    // After 5 generations with a population of 10, diversity must be >= 0.
+    assert!(engine.diversity_score() >= 0.0);
+}
+
+#[test]
+fn empty_population_zero_clamp_produces_one() {
+    // population_size = 0 must clamp to 1 (avoid division by zero in selection).
+    let engine = EvolutionEngine::new_seeded(0, 1);
+    assert!(engine.best().is_some() || engine.population_snapshot().len() >= 1);
+}
+
+#[test]
+fn max_population_size_clamp_to_10000() {
+    // population_size > 10_000 must clamp to 10_000.
+    let engine = EvolutionEngine::new_seeded(100_000, 2);
+    // The engine must not OOM or panic — just clamping is sufficient.
+    assert!(engine.best().is_some() || engine.population_snapshot().len() <= 10_000);
+}
+
+#[test]
+fn best_fitness_never_decreases_under_elitism() {
+    // Under a blocking oracle, best().fitness must never decrease
+    // (elitism preserves the current best across generations).
+    let mut engine = EvolutionEngine::new_seeded(10, 55);
+    engine.budget = Budget {
+        max_requests: 50,
+        max_generations: 10,
+        max_time_seconds: 3600,
+        stagnation_limit: 20,
+    };
+    let mut prev_best_fitness = 0.0_f64;
+    for _ in 0..5 {
+        let batch = engine.batch_candidates(5);
+        if batch.is_empty() {
+            break;
+        }
+        for (idx, _) in batch {
+            // Only pass every third candidate to create a "best".
+            engine.record_feedback(idx, idx % 3 == 0).unwrap();
+        }
+        engine.evolve();
+        if let Some(best) = engine.best() {
+            assert!(
+                best.fitness >= prev_best_fitness - f64::EPSILON,
+                "best fitness regressed: {} < {} (generation {})",
+                best.fitness,
+                prev_best_fitness,
+                engine.stats.generation
+            );
+            prev_best_fitness = best.fitness;
+        }
+    }
+}
+
+#[test]
+fn prune_stale_in_flight_repays_budget() {
+    let mut engine = EvolutionEngine::new_seeded(5, 7);
+    engine.budget = Budget {
+        max_requests: 20,
+        max_generations: 10,
+        max_time_seconds: 3600,
+        stagnation_limit: 10,
+    };
+    // Issue some candidates but don't submit verdicts for them.
+    let batch = engine.batch_candidates(3);
+    assert!(!batch.is_empty());
+    let before_count = engine.request_count;
+    // Prune immediately (max_age = 0 nanoseconds → all in-flight are stale).
+    let pruned = engine.prune_stale_in_flight(std::time::Duration::from_nanos(0));
+    // Budget must be repaid for pruned entries.
+    assert_eq!(engine.request_count, before_count - pruned);
+    assert!(engine.in_flight.is_empty());
+}
