@@ -558,7 +558,11 @@ where
         // membership queries are spent. If the distinct-query count has
         // passed the cap, stop honestly with the spend rather than
         // continue or return a partial hypothesis as if complete.
-        if mqx.cache.len() as u64 > budget {
+        // F94: was `>` — at exactly `budget` queries the learner
+        // still entered the next inner close/consistency cycle,
+        // which can spend O(|S| * |alpha| + |E|) more queries before
+        // the next gate check. Tighten to `>=` so we stop at the cap.
+        if mqx.cache.len() as u64 >= budget {
             return Err(crate::error::WafModelError::BudgetExhausted {
                 queries: mqx.cache.len() as u64,
             });
@@ -779,6 +783,17 @@ where
         // on the residual c[i..]. That yields a new state and a
         // distinguishing suffix that splits an existing leaf.
         let n = c.len();
+        // F92: an `EquivalenceOracle` returning `Some(vec![])` —
+        // "the empty word is a counterexample" — would slice `c[1..]`
+        // on an empty Vec and panic. The Rivest–Schapire decomposition
+        // is undefined for an empty counterexample (γ0 == γn
+        // trivially), so bail with a clear error instead of crashing.
+        if n == 0 {
+            return Err(crate::error::WafModelError::Oracle(
+                "equivalence oracle returned an empty counterexample — \
+                 Rivest–Schapire decomposition is undefined for ε".into(),
+            ));
+        }
         let state_word = |k: usize, kv: &mut Kv<B>| -> Result<Vec<usize>> {
             // Access string of the hypothesis state reached on c[..k].
             let id = {

@@ -63,7 +63,14 @@ impl OobOracle {
                     return Ok(OobConfirmation::Confirmed);
                 }
                 Ok(_) => {} // empty → keep polling
-                Err(_) => return Ok(OobConfirmation::Error),
+                // F93: was `Err(_) => Ok(OobConfirmation::Error)`,
+                // which silently converted a transport failure into
+                // a scan result. Callers that only check the
+                // `Confirmed` variant could never tell the oracle
+                // was dead the entire run. Propagate the typed
+                // error so the caller can distinguish
+                // "oracle broken" from "no interaction observed".
+                Err(e) => return Err(e),
             }
             if std::time::Instant::now() >= deadline {
                 return Ok(OobConfirmation::Timeout);
@@ -119,6 +126,11 @@ async fn poll_until(
         match provider.poll(canary).await {
             Ok(ints) if !ints.is_empty() => return OobConfirmation::Confirmed,
             Ok(_) => {}
+            // F93 sibling: the background-poll path still has to
+            // return an `OobConfirmation` (it owns its channel), so
+            // it can't propagate `OobError` like `confirm()` does.
+            // Keep the `Error` variant here, but `confirm()` —
+            // which CAN signal failure to the caller — should.
             Err(_) => return OobConfirmation::Error,
         }
         if std::time::Instant::now() >= deadline {
