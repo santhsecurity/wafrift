@@ -1511,6 +1511,48 @@ fn dogfood_b7_parent_child_overlap_also_caught() {
     assert!(stderr.contains("contradictory") || stderr.contains("appear in both"));
 }
 
+// ─────────────────── N01: exit code doc covers dual-usage of code 2 ───
+//
+// Pre-fix the docs said exit 2 means only "bench-waf zero bypasses /
+// replay bypass blocked" while 12+ sites used it for argument errors
+// (clap convention). Rather than relocate 12 sites and break CI
+// scripts, the docs now acknowledge both meanings.
+
+#[test]
+fn dogfood_n01_help_text_documents_dual_exit_2_meaning() {
+    let (code, stdout, _stderr) = wafrift(&["--help"]);
+    assert_eq!(code, 0);
+    // Help must mention exit 2 covers BOTH argument errors AND the
+    // bench-waf / replay legacy meanings.
+    assert!(stdout.contains("argument") || stdout.contains("input error"));
+    assert!(stdout.contains("clap convention") || stdout.contains("zero bypasses"));
+}
+
+// ─────────────────── N08: graphql corpus class accepted ───────────────
+//
+// `gql-diff` is a first-class subcommand but until 2026-05-23 there was
+// no corresponding bench corpus class — `wafrift bench-waf` couldn't
+// score bypass rate on GraphQL injection. Adding "graphql" to
+// KNOWN_CLASSES + an initial 19-case authoring closes the gap.
+
+#[test]
+fn dogfood_n08_graphql_class_in_validate_only_output() {
+    let (code, stdout, _stderr) = wafrift(&["bench-waf", "--validate-only"]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("graphql:"),
+        "validate-only output must list graphql class:\n{stdout}"
+    );
+}
+
+#[test]
+fn dogfood_n08_graphql_class_filter_works() {
+    let (code, stdout, _stderr) = wafrift(&["bench-waf", "--validate-only", "--class", "graphql"]);
+    assert_eq!(code, 0);
+    // GraphQL corpus has 19 cases.
+    assert!(stdout.contains("19") || stdout.contains("graphql:"));
+}
+
 // ─────────────────── F28: schema_version on evade JSON output ─────────
 //
 // Stabilises the contract for downstream JSON consumers — a schema
