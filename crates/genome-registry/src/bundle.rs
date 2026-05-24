@@ -231,6 +231,11 @@ impl SignedBundle {
 
     /// Verify the signature AND that the publishing key is in the
     /// trust list. Returns the inner bundle on success.
+    ///
+    /// **Does NOT check `created_unix` freshness.** A captured
+    /// bundle signed by a still-trusted key replays forever.
+    /// Production import paths SHOULD prefer [`Self::verify_fresh`]
+    /// which adds an upper bound on bundle age + clock-skew guard.
     pub fn verify(self, trust: &TrustList) -> Result<GenomeBundle, RegistryError> {
         let canonical = self.bundle.canonical_bytes()?;
         verify_bytes(&self.public_key_hex, &self.signature_hex, &canonical)?;
@@ -240,6 +245,47 @@ impl SignedBundle {
             });
         }
         Ok(self.bundle)
+    }
+
+    /// Verify signature + trust + freshness window.
+    ///
+    /// Rejects bundles older than `max_age_secs` (replay defence —
+    /// a captured bundle from a key that has since been revoked
+    /// cannot be re-imported indefinitely) AND bundles dated more
+    /// than `future_skew_secs` ahead of the local clock (defends
+    /// against a publisher with a wildly-wrong clock or a forged
+    /// future-dated timestamp).
+    ///
+    /// Suggested defaults: `max_age_secs = 30 * 86_400` (30 days),
+    /// `future_skew_secs = 300` (5 minutes).
+    pub fn verify_fresh(
+        self,
+        trust: &TrustList,
+        max_age_secs: u64,
+        future_skew_secs: u64,
+    ) -> Result<GenomeBundle, RegistryError> {
+        // Signature + trust first — never reveal anything about
+        // freshness for unsigned / untrusted input.
+        let bundle = self.verify(trust)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if bundle.created_unix > now.saturating_add(future_skew_secs) {
+            return Err(RegistryError::BundleFutureDated {
+                created_unix: bundle.created_unix,
+                skew_secs: future_skew_secs,
+            });
+        }
+        let age = now.saturating_sub(bundle.created_unix);
+        if age > max_age_secs {
+            return Err(RegistryError::BundleTooOld {
+                created_unix: bundle.created_unix,
+                age_secs: age,
+                max_age_secs,
+            });
+        }
+        Ok(bundle)
     }
 
     /// Verify ONLY the signature (does NOT consult the trust list).
@@ -352,5 +398,87 @@ mod tests {
         let signed1 = bundle1.sign(&key).unwrap();
         let signed2 = bundle2.sign(&key).unwrap();
         assert_eq!(signed1.signature_hex, signed2.signature_hex);
+    }
+
+    // ── verify_fresh: replay-defence + clock-skew ────────────
+
+    fn now_unix() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    fn trust_with(key: &SigningKey) -> TrustList {
+        let mut t = TrustList::default();
+        t.allow_hex(&key.verifying_key_hex(), "test");
+        t
+    }
+
+    #[test]
+    fn verify_fresh_accepts_recent_bundle() {
+        let key = SigningKey::generate();
+        let bundle = GenomeBundle::new("pack", three_genomes());
+        let signed = bundle.sign(&key).unwrap();
+        let trust = trust_with(&key);
+        // 30-day window, recent bundle — Ok.
+        assert!(
+            signed.verify_fresh(&trust, 30 * 86_400, 300).is_ok(),
+            "fresh bundle within window must verify"
+        );
+    }
+
+    #[test]
+    fn verify_fresh_rejects_too_old_bundle() {
+        let key = SigningKey::generate();
+        let mut bundle = GenomeBundle::new("pack", three_genomes());
+        // Date the bundle 60 days ago.
+        bundle.created_unix = now_unix().saturating_sub(60 * 86_400);
+        let signed = bundle.sign(&key).unwrap();
+        let trust = trust_with(&key);
+        // 30-day window — must reject.
+        let err = signed
+            .verify_fresh(&trust, 30 * 86_400, 300)
+            .expect_err("60-day-old bundle must not verify with 30-day window");
+        assert!(matches!(err, RegistryError::BundleTooOld { .. }));
+    }
+
+    #[test]
+    fn verify_fresh_rejects_far_future_bundle() {
+        let key = SigningKey::generate();
+        let mut bundle = GenomeBundle::new("pack", three_genomes());
+        // Date the bundle 1 hour in the future — well past the 5-min
+        // skew tolerance.
+        bundle.created_unix = now_unix().saturating_add(3600);
+        let signed = bundle.sign(&key).unwrap();
+        let trust = trust_with(&key);
+        let err = signed
+            .verify_fresh(&trust, 30 * 86_400, 300)
+            .expect_err("future-dated bundle must not verify");
+        assert!(matches!(err, RegistryError::BundleFutureDated { .. }));
+    }
+
+    #[test]
+    fn verify_fresh_tolerates_small_clock_skew() {
+        let key = SigningKey::generate();
+        let mut bundle = GenomeBundle::new("pack", three_genomes());
+        // 30 seconds in the future — within the 300s skew window.
+        bundle.created_unix = now_unix().saturating_add(30);
+        let signed = bundle.sign(&key).unwrap();
+        let trust = trust_with(&key);
+        assert!(signed.verify_fresh(&trust, 30 * 86_400, 300).is_ok());
+    }
+
+    #[test]
+    fn verify_fresh_still_rejects_untrusted_publisher() {
+        // Freshness check must NOT bypass the trust-list check.
+        let key = SigningKey::generate();
+        let bundle = GenomeBundle::new("pack", three_genomes());
+        let signed = bundle.sign(&key).unwrap();
+        let empty_trust = TrustList::new(); // key not added
+        let err = signed
+            .verify_fresh(&empty_trust, 30 * 86_400, 300)
+            .expect_err("untrusted publisher must reject");
+        assert!(matches!(err, RegistryError::UntrustedPublisher { .. }));
     }
 }
