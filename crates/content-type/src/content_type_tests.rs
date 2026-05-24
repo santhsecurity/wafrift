@@ -530,4 +530,165 @@ mod tests {
         let b = unique_boundary(&["x"]);
         assert_ne!(a, b);
     }
+
+    // ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+    #[test]
+    fn parse_form_body_at_exact_max_size_returns_empty() {
+        // Exactly MAX_FORM_BODY_SIZE bytes with no '=' delimiter → empty vec, not Err.
+        let body = vec![b'a'; MAX_FORM_BODY_SIZE];
+        let result = parse_form_body(&body).unwrap();
+        assert!(result.is_empty(), "no '=' → empty parse result");
+    }
+
+    #[test]
+    fn parse_form_body_at_max_size_minus_one_succeeds() {
+        // MAX-1 bytes: should parse without error.
+        let body = vec![b'a'; MAX_FORM_BODY_SIZE - 1];
+        assert!(parse_form_body(&body).is_ok());
+    }
+
+    #[test]
+    fn parse_form_body_at_max_size_plus_one_errors() {
+        let body = vec![b'b'; MAX_FORM_BODY_SIZE + 1];
+        match parse_form_body(&body) {
+            Err(crate::content_type::ContentTypeError::BodyTooLarge { got, cap }) => {
+                assert_eq!(got, MAX_FORM_BODY_SIZE + 1);
+                assert_eq!(cap, MAX_FORM_BODY_SIZE);
+            }
+            other => panic!("expected BodyTooLarge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_form_body_lossy_returns_empty_for_oversized() {
+        // parse_form_body_lossy must return Vec::new() for oversized bodies.
+        #[allow(deprecated)]
+        let result = crate::content_type::parse_form_body_lossy(
+            &vec![b'z'; MAX_FORM_BODY_SIZE + 1]
+        );
+        assert!(result.is_empty(), "lossy wrapper must return empty Vec on oversized");
+    }
+
+    #[test]
+    fn boundary_collision_deterministic_rng_1000_variants() {
+        // Generate 1000 boundary pairs. No pair should have real == fake.
+        use std::collections::HashSet;
+        let mut seen: HashSet<String> = HashSet::new();
+        for _ in 0..1000 {
+            let b = unique_boundary(&[]);
+            // Each boundary must start with the expected prefix.
+            assert!(b.starts_with("----WafriftBoundary"), "unexpected prefix: {b}");
+            seen.insert(b);
+        }
+        // Almost all 1000 must be unique (entropy is 128-bit).
+        // Allow for an astronomically-unlikely collision: require >= 990 unique.
+        assert!(seen.len() >= 990, "too many collisions among 1000 boundaries: {}", seen.len());
+    }
+
+    #[test]
+    fn xml_cdata_variant_contains_cdata_exactly_once_open_and_close() {
+        let params = vec![("payload".to_string(), "test-injection".to_string())];
+        let variants = generate_variants(&params);
+        let xml_var = variants
+            .iter()
+            .find(|v| v.technique == crate::content_type::ContentTypeTechnique::XmlCdata)
+            .unwrap();
+        let body_str = String::from_utf8_lossy(&xml_var.body);
+        // The top-level structure must have exactly one CDATA per field.
+        assert_eq!(
+            body_str.matches("<![CDATA[").count(),
+            1,
+            "expected exactly 1 CDATA open for 1 param"
+        );
+        assert_eq!(
+            body_str.matches("]]>").count(),
+            1,
+            "expected exactly 1 CDATA close for 1 param"
+        );
+    }
+
+    #[test]
+    fn json_unicode_escape_payload_parses_as_valid_json() {
+        // Every JsonUnicodeEscape variant body must parse as strict JSON.
+        let payloads = [
+            ("k".to_string(), "' OR 1=1--".to_string()),
+            ("k".to_string(), "<script>alert(1)</script>".to_string()),
+            ("k".to_string(), "\"quoted\"".to_string()),
+            ("k".to_string(), "back\\slash".to_string()),
+        ];
+        for (key, val) in &payloads {
+            let params = vec![(key.clone(), val.clone())];
+            let variants = generate_variants(&params);
+            let json_var = variants
+                .iter()
+                .find(|v| v.technique == crate::content_type::ContentTypeTechnique::JsonUnicodeEscape)
+                .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&json_var.body)
+                .unwrap_or_else(|e| panic!("JsonUnicodeEscape body is not valid JSON for val={val:?}: {e}"));
+        }
+    }
+
+    #[test]
+    fn multipart_round_trip_field_names_present() {
+        let params = vec![
+            ("username".to_string(), "admin".to_string()),
+            ("token".to_string(), "abc123".to_string()),
+        ];
+        let variants = generate_variants(&params);
+        let mp = variants
+            .iter()
+            .find(|v| v.technique == crate::content_type::ContentTypeTechnique::Multipart)
+            .unwrap();
+        let body_str = String::from_utf8_lossy(&mp.body);
+        assert!(body_str.contains(r#"name="username""#));
+        assert!(body_str.contains(r#"name="token""#));
+        assert!(body_str.contains("admin"));
+        assert!(body_str.contains("abc123"));
+    }
+
+    #[test]
+    fn content_type_sniffing_malformed_headers_no_panic() {
+        // Malformed Content-Type strings in generate_variants_from_body should
+        // not panic — they just produce no variants.
+        let bodies: &[&[u8]] = &[
+            b"",
+            b"plain text with no equals",
+            b"\x80\x81\x82", // invalid UTF-8
+            b"a=b", // minimal valid
+        ];
+        for body in bodies {
+            let _ = crate::content_type::generate_variants_from_body(body);
+        }
+        // If we reached here without panicking, the test passes.
+    }
+
+    #[test]
+    fn xml_safe_name_xml_prefix_shifted() {
+        // Names starting with "xml" (any case) are reserved; the sanitiser
+        // must prepend '_' to avoid producing a reserved name.
+        assert!(xml_safe_name("xml_field").starts_with('_'));
+        assert!(xml_safe_name("XML_FIELD").starts_with('_'));
+        assert!(xml_safe_name("XmL").starts_with('_'));
+    }
+
+    #[test]
+    fn xml_safe_name_valid_names_pass_through() {
+        assert_eq!(xml_safe_name("myField"), "myField");
+        assert_eq!(xml_safe_name("_private"), "_private");
+        assert_eq!(xml_safe_name("field123"), "field123");
+    }
+
+    #[test]
+    fn generate_variants_from_body_valid_form_generates_all_techniques() {
+        let body = b"user=admin&pass=secret";
+        let variants = crate::content_type::generate_variants_from_body(body);
+        assert!(variants.len() >= 10, "expected >= 10 variants, got {}", variants.len());
+        // Check all major techniques are present.
+        use crate::content_type::ContentTypeTechnique;
+        let techniques: Vec<_> = variants.iter().map(|v| &v.technique).collect();
+        assert!(techniques.contains(&&ContentTypeTechnique::Multipart));
+        assert!(techniques.contains(&&ContentTypeTechnique::JsonUnicodeEscape));
+        assert!(techniques.contains(&&ContentTypeTechnique::XmlCdata));
+    }
 }

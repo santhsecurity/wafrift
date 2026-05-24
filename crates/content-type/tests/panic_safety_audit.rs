@@ -140,8 +140,14 @@ fn content_type_transforms_survive_adversarial_corpus() {
         );
 
         // Round-trip: parsed params back through generate_variants.
-        let parsed = std::panic::catch_unwind(AssertUnwindSafe(|| parse_form_body(&bytes)))
-            .unwrap_or_default();
+        // `parse_form_body` now returns `Result`; unwrap both the
+        // catch_unwind outer layer and the inner Result so we get a
+        // `Vec<(String, String)>` that `generate_variants` expects.
+        let parsed: Vec<(String, String)> =
+            std::panic::catch_unwind(AssertUnwindSafe(|| parse_form_body(&bytes)))
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or_default();
         guard(&format!("generate_variants[{label}]"), &mut || {
             let _ = generate_variants(&parsed);
         });
@@ -308,7 +314,7 @@ mod fuzz {
 
         #[test]
         fn arbitrary_body_bytes_panic_free(bytes in prop::collection::vec(any::<u8>(), 0..4096)) {
-            let parsed = parse_form_body(&bytes);
+            let parsed = parse_form_body(&bytes).unwrap_or_default();
             let _ = generate_variants(&parsed);
             let out = generate_variants_from_body(&bytes);
             prop_assert!(
