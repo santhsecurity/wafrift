@@ -675,9 +675,15 @@ pub fn classify_with_status(
 /// Status codes where a body-keyword match plausibly means "this is
 /// a challenge response". Anything 2xx/3xx is by definition NOT a
 /// challenge — the upstream let the request through.
+///
+/// `401` is included because AWS WAF Challenge action and some
+/// Akamai Bot Manager configurations issue challenge tokens on
+/// 401 (with `WWW-Authenticate: x-amzn-waf-action=challenge` or
+/// an `aws-waf-token` / `_abck` body). The body-keyword guard in
+/// `classify_inner` still excludes benign 401 Basic-Auth flows.
 #[must_use]
 fn is_challenge_status(status: u16) -> bool {
-    matches!(status, 403 | 429 | 503) || (500..=599).contains(&status)
+    matches!(status, 401 | 403 | 429 | 503) || (500..=599).contains(&status)
 }
 
 fn classify_inner(body: &[u8], headers: &[(String, String)]) -> ChallengeKind {
@@ -1142,6 +1148,33 @@ mod tests {
         assert_eq!(
             classify_with_status(body, &[], 403),
             ChallengeKind::Hcaptcha
+        );
+    }
+
+    #[test]
+    fn classify_aws_waf_on_401_is_recognised() {
+        // AWS WAF Challenge action issues tokens on 401. Pre-fix
+        // is_challenge_status didn't include 401, so the status
+        // guard short-circuited to Unknown and the cookie-replay
+        // loop never fired.
+        let body = b"<html><body>blocked: see aws-waf-token</body></html>";
+        assert_eq!(
+            classify_with_status(body, &[], 401),
+            ChallengeKind::AwsWaf,
+            "401 with aws-waf-token body must classify as AwsWaf"
+        );
+    }
+
+    #[test]
+    fn classify_benign_401_basic_auth_stays_unknown() {
+        // The status-guard widening must not produce false
+        // positives — a plain 401 Basic-Auth response with no
+        // challenge keywords in body still classifies as Unknown.
+        let body = b"Unauthorized";
+        let headers = vec![("WWW-Authenticate".into(), "Basic realm=\"x\"".into())];
+        assert_eq!(
+            classify_with_status(body, &headers, 401),
+            ChallengeKind::Unknown
         );
     }
 
