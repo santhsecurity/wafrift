@@ -61,13 +61,17 @@ tokio-rustls = { workspace = true }
 webpki-roots = { workspace = true }
 
 # Santh-owned differential response analysis primitive.
-# Replaces per-command hand-rolled body-delta + severity classification
-# in the 11-cmd parser-diff family (parser-/header-/body-/query-/cache-
-# /h2-/method-/gql-/jwt-/cors-/trailer-diff). One shared
-# ResponseSnapshot + compare_responses + DiffPolicy means a fix to the
-# classification logic reaches every subcommand in one edit.
-# crates.io 0.2.0 (santhsecurity org).
-respdiff = "=0.2.0"
+# Backs `parser_diff_common::{body_delta_pct, severity_of, status_class}`
+# via thin local wrappers — every parser-diff subcommand
+# (parser-/header-/body-/query-/cache-/h2-/method-/gql-/jwt-/cors-
+# /trailer-diff) ends up grading divergence through the same upstream
+# `respdiff::classify_severity`, so a fix to the classification logic
+# reaches every subcommand in one edit AND propagates across the rest
+# of Santh's scanner family.
+# v0.3.0 added DiffSeverity + classify_severity + body_size_delta_pct
+# + saturating timing arithmetic + RFC 9110 §5.2 header folding.
+# crates.io 0.3.0 (santhsecurity org).
+respdiff = "=0.3.0"
 
 # Santh-owned HTTP error classification + target-error modelling.
 # Used for app-error / SQL-syntax / JSON-parse / missing-property insight
