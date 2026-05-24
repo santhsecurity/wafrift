@@ -134,11 +134,23 @@ export default {
             const to = url.searchParams.get('to') ?? '';
             // Only allow same-zone https targets so this Worker
             // can't be turned into a generic open redirect.
+            // F133: pre-fix used `dest.hostname.endsWith(url.hostname)`
+            // which is a string-suffix check — `attackerexample.com`
+            // ends with `example.com`, `evil-wafrift-bench.acct.
+            // workers.dev` ends with `wafrift-bench.acct.workers.dev`.
+            // The "same-zone" guard accepted foreign hosts as long as
+            // their name string ended with the Worker's hostname,
+            // breaking the bench's isolation invariant. Allow only
+            // the exact host OR a true subdomain (boundary at `.`).
             try {
                 const dest = new URL(to);
+                const sameHost = dest.hostname === url.hostname;
+                const trueSubdomain =
+                    dest.hostname.endsWith('.' + url.hostname) &&
+                    dest.hostname.length > url.hostname.length + 1;
                 if (
                     dest.protocol !== 'https:' ||
-                    !dest.hostname.endsWith(url.hostname)
+                    !(sameHost || trueSubdomain)
                 ) {
                     return json({ error: 'cross-origin redirect refused' }, 400);
                 }
