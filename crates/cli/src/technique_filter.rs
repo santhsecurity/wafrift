@@ -92,14 +92,18 @@ impl TechniqueFilter {
                 bad.join(", ")
             ));
         }
-        // Contradiction guard (dogfood B7): a selector appearing in
-        // BOTH --only and --exclude — or where a `--only` selector is
-        // a sub-path of an `--exclude` selector — produces zero
-        // techniques and previously failed silently with "(no
-        // techniques considered)". Fail loudly instead.
+        // Contradiction guard (dogfood B7): a real contradiction is
+        // when an `--exclude` selector COVERS (is ancestor of or
+        // equal to) an `--only` selector — that drowns the only
+        // and yields zero variants. `--only encoding/url
+        // --exclude encoding/url/triple` is NOT a contradiction:
+        // only is the ancestor, exclude just trims one leaf.
+        // Previously we caught both directions, which rejected the
+        // legitimate "include this subtree EXCEPT one leaf" compose
+        // pattern.
         let overlap: Vec<_> = only
             .iter()
-            .filter(|o| exclude.iter().any(|e| matches(e, o) || matches(o, e)))
+            .filter(|o| exclude.iter().any(|e| matches(e, o)))
             .cloned()
             .collect();
         if !overlap.is_empty() {
@@ -289,6 +293,26 @@ mod tests {
         assert!(f.allows_strategy(Strategy::UrlEncode));
         assert!(f.allows_strategy(Strategy::DoubleUrlEncode));
         assert!(!f.allows_strategy(Strategy::TripleUrlEncode));
+    }
+
+    #[test]
+    fn exclude_swallowing_only_still_errors() {
+        // --only encoding/url/double + --exclude encoding/url should
+        // still fail: exclude is the ancestor and drowns only.
+        let err = TechniqueFilter::parse(
+            &["encoding/url/double".into()],
+            &["encoding/url".into()],
+        )
+        .expect_err("rejected");
+        assert!(err.contains("contradictory"), "got: {err}");
+    }
+
+    #[test]
+    fn exact_match_in_both_lists_still_errors() {
+        let err =
+            TechniqueFilter::parse(&["encoding/url".into()], &["encoding/url".into()])
+                .expect_err("rejected");
+        assert!(err.contains("contradictory"), "got: {err}");
     }
 
     #[test]
