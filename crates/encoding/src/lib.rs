@@ -60,3 +60,9 @@ pub use tamper::{
 };
 
 pub mod contextual;
+
+/// Unified catalog of every attack-payload library — one call
+/// returns all 18+ vuln-class fan-outs. The single registry consumers
+/// (scan, model-evade, bench, hunt) hit to reach every shipped
+/// attack surface.
+pub mod payload_catalog;
