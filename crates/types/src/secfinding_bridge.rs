@@ -144,15 +144,26 @@ fn verdict_tag(v: &Verdict) -> &'static str {
 /// match against them.
 pub fn technique_tag(t: &Technique) -> String {
     // Technique is a large enum with many variants; we encode each
-    // via its Debug repr lower-cased and snake_cased so adding a new
-    // technique upstream is automatically routable here. Heavier
-    // hand-mapping can replace this once we want richer dashboards.
+    // via its Debug repr lower-cased and kebab-cased. The variant
+    // name is the only stable part of the Debug repr — any payload
+    // (tuple or struct fields) comes after the first `(` or `{` and
+    // MUST be excluded from the tag so tags remain stable regardless
+    // of what string the caller put inside.
+    //
+    // Bug (pre-fix): the loop broke only on `' '` (the separator
+    // before struct-variant fields, e.g. `MlEvasion { .. }`), so
+    // tuple variants like `HeaderObfuscation("case-mixing")` bled
+    // their payload into the tag — changing tag value with every
+    // different string argument and breaking downstream filters.
     let raw = format!("{t:?}");
     let mut out = String::with_capacity(raw.len() + 9);
     out.push_str("technique-");
     let mut prev_upper = false;
     for (i, c) in raw.chars().enumerate() {
-        if c == ' ' {
+        // Stop at the first payload delimiter: struct `{`, tuple `(`
+        // or whitespace ` `. Everything after is field content, not
+        // the variant name.
+        if c == ' ' || c == '(' || c == '{' {
             break;
         }
         if c.is_ascii_uppercase() {
@@ -445,5 +456,100 @@ mod tests {
             block_reason_tag(&BlockReason::CustomBlockPage("acme".to_string())),
             "block-page-match"
         );
+    }
+
+    // ── technique_tag payload-bleed regression ────────────────────
+    //
+    // Pre-fix: the loop only stopped on ' ' (struct-variant delimiter).
+    // Tuple variants like HeaderObfuscation("x") would bleed their
+    // payload string into the tag, making tags non-stable and different
+    // for every unique argument string.
+
+    #[test]
+    fn technique_tag_tuple_variant_does_not_bleed_payload() {
+        // HeaderObfuscation holds a String; the tag must be
+        // "technique-header-obfuscation" regardless of the payload.
+        let t1 = Technique::HeaderObfuscation("case-mixing".to_string());
+        let t2 = Technique::HeaderObfuscation("tab-separator".to_string());
+        assert_eq!(
+            technique_tag(&t1),
+            technique_tag(&t2),
+            "technique tag must not vary with the payload string"
+        );
+        assert_eq!(technique_tag(&t1), "technique-header-obfuscation");
+    }
+
+    #[test]
+    fn technique_tag_grammar_mutation_stable() {
+        let t1 = Technique::GrammarMutation("sql_tautology".to_string());
+        let t2 = Technique::GrammarMutation("xss_polyglot".to_string());
+        assert_eq!(technique_tag(&t1), technique_tag(&t2));
+        assert_eq!(technique_tag(&t1), "technique-grammar-mutation");
+    }
+
+    #[test]
+    fn technique_tag_payload_encoding_stable() {
+        let t1 = Technique::PayloadEncoding("UrlEncode".to_string());
+        let t2 = Technique::PayloadEncoding("HexEncode".to_string());
+        assert_eq!(technique_tag(&t1), technique_tag(&t2));
+        assert_eq!(technique_tag(&t1), "technique-payload-encoding");
+    }
+
+    #[test]
+    fn technique_tag_content_type_switch_stable() {
+        let t = Technique::ContentTypeSwitch("form -> json".to_string());
+        assert_eq!(technique_tag(&t), "technique-content-type-switch");
+    }
+
+    #[test]
+    fn technique_tag_unit_variants() {
+        assert_eq!(
+            technique_tag(&Technique::BoundaryManipulation),
+            "technique-boundary-manipulation"
+        );
+        assert_eq!(
+            technique_tag(&Technique::JsonUnicodeEscape),
+            "technique-json-unicode-escape"
+        );
+        assert_eq!(
+            technique_tag(&Technique::UserAgentRotation),
+            "technique-user-agent-rotation"
+        );
+        assert_eq!(
+            technique_tag(&Technique::Http2Settings),
+            "technique-http2-settings"
+        );
+        assert_eq!(
+            technique_tag(&Technique::DifferentialProbe),
+            "technique-differential-probe"
+        );
+    }
+
+    #[test]
+    fn technique_tag_starts_with_technique_prefix_for_all_variants() {
+        let variants = [
+            Technique::PayloadEncoding("x".into()),
+            Technique::ContentTypeSwitch("y".into()),
+            Technique::HeaderObfuscation("z".into()),
+            Technique::GrammarMutation("w".into()),
+            Technique::RequestSmuggling("cl-te".into()),
+            Technique::H2Evasion("frame".into()),
+            Technique::TlsFingerprint("chrome".into()),
+            Technique::BodyPadding(1024),
+            Technique::BoundaryManipulation,
+            Technique::JsonUnicodeEscape,
+            Technique::UserAgentRotation,
+            Technique::Http2Settings,
+            Technique::DifferentialProbe,
+        ];
+        for t in &variants {
+            let tag = technique_tag(t);
+            assert!(
+                tag.starts_with("technique-"),
+                "tag `{tag}` must start with technique-"
+            );
+            // No spaces in tags — they must be valid kebab-case.
+            assert!(!tag.contains(' '), "tag `{tag}` must not contain spaces");
+        }
     }
 }
