@@ -179,15 +179,15 @@ pub fn mongo_query_pollute(prop: &str, value: &str) -> String {
 #[must_use]
 pub fn all_pollution_payloads(prop: &str, value: &str) -> Vec<(String, String)> {
     vec![
-        ("json-proto", json_proto_pollute(prop, value)),
-        ("json-constructor", json_constructor_pollute(prop, value)),
-        ("lodash-merge", lodash_merge_pollute(prop, value)),
-        ("qs-proto", querystring_proto_pollute(prop, value)),
-        ("qs-constructor", querystring_constructor_pollute(prop, value)),
-        ("express-qs", express_qs_pollute(prop, value)),
-        ("deep-merge-5", deep_merge_pollute(5, prop, value)),
-        ("comprehensive", comprehensive_proto_pollute(prop, value)),
-        ("mongo-where", mongo_query_pollute(prop, value)),
+        ("json-proto".to_string(), json_proto_pollute(prop, value)),
+        ("json-constructor".to_string(), json_constructor_pollute(prop, value)),
+        ("lodash-merge".to_string(), lodash_merge_pollute(prop, value)),
+        ("qs-proto".to_string(), querystring_proto_pollute(prop, value)),
+        ("qs-constructor".to_string(), querystring_constructor_pollute(prop, value)),
+        ("express-qs".to_string(), express_qs_pollute(prop, value)),
+        ("deep-merge-5".to_string(), deep_merge_pollute(5, prop, value)),
+        ("comprehensive".to_string(), comprehensive_proto_pollute(prop, value)),
+        ("mongo-where".to_string(), mongo_query_pollute(prop, value)),
     ]
 }
 

@@ -35,6 +35,7 @@ pub fn default_crs_ruleset() -> &'static str {
 }
 
 pub mod artifact;
+pub mod booster;
 pub mod canon;
 pub mod ensemble_dilution;
 pub mod equiv_bridge;
@@ -53,6 +54,7 @@ pub mod solve;
 pub mod transduce;
 
 pub use artifact::{LearnedModel, Provenance};
+pub use booster::WafBoosterScorer;
 pub use canon::{CanonView, Channel, Segment, canonicalize};
 pub use equiv_bridge::{norm_mismatch_members, sink_for_tag, solution_member};
 pub use equiv_query::{ChainedEq, PacBound, SampledEq, UcbBanditEq, WMethodEq};
