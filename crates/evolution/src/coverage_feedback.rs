@@ -157,6 +157,14 @@ impl RuleId {
     }
 }
 
+impl Default for RuleId {
+    /// Empty rule-id used as the zero value when a `RuleBucket` is constructed
+    /// without a known rule identifier (e.g. as the field default in `RuleBucket::default()`).
+    fn default() -> Self {
+        Self(String::new())
+    }
+}
+
 // ── Coverage tracker ─────────────────────────────────────────────────────────
 
 /// Accumulates `(payload, rule_id)` observations from live bench runs and
