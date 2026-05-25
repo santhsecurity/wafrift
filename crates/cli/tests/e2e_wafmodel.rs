@@ -89,3 +89,106 @@ fn audit_help_is_discoverable() {
     assert!(stdout.contains("--ruleset"));
     assert!(stdout.contains("--class"));
 }
+
+// ── harden --format json ──────────────────────────────────────────────────
+
+#[test]
+fn harden_json_format_produces_valid_json() {
+    let (stdout, _e, _code) = run(&["harden", "--class", "xss", "--format", "json"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).expect("harden --format json must emit valid JSON");
+    assert!(
+        v.get("all_proven").is_some(),
+        "JSON must have 'all_proven' key"
+    );
+    assert!(v.get("classes").is_some(), "JSON must have 'classes' key");
+    assert!(
+        v["classes"].is_array(),
+        "'classes' must be a JSON array"
+    );
+}
+
+#[test]
+fn harden_json_added_rules_have_correct_transform_array() {
+    let (stdout, _e, _code) = run(&["harden", "--class", "xss", "--format", "json"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).expect("must be valid JSON");
+    let classes = v["classes"].as_array().expect("classes is array");
+    for class in classes {
+        let rules = class["added_rules"].as_array().expect("added_rules is array");
+        for rule in rules {
+            let tf = rule["transforms"].as_array().expect("transforms must be an array");
+            assert!(
+                !tf.is_empty(),
+                "every added rule must have a non-empty transforms array"
+            );
+            // Double-decode rules have id ending in "-dbl" and must contain
+            // "UrlDecodeUni" twice.
+            let id = rule["id"].as_str().unwrap_or("");
+            if id.ends_with("-dbl") {
+                let url_decode_count = tf
+                    .iter()
+                    .filter(|t| t.as_str() == Some("UrlDecodeUni"))
+                    .count();
+                assert_eq!(
+                    url_decode_count, 2,
+                    "double-decode rule {id} must have UrlDecodeUni twice, got: {tf:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn harden_human_output_double_decode_toml_has_two_urldecodings() {
+    // The pre-fix bug: human TOML output hardcoded a single-decode transform
+    // list for ALL rules, even double-decode variants. After the fix, the
+    // TOML snippet for a "-dbl" rule must contain UrlDecodeUni twice.
+    let (stdout, _e, _code) = run(&["harden", "--class", "xss"]);
+    // Find blocks starting with [[rule]] and ending at the next blank line.
+    let mut in_dbl_rule = false;
+    let mut dbl_rule_transforms = String::new();
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[rule]]" {
+            in_dbl_rule = false;
+            dbl_rule_transforms.clear();
+        }
+        if trimmed.starts_with("id = ") && trimmed.contains("-dbl") {
+            in_dbl_rule = true;
+        }
+        if in_dbl_rule && trimmed.starts_with("transforms = ") {
+            dbl_rule_transforms = trimmed.to_string();
+        }
+    }
+    assert!(
+        !dbl_rule_transforms.is_empty(),
+        "must find at least one -dbl rule in harden xss output"
+    );
+    let count = dbl_rule_transforms.matches("UrlDecodeUni").count();
+    assert_eq!(
+        count, 2,
+        "double-decode rule TOML must list UrlDecodeUni twice; got: {dbl_rule_transforms}"
+    );
+}
+
+#[test]
+fn harden_help_shows_format_flag() {
+    let (stdout, _e, code) = run(&["harden", "--help"]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("--format"),
+        "harden --help must document --format flag"
+    );
+}
+
+#[test]
+fn audit_json_format_produces_valid_json() {
+    let (stdout, _e, code) = run(&["audit", "--class", "xss", "--format", "json"]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).expect("audit --format json must emit valid JSON");
+    assert!(v.get("total_holes").is_some(), "must have 'total_holes'");
+    assert!(v.get("holes").is_some(), "must have 'holes' array");
+    assert!(v.get("rules_loaded").is_some(), "must have 'rules_loaded'");
+}
