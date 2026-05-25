@@ -239,6 +239,30 @@ pub struct BenchWafArgs {
     /// Has no effect when targeting rule-based or ML-backed WAFs.
     #[arg(long, default_value_t = 0.0, value_parser = parse_dilution_weight)]
     pub dilution_weight: f64,
+
+    /// Path to write the per-rule bypass corpus on completion.
+    /// When set, the bench captures full response envelopes for
+    /// confirmed bypasses (via `send_with_envelope`), routes them
+    /// through `parse_cf_block` to derive the CF rule attribution
+    /// + edge POP, and persists to this path. Combine with
+    /// `--coverage-out` for the cross-region POP coverage map.
+    /// Omitting both flags keeps the legacy hot-path send() that
+    /// drops headers/body for slightly lower per-probe latency.
+    #[arg(long)]
+    pub corpus_out: Option<std::path::PathBuf>,
+
+    /// Path to write the edge-POP coverage map on completion.
+    /// See `--corpus-out`.
+    #[arg(long)]
+    pub coverage_out: Option<std::path::PathBuf>,
+
+    /// Target fingerprint string the corpus is keyed under.
+    /// Defaults to `bench:<base_url>` so each target gets a stable
+    /// per-target corpus. Operators recording against CumulusFire
+    /// can pass an explicit `cf:cumulusfire:<host>` so multiple
+    /// runs accumulate into one file.
+    #[arg(long, default_value = "")]
+    pub corpus_fingerprint: String,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
@@ -767,6 +791,41 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     let mut bypass_corpus: Option<BypassCorpus> =
         args.lineage_output.as_ref().map(|_| BypassCorpus::new());
 
+    // CorpusRecorder: collected when --corpus-out OR --coverage-out is set.
+    // Captures full response envelopes per probe so the per-rule bypass
+    // corpus + edge-POP coverage map can be populated end-to-end. Wrapped
+    // in Arc<Mutex<>> so it can cross await points without changing the
+    // strategy function signatures to async-bounded references.
+    let recorder: Option<std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>> =
+        if args.corpus_out.is_some() || args.coverage_out.is_some() {
+            let fingerprint = if args.corpus_fingerprint.is_empty() {
+                format!("bench:{}", base_url)
+            } else {
+                args.corpus_fingerprint.clone()
+            };
+            // Default to side-by-side paths if only one was set so we
+            // never write a half-state where corpus exists but coverage
+            // doesn't (or vice-versa).
+            let corpus_path = args
+                .corpus_out
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from("wafrift-corpus.json"));
+            let coverage_path = args
+                .coverage_out
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from("wafrift-coverage.json"));
+            Some(std::sync::Arc::new(std::sync::Mutex::new(
+                crate::corpus_recorder::CorpusRecorder::new(
+                    fingerprint,
+                    corpus_path,
+                    coverage_path,
+                    None,
+                ),
+            )))
+        } else {
+            None
+        };
+
     use std::sync::atomic::Ordering;
 
     for (idx, case) in cases.iter().enumerate() {
@@ -803,7 +862,17 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
         };
 
         let evaded = if args.evade {
-            Some(run_evade(&client, case, &base_url, &args, &mut bypass_corpus).await?)
+            Some(
+                run_evade(
+                    &client,
+                    case,
+                    &base_url,
+                    &args,
+                    &mut bypass_corpus,
+                    recorder.as_ref(),
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -835,6 +904,26 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
         }
     }
 
+    // Persist the per-rule bypass corpus + edge-POP coverage map if the
+    // operator asked for them via --corpus-out / --coverage-out. Same
+    // single-atomic-write pattern as the lineage corpus above.
+    if let Some(rec) = recorder.as_ref() {
+        match rec.lock() {
+            Ok(guard) => {
+                if let Err(e) = guard.flush() {
+                    eprintln!("warn: corpus flush failed: {e}");
+                } else {
+                    eprintln!(
+                        "wrote {} probes ({} novel bypasses) to corpus + coverage files",
+                        guard.probe_count(),
+                        guard.novel_bypass_count(),
+                    );
+                }
+            }
+            Err(e) => eprintln!("warn: corpus recorder poisoned: {e}"),
+        }
+    }
+
     emit_report(&base_url, &args, &results)?;
 
     // Exit code:
@@ -860,6 +949,7 @@ async fn run_evade(
     base_url: &str,
     args: &BenchWafArgs,
     bypass_corpus: &mut Option<BypassCorpus>,
+    recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
 ) -> Result<EvadeResult, String> {
     let mut by_strategy: BTreeMap<String, StrategyStat> = BTreeMap::new();
     let mut total = 0;
@@ -881,6 +971,7 @@ async fn run_evade(
                     &mut total,
                     &mut bypassed,
                     &mut bypass_techs,
+                    recorder,
                 )
                 .await
             }
@@ -1056,6 +1147,7 @@ async fn run_payload_strategy(
     total: &mut usize,
     bypassed: &mut usize,
     bypass_techs: &mut Vec<String>,
+    recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
     let Some(level) = pick_level(strat) else {
@@ -1080,8 +1172,68 @@ async fn run_payload_strategy(
         let req = build_request_for_payload(base_url, &case.mode, &variant.payload);
         stat.variants += 1;
         *total += 1;
-        match send(client, &req, args.timeout_secs).await {
-            Ok((status, blocked, _l)) => {
+        // When a recorder is wired, capture the full envelope so we can
+        // route headers + body through parse_cf_block → rule_corpus +
+        // edge_pop_coverage + h1_dedup. Without a recorder, drop straight
+        // to the legacy hot-path send() that throws headers away.
+        let probe_result = if let Some(rec) = recorder {
+            match crate::equiv_engine::send_with_envelope(client, &req, args.timeout_secs).await {
+                Ok(env) => {
+                    let is_bypass = verified_bypass(
+                        &case.class,
+                        &case.payload,
+                        &variant.payload,
+                        env.blocked,
+                        env.status,
+                    );
+                    let outcome = if is_bypass {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                    } else if env.blocked {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    } else {
+                        // Unverified-not-blocked: don't record — the oracle
+                        // wasn't certain and corpus dedup would treat this
+                        // as noise.
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Ambiguous
+                    };
+                    if matches!(
+                        outcome,
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                            | wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    ) {
+                        let chain: Vec<String> = variant
+                            .techniques
+                            .iter()
+                            .map(std::string::ToString::to_string)
+                            .collect();
+                        let class = wafrift_evolution::coverage_feedback::PayloadClass::new(
+                            &case.class,
+                        );
+                        if let Ok(mut guard) = rec.lock() {
+                            let _ = guard.record(
+                                &env,
+                                &variant.payload,
+                                class,
+                                chain,
+                                "direct",
+                                base_url,
+                                outcome,
+                            );
+                        }
+                    }
+                    Ok((env.status, env.blocked))
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            match send(client, &req, args.timeout_secs).await {
+                Ok((status, blocked, _l)) => Ok((status, blocked)),
+                Err(e) => Err(e),
+            }
+        };
+
+        match probe_result {
+            Ok((status, blocked)) => {
                 if verified_bypass(
                     &case.class,
                     &case.payload,

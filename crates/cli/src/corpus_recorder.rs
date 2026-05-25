@@ -40,19 +40,13 @@ use crate::equiv_engine::ProbeEnvelope;
 /// Accumulate probe results from bench/hunt loops and persist them to
 /// the rule-bypass corpus + edge-POP coverage maps on disk.
 ///
-/// # Wiring status
+/// # Production callers
 ///
-/// The struct is fully implemented and used by `wafrift corpus stats`
-/// (read-only inspection path, via `corpus_cmd::run_stats`).
-///
-/// The WRITE path (calling [`CorpusRecorder::record`] per probe inside
-/// the bench-waf loop) requires `bench_waf` to expose a per-probe
-/// callback that passes the full [`ProbeEnvelope`]. That per-probe hook
-/// lands in the next bench_waf refactor. Until then, `record` and
-/// `flush` are compiled but not called from production code — the
-/// `#[allow(dead_code)]` on those individual methods below is explicit
-/// about exactly which methods are pending call sites rather than
-/// suppressing the entire impl block.
+/// - `wafrift corpus stats` (read-only inspection, via [`crate::corpus_cmd::run_stats`])
+///   constructs via [`Self::new`] and reads via [`Self::corpus`] / [`Self::coverage`].
+/// - `wafrift bench-waf --corpus-out <PATH>` (write path, via
+///   [`crate::bench_waf::run_payload_strategy`]) calls [`Self::record`]
+///   per probe and [`Self::flush`] once at end of run.
 pub struct CorpusRecorder {
     /// Per-rule bypass / block corpus.
     corpus: RuleBypassCorpus,
@@ -71,7 +65,6 @@ pub struct CorpusRecorder {
     novel_bypass_count: u64,
 }
 
-#[allow(dead_code)]
 impl CorpusRecorder {
     /// Create a recorder bound to the given target fingerprint and
     /// output paths. Loads any existing corpus / coverage / archive
@@ -178,9 +171,9 @@ impl CorpusRecorder {
     }
 }
 
-/// FNV-1a 64-bit hash of a byte slice.
-// Used by CorpusRecorder::record (pending bench_waf per-probe hook wiring).
-#[allow(dead_code)]
+/// FNV-1a 64-bit hash of a byte slice — used by
+/// [`CorpusRecorder::record`] to derive a stable response-body
+/// fingerprint for corpus dedup of near-identical "blocked" pages.
 fn fnv1a_64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
     for &b in bytes {

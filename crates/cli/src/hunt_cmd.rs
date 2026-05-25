@@ -437,6 +437,9 @@ async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<Round
         mutator: "default".into(),
         seed: None,
         dilution_weight: 0.0,
+        corpus_out: None,
+        coverage_out: None,
+        corpus_fingerprint: String::new(),
     };
 
     // Capture stdout temporarily to intercept the bench JSON output.

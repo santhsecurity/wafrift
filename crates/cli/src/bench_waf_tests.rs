@@ -509,6 +509,9 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         mutator: "default".into(),
         seed: None,
         dilution_weight: 0.0,
+        corpus_out: None,
+        coverage_out: None,
+        corpus_fingerprint: String::new(),
     }
 }
 
