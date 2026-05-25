@@ -1077,6 +1077,35 @@ mod tests {
         }
     }
 
+    /// INVARIANT test: every byte in every needle for each class MUST
+    /// appear in the class's distinguished-symbol alphabet. Violation
+    /// means the KMP SFA maps that byte to the catch-all representative
+    /// (b'A') and can never advance the needle match — the needle becomes
+    /// silently unmatchable over the abstract alphabet. This is the exact
+    /// bug that existed in the sqli alphabet before the fix (uppercase
+    /// letters listed, lowercase needles).
+    #[test]
+    fn class_config_alphabet_covers_all_needle_bytes() {
+        for class in &["sqli", "xss", "all"] {
+            let (alpha, needles) = class_config(class);
+            let sym_count = alpha.catch_all();
+            let symbols = &alpha.raw_symbols()[..sym_count];
+            for needle in &needles {
+                for &byte in *needle {
+                    assert!(
+                        symbols.contains(&byte),
+                        "class={class}: needle byte {byte:?} ({:?}) not in distinguished \
+                         alphabet — it maps to catch-all and kmp_sfa cannot match it.\n\
+                         Needle: {:?}\nAlphabet: {:?}",
+                        byte as char,
+                        String::from_utf8_lossy(needle),
+                        symbols.iter().map(|b| *b as char).collect::<Vec<_>>(),
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn mine_bypasses_all_class_finds_both_sqli_and_xss() {
         // Use `minimal_bypass` (shortest_accepted with a seen-set, O(states)) to

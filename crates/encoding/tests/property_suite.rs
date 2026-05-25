@@ -430,7 +430,6 @@ proptest! {
     fn unicode_turkish_i_no_panic(s in ".*") {
         let a = unicode::turkish_i_encode(&s);
         let b = unicode::turkish_i_encode(&s);
-        prop_assert_eq!(a, b);
         // Every char that was `i` or `I` must now be a dotless variant.
         for (orig, enc) in s.chars().zip(a.chars()) {
             if orig == 'i' {
@@ -439,19 +438,20 @@ proptest! {
                 prop_assert_eq!(enc, '\u{0130}');
             }
         }
+        prop_assert_eq!(a, b);
     }
 
     #[test]
     fn unicode_sharp_s_no_panic(s in ".*") {
         let a = unicode::sharp_s_encode(&s);
         let b = unicode::sharp_s_encode(&s);
-        prop_assert_eq!(a, b);
         // Every `s` or `S` in the input must become ß (U+00DF).
         for (orig, enc) in s.chars().zip(a.chars()) {
             if orig == 's' || orig == 'S' {
                 prop_assert_eq!(enc, '\u{00DF}');
             }
         }
+        prop_assert_eq!(a, b);
     }
 
     // ── SQL evasion helpers ─────────────────────────────────────
