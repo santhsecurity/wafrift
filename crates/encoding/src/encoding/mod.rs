@@ -22,6 +22,12 @@
 pub mod invisible;
 /// Keyword manipulation strategies (case, whitespace, comments).
 pub mod keyword;
+/// Path-normalization differential encoders (dot-segment variants,
+/// percent-encoded slash/dot, double-encoded, Tomcat semicolon,
+/// IIS backslash, fullwidth slash, overlong UTF-8 dot). Each variant
+/// is RFC 3986 §5.2.4-equivalent to the same target — but most WAFs
+/// don't run that exact algorithm.
+pub mod path_norm;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
