@@ -115,6 +115,13 @@ pub mod cache_poison;
 /// duplicates, CSRF-bundled mass-assign, CRLF-in-form-value
 /// sub-field smuggling.
 pub mod mass_assignment;
+/// MongoDB NoSQL operator-injection payload library: `$ne`/`$gt`/
+/// `$lt`/`$regex` auth bypass, `$where` + `$function` + `$accumulator`
+/// JS evaluation, `$elemMatch` array-auth bypass, `$or` injection,
+/// projection injection, aggregation pipeline `$lookup` + `$out` +
+/// `$merge` write-injection, JS-string injection for stringified
+/// query contexts.
+pub mod mongo_nosqli;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
