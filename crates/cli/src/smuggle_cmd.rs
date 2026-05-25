@@ -64,11 +64,19 @@ pub struct SmuggleArgs {
     pub action: SmuggleAction,
 }
 
+#[derive(Args, Debug)]
+pub struct ListArgs {
+    /// Output format: `text` (default, human-readable table) or `json`
+    /// (structured array of variant objects — suitable for scripting).
+    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    pub format: String,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SmuggleAction {
     /// Enumerate the smuggling variants the engine ships, with
     /// their safety tier.
-    List,
+    List(ListArgs),
 
     /// Render the raw wire bytes of a smuggling payload without
     /// sending anything.
@@ -819,7 +827,7 @@ async fn run_probe(args: ProbeSmuggleArgs) -> ExitCode {
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_smuggle(args: SmuggleArgs) -> ExitCode {
     match args.action {
-        SmuggleAction::List => run_list("text"),
+        SmuggleAction::List(a) => run_list(&a.format),
         SmuggleAction::DryRun(a) => run_dry(a),
         SmuggleAction::Detect(a) => {
             let rt = match tokio::runtime::Builder::new_current_thread()
@@ -1109,6 +1117,15 @@ mod tests {
         let code = run_list("text");
         // Can't easily compare ExitCode to a literal in stable
         // Rust without Termination plumbing; the smoke is enough.
+        let _ = code;
+    }
+
+    #[test]
+    fn list_json_format_is_accepted_by_run_list() {
+        // Pre-fix: `wafrift smuggle list` had a hardcoded "text" and
+        // did not accept --format. Adding ListArgs enables JSON. This
+        // test pins the run_list("json") path doesn't panic.
+        let code = run_list("json");
         let _ = code;
     }
 

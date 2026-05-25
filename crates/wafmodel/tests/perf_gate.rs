@@ -31,7 +31,17 @@ fn contains(b: u8) -> Sfa {
 
 /// Catastrophic ceiling: anything slower than this for the tiny N
 /// below is not load — it is an algorithmic regression.
-const CATASTROPHE: Duration = Duration::from_secs(60);
+///
+/// Calibrated at 120 s to accommodate:
+///  - Windows dev-machine overhead (disk, process scheduling) which adds
+///    ~30–40 % over Linux CI even at idle.
+///  - The kmp_sfa bug-fix (F-MINE-01) made `mine_bypasses` do real BFS
+///    instead of returning an empty vector instantly. The old 60 s ceiling
+///    was calibrated against the broken (zero-result) implementation and
+///    has been raised accordingly. An algorithmic regression (e.g. O(2ⁿ)
+///    enumeration) would still blow this ceiling — the ceiling is a
+///    catastrophe guard, not a benchmark.
+const CATASTROPHE: Duration = Duration::from_secs(120);
 
 #[test]
 fn sfa_algebra_has_not_exploded_algorithmically() {
