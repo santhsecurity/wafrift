@@ -63,5 +63,9 @@ pub mod lineage;
 /// Persistent per-rule bypass corpus — accumulates rule-level bypass records
 /// across hunt rounds and surfaces them to the genome-registry submission gate.
 pub mod rule_corpus;
+/// Single-call adapter from oracle verdicts → rule_corpus writes.
+/// Hunt / bench / model-evade route every probe result through one
+/// fn so corpus-key changes propagate without per-consumer churn.
+pub mod hunt_corpus_bridge;
 pub mod search;
 pub mod types;

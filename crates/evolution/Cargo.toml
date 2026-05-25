@@ -32,6 +32,7 @@ toml = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+tempfile = { workspace = true }
 tokio-test = "0.4"
 wiremock = { workspace = true }
 tokio = { workspace = true }
