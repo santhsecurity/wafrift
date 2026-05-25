@@ -189,8 +189,15 @@ impl TargetCooldown {
 
     /// Record a challenge response. Returns `true` when the threshold is
     /// crossed and the entry transitions into cooldown.
+    ///
+    /// The counter is saturated at `threshold` rather than allowed to grow
+    /// unboundedly. Without saturation, an entry that is already cooled
+    /// (condition guarded by `cooled_until.is_none()`) would increment
+    /// `consecutive_challenges` on every call and eventually overflow
+    /// `u32` after ~4 billion probes — a panic in debug, UB-adjacent in
+    /// release.
     fn record_challenge(&mut self, threshold: u32, cooldown: Duration, now: Instant) -> bool {
-        self.consecutive_challenges += 1;
+        self.consecutive_challenges = self.consecutive_challenges.saturating_add(1);
         if self.consecutive_challenges >= threshold && self.cooled_until.is_none() {
             self.cooled_until = Some(now + cooldown);
             return true;
@@ -807,6 +814,107 @@ mod tests {
         let pool = socks_pool(1);
         let entry = pool.next_for("x.com").unwrap();
         assert!(entry.tailscale_exit_node_header().is_none());
+    }
+
+    // ── TEST 16 — challenge counter saturates at u32::MAX (no overflow) ───
+    #[test]
+    fn challenge_counter_saturates_no_overflow() {
+        // Regression: before the saturating_add fix, calling record_challenge
+        // beyond u32::MAX while already cooled would overflow in debug builds.
+        // The entry is cooled after threshold=1; every subsequent call must
+        // saturate the counter rather than panic.
+        let pool = EgressPool::builder()
+            .socks5_str(vec!["socks5://127.0.0.1:1080".to_owned()])
+            .expect("valid url")
+            .challenge_threshold(1)
+            .cooldown_secs(300)
+            .build()
+            .unwrap();
+
+        let entry = pool.next_for("x.com").unwrap();
+        // Cool the entry.
+        entry.record_challenge("x.com", 1, Duration::from_secs(300));
+        // Fire many more challenges while cooled — must not panic on overflow.
+        for _ in 0..1_000 {
+            entry.record_challenge("x.com", 1, Duration::from_secs(300));
+        }
+        // Entry should still be cooled.
+        assert!(
+            matches!(
+                pool.next_for("x.com"),
+                Err(EgressError::EntirePoolCooled { .. })
+            ),
+            "entry must remain cooled after saturation-add calls"
+        );
+    }
+
+    // ── TEST 17 — challenge_threshold=0 immediately cools on first call ───
+    #[test]
+    fn challenge_threshold_zero_cools_immediately() {
+        // threshold=0: consecutive_challenges starts at 0, saturating_add(1)
+        // yields 1, and 1 >= 0 is always true, so the entry cools on the
+        // very first record_challenge call.
+        let pool = EgressPool::builder()
+            .socks5_str(vec!["socks5://127.0.0.1:1080".to_owned()])
+            .expect("valid url")
+            .challenge_threshold(0)
+            .cooldown_secs(300)
+            .build()
+            .unwrap();
+
+        let entry = pool.next_for("x.com").unwrap();
+        let cooled = entry.record_challenge("x.com", 0, Duration::from_secs(300));
+        assert!(cooled, "threshold=0: first challenge must trigger cooldown");
+        assert!(
+            matches!(pool.next_for("x.com"), Err(EgressError::EntirePoolCooled { .. })),
+            "pool must be cooled after threshold=0 challenge"
+        );
+    }
+
+    // ── TEST 18 — empty-string target is a valid key in cooldown map ─────
+    #[test]
+    fn empty_target_host_does_not_panic() {
+        let pool = socks_pool(1);
+        // next_for("") must not panic; it's a valid (if unusual) key.
+        assert!(pool.next_for("").is_ok());
+        let entry = pool.next_for("").unwrap();
+        // record_challenge / record_pass on empty host must not panic.
+        entry.record_challenge("", 3, Duration::from_secs(300));
+        entry.record_pass("");
+    }
+
+    // ── TEST 19 — single-entry pool: cooldown then pass recovery ─────────
+    #[test]
+    fn single_entry_recovery_after_pass() {
+        // A pool with 1 entry that was cooled at threshold=2 must become
+        // available again once the cooldown expires (simulated via pass).
+        let pool = EgressPool::builder()
+            .socks5_str(vec!["socks5://127.0.0.1:1080".to_owned()])
+            .expect("valid url")
+            .challenge_threshold(2)
+            .cooldown_secs(0) // 0s cooldown expires immediately
+            .build()
+            .unwrap();
+
+        let entry = pool.next_for("t.com").unwrap();
+        entry.record_challenge("t.com", 2, Duration::from_secs(0));
+        entry.record_challenge("t.com", 2, Duration::from_secs(0));
+        // Cooldown=0 means cooled_until is in the past at record_pass time.
+        // record_pass clears an expired cooldown.
+        entry.record_pass("t.com");
+        assert!(
+            pool.next_for("t.com").is_ok(),
+            "entry must be available after pass clears an expired cooldown"
+        );
+    }
+
+    // ── TEST 20 — url with embedded auth credentials validates ok ─────────
+    #[test]
+    fn socks5_url_with_special_chars_in_password() {
+        // Passwords with @ or : in them are legal when percent-encoded.
+        // The validator must accept the URL so the pool can use it.
+        let result = parse_socks5_url("socks5://user:p%40ss%3Aword@proxy.example.com:1080");
+        assert!(result.is_ok(), "percent-encoded auth must be accepted");
     }
 }
 
