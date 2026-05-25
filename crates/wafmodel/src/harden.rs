@@ -12,7 +12,7 @@
 
 use crate::learn::Alphabet;
 use crate::mine::attack_grammar;
-use crate::normalize::Transform;
+use crate::normalize::{self, Transform};
 use crate::oracle::{ChannelSet, Rule, SimRegexWaf};
 use crate::outcome::Outcome;
 use crate::sfa::Sfa;
@@ -100,11 +100,18 @@ pub fn synthesize_closure(
     ];
     let mut added = Vec::new();
     for n in needles {
-        let lc: Vec<u8> = n.iter().map(u8::to_ascii_lowercase).collect();
-        let pat = regex::escape(&String::from_utf8_lossy(&lc));
+        // Build the pattern on the DECODED form of the needle, not the raw
+        // needle bytes. The synthesized rule applies `tf` to the request body
+        // before testing the pattern — so the pattern must match what the body
+        // looks like AFTER that transform chain, i.e. the decoded/lowercased
+        // needle. Without this, a rule for needle `%3cx` would search for the
+        // literal string `%3cx` in a body that has already been URL-decoded to
+        // `<x` — the pattern can never match and the hole remains open.
+        let decoded = normalize::apply_chain(&tf, n);
+        let pat = regex::escape(&String::from_utf8_lossy(&decoded));
         if let Ok(re) = Regex::new(&pat) {
             added.push(Rule {
-                id: format!("synth-close-{}", String::from_utf8_lossy(&lc)),
+                id: format!("synth-close-{}", String::from_utf8_lossy(&decoded)),
                 channels,
                 transforms: tf.clone(),
                 pattern: re,
