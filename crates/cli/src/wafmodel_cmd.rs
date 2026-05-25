@@ -474,7 +474,7 @@ mod tests {
             class: "all".into(),
             format: "human".into(),
         };
-        assert_eq!(u8::from(run_audit(args)), 0);
+        assert_eq!(run_audit_inner(args), 0);
     }
 
     /// `--format json` must produce valid JSON with the expected top-level
@@ -485,7 +485,7 @@ mod tests {
         // classify_pass — we can't easily redirect stdout in a unit test,
         // so instead we test the JSON blob that run_audit would build.
         // Construct it the same way run_audit does.
-        use wafrift_wafmodel::{WafOracle, default_crs_ruleset};
+        use wafrift_wafmodel::default_crs_ruleset;
         let mut waf = SimRegexWaf::from_toml(default_crs_ruleset()).unwrap();
         let mut holes_json: Vec<serde_json::Value> = Vec::new();
         let mut total_holes = 0usize;
@@ -553,22 +553,22 @@ mod tests {
 
     #[test]
     fn harden_xss_only_proves_closure() {
-        let code = run_harden(HardenArgs {
+        let code = run_harden_inner(HardenArgs {
             ruleset: None,
             class: "xss".into(),
             format: "human".into(),
         });
-        assert_eq!(u8::from(code), 0);
+        assert_eq!(code, 0);
     }
 
     #[test]
     fn harden_sqli_only_proves_closure() {
-        let code = run_harden(HardenArgs {
+        let code = run_harden_inner(HardenArgs {
             ruleset: None,
             class: "sqli".into(),
             format: "human".into(),
         });
-        assert_eq!(u8::from(code), 0);
+        assert_eq!(code, 0);
     }
 
     /// JSON mode must produce valid JSON with the expected keys and the

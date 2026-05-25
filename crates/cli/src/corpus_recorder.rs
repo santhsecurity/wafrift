@@ -37,20 +37,22 @@ use wafrift_oracle::cloudflare::parse_cf_block;
 
 use crate::equiv_engine::ProbeEnvelope;
 
-/// One probe record waiting to be flushed.
-///
-/// We accumulate these and write to disk in `flush()` rather than
-/// after every probe so the bench loop stays fast.
+/// Accumulate probe results from bench/hunt loops and persist them to
+/// the rule-bypass corpus + edge-POP coverage maps on disk.
 ///
 /// # Wiring status
 ///
-/// The struct is complete and tested. The production call site lives in
-/// bench_waf's per-probe loop (see `crates/cli/src/bench_waf.rs`). The
-/// connection requires bench_waf to expose a per-probe callback so the
-/// recorder can be called inside the loop — that per-probe hook is the
-/// next architectural step. Until then, suppress the "never constructed"
-/// lint here rather than in callers.
-#[allow(dead_code)]
+/// The struct is fully implemented and used by `wafrift corpus stats`
+/// (read-only inspection path, via `corpus_cmd::run_stats`).
+///
+/// The WRITE path (calling [`CorpusRecorder::record`] per probe inside
+/// the bench-waf loop) requires `bench_waf` to expose a per-probe
+/// callback that passes the full [`ProbeEnvelope`]. That per-probe hook
+/// lands in the next bench_waf refactor. Until then, `record` and
+/// `flush` are compiled but not called from production code — the
+/// `#[allow(dead_code)]` on those individual methods below is explicit
+/// about exactly which methods are pending call sites rather than
+/// suppressing the entire impl block.
 pub struct CorpusRecorder {
     /// Per-rule bypass / block corpus.
     corpus: RuleBypassCorpus,
