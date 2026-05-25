@@ -1995,6 +1995,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
+name = "guise"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tracing",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4532,6 +4540,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "santh-error"
+version = "0.1.0"
+dependencies = [
+ "regex",
+]
+
+[[package]]
+name = "santh-tracing"
+version = "0.1.0"
+dependencies = [
+ "santh-error",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "scanclient"
 version = "0.2.0"
 dependencies = [
@@ -4540,6 +4564,7 @@ dependencies = [
  "bogon",
  "bytes",
  "futures",
+ "guise",
  "hex",
  "hickory-resolver 0.25.2",
  "http",
@@ -5578,6 +5603,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5587,12 +5622,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]
@@ -5825,6 +5863,7 @@ dependencies = [
  "erroracle",
  "flate2",
  "futures-util",
+ "guise",
  "httpdate",
  "libc",
  "pocgen",
@@ -5834,6 +5873,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "respdiff",
+ "santh-tracing",
  "serde",
  "serde_json",
  "serial_test",
@@ -5947,6 +5987,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sqlparser",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
@@ -5961,6 +6002,7 @@ dependencies = [
 name = "wafrift-fingerprint"
 version = "0.2.21"
 dependencies = [
+ "guise",
  "proptest",
  "rand 0.8.5",
  "wafrift-detect",
@@ -5997,6 +6039,13 @@ dependencies = [
  "urlencoding",
  "wafrift-oracle",
  "wafrift-types",
+]
+
+[[package]]
+name = "wafrift-graphql"
+version = "0.2.21"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -6070,6 +6119,7 @@ dependencies = [
  "wafrift-detect",
  "wafrift-encoding",
  "wafrift-evolution",
+ "wafrift-oracle",
  "wafrift-strategy",
  "wafrift-transport",
  "wafrift-types",
@@ -6145,6 +6195,7 @@ dependencies = [
  "http",
  "proptest",
  "psl",
+ "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
  "rquest",

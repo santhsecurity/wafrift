@@ -48,6 +48,7 @@ rquest-util = { workspace = true, optional = true }
 # Also pulled in transitively by reqwest in default builds, so this
 # explicit declaration doesn't bloat anything.
 futures-util = { workspace = true, optional = true }
+rand = { workspace = true }
 # gossan-origin = { path = "../../../gossan/crates/origin", optional = true }
 
 [features]
