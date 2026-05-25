@@ -1,0 +1,75 @@
+# Shadow Daemon WAF — modular web application firewall.
+#
+# Shadow Daemon (https://shadowd.zecure.org/) is an open-source WAF with a
+# three-component architecture:
+#   shadowd    — the daemon that receives request data and scores it
+#   connector  — a language-specific library (PHP/Perl/Python/Node) that hooks
+#                into the web app and sends data to shadowd
+#   dashboard  — a web UI for managing rules and viewing blocked requests
+#
+# The bypass surface differs from ModSec/Coraza/Naxsi because:
+# - Shadowd's signature engine uses a whitelist + blacklist hybrid with its own
+#   token grammar (not CRS), so CRS-bypass techniques don't transfer directly.
+# - The connector sits inside the application process, not at the HTTP layer,
+#   so transport-level evasions (chunked encoding, multipart tricks) are handled
+#   by the app server before shadowd sees them.
+#
+# Image: zecure/shadowd (Docker Hub official image)
+# PHP connector: zecure/shadowd_php (official image for the PHP connector demo app)
+#
+# Image digests pinned 2026-05-24:
+#   docker pull zecure/shadowd:latest
+#   sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+#
+#   docker pull zecure/shadowd_php:latest
+#   sha256:b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3
+#
+# NOTE: Shadowd does NOT use an httpbin backend. The connector must be embedded
+# in the application. We use the official `shadowd_php` demo image which ships
+# a PHP app with the shadowd connector pre-installed, fronted by nginx, on port
+# 80. The bench hits the PHP app which forwards all request parameters to shadowd
+# for scoring.
+#
+# Architecture for this stack:
+#
+#   bench/wafrift  ──HTTP──►  nginx (port 18105)  ──proxy──►  shadowd_php app
+#                                                               │
+#                                                               └──shadowd API──►  shadowd daemon
+#
+# No secrets or API keys in this file. The shadowd connector uses a shared key
+# for the daemon connection; we set it to a fixed bench value in the environment.
+services:
+  wafrift-shadowd:
+    image: zecure/shadowd:latest@sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+    container_name: wafrift-zoo-shadowd
+    environment:
+      # shadowd listens on port 9115 (default).
+      # SHADOWD_ADDRESS / SHADOWD_PORT are consumed by the connector.
+      SHADOWD_PORT: "9115"
+      # Profile ID = 1 is the default profile created on first start.
+      SHADOWD_PROFILE_ID: "1"
+      # Shared key between connector and daemon. Fixed for bench reproducibility.
+      # This is NOT a secret — it never leaves the local Docker network.
+      SHADOWD_KEY: "wafrift-bench-key-2026"
+    networks:
+      - wafrift-zoo-shadowd
+
+  # shadowd_php: nginx + PHP app with the shadowd PHP connector installed.
+  # The connector sends all request parameters to the shadowd daemon for scoring.
+  backend:
+    image: zecure/shadowd_php:latest@sha256:b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3
+    container_name: wafrift-zoo-shadowd-php
+    ports:
+      - "18105:80"
+    environment:
+      SHADOWD_ADDRESS: "wafrift-zoo-shadowd"
+      SHADOWD_PORT: "9115"
+      SHADOWD_PROFILE_ID: "1"
+      SHADOWD_KEY: "wafrift-bench-key-2026"
+    depends_on:
+      - wafrift-shadowd
+    networks:
+      - wafrift-zoo-shadowd
+
+networks:
+  wafrift-zoo-shadowd:

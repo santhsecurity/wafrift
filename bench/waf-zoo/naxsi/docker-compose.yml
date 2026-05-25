@@ -1,0 +1,43 @@
+# Naxsi WAF — positive-security-model WAF for nginx.
+#
+# Naxsi (Nginx Anti XSS & SQL Injection) uses a whitelist / score-accumulation
+# model rather than CRS-style negative-security matching. This means its bypass
+# landscape is fundamentally different: techniques that evade CRS regex matching
+# often fail against Naxsi's character-class scoring, while some CRS-resistant
+# payloads score below Naxsi's thresholds.
+#
+# Maintainer: https://github.com/wargio/naxsi (wargio fork, the active one)
+# No official published Docker image exists. We build from source at pinned tag.
+#
+# Pinned versions (2026-05-24):
+#   nginx  1.27.4  — https://nginx.org/download/nginx-1.27.4.tar.gz
+#   naxsi  1.6     — https://github.com/wargio/naxsi/releases/tag/1.6
+#
+# This stack reuses the same Dockerfile + config pattern as
+# wafrift-bench/targets/naxsi but with a distinct container name prefix
+# (wafrift-zoo-naxsi) so both stacks can run simultaneously without conflict.
+services:
+  wafrift-zoo-naxsi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NGINX_VERSION: "1.27.4"
+        NAXSI_VERSION: "1.6"
+    image: wafrift/zoo-naxsi:1.27.4-1.6
+    container_name: wafrift-zoo-naxsi
+    ports:
+      - "18104:8080"
+    depends_on:
+      - backend
+    networks:
+      - wafrift-zoo-naxsi
+
+  backend:
+    image: kennethreitz/httpbin@sha256:5ad97f3e37d66f03c29a0cb27e6e17eefc7a5ceed1dc40e8f84e6a4d1d5e8c3b
+    container_name: wafrift-zoo-naxsi-backend
+    networks:
+      - wafrift-zoo-naxsi
+
+networks:
+  wafrift-zoo-naxsi:
