@@ -576,7 +576,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(msg) = validate_args(&args) {
         eprintln!("{msg}");
         error!("{msg}");
-        std::process::exit(1);
+        return Err(msg.into());
     }
 
     if let Some(dir) = &args.write_mitm_ca_dir {
@@ -604,7 +604,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  (no $HOME / dirs::config_dir on this OS). Pass --mitm-ca-dir \
                  explicitly or unset --mitm."
             );
-            std::process::exit(1);
+            return Err("cannot determine home directory for MITM CA storage".into());
         };
         info!(
             "No --mitm-ca-dir specified; using default: {}",
@@ -645,15 +645,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let addr: SocketAddr = args.listen.parse().unwrap_or_else(|e| {
+    let addr: SocketAddr = args.listen.parse().map_err(|e| {
         error!("--listen must be a valid socket address (e.g. 127.0.0.1:8080, [::1]:8080), got '{}': {}", args.listen, e);
-        std::process::exit(1);
-    });
+        format!("invalid --listen address: {e}")
+    })?;
 
-    let listener = TcpListener::bind(addr).await.unwrap_or_else(|e| {
+    let listener = TcpListener::bind(addr).await.map_err(|e| {
         error!("Failed to bind to {addr}: {e}");
-        std::process::exit(1);
-    });
+        format!("failed to bind to {addr}: {e}")
+    })?;
     info!("Listening on http://{}", addr);
     let expose_wafrift_status = addr.ip().is_loopback();
     if !expose_wafrift_status {
@@ -674,7 +674,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  If you really want this (lab-only), bind to a loopback address and front-end with your own ACL'd reverse proxy.",
                 addr
             );
-            std::process::exit(1);
+            return Err(format!("--mitm refused on non-loopback address {addr}").into());
         }
     }
 
@@ -754,7 +754,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(p) => p,
             Err(e) => {
                 error!("--tls-impersonate: {}", e);
-                std::process::exit(2);
+                return Err(format!("--tls-impersonate: {e}").into());
             }
         };
         let client = match StealthClient::with_timeout(
@@ -768,7 +768,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     profile.name(),
                     e
                 );
-                std::process::exit(2);
+                return Err(format!("--tls-impersonate {}: {e}", profile.name()).into());
             }
         };
         if STEALTH_CLIENT.set(client).is_err() {
@@ -796,7 +796,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(p) => p,
                 Err(e) => {
                     error!("--tls-impersonate-rotate: {}", e);
-                    std::process::exit(2);
+                    return Err(format!("--tls-impersonate-rotate: {e}").into());
                 }
             };
             let c = match StealthClient::with_timeout(
@@ -810,7 +810,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         profile.name(),
                         e
                     );
-                    std::process::exit(2);
+                    return Err(format!("--tls-impersonate-rotate {}: {e}", profile.name()).into());
                 }
             };
             clients.push(c);
@@ -818,7 +818,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if clients.is_empty() {
             error!("--tls-impersonate-rotate: empty profile list after trimming");
-            std::process::exit(2);
+            return Err("--tls-impersonate-rotate: empty profile list".into());
         }
         let pool = StealthPool {
             clients,
@@ -932,10 +932,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Connection re-use disabled: every upstream forward opens a fresh TCP connection (new source port per request)"
         );
     }
-    let global_client = client_builder.build().unwrap_or_else(|e| {
+    let global_client = client_builder.build().map_err(|e| {
         error!("reqwest client build failed: {e}");
-        std::process::exit(1);
-    });
+        format!("reqwest client build failed: {e}")
+    })?;
     let limits = Arc::new(ProxyLimits {
         max_upstream_response_bytes: args.max_upstream_response_bytes,
         max_evade_retries: args.max_evade_retries,
@@ -977,7 +977,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(l) => Some(Arc::new(l)),
             Err(e) => {
                 error!(dir = %dir.display(), error = %e, "failed to open log directory");
-                std::process::exit(1);
+                return Err(format!("failed to open log directory {}: {e}", dir.display()).into());
             }
         }
     } else {
