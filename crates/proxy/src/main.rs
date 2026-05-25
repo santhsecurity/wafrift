@@ -38,9 +38,9 @@ use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::rate_limit::RateLimiter;
 use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
-    BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed,
-    resolve_forward_url_pinned,
+    BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed, resolve_forward_url_pinned,
 };
+use wafrift_strategy::gene_bank::GeneBank;
 use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::{EvasionConfig, HostState};
 use wafrift_transport::signal::{BlockClass, ResponseProfileDb};
@@ -912,15 +912,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // redirect target — the AWS / Azure / GCP IMDS endpoints were one
     // attacker-controlled HTTP 302 away. Surface the redirect to the
     // downstream client and let IT decide whether to follow.
-    let mut client_builder = reqwest::Client::builder()
-        .danger_accept_invalid_certs(config.insecure_tls)
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(
-            wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
-        ))
-        .dns_resolver(Arc::new(BogonFilteringResolver {
-            policy: policy.clone(),
-        }));
+    let mut client_builder = wafrift_transport::base_client_builder(
+        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+        config.insecure_tls,
+        None,
+    )
+    .redirect(reqwest::redirect::Policy::none())
+    .dns_resolver(Arc::new(BogonFilteringResolver {
+        policy: policy.clone(),
+    }));
     if args.no_conn_reuse {
         // Force a fresh TCP connection per request. Kernel chooses a
         // new ephemeral source port each time, defeating per-source-
@@ -995,6 +995,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    let mut bg_tasks = tokio::task::JoinSet::new();
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
     // ── Persistent gene bank ────────────────────────────────────────
     let gene_bank_path = default_gene_bank_path(&args.gene_bank_path);
     if let Some(path) = &gene_bank_path {
@@ -1030,7 +1033,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let flush_path = path.clone();
             let flush_state = shared_state.clone();
             let interval = args.gene_bank_flush_interval_secs;
-            tokio::spawn(async move {
+            bg_tasks.spawn(async move {
                 let mut tick = tokio::time::interval(std::time::Duration::from_secs(interval));
                 tick.tick().await; // skip the immediate first tick
                 loop {
@@ -1076,8 +1079,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Graceful shutdown: SIGINT/SIGTERM flush gene bank then exit ──
     let shutdown_state = shared_state.clone();
     let shutdown_path = gene_bank_path.clone();
-    tokio::spawn(async move {
-        // Wait for a shutdown signal, then flush gene bank and exit.
+    let shutdown_tx_sig = shutdown_tx.clone();
+    bg_tasks.spawn(async move {
+        // Wait for a shutdown signal, then flush gene bank and signal shutdown.
         // Surface handler-setup failure instead of silently dropping the
         // shutdown task — a setup failure must leave a log line.
         #[cfg(unix)]
@@ -1122,7 +1126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         info!("shutting down");
-        std::process::exit(0);
+        let _ = shutdown_tx_sig.send(true);
     });
 
     // ── Optional TUI dashboard ──────────────────────────────────────
@@ -1153,7 +1157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (quit_tx, quit_rx) = tokio::sync::oneshot::channel();
             // Dashboard lives in a blocking-friendly task so it can do
             // its terminal I/O without starving the runtime.
-            tokio::spawn(async move {
+            bg_tasks.spawn(async move {
                 if let Err(e) = wafrift_proxy::tui::run(cfg, rx, quit_tx).await {
                     eprintln!("TUI exited with error: {e}");
                 }
@@ -1162,7 +1166,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // graceful shutdown on the same code path SIGINT uses.
             let quit_state = shared_state.clone();
             let quit_path = gene_bank_path.clone();
-            tokio::spawn(async move {
+            let shutdown_tx_tui = shutdown_tx.clone();
+            bg_tasks.spawn(async move {
                 if quit_rx.await.is_ok() {
                     if let Some(path) = &quit_path {
                         let st = quit_state.lock().await;
@@ -1170,7 +1175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             warn!(path = %path.display(), error = %e, "gene bank flush from TUI quit failed");
                         }
                     }
-                    std::process::exit(0);
+                    let _ = shutdown_tx_tui.send(true);
                 }
             });
         }
@@ -1181,61 +1186,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(p) => p,
             Err(_) => continue,
         };
-        let (stream, peer) = listener.accept().await?;
-        let io = TokioIo::new(stream);
-        let shared_state = shared_state.clone();
-        let config = config.clone();
-        let default_escalation = default_escalation.clone();
-        let client = global_client.clone();
-        let mitm_ca = mitm_ca.clone();
-        let policy = policy.clone();
-        let limits = limits.clone();
-        let scope = scope.clone();
-        let rate_limiter = rate_limiter.clone();
-        let response_profiles = response_profiles.clone();
-
-        // Per-connection peer-loopback gate for /_wafrift/status. The
-        // bind-address check (expose_wafrift_status) is necessary but
-        // not sufficient: a reverse proxy or socat fronting wafrift on
-        // loopback would otherwise leak host names and proven winners
-        // to external callers. Require BOTH bind AND peer to be
-        // loopback before exposing the status endpoint.
-        let expose_status_per_conn = expose_wafrift_status && peer.ip().is_loopback();
-
-        let logger = logger.clone();
-        tokio::task::spawn(async move {
-            let _permit = permit;
-            if let Err(err) = http1::Builder::new()
-                .preserve_header_case(true)
-                .title_case_headers(true)
-                .serve_connection(
-                    io,
-                    service_fn(move |req| {
-                        proxy(
-                            req,
-                            shared_state.clone(),
-                            config.clone(),
-                            default_escalation.clone(),
-                            client.clone(),
-                            mitm_enabled,
-                            mitm_ca.clone(),
-                            policy.clone(),
-                            limits.clone(),
-                            scope.clone(),
-                            rate_limiter.clone(),
-                            expose_status_per_conn,
-                            logger.clone(),
-                            response_profiles.clone(),
-                        )
-                    }),
-                )
-                .with_upgrades()
-                .await
-            {
-                warn!("failed to serve connection: {:?}", err);
+        tokio::select! {
+            biased;
+            _ = shutdown_rx.changed() => {
+                break;
             }
-        });
+            accept_result = listener.accept() => {
+                let (stream, peer) = accept_result?;
+                let io = TokioIo::new(stream);
+                let shared_state = shared_state.clone();
+                let config = config.clone();
+                let default_escalation = default_escalation.clone();
+                let client = global_client.clone();
+                let mitm_ca = mitm_ca.clone();
+                let policy = policy.clone();
+                let limits = limits.clone();
+                let scope = scope.clone();
+                let rate_limiter = rate_limiter.clone();
+                let response_profiles = response_profiles.clone();
+
+                // Per-connection peer-loopback gate for /_wafrift/status. The
+                // bind-address check (expose_wafrift_status) is necessary but
+                // not sufficient: a reverse proxy or socat fronting wafrift on
+                // loopback would otherwise leak host names and proven winners
+                // to external callers. Require BOTH bind AND peer to be
+                // loopback before exposing the status endpoint.
+                let expose_status_per_conn = expose_wafrift_status && peer.ip().is_loopback();
+
+                let logger = logger.clone();
+                tokio::task::spawn(async move {
+                    let _permit = permit;
+                    if let Err(err) = http1::Builder::new()
+                        .preserve_header_case(true)
+                        .title_case_headers(true)
+                        .serve_connection(
+                            io,
+                            service_fn(move |req| {
+                                proxy(
+                                    req,
+                                    shared_state.clone(),
+                                    config.clone(),
+                                    default_escalation.clone(),
+                                    client.clone(),
+                                    mitm_enabled,
+                                    mitm_ca.clone(),
+                                    policy.clone(),
+                                    limits.clone(),
+                                    scope.clone(),
+                                    rate_limiter.clone(),
+                                    expose_status_per_conn,
+                                    logger.clone(),
+                                    response_profiles.clone(),
+                                )
+                            }),
+                        )
+                        .with_upgrades()
+                        .await
+                    {
+                        warn!("failed to serve connection: {:?}", err);
+                    }
+                });
+            }
+        }
     }
+
+    bg_tasks.abort_all();
+    while let Some(res) = bg_tasks.join_next().await {
+        if res.is_err() {
+            warn!("background task panicked");
+        }
+    }
+
+    Ok(())
 }
 
 // header_value_to_string, split_url_for_mutation, error_response
@@ -1279,6 +1301,8 @@ async fn forward_with_evade_retry(
             Arc::clone(&policy),
             Arc::clone(&limits),
             Arc::clone(&response_profiles),
+            // 1-based: the first attempt reports `1`, not `0`.
+            u32::try_from(attempt).unwrap_or(u32::MAX).saturating_add(1),
         )
         .await?;
         let status = resp.status().as_u16();
@@ -1315,6 +1339,11 @@ async fn forward_wafrift_request(
     policy: Arc<UpstreamPolicy>,
     limits: Arc<ProxyLimits>,
     response_profiles: Arc<ResponseProfileDb>,
+    // 1-based attempt counter, threaded from
+    // `forward_with_evade_retry`. The TUI Event::Request reports
+    // this so the dashboard accurately shows how many retries
+    // landed each bypass instead of permanently showing 0.
+    attempt_idx: u32,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // Snapshot the state needed for evasion, then DROP the lock before
     // running evade() / evade_smart() — those calls do regex-heavy
@@ -1352,6 +1381,40 @@ async fn forward_wafrift_request(
             st.host_fifo.push_back(host.clone());
         }
         let hs = st.hosts.entry(host.clone()).or_default();
+
+        // H1: Cross-host seeding from WAF genome.
+        // When this is a brand-new host AND the gene bank already knows the
+        // WAF (from a prior restore or from the persisted waf_name on a
+        // sibling host), pre-populate proven_winners from the WAF genome
+        // so the proxy skips cold-start discovery entirely.
+        //
+        // Constraints:
+        //  - Sync GeneBank I/O inside the tokio::sync::Mutex is intentional:
+        //    the lock is held for a bounded read (one JSON file). No .await.
+        //  - Only fires once per host (is_new guard) and only when the winner
+        //    pool is still empty, so it never overwrites runtime-discovered data.
+        if is_new && hs.proven_winners.is_empty() {
+            if let Some(ref waf) = hs.waf_name.clone() {
+                if let Ok(mut bank) = GeneBank::open_default() {
+                    if let Some(genome) = bank.load(waf) {
+                        // class is unknown at this point (we only have the host
+                        // and the WAF name); use the global seed_winners.
+                        let seeds = genome.seed_winners();
+                        let capped: Vec<String> = seeds.into_iter().take(5).collect();
+                        if !capped.is_empty() {
+                            info!(
+                                host = %host,
+                                waf = %waf,
+                                seeds = capped.len(),
+                                "cross-host gene bank seeding"
+                            );
+                            hs.proven_winners = capped;
+                            hs.discovery_complete = true;
+                        }
+                    }
+                }
+            }
+        }
 
         // Apply default escalation if requested.
         if let Some(esc) = &default_escalation {
@@ -1525,14 +1588,14 @@ async fn forward_wafrift_request(
 
     // Pin upstream addresses before intercept so a long operator wait
     // cannot reopen DNS-rebinding TOCTOU on the stealth TLS path.
-    let pinned_upstream = match resolve_forward_url_pinned(&evasion_result.request.url, &policy).await
-    {
-        Ok(v) => v,
-        Err(msg) => {
-            warn!(host = %host, url = %evasion_result.request.url, "{}", msg);
-            return Ok(error_response(StatusCode::FORBIDDEN, &msg));
-        }
-    };
+    let pinned_upstream =
+        match resolve_forward_url_pinned(&evasion_result.request.url, &policy).await {
+            Ok(v) => v,
+            Err(msg) => {
+                warn!(host = %host, url = %evasion_result.request.url, "{}", msg);
+                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+            }
+        };
 
     // ── Operator intercept rendezvous (#119) ────────────────────────
     // When intercept-mode is on, park here until the operator
@@ -1987,11 +2050,7 @@ async fn forward_wafrift_request(
             resp_headers: header_pairs.clone(),
             resp_body_excerpt,
             resp_body_total,
-            // attempts is not currently threaded through from
-            // forward_with_evade_retry — would need a return-tuple
-            // change. Leaving 0 until that refactor lands; the TUI
-            // tolerates 0 (just shows "0" in the detail pane).
-            attempts: 0,
+            attempts: attempt_idx,
         });
     }
 
