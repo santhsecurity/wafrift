@@ -641,3 +641,66 @@ fn equiv_outcome_warm_state_hash_defaults_to_none() {
         "default EquivOutcome must have no warm_state_hash"
     );
 }
+
+// ── B4: graphql + cve_pocs oracle gates ───────────────────────────
+
+#[test]
+fn oracle_valid_graphql_rejects_empty_and_bare_brace() {
+    // B4: graphql oracle must return false for destroyed payloads.
+    assert!(
+        !oracle_valid("graphql", "{ user { id } }", ""),
+        "empty transformed must fail"
+    );
+    assert!(
+        !oracle_valid("graphql", "{ user { id } }", "   "),
+        "whitespace-only must fail"
+    );
+    assert!(
+        !oracle_valid("graphql", "{ user { id } }", "no-braces-here"),
+        "no opening brace must fail"
+    );
+    // Bare brace with no field name is not a valid GQL body.
+    assert!(
+        !oracle_valid("graphql", "{ user { id } }", "{}"),
+        "bare empty braces must fail"
+    );
+}
+
+#[test]
+fn oracle_valid_graphql_accepts_minimal_operation() {
+    // B4: a payload with at least one field inside braces must pass.
+    assert!(
+        oracle_valid("graphql", "{ user { id } }", "{ user { id } }"),
+        "valid GQL with field inside must pass"
+    );
+    assert!(
+        oracle_valid("graphql", "{ me }", "{ me }"),
+        "minimal single-field must pass"
+    );
+    assert!(
+        oracle_valid("graphql", "{ user { id } }", "query { user { name } }"),
+        "query operation with field must pass"
+    );
+}
+
+#[test]
+fn oracle_valid_cve_pocs_always_returns_false() {
+    // B4: cve_pocs has no structural model -- always false (safe under-count).
+    assert!(
+        !oracle_valid("cve_pocs", "CVE-2021-44228", "CVE-2021-44228"),
+        "cve_pocs must always return false (no oracle)"
+    );
+    assert!(
+        !oracle_valid("cve_pocs", "anything", ""),
+        "cve_pocs must return false even for empty transformed"
+    );
+}
+
+#[test]
+fn oracle_valid_unknown_class_returns_false() {
+    // B4: unknown classes default to false (under-count, not over-count).
+    assert!(
+        !oracle_valid("totally_unknown_class", "payload", "payload"),
+        "unknown class must return false, not true"
+    );
+}

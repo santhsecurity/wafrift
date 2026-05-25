@@ -78,8 +78,14 @@ pub fn verified_bypass(
 
 /// True iff the variant retains the exploit semantics of the original
 /// payload for `class` (per-class structural validity via the
-/// corresponding `wafrift-oracle`). Falls back to `true` only for
-/// classes with genuinely no oracle (`cve_pocs` is held-out data).
+/// corresponding `wafrift-oracle`).
+///
+/// ## Fallthrough policy (B4)
+///
+/// The previous `_ => true` fallthrough counted completely destroyed
+/// payloads (e.g. mangled GraphQL with no braces) as verified bypasses.
+/// Every KNOWN_CLASSES entry is now explicitly handled; unknown classes
+/// default to false (under-count rather than inflate the headline).
 #[must_use]
 pub fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
     match class {
@@ -93,7 +99,13 @@ pub fn oracle_valid(class: &str, original: &str, transformed: &str) -> bool {
         "nosql" => is_valid_nosql(original, transformed),
         "xxe" => is_valid_xxe(original, transformed),
         "log4shell" => is_valid_log4shell(original, transformed),
-        _ => true,
+        // GraphQL: must still contain a field-selection set with identifiers (B4).
+        "graphql" => is_valid_graphql(original, transformed),
+        // cve_pocs: heterogeneous held-out data, no structural model.
+        // Safe default = false (under-count rather than inflate).
+        "cve_pocs" => false,
+        // Future KNOWN_CLASSES additions without an oracle default to false.
+        _ => false,
     }
 }
 
@@ -124,6 +136,24 @@ pub fn is_valid_xxe(original: &str, transformed: &str) -> bool {
 #[must_use]
 pub fn is_valid_log4shell(original: &str, transformed: &str) -> bool {
     grammar::equiv::log4shell::still_executes(original, transformed)
+}
+
+/// GraphQL structural validity (B4): the mutated payload must still
+/// look like a GraphQL operation with a field-selection set.
+///
+/// Minimum structural check: non-empty, contains `{`, has at least one
+/// alphanumeric/underscore identifier after `{`. Bare `{}` is not valid.
+/// Replace with `GraphqlOracle.is_semantically_valid` when that oracle ships.
+#[must_use]
+pub fn is_valid_graphql(_original: &str, transformed: &str) -> bool {
+    if transformed.trim().is_empty() {
+        return false;
+    }
+    let Some(brace_pos) = transformed.find('{') else {
+        return false;
+    };
+    let after_open = &transformed[brace_pos + 1..];
+    after_open.chars().any(|c| c.is_alphanumeric() || c == '_')
 }
 
 /// Attack class string for a grammar [`PayloadType`], or `None` when
@@ -717,12 +747,13 @@ mod tests {
     // ── oracle_valid per class ────────────────────────────────
 
     #[test]
-    fn oracle_valid_unknown_class_returns_true() {
-        // Unknown class falls through to true (oracle doesn't gate),
-        // so a class string typo from upstream would silently
-        // accept everything. Pin the contract.
-        assert!(oracle_valid("not_a_class", "x", "x"));
-        assert!(oracle_valid("totally-bogus", "1 OR 1=1", "anything"));
+    fn oracle_valid_unknown_class_returns_false() {
+        // B4: unknown classes default to false (under-count rather than inflate).
+        // The old _ => true fallthrough let any typo silently claim a bypass.
+        assert!(!oracle_valid("not_a_class", "x", "x"),
+            "unknown class must return false, not true");
+        assert!(!oracle_valid("totally-bogus", "1 OR 1=1", "anything"),
+            "unknown class must return false even for valid-looking payloads");
     }
 
     #[test]
