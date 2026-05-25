@@ -43,11 +43,31 @@ pub mod deserialization;
 /// JWK, jku/x5u SSRF, kid path-traversal + SQLi + log4shell, empty
 /// signature, crit-header bypass, b64 padding tricks, duplicate alg.
 pub mod jwt;
+/// OAuth 2.0 / OIDC attack library: redirect_uri bypass (11 URL-confusion
+/// variants — userinfo, subdomain prefix, path prefix, fragment, percent-encoded
+/// dot, backslash parser disagreement, case-fold, port confusion, IP literal,
+/// localhost alias, open-redirect chain), state CSRF / binding bugs, PKCE
+/// downgrade / reuse / method confusion, scope injection / separator / upgrade,
+/// token misuse and replay, response_type+response_mode hybrid-flow confusion,
+/// and JWT bearer token mutation relay via the `jwt` module.
+pub mod oauth;
 /// Single-packet race-condition primitives (Kettle BH23 "Smashing the
 /// State Machine"): HTTP/1.1 pipelined coalesce + HTTP/2 last-byte-sync
 /// frame builders. Builds wire bytes only; the transport layer
 /// handles the TCP_NODELAY-off + writev coalesce.
 pub mod race;
+/// DOM-clobbering payload library: HTML-only XSS primitives that
+/// override JavaScript globals via `<a id=…>`, `<form name=…>`,
+/// `<img name=…>`, `<base href=…>`, `<iframe name=…>`, HTMLCollection
+/// twins, nested `<form><input>` chains. Defeats CSPs that allow
+/// HTML but block `<script>`.
+pub mod dom_clobber;
+/// Server-side & client-side prototype-pollution payload library:
+/// JSON `__proto__`, `constructor.prototype`, lodash-merge / qs-parse
+/// bracket-notation, deep-nested-merge variants, MongoDB `$where`
+/// gadget. Covers Express, lodash, jQuery, Mongoose, Hoek vulnerable
+/// libraries.
+pub mod proto_pollution;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
