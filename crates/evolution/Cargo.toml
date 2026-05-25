@@ -33,6 +33,8 @@ toml = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 tokio-test = "0.4"
+wiremock = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true
