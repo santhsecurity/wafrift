@@ -657,6 +657,83 @@ pub fn json_unicode_alnum(payload: &str) -> String {
     out
 }
 
+/// Full JSON `\uXXXX` escape — escapes EVERY character of the input
+/// (including punctuation, whitespace, and control chars). Stronger
+/// than `json_unicode_alnum` which only touches alnum chars. Use when
+/// the WAF tokenises on punctuation boundaries that `json_unicode_alnum`
+/// leaves intact, OR when the WAF rule is a regex over the raw bytes
+/// of the keyword + adjacent punctuation.
+///
+/// Idempotent on already-escaped `\uXXXX` sequences (same detection
+/// as `json_unicode_alnum`).
+#[must_use]
+pub fn json_unicode_full(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 6);
+    let chars: Vec<char> = payload.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\'
+            && i + 5 < chars.len()
+            && chars[i + 1] == 'u'
+            && chars[i + 2..i + 6].iter().all(|h| h.is_ascii_hexdigit())
+        {
+            for k in 0..6 {
+                out.push(chars[i + k]);
+            }
+            i += 6;
+            continue;
+        }
+        let cp = c as u32;
+        if cp <= 0xFFFF {
+            let _ = write!(&mut out, "\\u{:04X}", cp);
+        } else {
+            // Surrogate pair for non-BMP.
+            let v = cp - 0x10000;
+            let hi = 0xD800 + (v >> 10);
+            let lo = 0xDC00 + (v & 0x3FF);
+            let _ = write!(&mut out, "\\u{:04X}\\u{:04X}", hi, lo);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Mixed-case JSON `\uXXXX` escape — alternates `\u` and `\U` plus
+/// upper/lowercase hex digits. Some WAF regexes are case-sensitive
+/// against `\u[0-9A-F]{4}`; JSON parsers RFC 8259 only accept `\u`
+/// lowercase, but JavaScript `JSON.parse` and PHP `json_decode`
+/// tolerate both — pick the form the backend tolerates and the WAF's
+/// regex misses.
+///
+/// Output alternates per-char between four forms:
+/// `s \U0053 s \U0073`.
+#[must_use]
+pub fn json_unicode_mixed_case(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 6);
+    for (i, c) in payload.chars().enumerate() {
+        let cp = c as u32;
+        if cp > 0xFFFF {
+            // Non-BMP: emit a surrogate pair, follow same alternation.
+            let v = cp - 0x10000;
+            let hi = 0xD800 + (v >> 10);
+            let lo = 0xDC00 + (v & 0x3FF);
+            let _ = match i % 2 {
+                0 => write!(&mut out, "\\u{:04x}\\U{:04X}", hi, lo),
+                _ => write!(&mut out, "\\U{:04X}\\u{:04x}", hi, lo),
+            };
+            continue;
+        }
+        let _ = match i % 4 {
+            0 => write!(&mut out, "\\u{:04x}", cp), // lowercase u, lowercase hex
+            1 => write!(&mut out, "\\U{:04X}", cp), // uppercase U, uppercase hex
+            2 => write!(&mut out, "\\u{:04X}", cp), // lowercase u, uppercase hex
+            _ => write!(&mut out, "\\U{:04x}", cp), // uppercase U, lowercase hex
+        };
+    }
+    out
+}
+
 /// SQL adjacent-string-literal concatenation — every `'string'` literal of
 /// length ≥ 2 is rewritten as a sequence of single-character adjacent
 /// literals: `'admin'` → `'a' 'd' 'm' 'i' 'n'`.
@@ -1047,6 +1124,55 @@ mod tests {
         let out = json_unicode_alnum("UNION");
         assert_eq!(out, "\\u0055\\u004E\\u0049\\u004F\\u004E");
         assert!(!out.contains("UNION"));
+    }
+
+    // ── json_unicode_full / mixed_case tests ──────────────────────────
+
+    #[test]
+    fn json_unicode_full_escapes_every_char() {
+        let out = json_unicode_full("a' b");
+        // Every char including space and quote escaped.
+        assert!(out.contains("\\u0061")); // a
+        assert!(out.contains("\\u0027")); // '
+        assert!(out.contains("\\u0020")); // space
+        assert!(out.contains("\\u0062")); // b
+        // No literal input char remains as plain (input letters 'a' and 'b'
+        // appear only inside hex of escapes; the literal 'a' standalone
+        // boundary should NOT be present as a runnable token).
+        // Simpler check: every output codepoint is either backslash, 'u',
+        // or hex digit.
+        for c in out.chars() {
+            assert!(
+                c == '\\' || c == 'u' || c.is_ascii_hexdigit(),
+                "unexpected raw char {c:?} in {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_unicode_full_idempotent_on_pre_escaped() {
+        let already = "\\u0073elect";
+        let out = json_unicode_full(already);
+        // Pre-existing s stays unchanged; "elect" gets escaped.
+        assert!(out.starts_with("\\u0073"));
+        assert!(out.contains("\\u0065")); // e
+    }
+
+    #[test]
+    fn json_unicode_full_handles_non_bmp_via_surrogate_pair() {
+        // U+1F600 GRINNING FACE → 😀
+        let out = json_unicode_full("😀");
+        assert_eq!(out, "\\uD83D\\uDE00");
+    }
+
+    #[test]
+    fn json_unicode_mixed_case_alternates_forms() {
+        let out = json_unicode_mixed_case("abcd");
+        // 4 chars → 4 different forms.
+        assert!(out.contains("\\u0061")); // i=0 lowercase
+        assert!(out.contains("\\U0062")); // i=1 uppercase U
+        assert!(out.contains("\\u0063")); // i=2 lower u, upper hex
+        assert!(out.contains("\\U0064")); // i=3 upper U, lower hex
     }
 
     #[test]
