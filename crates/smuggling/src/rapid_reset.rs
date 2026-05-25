@@ -57,6 +57,30 @@ fn frame_header(length: u32, frame_type: u8, flags: u8, stream_id: u32) -> [u8; 
 /// HPACK literal with name reference: 0x0F prefix if index > 14, else
 /// 0b0000_xxxx (not indexed, indexed name). We use fully-indexed refs
 /// where the static table has a complete entry.
+/// Encode an HPACK string-length as a 7-bit prefix varint (RFC 7541 §5.2).
+///
+/// Bit 7 = 0 (no Huffman encoding). The 7-bit prefix can represent 0–126
+/// directly; values 127+ use the multibyte continuation format.
+fn hpack_string_length(len: usize) -> Vec<u8> {
+    // RFC 7541 §5.2 — not Huffman (H=0), 7-bit prefix.
+    const PREFIX_MAX: usize = 127; // (1 << 7) - 1
+    if len < PREFIX_MAX {
+        vec![len as u8]
+    } else {
+        let mut out = vec![PREFIX_MAX as u8]; // saturated prefix
+        let mut remainder = len - PREFIX_MAX;
+        loop {
+            if remainder < 128 {
+                out.push(remainder as u8);
+                break;
+            }
+            out.push((remainder as u8 & 0x7F) | 0x80);
+            remainder >>= 7;
+        }
+        out
+    }
+}
+
 fn minimal_headers_payload(authority: &str) -> Vec<u8> {
     let mut buf = Vec::new();
     // :method: GET  — static table index 2, fully indexed (0x82)
@@ -69,10 +93,12 @@ fn minimal_headers_payload(authority: &str) -> Vec<u8> {
     // Literal header field never indexed (0x10), name index = 1 (0x01).
     buf.push(0x10); // never-indexed literal, name = static index
     buf.push(0x01); // static index 1 = :authority
-    // value length + value bytes
+    // Value length encoded as HPACK 7-bit prefix varint (RFC 7541 §5.2).
+    // Pre-fix: `auth_bytes.len() as u8` truncated silently for authority
+    // strings > 255 bytes, producing a corrupt HPACK block — the length
+    // byte would be wrong and the decoder would misparse all subsequent bytes.
     let auth_bytes = authority.as_bytes();
-    let val_len = auth_bytes.len() as u8; // safe: authority is sanitized short
-    buf.push(val_len);
+    buf.extend_from_slice(&hpack_string_length(auth_bytes.len()));
     buf.extend_from_slice(auth_bytes);
     buf
 }
@@ -850,5 +876,83 @@ mod tests {
         assert_eq!(f[0], 0x00);
         assert_eq!(f[1], 0x00);
         assert_eq!(f[2], 0x0C);
+    }
+
+    // ── HPACK string-length encoding ─────────────────────────────────────────
+
+    #[test]
+    fn hpack_string_length_small_value_single_byte() {
+        // Values 0..=126 must fit in one byte (7-bit prefix, H=0 bit clear).
+        for len in [0usize, 1, 63, 126] {
+            let encoded = hpack_string_length(len);
+            assert_eq!(encoded.len(), 1, "len={len} must encode as 1 byte");
+            assert_eq!(encoded[0], len as u8, "encoded byte must equal len for len={len}");
+            // Bit 7 (Huffman flag) must be clear.
+            assert_eq!(encoded[0] & 0x80, 0, "Huffman bit must be clear for len={len}");
+        }
+    }
+
+    #[test]
+    fn hpack_string_length_127_uses_multibyte() {
+        // 127 = PREFIX_MAX — triggers continuation.
+        let encoded = hpack_string_length(127);
+        assert!(encoded.len() > 1, "127 must use multi-byte encoding");
+        // First byte must be 127 (saturated 7-bit prefix).
+        assert_eq!(encoded[0], 127);
+        // Second byte encodes remainder = 127 - 127 = 0.
+        assert_eq!(encoded[1], 0);
+    }
+
+    #[test]
+    fn hpack_string_length_256_correct_encoding() {
+        // 256 — the value that `as u8` would silently truncate to 0.
+        // Correct: 127 (saturated prefix) + continuation byte(s) for 256-127=129.
+        let encoded = hpack_string_length(256);
+        // remainder = 256 - 127 = 129 ≥ 128 → needs 2 continuation bytes.
+        // byte 0: 127 (saturated prefix)
+        // byte 1: 129 & 0x7F | 0x80 = 0x01 | 0x80 = 0x81 (more follows)
+        // byte 2: 129 >> 7 = 1 (final)
+        assert_eq!(encoded[0], 127, "first byte must saturate the prefix");
+        assert_eq!(encoded[1], 0x81, "second byte encodes low 7 bits with continuation");
+        assert_eq!(encoded[2], 0x01, "third byte encodes remaining bits");
+        assert_eq!(encoded.len(), 3, "256 must encode as 3 bytes total");
+    }
+
+    #[test]
+    fn minimal_headers_payload_long_authority_correct_length() {
+        // Pre-fix: a 256-byte authority would truncate the HPACK length field to 0,
+        // producing a corrupt header block that a parser would misread as a
+        // zero-length :authority value followed by garbage.
+        let authority = "a".repeat(256);
+        let payload = minimal_headers_payload(&authority);
+        // Find the length-varint position: after 0x82 0x84 0x87 0x10 0x01 (5 bytes).
+        // hpack_string_length(256) = [127, 0x81, 0x01] = 3 bytes.
+        assert_eq!(payload[5], 127, "first length byte must be 127 (saturated)");
+        assert_eq!(payload[6], 0x81, "second length byte = low bits with continuation");
+        assert_eq!(payload[7], 0x01, "third length byte = remaining bits");
+        // Authority bytes follow at position 8.
+        assert_eq!(&payload[8..8 + 256], authority.as_bytes());
+    }
+
+    #[test]
+    fn minimal_headers_payload_short_authority_single_byte_length() {
+        // Short authority (e.g., "x.com" = 5 bytes) must use 1-byte length.
+        let payload = minimal_headers_payload("x.com");
+        // After 5 prefix bytes: length byte at index 5.
+        assert_eq!(payload[5], 5, "5-char authority must use single-byte length 5");
+        assert_eq!(&payload[6..11], b"x.com");
+    }
+
+    #[test]
+    fn classic_rapid_reset_long_authority_does_not_panic() {
+        // A 300-byte authority would have caused a panic in the pre-fix code
+        // via the truncated length byte making the HPACK block appear to have
+        // a 0-length :authority with 300 bytes of garbage following it —
+        // though the panic would only surface at the remote parser, not here.
+        // The fix must produce a well-formed HPACK block without panicking.
+        let authority = "very-long-domain-".repeat(18); // 306 bytes
+        let burst = classic_rapid_reset(&authority, 1, 0x8);
+        assert!(!burst.wire_bytes.is_empty(), "must produce non-empty wire bytes");
+        assert!(burst.wire_bytes.starts_with(CLIENT_PREFACE));
     }
 }
