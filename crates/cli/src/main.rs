@@ -20,6 +20,7 @@ mod cors_diff_cmd;
 mod detect_cmd;
 mod discover_cmd;
 mod distill_cmd;
+mod corpus_recorder;
 mod egress_example;
 mod equiv_engine;
 mod evade_cmd;
