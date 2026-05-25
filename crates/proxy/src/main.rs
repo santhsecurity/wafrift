@@ -1213,7 +1213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let expose_status_per_conn = expose_wafrift_status && peer.ip().is_loopback();
 
                 let logger = logger.clone();
-                tokio::task::spawn(async move {
+                bg_tasks.spawn(async move {
                     let _permit = permit;
                     if let Err(err) = http1::Builder::new()
                         .preserve_header_case(true)
@@ -1900,34 +1900,38 @@ async fn forward_wafrift_request(
         }
     }
 
-    // ── WAF identification: which product is in front of us? ────────
-    // The response signal may have already identified the WAF from a
-    // loaded profile. If not, fall back to wafrift-detect's
-    // header/body fingerprint database (160+ vendor rules).
-    let detected_waf = {
-        let st = state.lock().await;
-        st.hosts.get(&host).and_then(|h| h.waf_name.clone())
-    };
-    if detected_waf.is_none() {
-        if let Some(ref waf_name) = signal.matched_waf {
-            let mut st = state.lock().await;
-            if let Some(hs) = st.hosts.get_mut(&host) {
-                hs.confirm_waf(Some(waf_name.clone()));
-                info!(
-                    host = %host,
-                    waf = %waf_name,
-                    source = "response_profile",
-                    "WAF identified"
-                );
-            }
+    // ── WAF identification + feedback loop — single critical section ──
+    // All four logical steps (read current WAF name, conditionally
+    // write it, record signal, credit successes) are combined into one
+    // lock acquire. This eliminates three redundant lock/unlock round-
+    // trips per request and prevents a TOCTOU race where another task
+    // could overwrite waf_name between the read and write steps.
+    let waf_name_for_tui = {
+        let body_slice = &buf[..buf.len().min(8192)];
+        // Detect lazily outside the lock (pure computation, no shared
+        // state) so the lock hold time stays minimal.
+        let detections = if signal.matched_waf.is_none() {
+            wafrift_detect::waf_detect::detect(status_code, &header_pairs, body_slice)
         } else {
-            let body_slice = &buf[..buf.len().min(8192)];
-            let detections =
-                wafrift_detect::waf_detect::detect(status_code, &header_pairs, body_slice);
-            if let Some(top) = detections.first()
+            vec![]
+        };
+
+        let mut st = state.lock().await;
+        // Step 1 + 2: WAF identification (read-then-write in one go).
+        if st.hosts.get(&host).and_then(|h| h.waf_name.as_ref()).is_none() {
+            if let Some(ref waf_name) = signal.matched_waf {
+                if let Some(hs) = st.hosts.get_mut(&host) {
+                    hs.confirm_waf(Some(waf_name.clone()));
+                    info!(
+                        host = %host,
+                        waf = %waf_name,
+                        source = "response_profile",
+                        "WAF identified"
+                    );
+                }
+            } else if let Some(top) = detections.first()
                 && top.confidence >= wafrift_detect::waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD
             {
-                let mut st = state.lock().await;
                 if let Some(hs) = st.hosts.get_mut(&host) {
                     hs.confirm_waf(Some(top.name.clone()));
                     info!(
@@ -1940,7 +1944,6 @@ async fn forward_wafrift_request(
                 }
             }
         }
-    }
 
     // ── Feedback loop: rich signal replaces binary block/pass ────────
     // Key insight: a 429 (rate limit) is NOT a technique failure —
@@ -1949,8 +1952,6 @@ async fn forward_wafrift_request(
     // the current evasion technique. record_signal also ingests the
     // matched profile's prioritize/avoid lists so future requests
     // bias toward techniques known to bypass this WAF.
-    {
-        let mut st = state.lock().await;
         if let Some(hs) = st.hosts.get_mut(&host) {
             hs.record_signal(
                 signal.classification == BlockClass::HardBlock,
@@ -1995,7 +1996,11 @@ async fn forward_wafrift_request(
                 *st.techniques_used.entry(name).or_insert(0) += 1;
             }
         }
-    }
+        // All mutable borrows finished — safe to take a shared read now.
+        // Captures the WAF name written above (if any) so the TUI event
+        // below doesn't need a second lock acquire.
+        st.hosts.get(&host).and_then(|h| h.waf_name.clone())
+    }; // end single critical section — lock released here
 
     // ── Inject response tagging headers ──────────────────────────────
     // These are visible in Burp, browser devtools, and curl -v so the
@@ -2038,13 +2043,9 @@ async fn forward_wafrift_request(
         let resp_body_excerpt = buf[..buf.len().min(cap)].to_vec();
         let resp_body_total = buf.len() as u64;
 
-        // WAF identification — re-read under the lock so we get the
-        // most recent value (this function ran the identification a
-        // few lines above).
-        let waf_name = {
-            let st = state.lock().await;
-            st.hosts.get(&host).and_then(|h| h.waf_name.clone())
-        };
+        // WAF name captured inside the single critical section above
+        // (waf_name_for_tui) — no second lock needed here.
+        let waf_name = waf_name_for_tui;
 
         emit_tui(wafrift_proxy::tui::Event::Request {
             host: host.clone(),
