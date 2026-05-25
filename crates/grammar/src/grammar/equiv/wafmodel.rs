@@ -1,4 +1,4 @@
-//! Phase A — learned WAF decision-boundary model + CEGIS synthesis.
+//! Phase A — learned WAF decision-boundary model + active L*-style boundary learning.
 //!
 //! The deepest layer of the moat. The WAF is a black-box recogniser;
 //! ModSecurity/CRS (and most WAFs) decide block via an *anomaly score*
@@ -12,11 +12,18 @@
 //!  2. **Learn** — from labelled probes `(features, blocked)`, fit a
 //!     deterministic averaged perceptron. This *is* the WAF's decision
 //!     boundary, learned from behaviour alone (no rules needed).
-//!  3. **CEGIS** — over the provably-sound equivalence space, pick the
-//!     member the model predicts is *most* allowed; confirm live; if
-//!     wrong, add the counterexample, refit, repeat. Converges with
-//!     far fewer live requests than blind sampling AND generalises to
-//!     unseen payloads.
+//!  3. **Active L*-style boundary synthesis** — over the provably-sound
+//!     equivalence space, pick the member the model predicts is *most*
+//!     allowed; confirm live; if wrong, add the counterexample (the
+//!     "teacher" feedback in Angluin's L* sense), refit, and repeat.
+//!     Converges with far fewer live requests than blind sampling AND
+//!     generalises to unseen payloads. [Angluin 1987, "Learning Regular
+//!     Sets from Queries and Counterexamples", Information and Computation.]
+//!     Note: the public strategy token `equiv-cegis` / function
+//!     `run_equiv_cegis` is preserved for backwards compatibility;
+//!     the algorithm it implements is active WAF-boundary learning,
+//!     not counterexample-guided inductive synthesis (which requires
+//!     a formal specification).
 //!
 //! The learned model `(weights, threshold)` is serialisable per WAF
 //! fingerprint — a compounding, unclonable asset (clones copy code,
@@ -404,14 +411,21 @@ pub fn model_path(dir: &std::path::Path, fingerprint: &str) -> std::path::PathBu
     dir.join(format!("waf-{fingerprint}.toml"))
 }
 
-/// CEGIS over a sound equivalence space against a learned model.
+/// Active L*-style boundary synthesis over a sound equivalence space.
+///
+/// Implements the membership-query / equivalence-query loop from Angluin
+/// 1987 ("Learning Regular Sets from Queries and Counterexamples") adapted
+/// to WAF decision-boundary learning: the model is the learned hypothesis;
+/// each blocked candidate is a counterexample that refines it. Unlike
+/// classic CEGIS, no formal specification is required — the WAF oracle
+/// itself acts as the teacher.
 ///
 /// `candidates` are `(payload, delivery_arm)` — assumed already
 /// sound-by-construction (the equiv generator's invariant). Returns
 /// the candidate the model predicts is *most allowed* (lowest block
 /// score) among those not yet tried. The caller confirms it live; if
 /// blocked, push `(features, true)` into the sample set, re-`learn`,
-/// and call again — classic counterexample-guided synthesis.
+/// and call again.
 #[must_use]
 pub fn synthesize<'a>(
     candidates: &'a [(String, usize)],
@@ -514,7 +528,7 @@ mod tests {
     fn cegis_converges_to_a_model_allowed_candidate_and_excludes_tried() {
         // Synthetic WAF: blocks anything with has_union (arm-agnostic).
         // The equiv-style candidate set has both union and non-union
-        // sound members; CEGIS must surface a non-union one.
+        // sound members; the active boundary learner must surface a non-union one.
         let cands: Vec<(String, usize)> = vec![
             ("1 UNION SELECT a,b FROM u-- -".into(), 7), // union, query
             ("1' OR '1'='1".into(), 7),                  // no union
@@ -533,7 +547,7 @@ mod tests {
         let pick = synthesize(&cands, &model, &tried).unwrap();
         assert!(
             !pick.0.to_ascii_lowercase().contains("union"),
-            "CEGIS surfaced a model-blocked (union) candidate: {pick:?}"
+            "active-boundary-learning surfaced a model-blocked (union) candidate: {pick:?}"
         );
         // Exclusion: after trying the pick, a different one is returned.
         tried.insert(pick.clone());

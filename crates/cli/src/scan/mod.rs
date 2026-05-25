@@ -878,7 +878,10 @@ pub(crate) async fn run_scan(
     // Step 2e: Equivalence moat (B→C→A) — the flagship engine.
     //
     // The sound-by-construction `(payload × delivery)` generator + the
-    // per-WAF learned decision boundary (averaged-perceptron + CEGIS).
+    // per-WAF learned decision boundary via active L*-style boundary
+    // learning (Angluin 1987). Each blocked candidate is a counterexample
+    // that refines the averaged-perceptron model; the strategy token is
+    // `equiv-cegis` for backwards compatibility.
     // This is the EXACT loop the corpus bench measures
     // (`equiv_engine::run_equiv_cegis`) — here it runs against the live
     // target, keyed on the DETECTED WAF so the boundary compounds
@@ -893,7 +896,7 @@ pub(crate) async fn run_scan(
                 println!(
                     "\n{}",
                     format!(
-                        "[2e/7] Equivalence moat — B→C→A ({class}, learned-WAF CEGIS vs {waf_name})..."
+                        "[2e/7] Equivalence moat — B→C→A ({class}, active boundary learning vs {waf_name})..."
                     )
                     .bold()
                     .cyan()

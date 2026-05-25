@@ -95,7 +95,11 @@ pub struct BenchWafArgs {
     /// Available:
     ///   light / medium / heavy   — payload-string mutation via `build_variants`
     ///   equiv / equiv-adaptive / equiv-cegis
-    ///                              — sound `(payload×delivery)` moat (B / B+bandit / B→C→A+learned-WAF)
+    ///                              — sound `(payload×delivery)` moat (B / B+bandit /
+    ///                                B→C→A + active L*-style WAF-boundary learning).
+    ///                                Token `equiv-cegis` is the stable public name;
+    ///                                algorithm is active WAF-boundary learning
+    ///                                (Angluin 1987), not CEGIS.
     ///   mcts                      — Monte Carlo Tree Search over actions (mctrust)
     ///   smuggling                 — HTTP request smuggling variants (CL.TE / TE.CL / TE.TE / dual-CL)
     ///   content-type              — Content-Type confusion variants (multipart/json/xml/...)
@@ -1239,7 +1243,7 @@ async fn run_equiv_adaptive_strategy(
     stat
 }
 
-/// Strategy: Phase-A CEGIS. Learn the WAF's decision boundary as a
+/// Strategy: Phase-A active L*-style boundary learning. Learn the WAF's decision boundary as a
 /// linear model from labelled probes, then *synthesize* the member the
 /// model predicts is most-allowed from the sound equivalence space,
 /// confirm it live, and refit on every counterexample. Generalises to

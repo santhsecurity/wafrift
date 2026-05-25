@@ -26,7 +26,7 @@
 //! - No multi-vector phase: the template IS the vector — the
 //!   operator chose POST-body / header / cookie injection by where
 //!   they placed `§§`.
-//! - No equivalence-moat CEGIS: the moat assumes URL-query shape;
+//! - No equivalence-moat active boundary learning: the moat assumes URL-query shape;
 //!   adapting it to arbitrary raw templates is future work.
 //! - No header-obfuscation phase: operator uses `-H` instead.
 //! - No baseline / WAF-detection phase: the operator already knows

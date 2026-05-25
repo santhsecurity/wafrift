@@ -8,7 +8,7 @@
 //! 26. **Solver invariant**: over 10k random sink pipelines, whenever
 //!     `solve_bypass` returns `Some(s)`, the structural identity
 //!     `sink(s.input) == s.sink_view ⊇ attack` holds AND a FRESH real
-//!     WAF actually passes `s.input` (CEGIS verifies internally; we
+//!     WAF actually passes `s.input` (active boundary learning verifies internally; we
 //!     re-verify independently — the solver may never fabricate). A
 //!     `None` is always acceptable; an Identity sink against a WAF that
 //!     blocks the raw attack must be `None` (pinned precision twin —

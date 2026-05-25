@@ -1,6 +1,10 @@
 //! The B→C→A equivalence moat — the *single source* of the
 //! sound-by-construction `(payload × delivery)` engine, the per-class
-//! `verified_bypass` oracle, and the CEGIS learned-WAF-boundary loop.
+//! `verified_bypass` oracle, and the active L*-style WAF-boundary
+//! learning loop. The strategy token `equiv-cegis` and the function
+//! `run_equiv_cegis` are preserved for backwards compatibility; the
+//! algorithm is active WAF-boundary learning (Angluin 1987), not
+//! counterexample-guided inductive synthesis.
 //!
 //! Both the corpus bench (`bench_waf`) and the live product
 //! (`scan::run_scan`) drive the **same** engine through here — bench
@@ -308,7 +312,7 @@ pub async fn send(
     Ok((status, blocked, elapsed_ms))
 }
 
-// ───────────────────────── B→C→A CEGIS loop ─────────────────────────
+// ─────────────────── B→C→A active boundary-learning loop ───────────────────
 
 /// One verified bypass produced by the moat.
 #[derive(Debug, Clone)]
@@ -336,6 +340,11 @@ pub struct EquivOutcome {
     pub bypasses: Vec<EquivBypass>,
     /// The per-WAF boundary model was refined and persisted.
     pub model_saved: bool,
+    /// FNV-1a hex hash of the warm-start model weights that influenced
+    /// this run (B6). `None` when no warm-start model was loaded
+    /// (first run, or --no-warm-start was passed). Embed in JSON output
+    /// so downstream readers know which prior state shaped the result.
+    pub warm_state_hash: Option<String>,
 }
 
 /// Run the full B→C→A moat for one `(class, payload)`:
@@ -346,7 +355,7 @@ pub struct EquivOutcome {
 ///   previous engagement; order the learn probes by predicted-allow so
 ///   even learning sends bypass sooner (the compounding asset).
 /// * **C/A** — learn an averaged-perceptron WAF boundary from probe
-///   verdicts, then CEGIS-synthesize the min-predicted-block unseen
+///   verdicts, then synthesize (active L*-style) the min-predicted-block unseen
 ///   member, confirm, refit on every counterexample.
 ///
 /// `build` is the request constructor — the testbed builder for the
@@ -364,6 +373,10 @@ pub async fn run_equiv_cegis<F>(
     delay_ms: u64,
     timeout_secs: u64,
     model_signature: &str,
+    /// B6: when true, skip loading the persisted WAF boundary model.
+    /// Benchmarks intended for reproducibility MUST pass `true` here;
+    /// `wafrift scan` always passes `false` (warm-start is the product).
+    no_warm_start: bool,
 ) -> EquivOutcome
 where
     F: Fn(&grammar::equiv::DeliveryShape, &str) -> Request,
@@ -408,10 +421,31 @@ where
     let mut sends = 0usize;
 
     // A: compounding boundary learned for THIS WAF previously.
+    // B6: if no_warm_start=true, skip loading the model entirely so runs
+    // are reproducible (identical seed + corpus => identical outcome).
+    // When warm-start is used, hash the model weights into warm_state_hash
+    // so the JSON output embeds which prior state influenced the run.
     let model_dir = grammar::equiv::wafmodel::default_model_dir();
     let fp = grammar::equiv::wafmodel::waf_fingerprint(model_signature);
     let mpath = grammar::equiv::wafmodel::model_path(&model_dir, &fp);
-    let prior = WafModel::load(&mpath).filter(|m| m.n > 0);
+    let prior: Option<WafModel> = if no_warm_start {
+        None
+    } else {
+        WafModel::load(&mpath).filter(|m| m.n > 0)
+    };
+    // Record a content hash of the loaded model so callers can detect
+    // that this run was influenced by a specific prior state (B6).
+    out.warm_state_hash = prior.as_ref().map(|m| {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for &wi in &m.w {
+            let bits = wi.to_bits();
+            for byte in bits.to_le_bytes() {
+                h ^= u64::from(byte);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        format!("{h:016x}")
+    });
 
     // Phase 1: learn — probe a round-robin-by-arm diverse subset.
     let mut order: Vec<usize> = Vec::new();
@@ -473,7 +507,7 @@ where
         }
     }
 
-    // Phase 2: CEGIS — synthesize, confirm, refit on counterexample.
+    // Phase 2: active boundary learning — synthesize, confirm, refit on counterexample.
     let mut model = prior
         .clone()
         .unwrap_or_else(|| WafModel::learn(&samples, 30));

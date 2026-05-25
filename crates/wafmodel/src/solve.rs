@@ -11,13 +11,14 @@
 //! The solver never hard-codes "double-URL-encode" or any other trick.
 //! It takes the **sink pipeline as data**, computes the *structural
 //! preimage* of the attack under that pipeline (compose each stage's
-//! inverse encoder in reverse order), then runs a CEGIS loop: generate
-//! a candidate preimage, test it against the real WAF oracle and the
-//! sink, and on failure escalate to a deeper/likewise-structural
-//! encoding. Point the same code at a JSON-unescaping sink and it
-//! emits a JSON-escaped bypass; at a double-decoding sink, the
-//! double-encoding falls out. The trick is *derived from the pipeline*,
-//! not retrieved from a list.
+//! inverse encoder in reverse order), then runs an active L*-style
+//! boundary-learning loop: generate a candidate preimage, test it
+//! against the real WAF oracle and the sink, and on failure escalate
+//! to a deeper/likewise-structural encoding. Point the same code at a
+//! JSON-unescaping sink and it emits a JSON-escaped bypass; at a
+//! double-decoding sink, the double-encoding falls out. The trick is
+//! *derived from the pipeline*, not retrieved from a list.
+//! [Angluin 1987, "Learning Regular Sets from Queries and Counterexamples".]
 
 use crate::error::Result;
 use crate::oracle::WafOracle;
@@ -140,11 +141,12 @@ pub struct Solution {
 /// request shape under test (so the same solver works against a
 /// learned model, a `SimRegexWaf`, or a live target).
 ///
-/// CEGIS: candidates are ordered minimal-first (encode only dangerous
-/// bytes) then escalated (encode everything); each is *verified*
-/// against the real oracle and the real sink. `None` ⇒ no structural
-/// preimage bypasses this pipeline (e.g. an identity sink — correctly
-/// reported, never a fabricated bypass).
+/// Active boundary learning: candidates are ordered minimal-first (encode
+/// only dangerous bytes) then escalated (encode everything); each is
+/// *verified* against the real oracle and the real sink. `None` ⇒ no
+/// structural preimage bypasses this pipeline (e.g. an identity sink —
+/// correctly reported, never a fabricated bypass). Each blocked candidate
+/// acts as a counterexample that narrows the search (Angluin 1987).
 pub fn solve_bypass<B>(
     attack: &[u8],
     sink: &Pipeline,
