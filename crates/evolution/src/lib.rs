@@ -82,5 +82,10 @@ pub mod encoding_lattice;
 /// bias rotation toward egresses that haven't yet hit a given POP,
 /// detect anycast pinning early, and report total POP coverage.
 pub mod edge_pop_coverage;
+/// Per-rule L\* alphabet inference. Picks the bytes most
+/// discriminative for a given CF rule from its observed corpus
+/// (blocks vs bypasses) so the L\* learner explores tight,
+/// rule-scoped symbolic automata instead of a generic alphabet.
+pub mod rule_alphabet;
 pub mod search;
 pub mod types;
