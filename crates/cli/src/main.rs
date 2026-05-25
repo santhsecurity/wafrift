@@ -64,6 +64,9 @@ mod technique_filter;
 mod trailer_diff_cmd;
 mod model_evade_cmd;
 mod wafmodel_cmd;
+mod tmin_cmd;
+mod cluster_cmd;
+mod hunt_cmd;
 
 // All per-command helpers are imported by their command modules now.
 // main.rs is reduced to dispatch + the top-level Cli/Commands surface.
@@ -350,6 +353,33 @@ enum Commands {
     #[cfg(feature = "tls-impersonate")]
     #[command(name = "ja3-diff")]
     Ja3Diff(ja3_diff_cmd::Ja3DiffArgs),
+    /// Corpus minimization via Zeller's ddmin — alias for `wafrift distill`.
+    /// Familiar to AFL/libFuzzer users as `afl-tmin` / `tmin`. Takes a
+    /// KNOWN-working bypass payload and finds the minimum-edit-distance
+    /// substring that STILL bypasses. Reads payload from `--payload <P>`
+    /// or stdin. Outputs: minimal payload + reduction stats (original
+    /// length, final length, probes spent).
+    Tmin(tmin_cmd::TminArgs),
+    /// Offline bypass clustering: group a `bench-waf --output` JSON by
+    /// rule_id, payload class, and edit-distance similarity. Outputs
+    /// clusters with a representative technique and member count per
+    /// cluster. Pure offline — no HTTP. Useful for triaging large bypass
+    /// corpora and identifying duplicate root causes.
+    Cluster(cluster_cmd::ClusterArgs),
+    /// Long-running autonomous bypass campaign. Repeatedly runs
+    /// `bench-waf --evade` rounds against a target with rotating
+    /// mutators/strategies, saves every confirmed bypass to a campaign
+    /// JSON at `~/.wafrift/hunt-<campaign-id>.json`, and exits cleanly
+    /// on Ctrl-C. Resumable: re-run with the same `--campaign-id`.
+    ///
+    /// With `--auto-submit`: every newly verified bypass is queued for
+    /// HackerOne submission (requires `H1_API_KEY` env var). The first
+    /// 24 h of any campaign is always dry-run (corpus builds but nothing
+    /// is filed). Use `--dry-run-submit` to keep dry-run permanently.
+    ///
+    /// With `--target cumulusfire`: pre-fills the CF testing endpoint and
+    /// authorization reason for the CumulusFire public bug-bounty scope.
+    Hunt(hunt_cmd::HuntArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -1073,6 +1103,33 @@ fn main() -> ExitCode {
         },
         Some(Commands::Compress(args)) => compress_cmd::run_compress(args),
         Some(Commands::Smuggle(args)) => smuggle_cmd::run_smuggle(args),
+        Some(Commands::Tmin(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async {
+                let cancel = tokio_util::sync::CancellationToken::new();
+                let cancel_clone = cancel.clone();
+                tokio::spawn(async move {
+                    if tokio::signal::ctrl_c().await.is_ok() {
+                        eprintln!(
+                            "\n{}",
+                            "⚠ Ctrl+C received — finishing current probe and exiting..."
+                                .yellow()
+                                .bold()
+                        );
+                        cancel_clone.cancel();
+                    }
+                });
+                tmin_cmd::run_tmin(args, cancel).await
+            })
+        }
+        Some(Commands::Cluster(args)) => cluster_cmd::run_cluster(args),
+        Some(Commands::Hunt(args)) => hunt_cmd::run_hunt(args),
     }
 }
 
