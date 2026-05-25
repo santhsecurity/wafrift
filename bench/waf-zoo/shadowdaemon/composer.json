@@ -1,6 +1,12 @@
 {
     "require": {
-        "shadowd/php_connector": "^2.2"
+        "symfony/polyfill-mbstring": "^1.22"
+    },
+    "autoload": {
+        "files": ["/shadowd_php_src/inc/Constants.php"],
+        "psr-4": {
+            "shadowd\\": "/shadowd_php_src/src/"
+        }
     },
     "config": {
         "optimize-autoloader": true,
