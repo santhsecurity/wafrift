@@ -410,4 +410,65 @@ mod tests {
         assert_eq!(super::levenshtein_distance("a", ""), 1);
         assert_eq!(super::levenshtein_distance("", "b"), 1);
     }
+
+    // ── Saturating-arithmetic regression tests ────────────────────────────────
+
+    /// `eval_counter` must saturate at `u64::MAX` instead of wrapping to 0.
+    #[test]
+    fn eval_counter_saturates_at_u64_max() {
+        let mut alg = NoveltySearch::new(5, 0.0);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(50);
+        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+        alg.eval_counter = u64::MAX;
+        let _ = alg.request_evaluations(1, &mut rng);
+        assert_eq!(
+            alg.eval_counter,
+            u64::MAX,
+            "eval_counter must saturate at u64::MAX, not wrap to 0"
+        );
+    }
+
+    /// `generation` must saturate at `u32::MAX` instead of wrapping to 0.
+    #[test]
+    fn generation_saturates_at_u32_max() {
+        let mut alg = NoveltySearch::new(5, 0.0);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(51);
+        alg.initialize(vec![], &pool, &mut rng);
+        alg.generation = u32::MAX;
+        alg.submit_evaluations(vec![]);
+        assert_eq!(
+            alg.generation,
+            u32::MAX,
+            "generation must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    /// IDs emitted by `request_evaluations` must never collide across rounds.
+    #[test]
+    fn eval_counter_ids_are_unique_across_generations() {
+        let mut alg = NoveltySearch::new(5, 0.0);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(52);
+        alg.initialize(
+            vec![dummy_chromosome("CaseAlternation", "xss", "form")],
+            &pool,
+            &mut rng,
+        );
+        let mut ids: Vec<u64> = Vec::new();
+        for _ in 0..8 {
+            let batch = alg.request_evaluations(3, &mut rng);
+            for c in &batch {
+                ids.push(c.id);
+            }
+            let verdicts: Vec<_> = batch
+                .into_iter()
+                .map(|c| (c.id, OracleVerdict::from_bool(false)))
+                .collect();
+            alg.submit_evaluations(verdicts);
+        }
+        let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+        assert_eq!(unique.len(), ids.len(), "eval IDs must never collide");
+    }
 }
