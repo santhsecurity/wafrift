@@ -873,11 +873,23 @@ replacement = "y"
     #[test]
     fn invalid_regex_rejected() {
         let dir = TempDir::new().unwrap();
-        write_file(
-            &dir,
-            "bad_re.toml",
-            &minimal_toml("bad_re", r"[invalid(", "x"),
-        );
+        // Use a TOML literal string (single-quoted in TOML) for the pattern so
+        // backslashes are preserved verbatim.  We embed it manually instead of
+        // going through `minimal_toml` which wraps patterns in double quotes.
+        let content = r#"
+[manifest]
+name = "bad_re"
+version = "1.0.0"
+author = "Test Author"
+payload_classes = ["sqli"]
+contexts = ["query_string"]
+description = "Test tamper"
+
+[[rules]]
+pattern = '[invalid('
+replacement = "x"
+"#;
+        write_file(&dir, "bad_re.toml", content);
 
         let mut registry = TamperRegistry::new();
         let errors = registry.load_dir(dir.path());
@@ -955,10 +967,12 @@ replacement = "y"
         use std::thread;
 
         let dir = TempDir::new().unwrap();
+        // Use a literal character (not a regex meta) to avoid TOML
+        // backslash-escape issues in the minimal_toml template.
         write_file(
             &dir,
             "par.toml",
-            &minimal_toml("par_tamper", r"\d", "N"),
+            &minimal_toml("par_tamper", "0", "N"),
         );
 
         let mut registry = TamperRegistry::new();
@@ -969,7 +983,8 @@ replacement = "y"
             .map(|i| {
                 let r = Arc::clone(&registry);
                 thread::spawn(move || {
-                    let input = format!("payload_{i}");
+                    // "payload_0" → "N" replaces '0' → "payNload_N"
+                    let input = format!("payload_0_{i}");
                     let result = r.get("par_tamper").unwrap().apply(&input);
                     assert!(result.contains('N'), "thread {i}: got {result}");
                 })
