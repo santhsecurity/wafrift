@@ -122,6 +122,22 @@ pub mod mass_assignment;
 /// `$merge` write-injection, JS-string injection for stringified
 /// query contexts.
 pub mod mongo_nosqli;
+/// LDAP injection comprehensive library: search-filter wildcard
+/// match, OR-injection logic flip, AND-truncation, NUL-byte
+/// truncation, comment-style truncation, auth-bypass username,
+/// blind first-char + prefix probes, timing amplification, DN
+/// injection (search-base manipulation), Active Directory specific
+/// objectClass injection, wildcard-blocklist bypasses (NUL, double,
+/// multi-predicate, URL-encoded).
+pub mod ldap_inject;
+/// XPath injection comprehensive library: classic OR-1-equals-1
+/// auth bypass, wildcard position selectors, blind char-by-char
+/// extraction, node-name reconstruction, XPath 2.0 `doc()` SSRF +
+/// file-read, `unparsed-text()`, `system-property()` fingerprint,
+/// XPath 2.0 comment-syntax bypass, divide-by-zero error reveal,
+/// `count()` probes, `position()` filters, CDATA-XSS for XML-
+/// returning consumers.
+pub mod xpath_inject;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
