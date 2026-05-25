@@ -1,3 +1,4 @@
+use crate::coverage_feedback::{RuleCoverage, map_elites_descriptor};
 use crate::evolution::fitness::{evolutionary_fitness, update_gene_stats};
 use crate::evolution::{
     Chromosome, GenePool,
@@ -15,6 +16,7 @@ use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use wafrift_wafmodel::booster::WafBoosterScorer;
 
 /// The evolutionary engine that maintains a population and evolves it.
 #[derive(Debug)]
@@ -56,6 +58,16 @@ pub struct EvolutionEngine {
     pub stagnation_counter: u32,
     /// Saved bypass corpus.
     pub corpus: BypassCorpus,
+    /// WAF rule-coverage accumulator.  Tracks (payload_class × rule_id) cells
+    /// observed during the run.  Populated by [`submit_batch`] when the oracle
+    /// result carries a `rule_id` (via `OracleVerdict::rule_id`).
+    pub rule_coverage: RuleCoverage,
+    /// WAFBooster importance scorer.  Updated on every oracle result and used
+    /// to re-rank mutation candidates so pass-likely payloads are tried first.
+    pub booster: WafBoosterScorer,
+    /// When `true`, the booster is disabled and candidate selection falls back
+    /// to the underlying algorithm's FIFO/UCB1 ordering.
+    pub no_booster: bool,
     /// Evaluations this generation.
     generation_evals: usize,
     /// Next candidate ID.
@@ -94,6 +106,9 @@ impl Clone for EvolutionEngine {
             fitness_history: self.fitness_history.clone(),
             stagnation_counter: self.stagnation_counter,
             corpus: self.corpus.clone(),
+            rule_coverage: self.rule_coverage.clone(),
+            booster: self.booster.clone(),
+            no_booster: self.no_booster,
             generation_evals: self.generation_evals,
             next_id: self.next_id,
             pending_single: None,
@@ -188,9 +203,12 @@ impl EvolutionEngine {
             "tabu_search" => Box::new(crate::search::TabuSearch::new(20)),
             "novelty_search" => Box::new(crate::search::NoveltySearch::new(15, 0.3)),
             "map_elites" => Box::new(crate::search::MapElites::new()),
+            "ast_mcts" => Box::new(crate::search::AstMctsAlgorithm::new()),
             _ => {
                 return Err(EvolutionError::AlgorithmError(format!(
-                    "unknown algorithm: {algorithm_name}"
+                    "unknown algorithm '{algorithm_name}'; valid choices: \
+                     hill_climbing, simulated_annealing, tabu_search, \
+                     novelty_search, map_elites, ast_mcts"
                 )));
             }
         };
@@ -210,6 +228,9 @@ impl EvolutionEngine {
             fitness_history: VecDeque::new(),
             stagnation_counter: 0,
             corpus: BypassCorpus::new(),
+            rule_coverage: RuleCoverage::new(),
+            booster: WafBoosterScorer::no_decay(),
+            no_booster: false,
             generation_evals: 0,
             next_id: 0,
             pending_single: None,
@@ -264,6 +285,11 @@ impl EvolutionEngine {
     /// (the underlying algorithm is free to request whatever it likes
     /// internally; the engine bounds the request count it actually
     /// surfaces).
+    ///
+    /// When the booster is enabled (`no_booster == false`), the result
+    /// batch is re-ordered by ascending booster score so that pass-likely
+    /// candidates are tried first.  The in-flight map and cache logic are
+    /// unaffected by the reordering.
     pub fn batch_candidates(&mut self, n: usize) -> Vec<(usize, Chromosome)> {
         if self.should_terminate() || n == 0 {
             return Vec::new();
@@ -280,7 +306,7 @@ impl EvolutionEngine {
 
         for candidate in requested {
             let key = Self::cache_key(&candidate.chromosome);
-            if let Some(verdict) = self.cache.get(&key).copied() {
+            if let Some(verdict) = self.cache.get(&key).cloned() {
                 cached_results.push((candidate.id, verdict));
             } else {
                 let eval_id = self.next_eval_id();
@@ -301,6 +327,27 @@ impl EvolutionEngine {
         }
 
         self.request_count = self.request_count.saturating_add(result.len());
+
+        // WAFBooster re-ranking: when the booster is active, sort candidates
+        // so the lowest-score (most pass-likely) ones come first.  The sort
+        // is stable so equal-score candidates preserve algorithm order.
+        if !self.no_booster && !result.is_empty() {
+            // Build a booster-score map keyed by eval_id.
+            let mut scored: Vec<(usize, Chromosome, f64)> = result
+                .into_iter()
+                .map(|(eval_id, chrom)| {
+                    let payload = Self::cache_key(&chrom); // deterministic string repr
+                    let score = self.booster.score_candidate(&payload);
+                    (eval_id, chrom, score)
+                })
+                .collect();
+            scored.sort_by(|a, b| {
+                a.2.partial_cmp(&b.2)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            result = scored.into_iter().map(|(id, chrom, _)| (id, chrom)).collect();
+        }
+
         result
     }
 
@@ -345,9 +392,45 @@ impl EvolutionEngine {
 
             chromosome.record_verdict(&verdict);
             let key = Self::cache_key(&chromosome);
-            self.cache.put(key, verdict);
 
-            update_gene_stats(&mut self.gene_stats, &chromosome.genes, verdict.passed);
+            // Coverage-feedback: record the (payload_class × rule_id)
+            // MAP-Elites behavior descriptor.  Use the chromosome's
+            // `grammar_rule` gene as the class signal — it is the
+            // closest available proxy to "attack class" inside the
+            // engine layer.  When the verdict carries a `rule_id`, we
+            // get a 2-D descriptor; without it the descriptor collapses
+            // to class-only (the pre-coverage fall-through).
+            let coverage_signal = chromosome
+                .gene("grammar_rule")
+                .filter(|v| *v != "None")
+                .unwrap_or("")
+                .to_string();
+            let (_, _cov_rid) = map_elites_descriptor(
+                &coverage_signal,
+                verdict.rule_id.as_deref(),
+            );
+            self.rule_coverage
+                .record(&coverage_signal, verdict.rule_id.as_deref());
+
+            // Extract scalar fields before the verdict is moved.
+            let passed = verdict.passed;
+            let status_delta = verdict.status_delta;
+
+            // WAFBooster online update: feed the observation so future
+            // candidate ranking benefits from accumulated signal.
+            if !self.no_booster {
+                let payload_str = Self::cache_key(&chromosome);
+                if passed {
+                    self.booster.observe_pass(&payload_str);
+                } else {
+                    self.booster
+                        .observe_block(&payload_str, verdict.rule_id.as_deref());
+                }
+            }
+
+            self.cache.put(key, verdict.clone());
+
+            update_gene_stats(&mut self.gene_stats, &chromosome.genes, passed);
             let adjusted = evolutionary_fitness(&chromosome, &self.gene_stats);
             chromosome.fitness = adjusted;
 
@@ -371,9 +454,9 @@ impl EvolutionEngine {
             self.generation_evals += 1;
             self.stats.evaluations += 1;
 
-            if verdict.passed {
+            if passed {
                 self.target_health.record_success();
-            } else if verdict.status_delta >= 500 {
+            } else if status_delta >= 500 {
                 self.target_health.record_error();
             }
         }
@@ -403,7 +486,7 @@ impl EvolutionEngine {
         chromosome_index: usize,
         verdict: &OracleVerdict,
     ) -> Result<(), EvolutionError> {
-        self.submit_batch(vec![(chromosome_index, *verdict)])
+        self.submit_batch(vec![(chromosome_index, verdict.clone())])
     }
 
     /// Record target-error feedback.
@@ -475,6 +558,12 @@ impl EvolutionEngine {
         self.algorithm.best()
     }
 
+    /// Return the name of the active search algorithm (e.g. `"ast_mcts"`).
+    #[must_use]
+    pub fn algorithm_name(&self) -> &str {
+        self.algorithm.name()
+    }
+
     /// Save engine state to disk.
     pub fn save_checkpoint(&self, path: &Path) -> Result<(), EvolutionError> {
         let state = EngineState {
@@ -541,10 +630,18 @@ impl EvolutionEngine {
     /// Seed the underlying algorithm with an explicit population —
     /// the public path callers use to warm-start search from a known
     /// good corpus (or to inject a synthetic population from tests).
+    ///
+    /// Previously this method cloned `self.rng` before passing it to
+    /// `initialize`, so the engine's owned RNG was never advanced. Any
+    /// random draws made by `initialize` (e.g. MapElites grid placement,
+    /// initial mutation in SimulatedAnnealing) were "used up" in the
+    /// clone and the engine remained at the same RNG state — making two
+    /// successive `seed_population` calls (or a `seed_population` + an
+    /// `evolve`) produce identical random sequences and identical
+    /// chromosomes.
     pub fn seed_population(&mut self, population: Vec<Chromosome>) {
-        let mut rng = self.rng.clone();
         self.algorithm
-            .initialize(population, &self.gene_pool, &mut rng);
+            .initialize(population, &self.gene_pool, &mut self.rng);
     }
 
     /// Snapshot the algorithm's live population (test/diagnostic
@@ -666,6 +763,8 @@ impl EvolutionEngine {
 ///   - `target_health`: runtime stats; resets on resume.
 ///   - `checkpoint_path`: re-injected by the caller after load.
 ///   - `pending_single`: legacy sequential API state, transient.
+///   - `rule_coverage`: runtime observation accumulator; resets on
+///     resume so each run produces an independent coverage report.
 ///   - RNG state: search algorithms each capture their own RNG
 ///     state inside `algorithm_state`; the engine-level rng is
 ///     used only for `next_eval_id` minting and gene-pool sampling

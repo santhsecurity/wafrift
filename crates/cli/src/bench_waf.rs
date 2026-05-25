@@ -30,7 +30,6 @@ use wafrift_evolution::types::Budget;
 use wafrift_grammar::grammar::{self, PayloadType};
 use wafrift_smuggling::smuggling::all_payloads as smuggling_all_payloads;
 use wafrift_strategy::{EvasionConfig, evade_mcts};
-use wafrift_strategy::gene_bank::GeneBank;
 use wafrift_types::Request;
 
 use crate::Level;
@@ -95,11 +94,7 @@ pub struct BenchWafArgs {
     /// Available:
     ///   light / medium / heavy   — payload-string mutation via `build_variants`
     ///   equiv / equiv-adaptive / equiv-cegis
-    ///                              — sound `(payload×delivery)` moat (B / B+bandit /
-    ///                                B→C→A + active L*-style WAF-boundary learning).
-    ///                                Token `equiv-cegis` is the stable public name;
-    ///                                algorithm is active WAF-boundary learning
-    ///                                (Angluin 1987), not CEGIS.
+    ///                              — sound `(payload×delivery)` moat (B / B+bandit / B→C→A+learned-WAF)
     ///   mcts                      — Monte Carlo Tree Search over actions (mctrust)
     ///   smuggling                 — HTTP request smuggling variants (CL.TE / TE.CL / TE.TE / dual-CL)
     ///   content-type              — Content-Type confusion variants (multipart/json/xml/...)
@@ -187,25 +182,67 @@ pub struct BenchWafArgs {
     #[arg(long)]
     pub lineage_output: Option<PathBuf>,
 
-    /// Restrict gene-bank writes to this payload class (sql, xss, cmdi, ...).
-    /// When set, persists stats under this class key so future scans
-    /// warm-start from class-specific winners. Uses per-case class from
-    /// the corpus when unset. Only effective when --evade + --waf-name are set.
-    #[arg(long)]
-    pub payload_class: Option<String>,
+    // ─── Egress rotation (multi-IP evasion of bot-reputation engines) ────────
 
-    /// WAF vendor name for gene-bank persistence (e.g. "Cloudflare",
-    /// "ModSecurity"). When set with --evade, per-class bypass stats
-    /// are merged into the gene bank after the bench completes.
-    #[arg(long)]
-    pub waf_name: Option<String>,
+    /// SOCKS5 proxy URL for egress rotation (repeatable).
+    /// Example: `--socks5 socks5://user:pass@10.8.0.1:1080`
+    #[arg(long = "socks5", value_name = "URL", num_args = 0..)]
+    pub egress_socks5: Vec<String>,
 
-    /// B6: Skip loading the persisted WAF boundary model (warm-start).
-    /// Use for reproducible benchmarks. Default false (warm-start on)
-    /// preserves the product behaviour. When a model IS loaded, the
-    /// JSON output contains warm_state_hash for audit.
-    #[arg(long, default_value_t = false)]
-    pub no_warm_start: bool,
+    /// HTTP proxy URL for egress rotation (repeatable).
+    /// Example: `--http-proxy http://burp.internal:8080`
+    #[arg(long = "http-proxy", value_name = "URL", num_args = 0..)]
+    pub egress_http_proxy: Vec<String>,
+
+    /// Tailscale exit-node name for egress rotation (repeatable).
+    #[arg(long = "tailscale-exit-node", value_name = "NODE", num_args = 0..)]
+    pub egress_tailscale_nodes: Vec<String>,
+
+    /// Tailscale SOCKS listener address. Default: `127.0.0.1:1055`.
+    #[arg(long = "tailscale-socks-addr", value_name = "ADDR", default_value = "127.0.0.1:1055")]
+    pub egress_tailscale_socks_addr: String,
+
+    /// Consecutive challenges before cooling an egress entry. Default: 3.
+    #[arg(long = "egress-challenge-threshold", default_value_t = 3u32)]
+    pub egress_challenge_threshold: u32,
+
+    /// Seconds a cooled egress entry stays out of rotation. Default: 300.
+    #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
+    pub egress_cooldown_secs: u64,
+
+    /// Pin the evolution-strategy mutator to a specific algorithm for ablation.
+    /// `default` uses the strategy name (hill-climb, sim-anneal, etc.).
+    /// `ast-mcts` forces AST Monte-Carlo Tree Search for every evolution case.
+    #[arg(long, default_value = "default", value_parser = ["default", "ast-mcts"])]
+    pub mutator: String,
+
+    /// Weight for ensemble-dilution score in evolutionary fitness (0.0–1.0).
+    ///
+    /// When targeting a multi-rule-group ensemble WAF (Cloudflare Managed
+    /// Ruleset, AWS Core Rule Set), the evolution engine blends the oracle
+    /// bypass signal with a dilution score that estimates how well the
+    /// current chromosome keeps the WAF's total anomaly score below the
+    /// block threshold.
+    ///
+    /// 0.0 = pure oracle fitness (default, safe for all WAF types).
+    /// 0.3 = recommended for known ensemble targets.
+    /// 1.0 = pure dilution score (use only when oracle signal is noisy).
+    ///
+    /// Has no effect when targeting rule-based or ML-backed WAFs.
+    #[arg(long, default_value_t = 0.0, value_parser = parse_dilution_weight)]
+    pub dilution_weight: f64,
+}
+
+fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
+    let v: f64 = s
+        .parse()
+        .map_err(|_| format!("expected a float, got {s:?}"))?;
+    if !(0.0..=1.0).contains(&v) {
+        return Err(format!(
+            "--dilution-weight must be in [0.0, 1.0], got {v}"
+        ));
+    }
+    Ok(v)
 }
 
 #[derive(Debug, Deserialize)]
@@ -251,10 +288,6 @@ struct CaseResult {
     raw_blocked: bool,
     raw_status: u16,
     raw_latency_ms: f64,
-    /// B2: true when the HTTP request itself failed (network error / timeout).
-    /// Excluded from raw_block_rate denominator to avoid inflating with infra failures.
-    #[serde(default)]
-    raw_error: bool,
     evaded: Option<EvadeResult>,
 }
 
@@ -326,7 +359,7 @@ pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
 
 fn resolve_base_url(args: &BenchWafArgs) -> String {
     if let Some(ref u) = args.base_url {
-        return u.clone();
+        return crate::helpers::normalize_target_url(u);
     }
     std::env::var("WAFRIFT_BENCH_URL")
         .or_else(|_| std::env::var("WAFRIFT_MODSEC_URL"))
@@ -561,12 +594,6 @@ fn class_to_payload_type(class: &str) -> PayloadType {
         "nosql" => PayloadType::NoSql,
         // xxe / log4shell / cve_pocs have no wafrift mutator yet — fall back
         // to encoding-only mutations so the bench still runs.
-        // B3: graphql has no PayloadType variant yet; warn so the gap
-        // is visible in traces rather than silently falling through.
-        "graphql" => {
-            tracing::warn!("class=graphql: no grammar mutator, using encoding-only (B3)");
-            PayloadType::Unknown
-        }
         _ => PayloadType::Unknown,
     }
 }
@@ -733,19 +760,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
                     extra_delay_ms.store(prev.max(50) + args.delay_ms, Ordering::Relaxed);
                     consecutive_errors.store(0, Ordering::Relaxed);
                 }
-                // B2: push error record and skip; do not map to (0, true, 0.0)
-                // because that would count infra failures as WAF blocks.
-                results.push(CaseResult {
-                    id: case.id.clone(),
-                    class: case.class.clone(),
-                    description: case.description.clone(),
-                    raw_blocked: false,
-                    raw_status: 0,
-                    raw_latency_ms: 0.0,
-                    raw_error: true,
-                    evaded: None,
-                });
-                continue;
+                (0, true, 0.0)
             }
         };
 
@@ -762,7 +777,6 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
             raw_blocked,
             raw_status,
             raw_latency_ms,
-            raw_error: false, // B2: successful HTTP send
             evaded,
         });
     }
@@ -781,61 +795,6 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
                 corpus.entries.len(),
                 path.display()
             );
-        }
-    }
-
-    // Gene Bank (C1): persist per-class bypass stats so subsequent bench/scan
-    // runs against the same WAF warm-start from class-specific winners.
-    // Runs only when --evade AND --waf-name are both set; skips silently otherwise.
-    if args.evade {
-        if let Some(waf_name) = args.waf_name.as_deref() {
-            let mut class_stats: std::collections::HashMap<
-                String,
-                std::collections::HashMap<String, (u32, u32)>,
-            > = std::collections::HashMap::new();
-
-            for result in &results {
-                if let Some(evaded) = &result.evaded {
-                    let class = args
-                        .payload_class
-                        .as_deref()
-                        .unwrap_or(result.class.as_str())
-                        .to_string();
-                    let class_map = class_stats.entry(class).or_default();
-                    for (strat, stat) in &evaded.by_strategy {
-                        if stat.variants == 0 {
-                            continue;
-                        }
-                        let e = class_map.entry(strat.clone()).or_insert((0u32, 0u32));
-                        e.0 = e.0.saturating_add(stat.bypassed as u32);
-                        e.1 = e.1.saturating_add(stat.variants as u32);
-                    }
-                }
-            }
-
-            match GeneBank::open_default() {
-                Ok(mut bank) => {
-                    for (class, tech_map) in &class_stats {
-                        let stats: Vec<(String, u32, u32)> = tech_map
-                            .iter()
-                            .map(|(name, (s, a))| (name.clone(), *s, *a))
-                            .collect();
-                        if stats.is_empty() {
-                            continue;
-                        }
-                        match bank.merge_and_save_for_class(waf_name, class, &stats) {
-                            Ok(()) => eprintln!(
-                                "gene bank: {} technique(s) saved for {waf_name}/{class}",
-                                stats.len()
-                            ),
-                            Err(e) => eprintln!(
-                                "warn: gene bank save failed for {waf_name}/{class}: {e}"
-                            ),
-                        }
-                    }
-                }
-                Err(e) => eprintln!("warn: could not open gene bank: {e}"),
-            }
         }
     }
 
@@ -1077,18 +1036,6 @@ async fn run_payload_strategy(
     .take(args.variants)
     .collect();
 
-    // B8: warn when the mutator produced fewer variants than requested so
-    // coverage gaps are visible instead of silently under-testing.
-    if variants.len() < args.variants {
-        tracing::warn!(
-            case_id = %case.id,
-            requested = args.variants,
-            produced = variants.len(),
-            strat = %strat,
-            "build_variants produced fewer variants than requested (B8)"
-        );
-    }
-
     for variant in &variants {
         if *total > 0 && args.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
@@ -1285,7 +1232,7 @@ async fn run_equiv_adaptive_strategy(
     stat
 }
 
-/// Strategy: Phase-A active L*-style boundary learning. Learn the WAF's decision boundary as a
+/// Strategy: Phase-A CEGIS. Learn the WAF's decision boundary as a
 /// linear model from labelled probes, then *synthesize* the member the
 /// model predicts is most-allowed from the sound equivalence space,
 /// confirm it live, and refit on every counterexample. Generalises to
@@ -1319,7 +1266,6 @@ async fn run_equiv_cegis_strategy(
         args.delay_ms,
         args.timeout_secs,
         base_url,
-        args.no_warm_start, // B6: pass through --no-warm-start flag
     )
     .await;
 
@@ -1362,24 +1308,22 @@ async fn run_evolution_strategy(
     bypass_corpus: &mut Option<BypassCorpus>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
-    let algo_name = match strat {
-        "hill-climb" => "hill_climbing",
-        "sim-anneal" => "simulated_annealing",
-        "tabu" => "tabu_search",
-        "novelty" => "novelty_search",
-        "map-elites" => "map_elites",
-        _ => return stat,
+    // `--mutator ast-mcts` overrides the per-strategy algorithm selection so
+    // every evolution case runs through AST-MCTS for ablation comparison.
+    let algo_name = if args.mutator == "ast-mcts" {
+        "ast_mcts"
+    } else {
+        match strat {
+            "hill-climb" => "hill_climbing",
+            "sim-anneal" => "simulated_annealing",
+            "tabu" => "tabu_search",
+            "novelty" => "novelty_search",
+            "map-elites" => "map_elites",
+            _ => return stat,
+        }
     };
     let payload_type = class_to_payload_type(&case.class);
-    // B5: deterministic per-case seed via FNV-1a over case.id bytes.
-    // The old constant 0xC0FFEE made every run pick identical variants
-    // regardless of case identity, masking coverage gaps.
-    let mut case_seed: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
-    for byte in case.id.bytes() {
-        case_seed ^= u64::from(byte);
-        case_seed = case_seed.wrapping_mul(0x0000_0100_0000_01b3); // FNV prime
-    }
-    let rng = StdRng::seed_from_u64(case_seed);
+    let rng = StdRng::seed_from_u64(0xC0FFEE);
     let gene_pool = GenePool::default_wafrift();
     let budget = Budget {
         max_requests: args.variants.saturating_mul(4),
@@ -1393,6 +1337,16 @@ async fn run_evolution_strategy(
             return stat;
         }
     };
+
+    // When using AST-MCTS, seed the engine with a chromosome that carries the
+    // raw payload so the MCTS rollout starts from a meaningful rewrite context.
+    if algo_name == "ast_mcts" {
+        use wafrift_evolution::evolution::Chromosome;
+        let seed = Chromosome::new(vec![
+            ("ast_mcts_payload".into(), case.payload.clone()),
+        ]);
+        engine.seed_population(vec![seed]);
+    }
 
     for _ in 0..args.variants {
         if *total > 0 && args.delay_ms > 0 {
@@ -1529,7 +1483,8 @@ async fn run_mcts_strategy(
     bypass_techs: &mut Vec<String>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
-    let config = EvasionConfig::maximum();
+    let mut config = EvasionConfig::maximum();
+    config.dilution_weight = args.dilution_weight;
     let base_req = build_request(base_url, case);
 
     // MCTS is deterministic per (request, config, depth). Sweep depths so we
@@ -1880,17 +1835,6 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         })
         .collect();
 
-    // B2: compute block rate excluding network-error cases so infra
-    // failures do not inflate the block denominator.
-    let raw_error_count = results.iter().filter(|r| r.raw_error).count();
-    let raw_valid_count = results.len().saturating_sub(raw_error_count);
-    let raw_blocked_count = results.iter().filter(|r| r.raw_blocked).count();
-    let raw_block_rate_val = if raw_valid_count > 0 {
-        raw_blocked_count as f64 / raw_valid_count as f64
-    } else {
-        0.0
-    };
-
     let aggregate = serde_json::json!({
         // Schema version for downstream consumers (bench-diff, dashboards,
         // CI parsers). Bump when the JSON shape changes incompatibly so
@@ -1903,9 +1847,9 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         "variants_per_case_per_strategy": args.variants,
         "lineage_output": args.lineage_output.as_ref().map(|p| p.display().to_string()),
         "total_cases": results.len(),
-        "raw_error_cases": raw_error_count,
-        "raw_blocked": raw_blocked_count,
-        "raw_block_rate": raw_block_rate_val,
+        "raw_blocked": results.iter().filter(|r| r.raw_blocked).count(),
+        "raw_block_rate": results.iter().filter(|r| r.raw_blocked).count() as f64
+            / results.len() as f64,
         "evaded_summary": args.evade.then(|| {
             let total: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_total).sum();
             let bypassed: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_bypassed).sum();
