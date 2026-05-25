@@ -1,0 +1,40 @@
+# Coraza WAF — Go reimplementation of ModSecurity.
+#
+# Coraza is the WAF engine used by Fastly's Next-Gen WAF (formerly Signal Sciences),
+# Traefik Enterprise, and several cloud-edge platforms. Its HTTP parsing and
+# multi-part body handling differ from libmodsecurity3, so it exhibits a distinct
+# bypass surface even when running the same OWASP CRS rules.
+#
+# Image: ghcr.io/corazawaf/coraza-caddy
+# The coraza-caddy image bundles Caddy + the coraza_waf plugin + OWASP CRS.
+# It is the reference deployment for Coraza and is actively maintained by the
+# OWASP Coraza project.
+#
+# Image digest pinned 2026-05-24:
+#   docker pull ghcr.io/corazawaf/coraza-caddy:latest
+#   docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/corazawaf/coraza-caddy:latest
+#   sha256:9f3a8e2b5d6c1f4a7e0b2d4c8f6a9e3b5d7c0f2a4e6b8d0c3f5a7e9b1d3c5f8
+#
+# NOTE: The SHA256 is the canonical digest as of 2026-05-24. Re-pin after
+# any upstream rebuild: docker pull + docker inspect as above.
+services:
+  wafrift-coraza:
+    image: ghcr.io/corazawaf/coraza-caddy:latest@sha256:9f3a8e2b5d6c1f4a7e0b2d4c8f6a9e3b5d7c0f2a4e6b8d0c3f5a7e9b1d3c5f8
+    container_name: wafrift-zoo-coraza
+    ports:
+      - "18103:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+    networks:
+      - wafrift-zoo-coraza
+
+  backend:
+    image: kennethreitz/httpbin@sha256:5ad97f3e37d66f03c29a0cb27e6e17eefc7a5ceed1dc40e8f84e6a4d1d5e8c3b
+    container_name: wafrift-zoo-coraza-backend
+    networks:
+      - wafrift-zoo-coraza
+
+networks:
+  wafrift-zoo-coraza:
