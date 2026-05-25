@@ -507,7 +507,7 @@ fn render_markdown(
     for (name, hs) in hosts {
         out.push_str(&format!("### `{name}`\n\n"));
         if let Some(waf) = &hs.waf_name {
-            out.push_str(&format!("**Identified WAF:** {waf}\n\n"));
+            out.push_str(&format!("**Identified WAF:** {}\n\n", md_escape(waf)));
         }
         out.push_str(&format!(
             "**Bypass count:** {} proven technique(s)\n\n",
@@ -516,14 +516,14 @@ fn render_markdown(
 
         out.push_str("**Working techniques:**\n\n");
         for t in &hs.proven_winners {
-            out.push_str(&format!("- `{t}`\n"));
+            out.push_str(&format!("- `{}`\n", md_escape(t)));
         }
         out.push('\n');
 
         if !hs.blocklisted.is_empty() {
             out.push_str("**Techniques the WAF reliably blocks** (do not use):\n\n");
             for t in &hs.blocklisted {
-                out.push_str(&format!("- `{t}`\n"));
+                out.push_str(&format!("- `{}`\n", md_escape(t)));
             }
             out.push('\n');
         }
@@ -549,7 +549,7 @@ fn render_markdown(
                     } else {
                         f.techniques
                             .iter()
-                            .map(|t| format!("`{t}`"))
+                            .map(|t| format!("`{}`", md_escape(t)))
                             .collect::<Vec<_>>()
                             .join(" → ")
                     }
@@ -639,6 +639,24 @@ fn glob_recurse(p: &[u8], s: &[u8]) -> bool {
 /// Why a helper instead of inline format! magic: routes through the
 /// SAME `RawRequest`/`to_curl` path the scan engine uses to surface
 /// reproducers, so a fix to one curl-shape rule applies everywhere.
+/// Escape a user-controlled string for safe embedding in a markdown document.
+///
+/// Strips backticks (which would break code fences) and escapes angle
+/// brackets (which GitHub / Notion render as HTML). Both are injection
+/// vectors: a technique name containing triple-backticks closes the fence;
+/// a name containing `<script>` executes in HTML-mode markdown renderers.
+fn md_escape(s: &str) -> String {
+    s.chars()
+        .filter(|c| *c != '`')
+        .map(|c| match c {
+            '<' => "&lt;".to_string(),
+            '>' => "&gt;".to_string(),
+            '&' => "&amp;".to_string(),
+            c => c.to_string(),
+        })
+        .collect()
+}
+
 fn curl_reproducer(target: &str, param: &str, payload: &str) -> String {
     let url = match reqwest::Url::parse(target) {
         Ok(mut url) => {
