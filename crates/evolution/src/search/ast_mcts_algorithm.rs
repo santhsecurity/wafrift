@@ -166,7 +166,7 @@ impl AstMctsAlgorithm {
         }
 
         // Run MCTS using an inline oracle to enumerate candidate rewrites.
-        let jitter: u64 = rng.gen();
+        let jitter: u64 = rng.r#gen();
         let mut generated: Vec<String> = Vec::new();
         let mut inline = InlineOracle {
             candidates: &mut generated,
@@ -197,7 +197,12 @@ impl AstMctsAlgorithm {
                 set_gene(&mut c, "ast_mcts_payload", &payload);
                 c.lineage = Lineage::mutation(
                     &self.best,
-                    vec![format!("ast_mcts:best_payload")],
+                    vec![crate::lineage::MutationOp {
+                        gene_name: "ast_mcts_payload".into(),
+                        from: self.best_payload.clone(),
+                        to: payload.clone(),
+                        operator: "ast_mcts:best_payload".into(),
+                    }],
                     self.generation,
                 );
                 self.pending.push((self.eval_counter, c));
@@ -217,7 +222,12 @@ impl AstMctsAlgorithm {
             set_gene(&mut c, "ast_mcts_payload", &payload);
             c.lineage = Lineage::mutation(
                 &self.best,
-                vec![format!("ast_mcts:inline_candidate")],
+                vec![crate::lineage::MutationOp {
+                    gene_name: "ast_mcts_payload".into(),
+                    from: self.best_payload.clone(),
+                    to: payload.clone(),
+                    operator: "ast_mcts:inline_candidate".into(),
+                }],
                 self.generation,
             );
             self.pending.push((self.eval_counter, c));

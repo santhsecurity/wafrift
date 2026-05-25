@@ -260,7 +260,8 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
 }
 
 /// Run the body-diff scanner.
-pub async fn run_body_diff(args: BodyDiffArgs) -> ExitCode {
+pub async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,

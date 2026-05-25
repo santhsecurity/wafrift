@@ -25,6 +25,8 @@ members = [
     "crates/captchaforge-bridge",
     "crates/graphql",
     "crates/http3-evasion",
+    "crates/grpc-evasion",
+    "crates/plugin-api",
 ]
 
 [workspace.package]
@@ -90,6 +92,8 @@ wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "
 wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.21" }
 wafrift-graphql = { path = "crates/graphql", version = "0.2.21" }
 wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.2.21" }
+wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.2.21" }
+wafrift-plugin-api = { path = "crates/plugin-api", version = "0.2.21" }
 mctrust = "=0.4.0"
 pocgen = { path = "../../libs/offensive/pocgen" }
 # External dependencies (unavailable in this environment)
@@ -177,3 +181,5 @@ rustls-pki-types = "1.14.0"
 webpki-roots = "1.0.6"
 fs4 = "1.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
+wasmtime = "30"
+tempfile = "3"
