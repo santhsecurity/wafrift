@@ -243,7 +243,8 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     out
 }
 
-pub async fn run_query_diff(args: QueryDiffArgs) -> ExitCode {
+pub async fn run_query_diff(mut args: QueryDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,

@@ -1,7 +1,19 @@
-//! wafrift-evolution — Genetic algorithm, differential analysis, and WAF-aware advisor.
+//! wafrift-evolution — Genetic algorithm, MCTS, differential analysis, and WAF-aware advisor.
 //!
 //! The adaptive feedback loop: detect WAF → analyze differential responses →
 //! evolve technique populations → recommend optimal evasion strategies.
+//!
+//! Key modules:
+//! - [`evolution`]    — genetic algorithm (crossover, mutation, fitness)
+//! - [`ast_mcts`]     — MCTS over the technique action space
+//! - [`differential`] — differential response analysis (surface divergences)
+//! - [`advisor`]      — WAF-class-aware technique recommender
+//! - [`body_padding`] — inspection-window evasion (pad JSON/form past WAF scan cap)
+//! - [`dilution`]     — ensemble dilution for ML-WAF evasion
+//! - [`intelligence`] — cross-scan intelligence aggregation
+//! - [`lineage`]      — technique lineage tracking across generations
+//! - [`search`]       — novelty search + MAP-Elites algorithm
+//! - [`custom_rules`] — operator-supplied TOML evasion rules
 //!
 //! # Examples
 //!

@@ -1,3 +1,4 @@
+use crate::coverage_feedback::{RuleCoverage, map_elites_descriptor};
 use crate::evolution::fitness::{evolutionary_fitness, update_gene_stats};
 use crate::evolution::{
     Chromosome, GenePool,
@@ -56,6 +57,10 @@ pub struct EvolutionEngine {
     pub stagnation_counter: u32,
     /// Saved bypass corpus.
     pub corpus: BypassCorpus,
+    /// WAF rule-coverage accumulator.  Tracks (payload_class × rule_id) cells
+    /// observed during the run.  Populated by [`submit_batch`] when the oracle
+    /// result carries a `rule_id` (via `OracleVerdict::rule_id`).
+    pub rule_coverage: RuleCoverage,
     /// Evaluations this generation.
     generation_evals: usize,
     /// Next candidate ID.
@@ -94,6 +99,7 @@ impl Clone for EvolutionEngine {
             fitness_history: self.fitness_history.clone(),
             stagnation_counter: self.stagnation_counter,
             corpus: self.corpus.clone(),
+            rule_coverage: self.rule_coverage.clone(),
             generation_evals: self.generation_evals,
             next_id: self.next_id,
             pending_single: None,
@@ -210,6 +216,7 @@ impl EvolutionEngine {
             fitness_history: VecDeque::new(),
             stagnation_counter: 0,
             corpus: BypassCorpus::new(),
+            rule_coverage: RuleCoverage::new(),
             generation_evals: 0,
             next_id: 0,
             pending_single: None,
@@ -280,7 +287,7 @@ impl EvolutionEngine {
 
         for candidate in requested {
             let key = Self::cache_key(&candidate.chromosome);
-            if let Some(verdict) = self.cache.get(&key).copied() {
+            if let Some(verdict) = self.cache.get(&key).cloned() {
                 cached_results.push((candidate.id, verdict));
             } else {
                 let eval_id = self.next_eval_id();
@@ -345,9 +352,33 @@ impl EvolutionEngine {
 
             chromosome.record_verdict(&verdict);
             let key = Self::cache_key(&chromosome);
-            self.cache.put(key, verdict);
 
-            update_gene_stats(&mut self.gene_stats, &chromosome.genes, verdict.passed);
+            // Coverage-feedback: record the (payload_class × rule_id)
+            // MAP-Elites behavior descriptor.  Use the chromosome's
+            // `grammar_rule` gene as the class signal — it is the
+            // closest available proxy to "attack class" inside the
+            // engine layer.  When the verdict carries a `rule_id`, we
+            // get a 2-D descriptor; without it the descriptor collapses
+            // to class-only (the pre-coverage fall-through).
+            let coverage_signal = chromosome
+                .gene("grammar_rule")
+                .filter(|v| *v != "None")
+                .unwrap_or("")
+                .to_string();
+            let (_, _cov_rid) = map_elites_descriptor(
+                &coverage_signal,
+                verdict.rule_id.as_deref(),
+            );
+            self.rule_coverage
+                .record(&coverage_signal, verdict.rule_id.as_deref());
+
+            // Extract scalar fields before the verdict is moved.
+            let passed = verdict.passed;
+            let status_delta = verdict.status_delta;
+
+            self.cache.put(key, verdict.clone());
+
+            update_gene_stats(&mut self.gene_stats, &chromosome.genes, passed);
             let adjusted = evolutionary_fitness(&chromosome, &self.gene_stats);
             chromosome.fitness = adjusted;
 
@@ -371,9 +402,9 @@ impl EvolutionEngine {
             self.generation_evals += 1;
             self.stats.evaluations += 1;
 
-            if verdict.passed {
+            if passed {
                 self.target_health.record_success();
-            } else if verdict.status_delta >= 500 {
+            } else if status_delta >= 500 {
                 self.target_health.record_error();
             }
         }
@@ -403,7 +434,7 @@ impl EvolutionEngine {
         chromosome_index: usize,
         verdict: &OracleVerdict,
     ) -> Result<(), EvolutionError> {
-        self.submit_batch(vec![(chromosome_index, *verdict)])
+        self.submit_batch(vec![(chromosome_index, verdict.clone())])
     }
 
     /// Record target-error feedback.
@@ -674,6 +705,8 @@ impl EvolutionEngine {
 ///   - `target_health`: runtime stats; resets on resume.
 ///   - `checkpoint_path`: re-injected by the caller after load.
 ///   - `pending_single`: legacy sequential API state, transient.
+///   - `rule_coverage`: runtime observation accumulator; resets on
+///     resume so each run produces an independent coverage report.
 ///   - RNG state: search algorithms each capture their own RNG
 ///     state inside `algorithm_state`; the engine-level rng is
 ///     used only for `next_eval_id` minting and gene-pool sampling

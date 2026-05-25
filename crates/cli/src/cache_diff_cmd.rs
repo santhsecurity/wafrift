@@ -254,7 +254,8 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
 }
 
 /// Run the cache-diff scanner.
-pub async fn run_cache_diff(args: CacheDiffArgs) -> ExitCode {
+pub async fn run_cache_diff(mut args: CacheDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,

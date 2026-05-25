@@ -132,7 +132,8 @@ pub struct H2DiffResult {
 
 /// Entry point — runs the configured H1/H2 differential probes
 /// against `args.url`.
-pub async fn run_h2_diff(args: H2DiffArgs) -> ExitCode {
+pub async fn run_h2_diff(mut args: H2DiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let h1 = match build_client(false, &args) {
         Ok(c) => c,
         Err(code) => return code,

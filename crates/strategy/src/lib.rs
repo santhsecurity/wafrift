@@ -1,8 +1,14 @@
 //! wafrift-strategy — Evasion strategy pipeline.
 //!
 //! The orchestrator that wires all WAF Rift modules into a coherent
-//! evasion flow: request → fingerprint → grammar → encoding →
-//! header → content-type → result.
+//! evasion flow: request → detect → grammar → encoding →
+//! content-type → smuggling → fingerprint → result.
+//!
+//! Maintains per-host adaptive state (`HostState`), promotes proven-winner
+//! techniques into a rotation pool, evicts winners that get blocked, and
+//! restarts full discovery when all winners are exhausted. Per-WAF state
+//! persists to `~/.wafrift/genomes/<waf>.json` across sessions.
+//! Also integrates MCTS (`mcts_bridge`) and ML-WAF evasion (`ml_evasion`).
 //!
 //! # Examples
 //!
