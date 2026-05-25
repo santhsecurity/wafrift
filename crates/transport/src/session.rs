@@ -1,4 +1,4 @@
-use authjar::{AuthJarError, AuthSession, SessionSettings, SessionStore};
+use authjar::{AuthJarError, AuthSession, SessionStore};
 use std::path::Path;
 use thiserror::Error;
 use wafrift_types::Request;
@@ -199,6 +199,7 @@ pub fn inject_csrf(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use authjar::SessionSettings;
 
     #[test]
     fn load_jar_missing_file_returns_empty() {
