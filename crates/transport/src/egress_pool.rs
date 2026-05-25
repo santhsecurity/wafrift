@@ -39,20 +39,20 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use wafrift_transport::egress_pool::{EgressPool, EgressEntry, EgressBackend};
+//! use wafrift_transport::egress_pool::EgressPool;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let pool = EgressPool::builder()
-//!     .socks5(vec![
-//!         "socks5://user:pass@10.0.0.1:1080".parse()?,
-//!         "socks5://user:pass@10.0.0.2:1080".parse()?,
-//!     ])
+//!     .socks5_str(vec![
+//!         "socks5://user:pass@10.0.0.1:1080".to_owned(),
+//!         "socks5://user:pass@10.0.0.2:1080".to_owned(),
+//!     ])?
 //!     .cooldown_secs(300)
 //!     .build()?;
 //!
 //! // Get a reqwest::ClientBuilder pre-configured for one egress.
 //! let entry = pool.next_for("target.example.com")?;
-//! let client = entry.apply_to_builder(reqwest::ClientBuilder::new()).build()?;
+//! let _client = entry.apply_to_builder(reqwest::ClientBuilder::new()).build()?;
 //! # Ok(())
 //! # }
 //! ```
@@ -81,9 +81,55 @@ pub enum EgressError {
         count: usize,
         cooldown_secs: u64,
     },
-    /// A provided proxy URL failed to parse.
+    /// A provided proxy URL failed to parse or has an invalid scheme.
     #[error("invalid proxy URL {url:?}: {reason}")]
     InvalidUrl { url: String, reason: String },
+}
+
+// ── URL validation helpers ────────────────────────────────────────────────────
+
+/// Validate that `raw` is a syntactically valid URL with a SOCKS5 scheme
+/// (`socks5://` or `socks5h://`).
+///
+/// Returns the original string on success so callers can use it directly
+/// with [`reqwest::Proxy`] without re-boxing.
+pub fn parse_socks5_url(raw: &str) -> Result<String, EgressError> {
+    let lower = raw.to_ascii_lowercase();
+    if !lower.starts_with("socks5://") && !lower.starts_with("socks5h://") {
+        return Err(EgressError::InvalidUrl {
+            url: raw.to_owned(),
+            reason: "expected socks5:// or socks5h:// scheme".to_owned(),
+        });
+    }
+    // reqwest::Proxy::all will do the full parse later; we just need to reject
+    // obvious garbage (missing the ://host part) before it gets into the pool.
+    let after_scheme = raw.splitn(3, "://").nth(1).unwrap_or("");
+    if after_scheme.is_empty() {
+        return Err(EgressError::InvalidUrl {
+            url: raw.to_owned(),
+            reason: "missing host after scheme".to_owned(),
+        });
+    }
+    Ok(raw.to_owned())
+}
+
+/// Validate that `raw` is an HTTP or HTTPS proxy URL.
+pub fn parse_http_proxy_url(raw: &str) -> Result<String, EgressError> {
+    let lower = raw.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err(EgressError::InvalidUrl {
+            url: raw.to_owned(),
+            reason: "expected http:// or https:// scheme".to_owned(),
+        });
+    }
+    let after_scheme = raw.splitn(3, "://").nth(1).unwrap_or("");
+    if after_scheme.is_empty() {
+        return Err(EgressError::InvalidUrl {
+            url: raw.to_owned(),
+            reason: "missing host after scheme".to_owned(),
+        });
+    }
+    Ok(raw.to_owned())
 }
 
 // ── egress backend ────────────────────────────────────────────────────────────
@@ -108,7 +154,7 @@ pub enum EgressBackend {
 
 impl EgressBackend {
     /// The short display label used in tracing / diagnostics.
-    fn label(&self) -> &str {
+    pub fn label(&self) -> &str {
         match self {
             EgressBackend::Socks5(url) => url,
             EgressBackend::HttpProxy(url) => url,
@@ -186,9 +232,9 @@ impl EgressEntry {
 
     /// Apply this egress entry's proxy configuration to a `reqwest::ClientBuilder`.
     ///
-    /// Returns the builder unchanged if no proxy is configured (i.e., the
-    /// entry is a Tailscale node — the node selection is done via a request
-    /// header, not at the client level; callers must add the header too).
+    /// For Tailscale backends the proxy points at the local Tailscale SOCKS
+    /// listener; the caller must also add the `Tailscale-Exit-Node` header
+    /// (via [`EgressEntry::tailscale_exit_node_header`]).
     pub fn apply_to_builder(&self, builder: ClientBuilder) -> ClientBuilder {
         match &self.backend {
             EgressBackend::Socks5(url) => {
@@ -213,7 +259,7 @@ impl EgressEntry {
         }
     }
 
-    /// For Tailscale backends, returns the exit-node header to add:
+    /// For Tailscale backends, returns the exit-node header pair
     /// `("Tailscale-Exit-Node", "<node_name>")`. Returns `None` for
     /// other backends.
     pub fn tailscale_exit_node_header(&self) -> Option<(&str, &str)> {
@@ -348,6 +394,16 @@ impl EgressPool {
     pub fn record_pass(&self, entry: &EgressEntry, target: &str) {
         entry.record_pass(target);
     }
+
+    /// The challenge threshold configured for this pool.
+    pub fn challenge_threshold(&self) -> u32 {
+        self.challenge_threshold
+    }
+
+    /// The cooldown duration configured for this pool.
+    pub fn cooldown(&self) -> Duration {
+        self.cooldown
+    }
 }
 
 // ── builder ───────────────────────────────────────────────────────────────────
@@ -359,38 +415,50 @@ pub struct EgressPoolBuilder {
     challenge_threshold: Option<u32>,
     cooldown_secs: Option<u64>,
     seed: Option<u64>,
+    validation_errors: Vec<EgressError>,
 }
 
 impl EgressPoolBuilder {
-    /// Add SOCKS5 proxy URLs to the pool. Each URL must be parseable as a
-    /// valid `socks5://` URL.
-    pub fn socks5(mut self, urls: Vec<url::Url>) -> Self {
+    /// Add validated SOCKS5 proxy URL strings to the pool.
+    ///
+    /// Returns `Err` immediately if any URL fails validation; callers can
+    /// also call the infallible `socks5_str_raw` to defer validation.
+    pub fn socks5_str(mut self, urls: Vec<String>) -> Result<Self, EgressError> {
         for u in urls {
-            self.backends.push(EgressBackend::Socks5(u.to_string()));
+            let validated = parse_socks5_url(&u)?;
+            self.backends.push(EgressBackend::Socks5(validated));
+        }
+        Ok(self)
+    }
+
+    /// Add raw SOCKS5 URL strings, collecting validation errors to be
+    /// surfaced at [`build`] time. Use when you want to batch-validate.
+    pub fn socks5_str_raw(mut self, urls: Vec<String>) -> Self {
+        for u in urls {
+            match parse_socks5_url(&u) {
+                Ok(validated) => self.backends.push(EgressBackend::Socks5(validated)),
+                Err(e) => self.validation_errors.push(e),
+            }
         }
         self
     }
 
-    /// Add SOCKS5 proxy URL strings to the pool.
-    pub fn socks5_str(mut self, urls: Vec<String>) -> Self {
+    /// Add validated HTTP proxy URL strings to the pool.
+    pub fn http_proxy_str(mut self, urls: Vec<String>) -> Result<Self, EgressError> {
         for u in urls {
-            self.backends.push(EgressBackend::Socks5(u));
+            let validated = parse_http_proxy_url(&u)?;
+            self.backends.push(EgressBackend::HttpProxy(validated));
         }
-        self
+        Ok(self)
     }
 
-    /// Add HTTP proxy URLs to the pool.
-    pub fn http_proxy(mut self, urls: Vec<url::Url>) -> Self {
+    /// Add raw HTTP proxy URL strings, deferring validation to `build`.
+    pub fn http_proxy_str_raw(mut self, urls: Vec<String>) -> Self {
         for u in urls {
-            self.backends.push(EgressBackend::HttpProxy(u.to_string()));
-        }
-        self
-    }
-
-    /// Add HTTP proxy URL strings to the pool.
-    pub fn http_proxy_str(mut self, urls: Vec<String>) -> Self {
-        for u in urls {
-            self.backends.push(EgressBackend::HttpProxy(u));
+            match parse_http_proxy_url(&u) {
+                Ok(validated) => self.backends.push(EgressBackend::HttpProxy(validated)),
+                Err(e) => self.validation_errors.push(e),
+            }
         }
         self
     }
@@ -431,9 +499,16 @@ impl EgressPoolBuilder {
         self
     }
 
-    /// Build the pool. Returns `Err(EgressError::EmptyPool)` when no
-    /// backends were added.
+    /// Build the pool.
+    ///
+    /// Returns `Err(EgressError::EmptyPool)` when no backends were added.
+    /// Returns `Err(EgressError::InvalidUrl)` when any raw URL validation
+    /// errors were recorded during builder calls.
     pub fn build(self) -> Result<EgressPool, EgressError> {
+        // Surface the first validation error collected during builder calls.
+        if let Some(e) = self.validation_errors.into_iter().next() {
+            return Err(e);
+        }
         if self.backends.is_empty() {
             return Err(EgressError::EmptyPool);
         }
@@ -450,48 +525,6 @@ impl EgressPoolBuilder {
             seed: self.seed,
         })
     }
-}
-
-// ── URL parsing helpers ───────────────────────────────────────────────────────
-
-/// Parse a SOCKS5 URL string (accepts `socks5://...` and `socks5h://...`)
-/// and return a validated [`url::Url`].
-///
-/// Returns [`EgressError::InvalidUrl`] when parsing fails or the scheme is
-/// not a SOCKS5 variant.
-pub fn parse_socks5_url(raw: &str) -> Result<url::Url, EgressError> {
-    let u = url::Url::parse(raw).map_err(|e| EgressError::InvalidUrl {
-        url: raw.to_owned(),
-        reason: e.to_string(),
-    })?;
-    let scheme = u.scheme();
-    if scheme != "socks5" && scheme != "socks5h" {
-        return Err(EgressError::InvalidUrl {
-            url: raw.to_owned(),
-            reason: format!("expected socks5:// or socks5h:// scheme, got {scheme:?}"),
-        });
-    }
-    Ok(u)
-}
-
-/// Parse an HTTP proxy URL string (accepts `http://...` and `https://...`)
-/// and return a validated [`url::Url`].
-///
-/// Returns [`EgressError::InvalidUrl`] when parsing fails or the scheme is
-/// not HTTP/HTTPS.
-pub fn parse_http_proxy_url(raw: &str) -> Result<url::Url, EgressError> {
-    let u = url::Url::parse(raw).map_err(|e| EgressError::InvalidUrl {
-        url: raw.to_owned(),
-        reason: e.to_string(),
-    })?;
-    let scheme = u.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err(EgressError::InvalidUrl {
-            url: raw.to_owned(),
-            reason: format!("expected http:// or https:// scheme, got {scheme:?}"),
-        });
-    }
-    Ok(u)
 }
 
 // ── trait for swappable backends ──────────────────────────────────────────────
@@ -520,13 +553,14 @@ pub trait EgressRouter: Send + Sync {
 mod tests {
     use super::*;
 
-    // helper: pool with N fake SOCKS5 entries
+    // helper: pool with N fake SOCKS5 entries (raw, no scheme validation error)
     fn socks_pool(n: usize) -> EgressPool {
         let urls: Vec<String> = (0..n)
             .map(|i| format!("socks5://127.0.0.{i}:1080"))
             .collect();
         EgressPool::builder()
             .socks5_str(urls)
+            .expect("valid socks5 urls")
             .build()
             .expect("pool should build")
     }
@@ -538,6 +572,7 @@ mod tests {
             .collect();
         EgressPool::builder()
             .socks5_str(urls)
+            .expect("valid socks5 urls")
             .seed(seed)
             .build()
             .expect("pool should build")
@@ -571,6 +606,7 @@ mod tests {
     fn cooldown_after_n_consecutive_blocks() {
         let pool = EgressPool::builder()
             .socks5_str(vec!["socks5://127.0.0.1:1080".to_owned()])
+            .expect("valid url")
             .challenge_threshold(3)
             .cooldown_secs(300)
             .build()
@@ -599,6 +635,7 @@ mod tests {
                 "socks5://127.0.0.1:1080".to_owned(),
                 "socks5://127.0.0.2:1080".to_owned(),
             ])
+            .expect("valid urls")
             .challenge_threshold(1)
             .cooldown_secs(300)
             .build()
@@ -621,6 +658,7 @@ mod tests {
     fn cooldown_is_per_target() {
         let pool = EgressPool::builder()
             .socks5_str(vec!["socks5://127.0.0.1:1080".to_owned()])
+            .expect("valid url")
             .challenge_threshold(1)
             .cooldown_secs(300)
             .build()
@@ -662,17 +700,15 @@ mod tests {
     // ── TEST 7 — parse valid SOCKS5 URL with auth ─────────────────────────
     #[test]
     fn parse_socks5_url_with_auth() {
-        let u = parse_socks5_url("socks5://alice:s3cr3t@10.8.0.1:1080").unwrap();
-        assert_eq!(u.host_str(), Some("10.8.0.1"));
-        assert_eq!(u.port(), Some(1080));
-        assert_eq!(u.username(), "alice");
+        let validated = parse_socks5_url("socks5://alice:s3cr3t@10.8.0.1:1080").unwrap();
+        assert!(validated.contains("10.8.0.1"));
     }
 
     // ── TEST 8 — parse SOCKS5h variant ────────────────────────────────────
     #[test]
     fn parse_socks5h_url() {
-        let u = parse_socks5_url("socks5h://proxy.internal:1080").unwrap();
-        assert_eq!(u.scheme(), "socks5h");
+        let validated = parse_socks5_url("socks5h://proxy.internal:1080").unwrap();
+        assert!(validated.starts_with("socks5h://"));
     }
 
     // ── TEST 9 — invalid URL scheme rejected ──────────────────────────────
@@ -695,8 +731,8 @@ mod tests {
     // ── TEST 11 — HTTP proxy URL parsing ──────────────────────────────────
     #[test]
     fn parse_http_proxy_url_ok() {
-        let u = parse_http_proxy_url("http://burp.internal:8080").unwrap();
-        assert_eq!(u.port(), Some(8080));
+        let validated = parse_http_proxy_url("http://burp.internal:8080").unwrap();
+        assert!(validated.contains(":8080"));
     }
 
     // ── TEST 12 — cooldown skip: non-cooled entry preferred ──────────────
@@ -707,6 +743,7 @@ mod tests {
                 "socks5://127.0.0.1:1080".to_owned(), // will be cooled
                 "socks5://127.0.0.2:1080".to_owned(), // stays clean
             ])
+            .expect("valid urls")
             .challenge_threshold(1)
             .cooldown_secs(300)
             .seed(0) // deterministic: cursor starts at slot 0
@@ -726,6 +763,7 @@ mod tests {
     fn record_pass_resets_challenge_counter() {
         let pool = EgressPool::builder()
             .socks5_str(vec!["socks5://127.0.0.1:1080".to_owned()])
+            .expect("valid url")
             .challenge_threshold(3)
             .cooldown_secs(300)
             .build()
@@ -804,6 +842,7 @@ mod integration {
         // Pool: slot 0 = ok_url (HTTP proxy), slot 1 = bad_url.
         let pool = EgressPool::builder()
             .http_proxy_str(vec![ok_url.clone(), bad_url])
+            .expect("valid http proxy urls")
             .challenge_threshold(3)
             .cooldown_secs(300)
             .seed(0)
@@ -845,6 +884,7 @@ mod integration {
 
         let pool = EgressPool::builder()
             .http_proxy_str(vec![url_a, url_b])
+            .expect("valid urls")
             .challenge_threshold(1)
             .cooldown_secs(300)
             .build()
@@ -874,6 +914,7 @@ mod integration {
 
         let pool = EgressPool::builder()
             .http_proxy_str(vec![ok_url.clone(), bad_url])
+            .expect("valid urls")
             .challenge_threshold(1)
             .cooldown_secs(300)
             .seed(0)

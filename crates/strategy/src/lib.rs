@@ -67,3 +67,6 @@ pub use planner::plan_pipelines;
 pub use strategy::*;
 
 pub mod explain;
+/// Plugin bridge — integrates external TOML/WASM tampers from wafrift-plugin-api
+/// into the evasion pipeline alongside built-in tampers.
+pub mod plugin_bridge;

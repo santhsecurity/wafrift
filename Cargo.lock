@@ -6509,6 +6509,7 @@ dependencies = [
  "wafrift-graphql",
  "wafrift-grpc-evasion",
  "wafrift-oracle",
+ "wafrift-plugin-api",
  "wafrift-smuggling",
  "wafrift-types",
  "wafrift-wafmodel",
