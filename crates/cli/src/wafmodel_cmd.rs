@@ -17,7 +17,8 @@ use std::process::ExitCode;
 use wafrift_types::Request;
 use wafrift_wafmodel::normalize::Transform;
 use wafrift_wafmodel::{
-    ChannelSet, Outcome, Rule, SimRegexWaf, WafOracle, default_crs_ruleset, norm_mismatch_members,
+    Channel, ChannelSet, Outcome, Rule, SimRegexWaf, WafOracle, default_crs_ruleset,
+    norm_mismatch_members,
 };
 
 #[derive(clap::Args, Debug)]
@@ -70,6 +71,28 @@ fn load_ruleset(path: &Option<String>) -> Result<SimRegexWaf, String> {
 
 fn body(b: &[u8]) -> Request {
     Request::post("https://h/p", b.to_vec()).header("Content-Type", "application/json")
+}
+
+/// Render a `ChannelSet` as the TOML array literal that `SimRegexWaf::from_toml`
+/// can round-trip back. Needed so the harden output's `[[rule]]` stanzas are
+/// copy-pasteable into a `.toml` ruleset without a missing-field parse error.
+fn channel_set_toml(cs: ChannelSet) -> String {
+    const ALL: &[(Channel, &str)] = &[
+        (Channel::Path,        "\"Path\""),
+        (Channel::ArgName,     "\"ArgName\""),
+        (Channel::ArgValue,    "\"ArgValue\""),
+        (Channel::HeaderName,  "\"HeaderName\""),
+        (Channel::HeaderValue, "\"HeaderValue\""),
+        (Channel::CookieName,  "\"CookieName\""),
+        (Channel::CookieValue, "\"CookieValue\""),
+        (Channel::Body,        "\"Body\""),
+    ];
+    let parts: Vec<&str> = ALL
+        .iter()
+        .filter(|(ch, _)| cs.contains(*ch))
+        .map(|(_, s)| *s)
+        .collect();
+    format!("[{}]", parts.join(", "))
 }
 
 /// Canonical attacks + the CRS-normalized tokens that detect them.
@@ -431,8 +454,9 @@ fn run_harden_inner(args: HardenArgs) -> u8 {
                     .map(|t| format!("\"{t:?}\""))
                     .collect();
                 println!(
-                    "  [[rule]]\n  id = \"{}\"\n  transforms = [{}]\n  pattern = {:?}\n  score = {}",
+                    "  [[rule]]\n  id = \"{}\"\n  channels = {}\n  transforms = [{}]\n  pattern = {:?}\n  score = {}",
                     rule.id,
+                    channel_set_toml(rule.channels),
                     tf_toml.join(", "),
                     rule.pattern.as_str(),
                     rule.score
@@ -764,6 +788,72 @@ mod tests {
         assert_eq!(case_flip("Hello123!"), "hELLO123!");
         assert_eq!(case_flip(""), "");
         assert_eq!(case_flip("123"), "123");
+    }
+
+    // ── channel_set_toml ─────────────────────────────────────────────────
+
+    /// All-channels `ChannelSet` must serialize to a TOML array containing
+    /// all eight channel names in canonical declaration order.
+    #[test]
+    fn channel_set_toml_all_channels_round_trips() {
+        let s = channel_set_toml(ChannelSet::all());
+        // Must be bracketed.
+        assert!(s.starts_with('[') && s.ends_with(']'), "must be a TOML array: {s}");
+        // All eight channels must appear.
+        for name in &[
+            "\"Path\"",
+            "\"ArgName\"",
+            "\"ArgValue\"",
+            "\"HeaderName\"",
+            "\"HeaderValue\"",
+            "\"CookieName\"",
+            "\"CookieValue\"",
+            "\"Body\"",
+        ] {
+            assert!(s.contains(name), "missing channel {name} in: {s}");
+        }
+    }
+
+    /// An empty `ChannelSet` must serialize to `[]`, not to a list of
+    /// stray commas or a malformed TOML literal.
+    #[test]
+    fn channel_set_toml_empty_produces_empty_array() {
+        let s = channel_set_toml(ChannelSet::none());
+        assert_eq!(s, "[]", "empty ChannelSet must produce '[]', got: {s}");
+    }
+
+    /// A single-channel `ChannelSet` must produce exactly one entry.
+    #[test]
+    fn channel_set_toml_single_channel_has_one_entry() {
+        let cs = ChannelSet::none().with(Channel::Body);
+        let s = channel_set_toml(cs);
+        assert_eq!(s, "[\"Body\"]", "single-channel must serialize to [\"Body\"], got: {s}");
+    }
+
+    /// `channel_set_toml` output is accepted by `SimRegexWaf::from_toml`
+    /// when embedded in a minimal `[[rule]]` stanza. This is the end-to-end
+    /// contract: if the harden command emits the TOML, a user can paste it
+    /// and it will parse without error.
+    #[test]
+    fn channel_set_toml_output_is_parseable_by_sim_regex_waf() {
+        let channels_toml = channel_set_toml(ChannelSet::all());
+        // Minimal valid ruleset with the generated channels field.
+        let toml = format!(
+            r#"threshold = 5
+[[rule]]
+id = "test-toml-roundtrip"
+channels = {channels_toml}
+transforms = ["UrlDecodeUni", "Lowercase"]
+pattern = "script"
+score = 5
+"#
+        );
+        let result = SimRegexWaf::from_toml(&toml);
+        assert!(
+            result.is_ok(),
+            "channel_set_toml output must parse cleanly in from_toml: {:?}",
+            result.err()
+        );
     }
 
     /// candidates must include the raw and case-flipped variants plus
