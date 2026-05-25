@@ -451,35 +451,81 @@ Globs use a tiny ASCII grammar (`*` matches any run, `?` matches one byte, case-
 
 `wafrift-proxy` refuses upstream targets in private / loopback / RFC1918 / link-local ranges by default; pass `--allow-private-upstream` only against lab targets you own. `wafrift replay` and `bypass-probe` send genuinely exploitable strings — see the [Lawful Use](#lawful-use--repository-responsibility) clause at the bottom of this README.
 
-## Measured bypass rates
+## Canonical benchmark
 
-Live scoreboard: [`docs/SCOREBOARD.md`](./docs/SCOREBOARD.md) — refreshed nightly from CI; per-(WAF × payload-class) verified-bypass rate across ModSec PL1-4, Coraza, BunkerWeb, and naxsi. Every number below is reproducible from [`wafrift-bench/`](./wafrift-bench/); methodology in [`wafrift-bench/methodology.md`](./wafrift-bench/methodology.md); machine-readable JSON in `wafrift-bench/results/`.
+**One number, one command.** The headline figure for wafrift is the verified-bypass rate
+of the default out-of-the-box strategy pair (`heavy,equiv-cegis`) against ModSecurity CRS
+PL=4 — the toughest widely-deployed preset — using only the 5 variants-per-strategy default.
 
-**Target: ModSecurity + OWASP CRS.** Corpus: 557 cases across 10 attack classes (sql / xss / cmdi / ssti / path / ldap / xxe / ssrf / nosql / log4shell). 10 evasion strategies combined; oracle-gated (each "bypass" verified structurally as a valid attack, not garbage that slipped past).
-
-| Paranoia | Variants sent | Bypassed | Rate | Cases ≥1 bypass |
-|---|---:|---:|---:|---:|
-| **PL=1** (default) | 46k | 16.7k | **36%** | **557 / 557 (100%)** |
-| PL=2 | 60k | 17.6k | 29% | 557 / 557 (100%) |
-| PL=3 | 60k | 17.3k | 28% | 557 / 557 (100%) |
-| **PL=4** (most aggressive) | 60k | 16.3k | **27%** | **557 / 557 (100%)** |
-
-**At every paranoia level — including PL=4, CRS's most paranoid preset — every single attack case in the corpus has at least one working bypass when the full strategy stack is applied with 60+ variants per case.** Once a working seed exists, the per-host gene bank (`~/.wafrift/genomes/`) replays it indefinitely.
-
-> "557/557 cases bypassed" is a search-budget result, not a one-shot rate. The proxy alone (HTTP-layer evasion only) still gets blocked on a naked SQLi against PL=4; payload-byte mutation lives in `wafrift scan` / `wafrift bench-waf`. Worked example: [`docs/PRACTITIONER_WALKTHROUGH.md`](./docs/PRACTITIONER_WALKTHROUGH.md).
+| Config | Value |
+|---|---|
+| WAF image | `owasp/modsecurity-crs:4-apache-202604040104` |
+| Paranoia level | 4 (all four PL rules active, `ANOMALY_INBOUND=5`) |
+| Corpus | 607 cases, all attack classes, `wafrift-bench/corpus/` |
+| Strategies | `heavy,equiv-cegis` (default; no extra flags) |
+| Variants per case per strategy | 5 (default) |
+| Oracle gate | always on (non-attack garbage never counted) |
+| **Headline bypass rate** | **9.8% overall** (`evaded_summary.overall_bypass_rate`) |
+| Result file | `wafrift-bench/results/2026-05-19/modsec-pl4-after-compression.json` |
+| Run date | 2026-05-19 |
 
 ```bash
-# Reproduce
+# Reproduce the headline number (approx 15 min on an 8-core machine)
 git clone https://github.com/santhsecurity/wafrift && cd wafrift
 wafrift-bench/scripts/up.sh modsec-pl4
 cargo run --release -p wafrift-cli -- bench-waf \
     --base-url http://127.0.0.1:18084 \
     --corpus wafrift-bench/corpus \
-    --evade --variants 20 \
-    --strategies heavy,mcts,smuggling,content-type,redos,hill-climb,sim-anneal,tabu,novelty,map-elites,differential \
-    --oracle-gate \
-    --output repro.json
-jq .evaded_summary repro.json
+    --evade \
+    --strategies heavy,equiv-cegis \
+    --format json \
+    --output wafrift-bench/results/$(date -u +%Y%m%d)-modsec-pl4-canonical.json
+jq '.evaded_summary.overall_bypass_rate' wafrift-bench/results/*-modsec-pl4-canonical.json
+```
+
+The result lands in `wafrift-bench/results/<date>-modsec-pl4-canonical.json`; the
+field to cite is `.evaded_summary.overall_bypass_rate`.
+
+> **Why 9.8% and not 27%?** The 27% figure (file `wafrift-bench/results/modsec-pl4-multi.json`,
+> corpus 557 cases, strategies `heavy,mcts,smuggling,content-type,redos`, 30 variants
+> per strategy per case = 59 941 total variants sent) measures search-budget throughput
+> with a 5-strategy pile: given enough tries, 27% of all generated variants slip through.
+> The 9.8% figure measures what wafrift does out of the box in one pass with the default
+> settings — a stricter, more honest claim. Both numbers are real, both are reproducible,
+> and they measure different things. We cite the conservative one as the headline.
+
+## Measured bypass rates
+
+Live scoreboard: [`docs/SCOREBOARD.md`](./docs/SCOREBOARD.md) — refreshed nightly from CI; per-(WAF × payload-class) verified-bypass rate across ModSec PL1-4, Coraza, BunkerWeb, and naxsi. Every number is reproducible from [`wafrift-bench/`](./wafrift-bench/); methodology in [`wafrift-bench/methodology.md`](./wafrift-bench/methodology.md); machine-readable JSON in `wafrift-bench/results/`.
+
+**Headline (canonical config): 9.8% bypass rate at ModSecurity CRS PL=4, default strategies (`heavy,equiv-cegis`), 607 cases (2026-05-19).**
+
+Per-paranoia breakdown using a higher search budget (5 strategies, 30 variants per strategy
+per case); see the Canonical benchmark note above for the distinction between these numbers
+and the headline:
+
+**Target: ModSecurity + OWASP CRS.** Corpus: 557 cases across 10 attack classes (sql / xss / cmdi / ssti / path / ldap / xxe / ssrf / nosql / log4shell). Strategies: `heavy,mcts,smuggling,content-type,redos`; 30 variants per strategy per case; oracle-gated.
+
+| Paranoia | Strategies | Variants sent | Bypassed | Rate | Cases ≥1 bypass |
+|---|---|---:|---:|---:|---:|
+| PL=4 (most aggressive) | heavy,mcts,smuggling,content-type,redos | 60k | 16.3k | 27% | 557 / 557 (100%) |
+
+**At the highest search budget — 5 strategies × 30 variants per case — every single attack case has at least one working bypass against PL=4.** Once a working seed exists, the per-host gene bank (`~/.wafrift/genomes/`) replays it indefinitely.
+
+> "557/557 cases bypassed" is a search-budget result, not a one-shot rate. The proxy alone (HTTP-layer evasion only) still gets blocked on a naked SQLi against PL=4; payload-byte mutation lives in `wafrift scan` / `wafrift bench-waf`. Worked example: [`docs/PRACTITIONER_WALKTHROUGH.md`](./docs/PRACTITIONER_WALKTHROUGH.md).
+
+```bash
+# Reproduce the extended search-budget table
+git clone https://github.com/santhsecurity/wafrift && cd wafrift
+wafrift-bench/scripts/up.sh modsec-pl4
+cargo run --release -p wafrift-cli -- bench-waf \
+    --base-url http://127.0.0.1:18084 \
+    --corpus wafrift-bench/corpus \
+    --evade --variants 30 \
+    --strategies heavy,mcts,smuggling,content-type,redos \
+    --format json \
+    --output repro-extended.json
+jq .evaded_summary repro-extended.json
 ```
 
 ## How it compares
