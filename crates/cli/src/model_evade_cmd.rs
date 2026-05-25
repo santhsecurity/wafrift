@@ -468,7 +468,13 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
         .header("Content-Type", "application/x-www-form-urlencoded")
     };
 
-    let mut eq = BoundedExhaustiveEq { max_len: 6 };
+    // max_queries caps the EQ oracle's HTTP round-trips per equivalence
+    // round. With a 22-symbol sqli alphabet the BFS frontier reaches
+    // 22⁵ ≈ 5 M entries at depth 5, capped to 1 M by FRONTIER_CAP —
+    // still 1 M HTTP calls per EQ round without this gate. 500 queries
+    // is more than enough to find a counterexample for any sub-6-state
+    // boundary learned from a budget-50 membership pass.
+    let mut eq = BoundedExhaustiveEq { max_len: 6, max_queries: Some(500) };
     let learn_result: LearnReport =
         match l_star_budgeted(&mut oracle, &build_req, &alpha, &mut eq, args.budget) {
             Ok(r) => {
@@ -954,7 +960,7 @@ mod tests {
             Request::post("https://h/p", bytes.to_vec())
                 .header("Content-Type", "application/x-www-form-urlencoded")
         };
-        let mut eq = BoundedExhaustiveEq { max_len: 5 };
+        let mut eq = BoundedExhaustiveEq { max_len: 5, max_queries: None };
         let report = l_star_budgeted(&mut waf, &build, &alpha, &mut eq, 2000).unwrap();
         // Learned model must pass the empty body (benign).
         assert!(report.sfa.accepts(b""), "empty body must pass");
@@ -980,7 +986,7 @@ mod tests {
             Request::post("https://h/p", bytes.to_vec())
                 .header("Content-Type", "application/x-www-form-urlencoded")
         };
-        let mut eq = BoundedExhaustiveEq { max_len: 5 };
+        let mut eq = BoundedExhaustiveEq { max_len: 5, max_queries: None };
         // Budget of 1 is too small — must return BudgetExhausted.
         let result = l_star_budgeted(&mut waf, &build, &alpha, &mut eq, 1);
         assert!(
