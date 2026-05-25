@@ -292,7 +292,9 @@ pub fn all_payload_families() -> Vec<PayloadFamily> {
 /// Demo SAML fixture for the catalog's `saml-xsw` family. Real
 /// callers pass their own captured assertion.
 fn saml_demo_fixture() -> &'static str {
-    r#"<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_r" Version="2.0"><saml:Assertion ID="_a" Version="2.0" IssueInstant="2026-01-01T00:00:00Z"><ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo><ds:Reference URI="#_a"/></ds:SignedInfo><ds:SignatureValue>AA</ds:SignatureValue></ds:Signature><saml:Subject><saml:NameID>victim</saml:NameID></saml:Subject></saml:Assertion></samlp:Response>"#
+    // Raw string uses r##"..."## so the embedded `"#` (from the XML
+    // xmldsig# namespace URI) doesn't close the r#"..."# delimiter.
+    r##"<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_r" Version="2.0"><saml:Assertion ID="_a" Version="2.0" IssueInstant="2026-01-01T00:00:00Z"><ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo><ds:Reference URI="#_a"/></ds:SignedInfo><ds:SignatureValue>AA</ds:SignatureValue></ds:Signature><saml:Subject><saml:NameID>victim</saml:NameID></saml:Subject></saml:Assertion></samlp:Response>"##
 }
 
 /// Demo JWT fixture for the catalog's `jwt` family. Real callers
