@@ -19,6 +19,7 @@
 use proptest::prelude::*;
 use wafrift_encoding::encoding::{
     cache_poison, invisible, method_override, path_norm, race, request_line,
+    unicode,
 };
 
 // ───────────────────────────────────────────────────────────────
@@ -310,5 +311,183 @@ proptest! {
         let any_host = v.iter().any(|(_, p)| p.contains(&host));
         let any_path = v.iter().any(|(_, p)| p.contains(&path));
         prop_assert!(any_host || any_path);
+    }
+}
+
+// ───────────────────────────────────────────────────────────────
+// unicode.rs — Math/script/fraktur/double-struck/letterlike alphabet
+// encoders and JSON/SQL evasion helpers.
+//
+// Each proptest asserts two invariants:
+//   1. No panic on arbitrary UTF-8 input (".*").
+//   2. Determinism: same input → same output.
+// ───────────────────────────────────────────────────────────────
+
+proptest! {
+    // ── Mathematical alphabet encoders ────────────────────────
+
+    #[test]
+    fn unicode_math_italic_no_panic(s in ".*") {
+        let a = unicode::math_italic_encode(&s);
+        let b = unicode::math_italic_encode(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_math_script_no_panic(s in ".*") {
+        let a = unicode::math_script_encode(&s);
+        let b = unicode::math_script_encode(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_math_fraktur_no_panic(s in ".*") {
+        let a = unicode::math_fraktur_encode(&s);
+        let b = unicode::math_fraktur_encode(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_math_double_struck_no_panic(s in ".*") {
+        let a = unicode::math_double_struck_encode(&s);
+        let b = unicode::math_double_struck_encode(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_letterlike_no_panic(s in ".*") {
+        let a = unicode::letterlike_encode(&s);
+        let b = unicode::letterlike_encode(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    // ── JSON escape variants ────────────────────────────────────
+
+    #[test]
+    fn unicode_json_unicode_full_no_panic(s in ".*") {
+        let a = unicode::json_unicode_full(&s);
+        let b = unicode::json_unicode_full(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_json_unicode_mixed_case_no_panic(s in ".*") {
+        let a = unicode::json_unicode_mixed_case(&s);
+        let b = unicode::json_unicode_mixed_case(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_json_key_unicode_escape_no_panic(key in ".*", value in ".*") {
+        let a = unicode::json_key_unicode_escape(&key, &value);
+        let b = unicode::json_key_unicode_escape(&key, &value);
+        prop_assert_eq!(a, b);
+    }
+
+    // ── Path traversal helper ──────────────────────────────────
+
+    #[test]
+    fn unicode_overlong_utf8_path_no_panic(path in ".*", width in 0u8..=5) {
+        let a = unicode::overlong_utf8_path(&path, width);
+        let b = unicode::overlong_utf8_path(&path, width);
+        prop_assert_eq!(a, b);
+    }
+
+    // ── Invisible-char injectors ───────────────────────────────
+
+    #[test]
+    fn unicode_bidi_inject_no_panic(s in ".*") {
+        let a = unicode::bidi_inject(&s);
+        // Must start with RLO and end with PDF.
+        prop_assert!(a.starts_with('\u{202E}'));
+        prop_assert!(a.ends_with('\u{202C}'));
+    }
+
+    #[test]
+    fn unicode_combining_mark_inject_no_panic(s in ".*") {
+        let a = unicode::combining_mark_inject(&s, '\u{0308}');
+        let b = unicode::combining_mark_inject(&s, '\u{0308}');
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_zero_width_inject_no_panic(s in ".*") {
+        let a = unicode::zero_width_inject(&s, '\u{200B}');
+        let b = unicode::zero_width_inject(&s, '\u{200B}');
+        prop_assert_eq!(a, b);
+    }
+
+    // ── Script-homoglyph / locale-case encoders ────────────────
+
+    #[test]
+    fn unicode_script_homoglyph_no_panic(s in ".*") {
+        let a = unicode::script_homoglyph_encode(&s);
+        let b = unicode::script_homoglyph_encode(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_turkish_i_no_panic(s in ".*") {
+        let a = unicode::turkish_i_encode(&s);
+        let b = unicode::turkish_i_encode(&s);
+        prop_assert_eq!(a, b);
+        // Every char that was `i` or `I` must now be a dotless variant.
+        for (orig, enc) in s.chars().zip(a.chars()) {
+            if orig == 'i' {
+                prop_assert_eq!(enc, '\u{0131}');
+            } else if orig == 'I' {
+                prop_assert_eq!(enc, '\u{0130}');
+            }
+        }
+    }
+
+    #[test]
+    fn unicode_sharp_s_no_panic(s in ".*") {
+        let a = unicode::sharp_s_encode(&s);
+        let b = unicode::sharp_s_encode(&s);
+        prop_assert_eq!(a, b);
+        // Every `s` or `S` in the input must become ß (U+00DF).
+        for (orig, enc) in s.chars().zip(a.chars()) {
+            if orig == 's' || orig == 'S' {
+                prop_assert_eq!(enc, '\u{00DF}');
+            }
+        }
+    }
+
+    // ── SQL evasion helpers ─────────────────────────────────────
+
+    #[test]
+    fn unicode_sql_concat_split_no_panic(s in ".*") {
+        let a = unicode::sql_concat_split(&s);
+        let b = unicode::sql_concat_split(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_sql_char_decompose_no_panic(s in ".*") {
+        let a = unicode::sql_char_decompose(&s);
+        let b = unicode::sql_char_decompose(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_pg_chr_decompose_no_panic(s in ".*") {
+        let a = unicode::pg_chr_decompose(&s);
+        let b = unicode::pg_chr_decompose(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_html_entity_variants_no_panic(s in ".*") {
+        let a = unicode::html_entity_variants(&s);
+        let b = unicode::html_entity_variants(&s);
+        prop_assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unicode_sql_adjacent_string_concat_no_panic(s in ".*") {
+        let a = unicode::sql_adjacent_string_concat(&s);
+        let b = unicode::sql_adjacent_string_concat(&s);
+        prop_assert_eq!(a, b);
     }
 }
