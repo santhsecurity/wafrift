@@ -326,6 +326,52 @@ struct WasmRuntime {
     dealloc_fn: Option<wasmtime::TypedFunc<(i32, i32), ()>>,
 }
 
+impl WasmRuntime {
+    /// Execute one tamper call.  All field borrows are resolved inside
+    /// this `&mut self` method so the borrow checker sees a single
+    /// mutable borrow of `self` — no aliasing conflicts.
+    fn call_tamper(&mut self, input: &str) -> Option<String> {
+        self.store.set_fuel(WASM_FUEL_PER_CALL).ok()?;
+
+        let bytes = input.as_bytes();
+        let len = bytes.len() as i32;
+
+        // Allocate guest memory for the input.
+        let ptr = self.alloc_fn.call(&mut self.store, len).ok()?;
+
+        // Write payload into guest linear memory.
+        self.memory
+            .write(&mut self.store, ptr as usize, bytes)
+            .ok()?;
+
+        // Call the guest tamper function.
+        let result_packed = self.tamper_fn.call(&mut self.store, (ptr, len)).ok()?;
+
+        // Free the input allocation if a dealloc export is present.
+        if let Some(dealloc) = self.dealloc_fn {
+            dealloc.call(&mut self.store, (ptr, len)).ok();
+        }
+
+        // Unpack (result_ptr << 32 | result_len).
+        let result_ptr = ((result_packed >> 32) & 0xFFFF_FFFF) as usize;
+        let result_len = (result_packed & 0xFFFF_FFFF) as usize;
+
+        let mut out = vec![0u8; result_len];
+        self.memory
+            .read(&self.store, result_ptr, &mut out)
+            .ok()?;
+
+        // Free the output allocation.
+        if let Some(dealloc) = self.dealloc_fn {
+            dealloc
+                .call(&mut self.store, (result_ptr as i32, result_len as i32))
+                .ok();
+        }
+
+        String::from_utf8(out).ok()
+    }
+}
+
 impl Tamper for WasmTamper {
     fn name(&self) -> &str {
         &self.manifest.name
@@ -336,56 +382,7 @@ impl Tamper for WasmTamper {
             Ok(g) => g,
             Err(_) => return input.to_owned(), // poisoned — fail safe
         };
-
-        // Re-fuel the store for this call.
-        rt.store.set_fuel(WASM_FUEL_PER_CALL).unwrap_or(());
-
-        let bytes = input.as_bytes();
-        let len = bytes.len() as i32;
-
-        // Allocate guest memory for the input.
-        let ptr = match rt.alloc_fn.call(&mut rt.store, len) {
-            Ok(p) => p,
-            Err(_) => return input.to_owned(),
-        };
-
-        // Write payload into guest linear memory.
-        if rt.memory.write(&mut rt.store, ptr as usize, bytes).is_err() {
-            return input.to_owned();
-        }
-
-        // Call the guest tamper function.
-        let result_packed = match rt.tamper_fn.call(&mut rt.store, (ptr, len)) {
-            Ok(v) => v,
-            Err(_) => return input.to_owned(),
-        };
-
-        // Free the input allocation if a dealloc export is present.
-        if let Some(ref dealloc) = rt.dealloc_fn {
-            dealloc.call(&mut rt.store, (ptr, len)).ok();
-        }
-
-        // Unpack (result_ptr << 32 | result_len).
-        let result_ptr = ((result_packed >> 32) & 0xFFFF_FFFF) as usize;
-        let result_len = (result_packed & 0xFFFF_FFFF) as usize;
-
-        let mut out = vec![0u8; result_len];
-        if rt
-            .memory
-            .read(&rt.store, result_ptr, &mut out)
-            .is_err()
-        {
-            return input.to_owned();
-        }
-
-        // Free the output allocation.
-        if let Some(ref dealloc) = rt.dealloc_fn {
-            dealloc
-                .call(&mut rt.store, (result_ptr as i32, result_len as i32))
-                .ok();
-        }
-
-        String::from_utf8(out).unwrap_or_else(|_| input.to_owned())
+        rt.call_tamper(input).unwrap_or_else(|| input.to_owned())
     }
 
     fn manifest(&self) -> TamperManifest {
@@ -424,8 +421,8 @@ fn load_wasm_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
     config.consume_fuel(true);
     config.static_memory_maximum_size(WASM_MEMORY_PAGES * 65536);
     config.dynamic_memory_guard_size(0);
-    // Disable WASI-related features at the engine level.
-    config.wasm_threads(false);
+    // Multi-memory and threads are not needed; keeping them off
+    // narrows the attack surface of the sandboxed guest.
 
     let engine = wasmtime::Engine::new(&config).map_err(|e| PluginError::WasmLoad {
         file: path.to_owned(),

@@ -179,6 +179,33 @@ pub struct BenchWafArgs {
     /// Only the search-loop strategies (hill-climb / sim-anneal / tabu /
     /// novelty / map-elites) populate lineage — the static strategies have
     /// no chromosome.
+    // ─── Egress rotation (multi-IP evasion of bot-reputation engines) ────────
+
+    /// SOCKS5 proxy URL for egress rotation (repeatable).
+    /// Example: `--socks5 socks5://user:pass@10.8.0.1:1080`
+    #[arg(long = "socks5", value_name = "URL", num_args = 0..)]
+    pub egress_socks5: Vec<String>,
+
+    /// HTTP proxy URL for egress rotation (repeatable).
+    /// Example: `--http-proxy http://burp.internal:8080`
+    #[arg(long = "http-proxy", value_name = "URL", num_args = 0..)]
+    pub egress_http_proxy: Vec<String>,
+
+    /// Tailscale exit-node name for egress rotation (repeatable).
+    #[arg(long = "tailscale-exit-node", value_name = "NODE", num_args = 0..)]
+    pub egress_tailscale_nodes: Vec<String>,
+
+    /// Tailscale SOCKS listener address. Default: `127.0.0.1:1055`.
+    #[arg(long = "tailscale-socks-addr", value_name = "ADDR", default_value = "127.0.0.1:1055")]
+    pub egress_tailscale_socks_addr: String,
+
+    /// Consecutive challenges before cooling an egress entry. Default: 3.
+    #[arg(long = "egress-challenge-threshold", default_value_t = 3u32)]
+    pub egress_challenge_threshold: u32,
+
+    /// Seconds a cooled egress entry stays out of rotation. Default: 300.
+    #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
+    pub egress_cooldown_secs: u64,
     #[arg(long)]
     pub lineage_output: Option<PathBuf>,
 }

@@ -7,7 +7,7 @@ repository.workspace = true
 authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Origin discovery and recon (CT logs, historical DNS) for Wafrift"
+description = "Origin discovery and recon (CT logs, historical DNS, active HTTP/TCP probing) for wafrift"
 
 [dependencies]
 tokio.workspace = true

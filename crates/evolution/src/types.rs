@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 /// Rich oracle verdict providing gradient signals for fitness.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OracleVerdict {
     /// Whether the payload passed the WAF.
     pub passed: bool,
@@ -19,6 +19,10 @@ pub struct OracleVerdict {
     pub confidence: f64,
     /// Number of WAF rules triggered.
     pub triggered_rules: u32,
+    /// WAF rule ID that fired (e.g. "942100" for ModSecurity CRS SQL injection).
+    /// `None` if the request passed or the WAF did not expose the rule ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
 }
 
 /// Penalty per triggered WAF rule in fitness calculation.
@@ -49,6 +53,7 @@ impl OracleVerdict {
             latency_ms: 0,
             confidence: 1.0,
             triggered_rules: if passed { 0 } else { 1 },
+            rule_id: None,
         }
     }
 
@@ -107,6 +112,7 @@ impl Feedback {
                 latency_ms: 0,
                 confidence: 0.0,
                 triggered_rules: 0,
+                rule_id: None,
             },
         }
     }

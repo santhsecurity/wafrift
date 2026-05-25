@@ -223,7 +223,8 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     out
 }
 
-pub async fn run_cors_diff(args: CorsDiffArgs) -> ExitCode {
+pub async fn run_cors_diff(mut args: CorsDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,

@@ -142,7 +142,8 @@ pub struct Divergence {
 /// Returns `Err` if the target URL can't be parsed, the HTTP client
 /// can't be built, or the baseline request fails outright (no
 /// connectivity).
-pub fn run_bypass_probe(args: BypassProbeArgs) -> Result<(), String> {
+pub fn run_bypass_probe(mut args: BypassProbeArgs) -> Result<(), String> {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

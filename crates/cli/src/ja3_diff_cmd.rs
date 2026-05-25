@@ -106,7 +106,8 @@ struct ProbeOutcome {
 }
 
 /// Entry point for the `wafrift ja3-diff` subcommand.
-pub fn run_ja3_diff(args: Ja3DiffArgs) -> ExitCode {
+pub fn run_ja3_diff(mut args: Ja3DiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {
