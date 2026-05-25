@@ -1,90 +1,44 @@
-//! wafrift-core — Façade crate re-exporting all WAF Rift modules.
+//! wafrift-core -- Facade crate (integration-test surface only).
 //!
-//! This crate is a convenience umbrella. Each module lives in its own
-//! focused crate; this crate re-exports them all under a single namespace
-//! so existing consumers (`wafrift-cli`, `wafrift-transport`, integration
-//! tests) can continue using `wafrift_core::*`.
+//! This crate is NOT a public entry-point for production consumers.
+//! wafrift-cli, wafrift-proxy, and wafrift-transport all depend on
+//! individual subcrates directly. This facade exists solely to give the
+//! workspace integration tests (crates/core/tests/) a single import
+//! namespace so each test file does not list a dozen dev-dependencies.
 //!
-//! # Examples
+//! # Symbol inventory (everything the tests actually use)
 //!
-//! Use the umbrella to drive a payload through three subsystems
-//! without depending on each subcrate by name:
-//!
-//! ```
-//! use wafrift_core::{encoding, grammar};
-//!
-//! // Classify, mutate, encode — three lego-blocks, one façade.
-//! let p = "' OR 1=1 --";
-//! assert_eq!(grammar::classify(p), grammar::PayloadType::Sql);
-//!
-//! let mutations = grammar::mutate(p, 3);
-//! assert!(!mutations.is_empty());
-//!
-//! let encoded = encoding::encode(p, encoding::Strategy::UrlEncode).unwrap();
-//! assert!(encoded.contains("%27"));
-//! ```
-//!
-//! Use the re-exported types to build a request without naming
-//! `wafrift_types`:
-//!
-//! ```
-//! use wafrift_core::{Method, Request};
-//!
-//! let r = Request::get("https://example.com").header("X-Test", "1");
-//! assert_eq!(r.method(), &Method::Get);
-//! assert_eq!(r.headers().len(), 1);
-//! ```
-//!
-//! # Crate structure
-//!
-//! | Crate                   | Purpose                                       |
-//! |-------------------------|-----------------------------------------------|
-//! | `wafrift-types`         | Core types: Request, Technique, EvasionResult  |
-//! | `wafrift-encoding`      | Payload encoding + header obfuscation          |
-//! | `wafrift-grammar`       | Grammar-aware payload mutations                |
-//! | `wafrift-content-type`  | WAFFLED Content-Type switching                 |
-//! | `wafrift-smuggling`     | HTTP smuggling + HTTP/2 evasion                |
-//! | `wafrift-fingerprint`   | Browser + TLS fingerprint profiles             |
-//! | `wafrift-detect`        | WAF detection + response fingerprinting        |
-//! | `wafrift-evolution`     | Genetic algorithm + differential + advisor     |
-//! | `wafrift-strategy`      | Evasion strategy pipeline                      |
+//! | Re-export path                      | Used by                             |
+//! |-------------------------------------|-------------------------------------|
+//! | wafrift_types::*                    | all tests (Request, Technique, ...) |
+//! | content_type                        | adversarial, failure_tests          |
+//! | encoding                            | all tests                           |
+//! | fingerprint                         | adversarial                         |
+//! | grammar                             | pipeline_integration                |
+//! | smuggling, h2_evasion               | pipeline_integration                |
+//! | waf_detect                          | adversarial, pipeline_integration   |
+//! | host_state, strategy                | all tests                           |
+//! | HostState, EscalationLevel          | strategy_adversarial, failure_tests |
+//! | EvasionConfig, CalibrationResult    | strategy_adversarial, failure_tests |
 
-// ── Foundation types ──
+// -- Foundation types (Request, Technique, Method, EvasionResult, config::*, ...) --
 pub use wafrift_types::*;
 
-// ── Technique modules (re-exported as submodules) ──
+// -- Technique modules --
 pub use wafrift_content_type as content_type;
 pub use wafrift_encoding::encoding;
-pub use wafrift_encoding::header;
 pub use wafrift_fingerprint::fingerprint;
-pub use wafrift_fingerprint::tls_fingerprint;
 pub use wafrift_grammar::grammar;
 pub use wafrift_smuggling::h2_evasion;
 pub use wafrift_smuggling::smuggling;
 
-// ── Intelligence modules ──
-pub use wafrift_detect::response_fingerprint;
+// -- Detection --
 pub use wafrift_detect::waf_detect;
-pub use wafrift_evolution::advisor;
-pub use wafrift_evolution::custom_rules;
-pub use wafrift_evolution::differential;
-pub use wafrift_evolution::evolution;
-pub use wafrift_evolution::intelligence;
 
-// ── Pipeline ──
+// -- Pipeline --
 pub use wafrift_strategy::host_state;
 pub use wafrift_strategy::strategy;
 
-// ── Validation / oracle layer ──
-pub use wafrift_oracle as oracle;
-
-// ── Transport / network ──
-pub use wafrift_pool as pool;
-pub use wafrift_transport as transport;
-
-// ── Discovery ──
-pub use wafrift_recon as recon;
-
-// Re-export key types that integration tests expect at crate root
+// -- Root-level re-exports that tests import without a module path --
 pub use wafrift_strategy::host_state::HostState;
 pub use wafrift_strategy::strategy::{CalibrationResult, EscalationLevel, EvasionConfig};

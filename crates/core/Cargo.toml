@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "WAF Rift — intelligent WAF evasion engine. Façade crate re-exporting all modules."
+description = "WAF Rift -- integration-test facade (not a public API surface)."
 readme = "README.md"
 repository.workspace = true
 keywords = ["waf", "evasion", "security", "http", "engine"]
@@ -20,18 +20,9 @@ wafrift-fingerprint = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
 wafrift-strategy = { workspace = true }
-wafrift-oracle = { workspace = true }
-wafrift-transport = { workspace = true }
-wafrift-pool = { workspace = true }
-wafrift-recon = { workspace = true }
 
-# Keep direct deps for existing integration tests
-rand = { workspace = true }
-urlencoding = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+[dev-dependencies]
 serde_json = { workspace = true }
-toml = { workspace = true }
-rcgen = { workspace = true }
 
 [lints]
 workspace = true
