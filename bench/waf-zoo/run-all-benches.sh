@@ -9,9 +9,15 @@
 #   2. All stacks up: bench/waf-zoo/up.sh
 #
 # Usage:
-#   bench/waf-zoo/run-all-benches.sh                     # all stacks
-#   VARIANTS=20 bench/waf-zoo/run-all-benches.sh         # 20 variants
-#   bench/waf-zoo/run-all-benches.sh modsec-aws coraza   # specific stacks
+#   bench/waf-zoo/run-all-benches.sh                              # all stacks, default strategies
+#   VARIANTS=20 bench/waf-zoo/run-all-benches.sh                  # 20 variants
+#   STRATEGIES=all bench/waf-zoo/run-all-benches.sh               # full strategy sweep (slow)
+#   STRATEGIES=heavy bench/waf-zoo/run-all-benches.sh             # quick smoke run
+#   bench/waf-zoo/run-all-benches.sh modsec-aws coraza            # specific stacks
+#
+# Defaults match `bench-waf`'s own default: `heavy,equiv-cegis`. That covers
+# the two strategies the bench-diff CI gate cares about (payload mutation +
+# CEGIS) without burning hours on the full grid.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,7 +64,7 @@ for stack in "${STACKS[@]}"; do
     if "$WAFRIFT" bench-waf \
         --base-url "http://127.0.0.1:${port}" \
         --evade \
-        --strategies all \
+        --strategies "${STRATEGIES:-heavy,equiv-cegis}" \
         --variants "${VARIANTS:-5}" \
         --format json \
         --output "$output"; then
