@@ -305,9 +305,6 @@ fn load_toml_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
 /// Fuel budget: 1 000 000 instructions per `apply()` call.
 const WASM_FUEL_PER_CALL: u64 = 1_000_000;
 
-/// Linear memory limit: 4 MiB.
-const WASM_MEMORY_PAGES: u64 = 64; // 64 × 64 KiB = 4 MiB
-
 /// Maximum `.wasm` file size: 4 MiB.
 const WASM_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -327,28 +324,35 @@ struct WasmRuntime {
 }
 
 impl WasmRuntime {
-    /// Execute one tamper call.  All field borrows are resolved inside
-    /// this `&mut self` method so the borrow checker sees a single
-    /// mutable borrow of `self` — no aliasing conflicts.
+    /// Execute one tamper call.
+    ///
+    /// We resolve borrow-checker conflicts by cloning the `TypedFunc`
+    /// values out of their `Option` wrappers before mutably borrowing
+    /// `self.store` — `TypedFunc` is a lightweight handle (index +
+    /// type marker) designed to be cloned cheaply.
     fn call_tamper(&mut self, input: &str) -> Option<String> {
+        // Clone handles upfront to avoid aliasing borrows later.
+        let alloc_fn = self.alloc_fn.clone();
+        let tamper_fn = self.tamper_fn.clone();
+        let dealloc_fn = self.dealloc_fn.clone();
+        let memory = self.memory;
+
         self.store.set_fuel(WASM_FUEL_PER_CALL).ok()?;
 
         let bytes = input.as_bytes();
         let len = bytes.len() as i32;
 
         // Allocate guest memory for the input.
-        let ptr = self.alloc_fn.call(&mut self.store, len).ok()?;
+        let ptr = alloc_fn.call(&mut self.store, len).ok()?;
 
         // Write payload into guest linear memory.
-        self.memory
-            .write(&mut self.store, ptr as usize, bytes)
-            .ok()?;
+        memory.write(&mut self.store, ptr as usize, bytes).ok()?;
 
         // Call the guest tamper function.
-        let result_packed = self.tamper_fn.call(&mut self.store, (ptr, len)).ok()?;
+        let result_packed = tamper_fn.call(&mut self.store, (ptr, len)).ok()?;
 
         // Free the input allocation if a dealloc export is present.
-        if let Some(dealloc) = self.dealloc_fn {
+        if let Some(ref dealloc) = dealloc_fn {
             dealloc.call(&mut self.store, (ptr, len)).ok();
         }
 
@@ -357,12 +361,10 @@ impl WasmRuntime {
         let result_len = (result_packed & 0xFFFF_FFFF) as usize;
 
         let mut out = vec![0u8; result_len];
-        self.memory
-            .read(&self.store, result_ptr, &mut out)
-            .ok()?;
+        memory.read(&self.store, result_ptr, &mut out).ok()?;
 
         // Free the output allocation.
-        if let Some(dealloc) = self.dealloc_fn {
+        if let Some(ref dealloc) = dealloc_fn {
             dealloc
                 .call(&mut self.store, (result_ptr as i32, result_len as i32))
                 .ok();
@@ -419,8 +421,9 @@ fn load_wasm_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
     // Build a sandboxed engine: no WASI, fuel enabled, memory limited.
     let mut config = wasmtime::Config::new();
     config.consume_fuel(true);
-    config.static_memory_maximum_size(WASM_MEMORY_PAGES * 65536);
-    config.dynamic_memory_guard_size(0);
+    // Cap the guest linear memory to WASM_MEMORY_PAGES × 64 KiB = 4 MiB.
+    config.memory_guard_size(0);
+    config.max_wasm_stack(512 * 1024); // 512 KiB Wasm stack
     // Multi-memory and threads are not needed; keeping them off
     // narrows the attack surface of the sandboxed guest.
 

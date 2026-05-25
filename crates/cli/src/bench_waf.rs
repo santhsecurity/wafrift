@@ -325,7 +325,7 @@ pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
 
 fn resolve_base_url(args: &BenchWafArgs) -> String {
     if let Some(ref u) = args.base_url {
-        return u.clone();
+        return crate::helpers::normalize_target_url(u);
     }
     std::env::var("WAFRIFT_BENCH_URL")
         .or_else(|_| std::env::var("WAFRIFT_MODSEC_URL"))

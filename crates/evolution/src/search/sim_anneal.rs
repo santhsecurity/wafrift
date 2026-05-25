@@ -161,6 +161,7 @@ mod tests {
                 latency_ms: 0,
                 confidence: f64::NAN,
                 triggered_rules: 1,
+                ..Default::default()
             },
         )]);
         let best_after_nan = comparable_fitness(alg.best().expect("best must exist").fitness);
