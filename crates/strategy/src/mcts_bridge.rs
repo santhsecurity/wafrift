@@ -26,7 +26,7 @@ use wafrift_types::{Request, Technique};
 /// Each variant maps to a different evasion dimension that the MCTS tree
 /// can explore. Actions are composable — applying encoding after grammar
 /// mutation is a valid 2-step path.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TechniqueAction {
     /// Apply a payload encoding strategy (URL, unicode, case alternation, etc.).
     Encode(String),
@@ -141,10 +141,15 @@ impl Environment for WafRiftEnv {
     type Action = TechniqueAction;
 
     fn legal_actions(&self) -> Vec<Self::Action> {
-        let mut actions = Vec::new();
+        // Use BTreeSet as the accumulator so the action space is both
+        // deduplicated AND ordered deterministically across runs (Vec /
+        // HashSet both have implementation-defined order when built from
+        // heterogeneous sources like grammar_mutations).
+        use std::collections::BTreeSet;
+        let mut action_set: BTreeSet<Self::Action> = BTreeSet::new();
 
         if self.applied_techniques.len() >= self.max_depth {
-            return actions;
+            return Vec::new();
         }
 
         // ── Dimension 1: Encoding strategies ──
@@ -156,14 +161,14 @@ impl Environment for WafRiftEnv {
             {
                 continue;
             }
-            actions.push(TechniqueAction::Encode(tech_name));
+            action_set.insert(TechniqueAction::Encode(tech_name));
         }
 
         // ── Dimension 2: Grammar mutations (only once per path) ──
         if !self.grammar_applied {
             for mutation in &self.grammar_mutations {
                 let desc = mutation.rules_applied.first().copied().unwrap_or("grammar");
-                actions.push(TechniqueAction::GrammarMutate(desc.to_string()));
+                action_set.insert(TechniqueAction::GrammarMutate(desc.to_string()));
             }
         }
 
@@ -174,16 +179,16 @@ impl Environment for WafRiftEnv {
         {
             let params = wafrift_content_type::parse_form_body(body);
             if !params.is_empty() {
-                actions.push(TechniqueAction::ContentTypeSwitch(
+                action_set.insert(TechniqueAction::ContentTypeSwitch(
                     wafrift_content_type::ContentTypeTechnique::Multipart.technique_key().to_string(),
                 ));
-                actions.push(TechniqueAction::ContentTypeSwitch(
+                action_set.insert(TechniqueAction::ContentTypeSwitch(
                     wafrift_content_type::ContentTypeTechnique::JsonUnicodeEscape.technique_key().to_string(),
                 ));
-                actions.push(TechniqueAction::ContentTypeSwitch(
+                action_set.insert(TechniqueAction::ContentTypeSwitch(
                     wafrift_content_type::ContentTypeTechnique::XmlCdata.technique_key().to_string(),
                 ));
-                actions.push(TechniqueAction::ContentTypeSwitch(
+                action_set.insert(TechniqueAction::ContentTypeSwitch(
                     wafrift_content_type::ContentTypeTechnique::MultipartQuotedBoundary.technique_key().to_string(),
                 ));
             }
@@ -221,11 +226,11 @@ impl Environment for WafRiftEnv {
                 "NullByteInjection",
                 "DuplicateHeader",
             ] {
-                actions.push(TechniqueAction::HeaderTrick(trick.to_string()));
+                action_set.insert(TechniqueAction::HeaderTrick(trick.to_string()));
             }
         }
 
-        actions
+        action_set.into_iter().collect()
     }
 
     fn apply(&mut self, action: &Self::Action) {
