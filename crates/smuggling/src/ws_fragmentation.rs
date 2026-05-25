@@ -130,7 +130,9 @@ fn build_frame(
 }
 
 /// Build an unmasked TEXT frame (FIN=1, no RSV, opcode=0x1).
-fn text_frame(payload: &[u8]) -> Vec<u8> {
+///
+/// Used by generators that need a standalone (non-fragmented) text frame.
+pub fn text_frame(payload: &[u8]) -> Vec<u8> {
     build_frame(true, 0, opcode::TEXT, None, payload, None)
 }
 

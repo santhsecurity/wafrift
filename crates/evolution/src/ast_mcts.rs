@@ -590,16 +590,23 @@ pub fn mcts_search<O: AstMctsOracle>(
     let mut bypass_found = false;
 
     while oracle_queries < budget && !bypass_found {
-        // UCB1 selection.
-        let action = *arms
+        // UCB1 selection — use a sorted Vec for deterministic tiebreaking.
+        // HashMap iteration order is unspecified; sorting by (ucb1 desc,
+        // rule asc, position asc) makes the selection reproducible across
+        // runs with the same seed even when multiple arms are tied at ∞
+        // (all-unvisited at round zero).
+        let mut ranked: Vec<(&MctsAction, f64)> = arms
             .iter()
-            .max_by(|(_, a), (_, b)| {
-                a.ucb1(total_visits + 1.0, c)
-                    .partial_cmp(&b.ucb1(total_visits + 1.0, c))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|(k, _)| k)
-            .unwrap(); // arms is non-empty
+            .map(|(k, a)| (k, a.ucb1(total_visits + 1.0, c)))
+            .collect();
+        ranked.sort_by(|(a_key, a_val), (b_key, b_val)| {
+            b_val
+                .partial_cmp(a_val)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a_key.rule.0.cmp(&b_key.rule.0))
+                .then_with(|| a_key.position.cmp(&b_key.position))
+        });
+        let action = *ranked[0].0;
 
         // Rollout: generate candidate and query oracle.
         let candidate_payload =
