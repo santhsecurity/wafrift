@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{BodyFraming, WireParseError, parse_http_requests, parse_http_requests_no_tail};
+use common::{BodyFraming, parse_http_requests, parse_http_requests_no_tail};
 use wafrift_smuggling::smuggling::{cl_te, cl_te_precedence_test};
 
 const HOST: &str = "127.0.0.1";
