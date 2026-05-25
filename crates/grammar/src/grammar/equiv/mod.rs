@@ -989,6 +989,93 @@ mod delivery_api_tests {
     }
 }
 
+/// `Rng` unit tests (independent of any generator).
+#[cfg(test)]
+mod rng_tests {
+    use super::Rng;
+
+    // ── F-RNG-01: Rng::pick with the new implementation ───────────────
+
+    /// `pick` on a single-element slice always returns that element.
+    #[test]
+    fn pick_single_element_is_that_element() {
+        let mut rng = Rng::new(42);
+        let xs = [99u32];
+        assert_eq!(*rng.pick(&xs), 99);
+    }
+
+    /// `pick` on a two-element slice always returns one of them.
+    #[test]
+    fn pick_two_elements_stays_in_bounds() {
+        let mut rng = Rng::new(0x1234);
+        let xs = [10u32, 20u32];
+        for _ in 0..100 {
+            let v = *rng.pick(&xs);
+            assert!(v == 10 || v == 20, "pick returned out-of-bounds value {v}");
+        }
+    }
+
+    /// `pick` is uniform over a large sample (statistical sanity).
+    #[test]
+    fn pick_distributes_uniformly_over_many_trials() {
+        let mut rng = Rng::new(0xDEAD_BEEF);
+        let xs = [0u32, 1, 2, 3, 4];
+        let mut counts = [0u64; 5];
+        for _ in 0..5000 {
+            counts[*rng.pick(&xs) as usize] += 1;
+        }
+        // Each bucket should appear at least 500 times (5000/5 * 0.5).
+        for (i, &c) in counts.iter().enumerate() {
+            assert!(c >= 500, "bucket {i} undersampled: {c}/5000");
+        }
+    }
+
+    // ── F-RNG-01 regression: old code used `xs.len() - 1` before checking
+    // emptiness, causing a subtraction overflow panic in debug mode and an
+    // out-of-bounds panic in release.  The new code uses `below(xs.len())`
+    // directly, which is always in-bounds for non-empty xs.
+    // We cannot test the empty-slice panic here (it would abort the test run),
+    // but we confirm the non-empty paths all return valid indices.
+
+    /// `below(n)` always returns a value in `0..n`.
+    #[test]
+    fn below_always_in_range() {
+        let mut rng = Rng::new(0xCAFE_BABE);
+        for n in 1..=256usize {
+            for _ in 0..20 {
+                let v = rng.below(n);
+                assert!(v < n, "below({n}) returned {v} which is out of range");
+            }
+        }
+    }
+
+    /// `below(0)` returns 0 (the documented guard for the zero case).
+    #[test]
+    fn below_zero_returns_zero() {
+        let mut rng = Rng::new(7);
+        assert_eq!(rng.below(0), 0);
+    }
+
+    /// `chance` with `num == den` is always true, with `num == 0` is always false.
+    #[test]
+    fn chance_boundary_conditions() {
+        let mut rng = Rng::new(11);
+        for _ in 0..50 {
+            assert!(rng.chance(5, 5), "5/5 must always be true");
+            assert!(!rng.chance(0, 5), "0/5 must always be false");
+        }
+    }
+
+    /// `chance` with `den == 0` is always false (division-by-zero guard).
+    #[test]
+    fn chance_zero_denominator_returns_false() {
+        let mut rng = Rng::new(999);
+        for _ in 0..50 {
+            assert!(!rng.chance(1, 0), "1/0 must be false (den==0 guard)");
+        }
+    }
+}
+
 /// ROUND-TRIP SOUNDNESS — the load-bearing invariant of the entire
 /// `(payload × delivery)` algebra: whatever shape the payload is
 /// delivered in, a conforming backend MUST recover the *exact same

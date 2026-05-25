@@ -748,32 +748,32 @@ fn stagnation_counter_saturates_at_u32_max() {
 
 /// `stats.generation` must not wrap around on overflow.
 #[test]
-fn stats_generation_saturates_at_u64_max() {
+fn stats_generation_saturates_at_u32_max() {
     let mut engine = EvolutionEngine::new_seeded(5, 43);
-    engine.stats.generation = u64::MAX;
+    engine.stats.generation = u32::MAX;
     // evolve() increments stats.generation.
     engine.evolve();
     assert_eq!(
         engine.stats.generation,
-        u64::MAX,
-        "stats.generation must saturate at u64::MAX, not wrap to 0"
+        u32::MAX,
+        "stats.generation must saturate at u32::MAX, not wrap to 0"
     );
 }
 
 /// `stats.evaluations` must not wrap on overflow.
 #[test]
-fn stats_evaluations_saturates_at_u64_max() {
+fn stats_evaluations_saturates_at_usize_max() {
     let mut engine = EvolutionEngine::new_seeded(3, 44);
-    engine.stats.evaluations = u64::MAX;
+    engine.stats.evaluations = usize::MAX;
     let batch = engine.batch_candidates(1);
     if let Some((idx, _)) = batch.into_iter().next() {
         engine.record_feedback(idx, true).unwrap();
     }
-    // stats.evaluations must remain at u64::MAX.
+    // stats.evaluations must remain at usize::MAX.
     assert_eq!(
         engine.stats.evaluations,
-        u64::MAX,
-        "stats.evaluations must saturate at u64::MAX, not wrap to 0"
+        usize::MAX,
+        "stats.evaluations must saturate at usize::MAX, not wrap to 0"
     );
 }
 
