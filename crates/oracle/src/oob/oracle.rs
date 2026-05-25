@@ -26,6 +26,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use wafrift_types::oob::{OobCanary, OobConfig, OobConfirmation};
 
+/// Maximum number of consecutive poll errors before treating the provider
+/// as permanently failed.  A single transient network blip should not abort
+/// the full confirmation window — DNS / HTTP hiccups in CI happen.
+const MAX_CONSECUTIVE_POLL_ERRORS: usize = 3;
+
 pub struct OobOracle {
     /// `Arc` rather than `Box` so `confirm_background` can clone a
     /// handle into the polling task — otherwise the spawned future
@@ -57,20 +62,26 @@ impl OobOracle {
         let canary = self.provider.register().await?;
         let deadline = std::time::Instant::now() + Duration::from_secs(self.config.timeout_secs);
         let interval = Duration::from_secs(self.config.poll_interval_secs.max(1));
+        let mut consecutive_errors: usize = 0;
         loop {
             match self.provider.poll(&canary).await {
                 Ok(interactions) if !interactions.is_empty() => {
                     return Ok(OobConfirmation::Confirmed);
                 }
-                Ok(_) => {} // empty → keep polling
-                // F93: was `Err(_) => Ok(OobConfirmation::Error)`,
-                // which silently converted a transport failure into
-                // a scan result. Callers that only check the
-                // `Confirmed` variant could never tell the oracle
-                // was dead the entire run. Propagate the typed
-                // error so the caller can distinguish
-                // "oracle broken" from "no interaction observed".
-                Err(e) => return Err(e),
+                Ok(_) => {
+                    // Empty interaction list — keep polling.
+                    consecutive_errors = 0;
+                }
+                Err(e) => {
+                    consecutive_errors += 1;
+                    // Tolerate transient network blips up to
+                    // MAX_CONSECUTIVE_POLL_ERRORS before surfacing the error
+                    // to the caller.  A single flaky poll should not abort a
+                    // 30-second confirmation window.
+                    if consecutive_errors >= MAX_CONSECUTIVE_POLL_ERRORS {
+                        return Err(e);
+                    }
+                }
             }
             if std::time::Instant::now() >= deadline {
                 return Ok(OobConfirmation::Timeout);
@@ -113,11 +124,6 @@ impl OobOracle {
         Ok((canary, rx))
     }
 }
-
-/// Maximum number of consecutive poll errors before treating the provider
-/// as permanently failed.  A single transient network blip should not abort
-/// the full confirmation window — DNS / HTTP hiccups in CI happen.
-const MAX_CONSECUTIVE_POLL_ERRORS: usize = 3;
 
 async fn poll_until(
     provider: &dyn OobProviderTrait,
@@ -297,8 +303,6 @@ mod tests {
     /// before giving up, allowing a later successful poll to confirm.
     #[tokio::test]
     async fn transient_poll_errors_are_retried_not_fatal() {
-        use std::sync::Mutex;
-
         // Provider: returns errors for first 2 polls, then confirms.
         // This must NOT produce OobConfirmation::Error — it must Confirm.
         #[derive(Debug)]
