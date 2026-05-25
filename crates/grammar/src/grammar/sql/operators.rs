@@ -1,6 +1,19 @@
 //! Operator and delimiter mutation helpers.
 
-use rand::Rng;
+
+/// FNV-1a hash of (position, payload bytes) for deterministic operator alternative selection.
+fn fnv1a_op_hash(pos: usize, payload: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in pos.to_le_bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    for b in payload.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
 
 /// Find all balanced string-literal regions in a payload.
 ///
@@ -75,8 +88,8 @@ pub(crate) fn replace_logical_operator(
             continue;
         }
         if lower_bytes[i..].starts_with(search_bytes) {
-            let mut rng = rand::thread_rng();
-            let replacement = &alternatives[rng.gen_range(0..alternatives.len())];
+            // Derive alternative index deterministically from FNV-1a of payload + position.
+            let replacement = &alternatives[fnv1a_op_hash(i, payload) as usize % alternatives.len()];
             let mut result = String::with_capacity(payload.len() + replacement.len());
             result.push_str(&payload[..i]);
             result.push(' ');
