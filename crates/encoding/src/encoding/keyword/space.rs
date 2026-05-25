@@ -1,7 +1,5 @@
 //! Space-replacement strategies.
 
-use rand::seq::SliceRandom as _;
-
 const SQL_BLANK_CHARS: &[char] = &['\t', '\n', '\r', '\x0b', '\x0c'];
 
 /// Insert tab characters BETWEEN tokens by replacing spaces with tabs.
@@ -45,14 +43,31 @@ pub fn space_to_plus(payload: &str) -> String {
     payload.replace(' ', "+")
 }
 
-/// Replace spaces with random blank characters.
+/// Replace spaces with rotating SQL-blank characters (`\t \n \r \x0b \x0c`).
+///
+/// F140: pre-fix used `rand::thread_rng().choose(...)`, so the same input
+/// produced different outputs across calls — a successful bypass could not
+/// be replayed and no regression test could pin its bytes. Same hazard
+/// fixed in `parameter_pollute` (F114) and `whitespace_pad` (F136). The
+/// pick is now driven by an FNV-1a hash of the full payload mixed with the
+/// space-position index, so identical input is byte-identical output and a
+/// captured bypass is reproducible.
 pub fn space_to_random_blank(payload: &str) -> String {
-    let mut rng = rand::thread_rng();
+    // FNV-1a seed over the whole payload — every space gets the same
+    // run-stable seed mixed with its 0-based position among the chars.
+    let seed: u64 = payload
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325, |acc, b| {
+            (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
     payload
         .chars()
-        .map(|c| {
+        .enumerate()
+        .map(|(i, c)| {
             if c == ' ' {
-                *SQL_BLANK_CHARS.choose(&mut rng).unwrap_or(&'\t')
+                let pick =
+                    seed.wrapping_add(i as u64).wrapping_mul(0x0000_0100_0000_01b3);
+                SQL_BLANK_CHARS[(pick as usize) % SQL_BLANK_CHARS.len()]
             } else {
                 c
             }
@@ -108,5 +123,44 @@ mod tests {
         let result = space_to_random_blank("SELECT * FROM");
         assert!(!result.contains(' '));
         assert_eq!(result.len(), "SELECT * FROM".len());
+    }
+
+    #[test]
+    fn space_to_random_blank_is_deterministic() {
+        // F140 regression: pre-fix `rand::thread_rng().choose` made
+        // identical input produce different output, so a successful
+        // bypass discovered via space_to_random_blank could not be
+        // replayed — same hazard fixed in parameter_pollute (F114)
+        // and whitespace_pad (F136). Post-fix FNV-1a hash drives the
+        // pick so the same input is byte-identical output.
+        let a = space_to_random_blank("SELECT * FROM users");
+        let b = space_to_random_blank("SELECT * FROM users");
+        assert_eq!(a, b, "space_to_random_blank must be deterministic");
+    }
+
+    #[test]
+    fn space_to_random_blank_uses_more_than_one_blank() {
+        // The whole point of "random blank" is to exercise multiple
+        // chars from SQL_BLANK_CHARS, not collapse to one. With a
+        // many-space payload across diverse runs, every char in the
+        // table should appear at least once.
+        let mut seen = std::collections::HashSet::new();
+        for payload in [
+            "a b c d e f g h i j",
+            "x y z 1 2 3 4 5 6 7",
+            "UNION SELECT 1 2 3 4 5 FROM dual t1 t2",
+            "INSERT INTO t VALUES 1 2 3 4 5",
+            "WHERE id = 1 OR 1 = 1 AND 2 = 2",
+        ] {
+            for c in space_to_random_blank(payload).chars() {
+                if SQL_BLANK_CHARS.contains(&c) {
+                    seen.insert(c);
+                }
+            }
+        }
+        assert!(
+            seen.len() >= 3,
+            "space_to_random_blank should rotate through at least 3 of 5 blank chars across diverse payloads, saw {seen:?}"
+        );
     }
 }
