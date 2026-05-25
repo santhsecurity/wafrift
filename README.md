@@ -377,7 +377,7 @@ Unknown selectors fail fast — no silent drops.
 
 ### Differential bypass probing (`wafrift bypass-probe`)
 
-For Tsai-class boundary-mismatch vulns (admin panel gated by WAF header rule, `X-Original-URL` rewrite, ProxyShell-style routing disagreement, IP-trust spoofing), point bypass-probe at the resource and let it fire the full 136-probe auth-bypass set plus path/method variants:
+For Tsai-class boundary-mismatch vulns (admin panel gated by WAF header rule, `X-Original-URL` rewrite, ProxyShell-style routing disagreement, IP-trust spoofing), point bypass-probe at the resource and let it fire the full 230-probe auth-bypass set plus path/method variants:
 
 ```bash
 # Single URL

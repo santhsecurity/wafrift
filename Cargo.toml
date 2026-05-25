@@ -153,6 +153,7 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 clap_mangen = "0.2"
 urlencoding = "2"
+url = "2"
 regex = "1"
 toml = "0.8"
 ratatui = "0.30"
