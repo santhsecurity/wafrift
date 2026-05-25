@@ -49,6 +49,28 @@ pub fn run_bench_diff(args: BenchDiffArgs) -> ExitCode {
         }
     };
 
+    // Detect files that are clearly not bench-waf outputs — warn before
+    // comparing so the operator knows they're comparing garbage.
+    // A legitimate bench-waf file always has at least one of: raw_block_rate,
+    // evade_mode, or results. Two missing = almost certainly the wrong file.
+    let looks_like_bench = |v: &serde_json::Value| -> bool {
+        v.get("raw_block_rate").is_some()
+            || v.get("evade_mode").is_some()
+            || v.get("results").is_some()
+    };
+    if !looks_like_bench(&cur) {
+        eprintln!(
+            "WARNING: {} does not look like a bench-waf --output file (missing raw_block_rate / evade_mode / results). Comparison may be meaningless.",
+            args.current.display()
+        );
+    }
+    if !looks_like_bench(&base) {
+        eprintln!(
+            "WARNING: {} does not look like a bench-waf --output file (missing raw_block_rate / evade_mode / results). Comparison may be meaningless.",
+            args.baseline.display()
+        );
+    }
+
     // Catch the foot-gun where one side ran with --evade and the other
     // didn't. The bypass-rate column only exists in evade mode, and a
     // missing field reads as 0 — silent comparison would either show a
@@ -264,6 +286,28 @@ mod tests {
             raw_block_floor: 0.95,
         });
         // base_bypass=0, cur_bypass=0.10 → drop_pp negative → no regression.
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn non_bench_files_still_return_success_not_panic() {
+        // Both files are valid JSON but lack every bench-waf field.
+        // The command should complete (exit 0) and not panic — the
+        // warning is emitted but can't be asserted here without
+        // capturing stderr. The important invariant is: no crash.
+        let dir = std::env::temp_dir().join("wafrift_bench_diff_test_non_bench");
+        let _ = std::fs::create_dir_all(&dir);
+        let cur = dir.join("cur.json");
+        let base = dir.join("base.json");
+        write(&cur, r#"{"completely":"unrelated","data":42}"#);
+        write(&base, r#"{"also":"unrelated"}"#);
+        let code = run_bench_diff(BenchDiffArgs {
+            current: cur,
+            baseline: base,
+            bypass_drop_pp: 2.0,
+            raw_block_floor: 0.95,
+        });
+        // Both sides 0.00% → no regression, exits 0.
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 

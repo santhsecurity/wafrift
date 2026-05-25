@@ -130,14 +130,15 @@ proptest! {
 // request_line.rs — exotic methods / URI forms / version strings
 // ───────────────────────────────────────────────────────────────
 
-proptest! {
-    #[test]
-    fn request_line_exotic_methods_stable() {
-        let a = request_line::exotic_methods();
-        let b = request_line::exotic_methods();
-        prop_assert_eq!(a, b);
-    }
+// Pure-determinism test — no strategy parameters, cannot live inside proptest!.
+#[test]
+fn request_line_exotic_methods_stable() {
+    let a = request_line::exotic_methods();
+    let b = request_line::exotic_methods();
+    assert_eq!(a, b);
+}
 
+proptest! {
     #[test]
     fn request_line_absolute_uri_no_panic(
         method in "[A-Z]{1,10}",

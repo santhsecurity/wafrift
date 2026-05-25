@@ -281,10 +281,13 @@ mod tests {
 
     #[test]
     fn all_override_variants_contain_target_method() {
+        // header-case-mix intentionally changes the ASCII case of the method
+        // value (that IS its WAF-evasion purpose), so we compare case-insensitively.
         let v = all_override_variants("UNIQUEMARKER");
+        let marker_lower = "uniquemarker";
         for (name, payload) in &v {
             assert!(
-                payload.contains("UNIQUEMARKER"),
+                payload.to_ascii_lowercase().contains(marker_lower),
                 "{name} doesn't carry the method: {payload}"
             );
         }

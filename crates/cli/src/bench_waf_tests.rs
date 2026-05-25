@@ -321,21 +321,21 @@ fn case(id: &str, class: &str, payload: &str) -> BenchCase {
 #[test]
 fn validate_corpus_flags_duplicate_id() {
     let cases = vec![case("a", "sql", "1=1"), case("a", "xss", "<script>")];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }
 
 #[test]
 fn validate_corpus_flags_unknown_class() {
     let cases = vec![case("a", "definitelynot", "x")];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }
 
 #[test]
 fn validate_corpus_flags_empty_payload() {
     let cases = vec![case("a", "sql", "")];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }
 
@@ -346,7 +346,7 @@ fn validate_corpus_passes_clean_set() {
         case("b", "xss", "<script>"),
         case("c", "log4shell", "${jndi:ldap://x}"),
     ];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
 }
 
@@ -612,6 +612,6 @@ fn validate_corpus_flags_duplicate_ids() {
             description: String::new(),
         },
     ];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }

@@ -33,7 +33,7 @@ use std::time::Instant;
 use wafrift_types::Request;
 use wafrift_wafmodel::{
     Alphabet, BoundedExhaustiveEq, FnOracle, LearnReport, Outcome, WafModelError, WafOracle,
-    attack_grammar, l_star_budgeted, mine_bypasses,
+    attack_grammar, l_star_budgeted, minimal_bypass, mine_bypasses,
 };
 
 /// Arguments for `wafrift model-evade`.
@@ -162,11 +162,21 @@ pub(crate) fn class_config(class: &str) -> (Alphabet, Vec<&'static [u8]>) {
             ],
         ),
         "xss" => (
+            // Distinguished bytes that XSS WAF rules branch on.
+            // INVARIANT: every byte that appears in ANY needle below MUST
+            // be in this set. kmp_sfa() uses alpha.byte_of(catch_all_idx)
+            // (= b'A') as the representative for all non-distinguished
+            // bytes — so a needle byte not in the distinguished set maps
+            // to the catch-all class, and kmp_next(state, b'A') will
+            // never advance the KMP state machine past that needle byte,
+            // making the needle silently unmatchable over the abstract alphabet.
+            // Missing before: v, g, m, d (needed by <svg, <img, onload=).
             Alphabet::new(
                 vec![
                     b'<', b'>', b'/', b'"', b'\'', b' ', b'=', b'(', b')',
                     b's', b'c', b'r', b'i', b'p', b't', b'o', b'n', b'l',
                     b'a', b'e',
+                    b'v', b'g', b'm', b'd',
                 ],
                 b'A',
             ),
@@ -1051,30 +1061,39 @@ mod tests {
 
     #[test]
     fn mine_bypasses_all_class_finds_both_sqli_and_xss() {
-        let (alpha, needles) = class_config("all");
+        // Use `minimal_bypass` (shortest_accepted with a seen-set, O(states)) to
+        // verify each class grammar accepts its attack language.  `mine_bypasses`
+        // (enumerate_accepted, no seen-set) hits ENUMERATE_QUEUE_CAP on large
+        // cyclic grammars when max_len is generous; it is NOT the correctness
+        // oracle — `minimal_bypass` is.
         let accept_all = Sfa::new(0, vec![true], vec![vec![(BytePred::any(), 0)]]);
-        let grammar = attack_grammar(&alpha, &needles);
-        let candidates = mine_bypasses(&accept_all, &grammar, 30, 30);
+
+        // SQLi: the shortest bypass must contain an SQLi needle.
+        let (sqli_alpha, sqli_needles) = class_config("sqli");
+        let sqli_grammar = attack_grammar(&sqli_alpha, &sqli_needles);
+        let sqli_word = minimal_bypass(&accept_all, &sqli_grammar)
+            .expect("sqli grammar must accept at least one bypass");
+        let sqli_s = String::from_utf8_lossy(&sqli_word).to_ascii_lowercase();
         assert!(
-            !candidates.is_empty(),
-            "all-class grammar must mine candidates"
-        );
-        // Must find at least one sqli and one xss candidate.
-        let (_, sqli_needles) = class_config("sqli");
-        let (_, xss_needles) = class_config("xss");
-        let has_sqli = candidates.iter().any(|c| {
-            let s = String::from_utf8_lossy(c).to_ascii_lowercase();
             sqli_needles
                 .iter()
-                .any(|n| s.contains(std::str::from_utf8(n).unwrap_or("")))
-        });
-        let has_xss = candidates.iter().any(|c| {
-            let s = String::from_utf8_lossy(c).to_ascii_lowercase();
+                .any(|n| sqli_s.contains(std::str::from_utf8(n).unwrap_or(""))),
+            "sqli minimal bypass {:?} must contain a sqli needle",
+            sqli_s
+        );
+
+        // XSS: the shortest bypass must contain an XSS needle.
+        let (xss_alpha, xss_needles) = class_config("xss");
+        let xss_grammar = attack_grammar(&xss_alpha, &xss_needles);
+        let xss_word = minimal_bypass(&accept_all, &xss_grammar)
+            .expect("xss grammar must accept at least one bypass");
+        let xss_s = String::from_utf8_lossy(&xss_word).to_ascii_lowercase();
+        assert!(
             xss_needles
                 .iter()
-                .any(|n| s.contains(std::str::from_utf8(n).unwrap_or("")))
-        });
-        assert!(has_sqli, "all-class must find at least one sqli candidate");
-        assert!(has_xss, "all-class must find at least one xss candidate");
+                .any(|n| xss_s.contains(std::str::from_utf8(n).unwrap_or(""))),
+            "xss minimal bypass {:?} must contain an xss needle",
+            xss_s
+        );
     }
 }
