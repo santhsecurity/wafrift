@@ -408,10 +408,11 @@ fn print_output(out: &ClusterOutput, format: &str) {
     }
 }
 
-// ─── Deserialize helper (used only in integration callers) ────────────────────
+// ─── Deserialize helper ────────────────────────────────────────────────────────
 
-/// Thin wrapper that satisfies `#[derive(Deserialize)]` for callers that
-/// need to round-trip the JSON output.
+/// Deserializable mirror of [`ClusterOutput`]. Used in tests and by callers
+/// that need to round-trip the JSON output programmatically. Declared in the
+/// production module (not cfg(test)) so external tooling can import it.
 #[derive(Deserialize)]
 pub struct ClusterOutputDeser {
     pub schema_version: u32,
@@ -420,6 +421,7 @@ pub struct ClusterOutputDeser {
     pub clusters: Vec<ClusterDeser>,
 }
 
+/// Deserializable mirror of [`Cluster`].
 #[derive(Deserialize)]
 pub struct ClusterDeser {
     pub rule_id: String,
@@ -520,7 +522,7 @@ mod tests {
         assert_eq!(clusters.len(), 1);
     }
 
-    // ── Test 6: JSON output schema fields ─────────────────────────────────
+    // ── Test 6: JSON output schema fields (round-trip via ClusterOutputDeser) ──
 
     #[test]
     fn json_output_schema() {
@@ -534,10 +536,16 @@ mod tests {
             clusters,
         };
         let s = serde_json::to_string(&out).unwrap();
-        let v: Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(v["schema_version"], 1);
-        assert!(v["clusters"].is_array());
-        assert!(v["total_bypasses"].as_u64().unwrap() > 0);
+        // Deserialize via the public ClusterOutputDeser to exercise the type.
+        let deser: ClusterOutputDeser = serde_json::from_str(&s).unwrap();
+        assert_eq!(deser.schema_version, 1);
+        assert!(!deser.clusters.is_empty());
+        assert!(deser.total_bypasses > 0);
+        // Verify cluster fields via ClusterDeser.
+        let first: &ClusterDeser = &deser.clusters[0];
+        assert!(!first.rule_id.is_empty());
+        assert!(!first.payload_class.is_empty());
+        assert!(first.member_count > 0);
     }
 
     // ── Test 7: result with zero bypasses is not counted ─────────────────
