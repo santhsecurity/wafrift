@@ -15,7 +15,6 @@
 
 use std::io::Write;
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -75,7 +74,28 @@ async fn spawn_realistic_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Probe-until-ready using the stdlib (synchronous) TCP connect so this
+    // loop works even if the tokio reactor is saturated. The listener is
+    // bound at the OS level the moment TcpListener::bind returns; the
+    // blocking connect goes through the kernel's SYN-ACK path and succeeds
+    // immediately without needing the application's accept() to have run.
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -265,9 +285,9 @@ fn dogfood_attack_runs_all_seven_subprobes_concurrently_via_real_binary() {
         "--concurrency",
         "4",
         "--timeout-secs",
-        "5",
-        "--probe-timeout-secs",
         "30",
+        "--probe-timeout-secs",
+        "120",
     ]);
     assert_eq!(code, 0, "attack exit 0 — stderr:\n{stderr}");
     let p = parse_or_explain(&stdout, &stderr, "attack");

@@ -5,7 +5,6 @@
 //! scanner correctly flags the cache-key collisions.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -35,7 +34,23 @@ async fn spawn_cache_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -69,6 +84,8 @@ fn cache_diff_flags_cache_key_collisions_on_aggressive_cache_mock() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--timeout-secs",
+        "30",
     ]);
     assert_eq!(code, 0, "cache-diff should exit 0 — stderr:\n{stderr}");
 

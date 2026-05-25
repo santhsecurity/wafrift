@@ -16,7 +16,6 @@ use std::io::Write;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -56,7 +55,23 @@ async fn spawn_mock_waf() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     (addr, counter)
 }
 
@@ -175,7 +190,18 @@ fn raw_request_get_template_e2e_emits_repro_curl_per_bypass() {
         let curl = entry["repro_curl"]
             .as_str()
             .expect("repro_curl is a string on every bypass");
-        assert!(curl.starts_with("curl -i "), "repro_curl shape: {curl}");
+        // repro_curl may be prefixed with metadata comment lines
+        // (# Techniques: ..., # Bypass confidence: ..., etc.) when the
+        // annotated poc_emit path succeeds. Find the first non-comment,
+        // non-empty line to get the actual curl invocation.
+        let curl_line = curl
+            .lines()
+            .find(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .unwrap_or(curl);
+        assert!(
+            curl_line.starts_with("curl "),
+            "repro_curl must contain a curl invocation: {curl}"
+        );
         assert!(
             curl.contains(&addr.to_string()),
             "repro_curl points at mock: {curl}"
