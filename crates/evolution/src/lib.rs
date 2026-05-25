@@ -67,5 +67,10 @@ pub mod rule_corpus;
 /// Hunt / bench / model-evade route every probe result through one
 /// fn so corpus-key changes propagate without per-consumer churn.
 pub mod hunt_corpus_bridge;
+/// HackerOne submission-dedup fingerprint. Stable hash of
+/// (rule_id, encoding-chain-shape, payload-skeleton) so the
+/// submission queue rejects bypasses already filed in the public
+/// CumulusFire archive.
+pub mod h1_dedup;
 pub mod search;
 pub mod types;
