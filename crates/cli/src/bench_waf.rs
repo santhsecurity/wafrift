@@ -561,6 +561,12 @@ fn class_to_payload_type(class: &str) -> PayloadType {
         "nosql" => PayloadType::NoSql,
         // xxe / log4shell / cve_pocs have no wafrift mutator yet — fall back
         // to encoding-only mutations so the bench still runs.
+        // B3: graphql has no PayloadType variant yet; warn so the gap
+        // is visible in traces rather than silently falling through.
+        "graphql" => {
+            tracing::warn!("class=graphql: no grammar mutator, using encoding-only (B3)");
+            PayloadType::Unknown
+        }
         _ => PayloadType::Unknown,
     }
 }
