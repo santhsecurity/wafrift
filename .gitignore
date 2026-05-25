@@ -96,3 +96,11 @@ __pycache__/
 # wafrift-bench/results/dogfood-*. Operator-private, never committed —
 # each run produces fresh logs.
 wafrift-bench/results/dogfood-*
+# Per-run smoke / zoo / live bench artifacts — same rationale.
+wafrift-bench/results/zoo-*
+wafrift-bench/results/cf-*
+wafrift-bench/results/live-*
+
+# Local-only scaffolded `wafrift scan` config — every operator has
+# their own values. The committed reference lives in `docs/`.
+.wafrift.toml
