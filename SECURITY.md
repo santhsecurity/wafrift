@@ -9,7 +9,7 @@ built-in **Private Vulnerability Reporting**:
 2. Click **Report a vulnerability** and fill out the advisory form.
 
 If private reporting is unavailable for some reason, email
-**contactmukundthiru@gmail.com** with:
+**security@santh.dev** with:
 
 - Affected version / commit SHA
 - Reproduction steps and proof-of-concept (where safe to share)
@@ -71,6 +71,6 @@ reports of misuse may be forwarded to the affected organisation's
 `abuse@` / legal contact.
 
 If you believe you have found wafrift being used against a system you
-operate without authorisation, contact **contactmukundthiru@gmail.com**
+operate without authorisation, contact **security@santh.dev**
 with the request fingerprint (User-Agent, source IP, timestamp) and we
 will assist with attribution where possible.

@@ -9,7 +9,7 @@
 [manifest]
 name        = "reverse_string"
 version     = "1.0.0"
-author      = "Santh Project <contact@santh.dev>"
+author      = "Santh Project <security@santh.dev>"
 payload_classes = ["generic"]
 contexts        = ["query_string", "json_body", "header_value"]
 description     = "Reverses the entire payload for obfuscation smoke-tests."

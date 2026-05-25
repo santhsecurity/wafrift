@@ -48,7 +48,7 @@ repository = "https://github.com/santhsecurity/wafrift"
 description = "Programmable WAF-evasion engine — encoding × grammar mutation × HTTP smuggling × Content-Type confusion × TLS fingerprint rotation × active-learning WAF decompilation"
 keywords = ["waf", "evasion", "security", "bypass", "firewall"]
 categories = ["network-programming", "web-programming"]
-authors = ["Santh Project <contact@santh.dev>"]
+authors = ["Santh Project <security@santh.dev>"]
 
 [workspace.metadata.santh]
 status = "beta"
