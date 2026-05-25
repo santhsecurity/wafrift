@@ -37,17 +37,23 @@
 //!
 //! # Crate structure
 //!
-//! | Crate                   | Purpose                                       |
-//! |-------------------------|-----------------------------------------------|
-//! | `wafrift-types`         | Core types: Request, Technique, EvasionResult  |
-//! | `wafrift-encoding`      | Payload encoding + header obfuscation          |
-//! | `wafrift-grammar`       | Grammar-aware payload mutations                |
-//! | `wafrift-content-type`  | WAFFLED Content-Type switching                 |
-//! | `wafrift-smuggling`     | HTTP smuggling + HTTP/2 evasion                |
-//! | `wafrift-fingerprint`   | Browser + TLS fingerprint profiles             |
-//! | `wafrift-detect`        | WAF detection + response fingerprinting        |
-//! | `wafrift-evolution`     | Genetic algorithm + differential + advisor     |
-//! | `wafrift-strategy`      | Evasion strategy pipeline                      |
+//! | Crate                        | Purpose                                             |
+//! |------------------------------|-----------------------------------------------------|
+//! | `wafrift-types`              | Core types: Request, Technique, EvasionResult       |
+//! | `wafrift-encoding`           | Payload encoding + header obfuscation               |
+//! | `wafrift-grammar`            | Grammar-aware payload mutations                     |
+//! | `wafrift-content-type`       | WAFFLED Content-Type switching                      |
+//! | `wafrift-smuggling`          | HTTP smuggling + HTTP/2 frame-level evasion         |
+//! | `wafrift-fingerprint`        | Browser + TLS JA3/JA4 fingerprint profiles          |
+//! | `wafrift-detect`             | WAF detection (HTTP headers, DNS CNAME, BGP ASN)    |
+//! | `wafrift-evolution`          | Genetic algorithm + MCTS + differential + advisor   |
+//! | `wafrift-wafmodel`           | L* WAF decompiler + offline SFA bypass mining       |
+//! | `wafrift-oracle`             | Payload validity oracles (SQL, XSS, SSTI, …)        |
+//! | `wafrift-strategy`           | Evasion pipeline + gene bank + adaptive host state  |
+//! | `wafrift-transport`          | Evasion-aware HTTP client + stealth profiles         |
+//! | `wafrift-pool`               | Round-robin HTTP/SOCKS5 proxy pool                  |
+//! | `wafrift-recon`              | Origin discovery via CT logs + DNS history           |
+//! | `wafrift-genome-registry`    | ed25519 genome signing + trust-list management      |
 
 // ── Foundation types ──
 pub use wafrift_types::*;

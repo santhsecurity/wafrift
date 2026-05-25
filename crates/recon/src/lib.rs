@@ -1,4 +1,4 @@
-//! Origin discovery via OSINT (CT logs, DNS history) for WAF evasion.
+//! Origin discovery via OSINT (CT logs, DNS history) and active HTTP/TCP probing for WAF evasion.
 //!
 //! ## Active probing
 //!

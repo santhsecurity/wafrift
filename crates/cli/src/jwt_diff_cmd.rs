@@ -246,7 +246,8 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     out
 }
 
-pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
+pub async fn run_jwt_diff(mut args: JwtDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     if args.token.split('.').count() != 3 {
         eprintln!(
             "{} --token does not look like a JWT (must be `<header>.<payload>.<signature>`)",

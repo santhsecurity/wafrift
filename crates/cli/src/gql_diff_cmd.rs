@@ -202,7 +202,8 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
     ]
 }
 
-pub async fn run_gql_diff(args: GqlDiffArgs) -> ExitCode {
+pub async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
