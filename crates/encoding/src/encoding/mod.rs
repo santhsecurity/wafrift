@@ -15,6 +15,11 @@
 //! | [`structural`] | Null byte, overlong UTF-8, chunked split, HPP, compression |
 //! | [`layered`] | Multi-strategy chaining and aggressiveness scoring |
 
+/// Invisible-character & tag-character encoders (Plan 9 tag chars,
+/// variation selectors, stylistic ligatures, enclosed alphanumerics,
+/// soft hyphens, word joiners). Looks identical, normalizes identical,
+/// byte stream is unrecognizable.
+pub mod invisible;
 /// Keyword manipulation strategies (case, whitespace, comments).
 pub mod keyword;
 /// Multi-strategy layering and aggressiveness scoring.
