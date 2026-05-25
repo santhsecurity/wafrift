@@ -91,3 +91,8 @@ SCOREBOARD*.md
 .tmp_*
 __pycache__/
 *.pyc
+
+# Per-run dogfood-sweep transcripts (bash + PowerShell) write to
+# wafrift-bench/results/dogfood-*. Operator-private, never committed —
+# each run produces fresh logs.
+wafrift-bench/results/dogfood-*
