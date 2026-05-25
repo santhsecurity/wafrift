@@ -29,6 +29,49 @@
 
 Built so each crate is usable standalone: [`wafrift-encoding`](https://docs.rs/wafrift-encoding), [`wafrift-grammar`](https://docs.rs/wafrift-grammar), [`wafrift-detect`](https://docs.rs/wafrift-detect), [`wafrift-smuggling`](https://docs.rs/wafrift-smuggling), [`wafrift-evolution`](https://docs.rs/wafrift-evolution), [`wafrift-oracle`](https://docs.rs/wafrift-oracle), [`wafrift-strategy`](https://docs.rs/wafrift-strategy). No façade required.
 
+## Subcommand reference
+
+| Subcommand | Family | One-line role |
+|---|---|---|
+| `evade` | Offline mutation | Transform a payload with encoding + grammar strategies; no target required |
+| `scan` | Scan | Fire evasion variants at a live target; report bypass chains |
+| `detect` | Recon | Fingerprint WAF/CDN/origin (HTTP headers, DNS CNAME, reverse-DNS, BGP ASN) |
+| `discover` | Recon | Parse OpenAPI / GraphQL introspection / mine parameters into injection points |
+| `recon` | Recon | Origin discovery via CT logs (crt.sh) + DNS history |
+| `bypass-probe` | Scan | 230 auth-bypass header probes + path/method variants (Tsai-class) |
+| `attack` | Scan | Unified orchestrator — all seven parser-diff probes run concurrently |
+| `parser-diff` | Parser diff | URL-path shape variants vs WAF/origin disagreement |
+| `header-diff` | Parser diff | Request header block variants (dup-header, XFF spoofing, LWS) |
+| `body-diff` | Parser diff | Body format variants (JSON dup-key, UTF-7, BOM, multipart collision) |
+| `query-diff` | Parser diff | Query-string variants (HPP, bracket notation, semicolon separator) |
+| `cache-diff` | Parser diff | Cache-key confusion surface (Host case, param order, fragment leak) |
+| `h2-diff` | Parser diff | HTTP/1.1 vs HTTP/2 differential (WAF H2 downgrade bugs) |
+| `method-diff` | Parser diff | HTTP method variants (WebDAV, lowercase, H2 preface) |
+| `gql-diff` | Parser diff | GraphQL parser disagreements (alias bomb, op-name spoof, introspection) |
+| `jwt-diff` | Parser diff | JWT validation scanner (alg:none, kid injection, role elevation) |
+| `cors-diff` | Parser diff | CORS misconfiguration scanner (10 origin-validation pitfalls) |
+| `trailer-diff` | Parser diff | HTTP chunked-trailer injection (WAF misses trailing headers) |
+| `ja3-diff` | Parser diff | TLS fingerprint differential (requires `--features tls-impersonate`) |
+| `smuggle` | Smuggling | HTTP request smuggling CLI (CL.TE / TE.CL / CL.0 / detect / dry-run) |
+| `compress` | Mutation | Wrap a body in gzip / deflate / brotli chains |
+| `distill` | Analysis | Adversarial ddmin — find the minimal bypass payload (Zeller) |
+| `model-evade` | Advanced | L*-active-learning WAF decompiler + offline SFA bypass mining |
+| `audit` | Defender | X-ray a CRS ruleset; report bypassable holes |
+| `harden` | Defender | Synthesize closure rules; proves zero benign false positives |
+| `replay` | Utility | Deterministic re-fire of a saved bypass (exits 0 bypass / 2 block) |
+| `import-curl` | Utility | Parse a Burp "Copy as cURL" capture and run scan against it |
+| `bank` | Utility | Gene-bank management: list / export / import / sign / trust / pull |
+| `seed` | Utility | Pre-load a gene-bank with known-working techniques |
+| `report` | Utility | Generate a markdown pentest writeup from the proxy gene-bank |
+| `legendary` | Demo | One-shot: detect + fingerprint + bypass-probe + polished markdown report |
+| `listener` | OOB | Callback receiver for blind SQLi / stored XSS / SSRF / OOB cmdi |
+| `techniques` | Meta | List / explain `--only`/`--exclude` technique selectors |
+| `init` | Meta | Scaffold a `.wafrift.toml` in the current directory |
+| `completion` | Meta | Generate shell completions (bash / zsh / fish / PowerShell) |
+| `man` | Meta | Generate troff man page |
+| `bench-waf` | Bench | Measure raw WAF block rate + wafrift bypass rate against a corpus |
+| `bench-diff` | Bench | Gate on regression between two `bench-waf` JSON blobs |
+
 ## Install
 
 ```bash

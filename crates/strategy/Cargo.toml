@@ -32,6 +32,8 @@ tracing = { workspace = true }
 toml = { workspace = true }
 fs4 = { workspace = true }
 thiserror = { workspace = true }
+wafrift-plugin-api = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
 
