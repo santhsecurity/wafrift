@@ -160,10 +160,22 @@ impl Environment for WafRiftEnv {
         }
 
         // ── Dimension 2: Grammar mutations (only once per path) ──
+        //
+        // Deduplicate by action key before pushing.  Multiple grammar mutations
+        // can share the same first rule name (e.g. "separator_swap" once per
+        // separator variant, "case_alternation" twice for different XSS shapes).
+        // Without deduplication `legal_actions` advertises N identical
+        // `GrammarMutate("separator_swap")` entries; MCTS treats them as N
+        // distinct siblings but `apply` always resolves to the *first* matching
+        // mutation — so N-1 branches are structural duplicates that waste the
+        // search budget without ever producing a different result.
         if !self.grammar_applied {
+            let mut seen_keys = std::collections::HashSet::new();
             for mutation in &self.grammar_mutations {
                 let desc = mutation.rules_applied.first().copied().unwrap_or("grammar");
-                actions.push(TechniqueAction::GrammarMutate(desc.to_string()));
+                if seen_keys.insert(desc) {
+                    actions.push(TechniqueAction::GrammarMutate(desc.to_string()));
+                }
             }
         }
 
@@ -763,6 +775,115 @@ mod tests {
             assert!(
                 !header_tricks.iter().any(|t| t == must_not),
                 "wire-only trick {must_not} should not appear — got {header_tricks:?}"
+            );
+        }
+    }
+
+    // ── Grammar-action deduplication (F138) ──────────────────────────────
+
+    /// `legal_actions` must never advertise two identical `GrammarMutate`
+    /// actions for the same rule name.  Multiple grammar mutations can share
+    /// the same first rule (e.g. "separator_swap" once per separator variant,
+    /// "case_alternation" twice for different XSS shapes).  Without
+    /// deduplication MCTS creates N structurally identical siblings; `apply`
+    /// always resolves to the *first* match so N-1 branches are wasted.
+    #[test]
+    fn grammar_actions_in_legal_actions_are_unique() {
+        // A CMDI payload typically generates multiple "separator_swap"
+        // mutations (one per separator in the set).
+        let req = Request::post(
+            "http://example.com/exec",
+            b"cmd=ls%20-la".to_vec(),
+        );
+        let env = WafRiftEnv::new(req, 6);
+        let actions = env.legal_actions();
+
+        let mut grammar_names: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                TechniqueAction::GrammarMutate(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let total = grammar_names.len();
+        grammar_names.dedup();  // in-place dedup of consecutive (sort first for safety)
+        grammar_names.sort();
+        grammar_names.dedup();
+        assert_eq!(
+            grammar_names.len(),
+            total,
+            "legal_actions returned duplicate GrammarMutate actions; \
+             unique={} vs total={}",
+            grammar_names.len(),
+            total,
+        );
+    }
+
+    /// When grammar mutations are present, every unique rule name in
+    /// `legal_actions` must be independently resolvable in `apply` — i.e.
+    /// applying that action must mutate the body (not be a no-op).
+    #[test]
+    fn each_grammar_action_produces_a_distinct_body() {
+        let req = Request::post(
+            "http://example.com/exec",
+            b"cmd=ls%20-la".to_vec(),
+        );
+        let original_body = req.body.clone().unwrap();
+        let env = WafRiftEnv::new(req.clone(), 6);
+        let grammar_actions: Vec<TechniqueAction> = env
+            .legal_actions()
+            .into_iter()
+            .filter(|a| matches!(a, TechniqueAction::GrammarMutate(_)))
+            .collect();
+
+        for action in &grammar_actions {
+            let mut env2 = WafRiftEnv::new(req.clone(), 6);
+            env2.apply(action);
+            // Body must have changed — a no-op means `apply` couldn't find
+            // the mutation for this rule name (old bug: N-1 duplicates were
+            // unreachable because `apply` picked the first match every time).
+            assert_ne!(
+                env2.req.body.as_deref(),
+                Some(original_body.as_slice()),
+                "GrammarMutate({:?}) did not mutate the body — \
+                 apply() couldn't resolve the rule",
+                match action {
+                    TechniqueAction::GrammarMutate(n) => n,
+                    _ => unreachable!(),
+                }
+            );
+        }
+    }
+
+    /// After applying any single grammar action the grammar dimension must be
+    /// closed (`grammar_applied = true`), regardless of which rule was used.
+    #[test]
+    fn grammar_dimension_closed_after_any_grammar_action() {
+        let req = Request::post(
+            "http://example.com/search",
+            b"q=admin' OR 1=1--".to_vec(),
+        );
+        let env = WafRiftEnv::new(req.clone(), 6);
+        let grammar_actions: Vec<TechniqueAction> = env
+            .legal_actions()
+            .into_iter()
+            .filter(|a| matches!(a, TechniqueAction::GrammarMutate(_)))
+            .collect();
+
+        // Test with first and last to cover both ends of the (possibly
+        // deduplicated) list.
+        for action in grammar_actions.iter().take(1).chain(grammar_actions.last()) {
+            let mut env2 = WafRiftEnv::new(req.clone(), 6);
+            env2.apply(action);
+            let remaining = env2.legal_actions();
+            let has_grammar = remaining
+                .iter()
+                .any(|a| matches!(a, TechniqueAction::GrammarMutate(_)));
+            assert!(
+                !has_grammar,
+                "grammar dimension still open after applying {:?}",
+                action
             );
         }
     }
