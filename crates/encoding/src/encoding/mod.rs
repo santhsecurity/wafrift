@@ -154,6 +154,14 @@ pub mod cmd_inject;
 /// quadratic blowup, SVG-wrapped XXE for image consumers, SOAP
 /// envelope XXE, JSON-as-XML XXE, Phithon local-DTD-reuse trick.
 pub mod xxe_attacks;
+/// SSRF scheme-confusion payload library: `gopher://` arbitrary-
+/// protocol injection (Redis SLAVEOF, memcached, SMTP relay),
+/// `dict://` memcached/Redis probes, `file://` reads, `ldap://`
+/// JNDI Log4Shell-class, `jar://` Java remote archive, `netdoc://`
+/// Java-only, `tftp://` UDP, `smtp://` direct relay. Plus IP-shape
+/// bypasses (decimal/hex/octal/mixed-base) and IPv6 v4-mapped +
+/// 6to4 cloak.
+pub mod ssrf_schemes;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
