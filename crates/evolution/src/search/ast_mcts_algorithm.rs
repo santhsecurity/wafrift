@@ -531,4 +531,137 @@ mod tests {
         let snap = alg.population_snapshot();
         assert_eq!(snap.len(), 1);
     }
+
+    // ── Saturating-arithmetic + NaN/Inf regression tests ─────────────────────
+
+    /// `eval_counter` must saturate at `u64::MAX` rather than wrapping to 0.
+    /// A wrap-around would reuse previously-issued IDs, causing the engine's
+    /// `in_flight` map to collide and silently drop evaluations.
+    #[test]
+    fn eval_counter_saturates_at_u64_max() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+        alg.eval_counter = u64::MAX;
+        // request_evaluations calls saturating_add — counter must stay at MAX.
+        let _ = alg.request_evaluations(1, &mut rng);
+        assert_eq!(
+            alg.eval_counter,
+            u64::MAX,
+            "eval_counter must saturate at u64::MAX, not wrap to 0"
+        );
+    }
+
+    /// `generation` must saturate at `u32::MAX` rather than wrapping.
+    #[test]
+    fn generation_saturates_at_u32_max() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(vec![], &pool, &mut rng);
+        alg.generation = u32::MAX;
+        // submit_evaluations increments generation.
+        alg.submit_evaluations(vec![(0, OracleVerdict::from_bool(false))]);
+        assert_eq!(
+            alg.generation,
+            u32::MAX,
+            "generation must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    /// A NaN `mean_reward` from the oracle must NOT permanently poison the
+    /// running `rule_stats` total.  After the NaN injection, a valid reward
+    /// must still produce a finite and positive running total.
+    #[test]
+    fn rule_stats_nan_reward_does_not_poison_ucb1() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+
+        // Manually inject NaN into rule_stats (simulating a buggy oracle).
+        alg.rule_stats.insert(0, (10, f64::NAN));
+
+        // Submit a valid passing verdict — the NaN total must be cleared.
+        let candidates = alg.request_evaluations(2, &mut rng);
+        if let Some(c) = candidates.into_iter().next() {
+            alg.submit_evaluations(vec![(c.id, OracleVerdict::from_bool(true))]);
+        }
+
+        // The rule_stats entry for rule 0 must now hold a finite total.
+        for (_rule, (visits, total)) in &alg.rule_stats {
+            assert!(
+                total.is_finite() || *visits == 0,
+                "rule_stats total must be finite after NaN reset, got {total}"
+            );
+        }
+    }
+
+    /// `+Inf` in the running total must also be cleared (same guard).
+    #[test]
+    fn rule_stats_inf_reward_does_not_poison_ucb1() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+
+        alg.rule_stats.insert(1, (5, f64::INFINITY));
+
+        let candidates = alg.request_evaluations(2, &mut rng);
+        if let Some(c) = candidates.into_iter().next() {
+            alg.submit_evaluations(vec![(c.id, OracleVerdict::from_bool(false))]);
+        }
+
+        for (_rule, (visits, total)) in &alg.rule_stats {
+            assert!(
+                total.is_finite() || *visits == 0,
+                "rule_stats total must be finite after Inf reset, got {total}"
+            );
+        }
+    }
+
+    /// A NaN `mean_reward` from a single oracle call must not affect a
+    /// *different* rule's stats entry — the guard is per-entry.
+    #[test]
+    fn rule_stats_nan_does_not_cross_contaminate_other_rules() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+
+        // Rule 0: healthy entry; rule 1: NaN-poisoned.
+        alg.rule_stats.insert(0, (3, 2.5));
+        alg.rule_stats.insert(1, (7, f64::NAN));
+
+        // Trigger a submit that might update stats.
+        let candidates = alg.request_evaluations(1, &mut rng);
+        if let Some(c) = candidates.into_iter().next() {
+            alg.submit_evaluations(vec![(c.id, OracleVerdict::from_bool(true))]);
+        }
+
+        // Rule 0's total must still be finite (may have grown from the new award).
+        if let Some((_, total)) = alg.rule_stats.get(&0) {
+            assert!(
+                total.is_finite(),
+                "healthy rule_stats entry must remain finite, got {total}"
+            );
+        }
+    }
 }
