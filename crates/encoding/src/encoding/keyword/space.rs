@@ -1,8 +1,20 @@
 //! Space-replacement strategies.
 
-use rand::seq::SliceRandom as _;
-
 const SQL_BLANK_CHARS: &[char] = &['\t', '\n', '\r', '\x0b', '\x0c'];
+
+/// FNV-1a hash of (byte index, payload bytes) for deterministic blank-char selection.
+fn fnv1a_space_hash(space_idx: usize, payload: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in space_idx.to_le_bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    for b in payload.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
 
 /// Insert tab characters BETWEEN tokens by replacing spaces with tabs.
 ///
@@ -31,14 +43,19 @@ pub fn space_to_plus(payload: &str) -> String {
     payload.replace(' ', "+")
 }
 
-/// Replace spaces with random blank characters.
+/// Replace spaces with a deterministic blank character derived from FNV-1a hash.
+///
+/// Each space's replacement is derived from `fnv1a_space_hash(space_index, payload)`,
+/// making the output byte-identical for identical inputs across all runs.
 pub fn space_to_random_blank(payload: &str) -> String {
-    let mut rng = rand::thread_rng();
+    let mut space_idx = 0usize;
     payload
         .chars()
         .map(|c| {
             if c == ' ' {
-                *SQL_BLANK_CHARS.choose(&mut rng).unwrap_or(&'\t')
+                let h = fnv1a_space_hash(space_idx, payload);
+                space_idx += 1;
+                SQL_BLANK_CHARS[(h as usize) % SQL_BLANK_CHARS.len()]
             } else {
                 c
             }
@@ -80,5 +97,13 @@ mod tests {
         let result = space_to_random_blank("SELECT * FROM");
         assert!(!result.contains(' '));
         assert_eq!(result.len(), "SELECT * FROM".len());
+    }
+
+    #[test]
+    fn space_to_random_blank_is_deterministic() {
+        let payload = "SELECT * FROM t WHERE a = 1";
+        let a = space_to_random_blank(payload);
+        let b = space_to_random_blank(payload);
+        assert_eq!(a, b, "space_to_random_blank must be byte-identical for identical input");
     }
 }

@@ -99,11 +99,26 @@ pub fn tab_separator(header_name: &str, value: &str) -> String {
     format!("{header_name}:\t{value}")
 }
 
+/// FNV-1a hash of header_name + value bytes for deterministic pad count.
+fn fnv1a_header_hash(header_name: &str, value: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in header_name.bytes().chain(value.bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 /// Apply whitespace padding around the value.
+///
+/// The pad count (2-5 spaces) is derived deterministically from FNV-1a hash
+/// of the header name and sanitised value, ensuring byte-identical output
+/// for identical inputs across all runs.
 #[must_use]
 pub fn whitespace_pad(header_name: &str, value: &str) -> String {
     let value = sanitize_header_value(value);
-    let pad_count = rand::random::<usize>() % 4 + 2; // 2–5 spaces
+    // derive 2-5 spaces deterministically from header name + value
+    let pad_count = (fnv1a_header_hash(header_name, &value) as usize) % 4 + 2;
     let left = " ".repeat(pad_count);
     let right = " ".repeat(pad_count);
     format!("{header_name}:{left}{value}{right}")

@@ -537,4 +537,62 @@ mod tests {
             "URL must not contain hostname after pinning, got: {pinned_url}"
         );
     }
+
+    /// Concurrent second resolutions all hit the fast path and return the
+    /// pinned IP, never racing to insert a different value.
+    #[tokio::test]
+    async fn dns_rebinding_pinning_resolver_concurrent_resolutions_hold() {
+        use reqwest::dns::Resolve as _;
+        use std::str::FromStr as _;
+
+        let public_ip: IpAddr = "198.51.100.7".parse().unwrap();
+        let policy = Arc::new(UpstreamPolicy {
+            allow_private_upstream: false,
+            insecure_open_upstream: false,
+        });
+        let resolver = Arc::new(PinningResolver::new(policy));
+        // Seed the pin table.
+        {
+            let mut map = resolver.pinned.lock().unwrap();
+            map.insert("concurrent-rebind.example".to_string(), public_ip);
+        }
+
+        // Fire 8 concurrent resolution attempts — all must return the pinned IP.
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let r = resolver.clone();
+            handles.push(tokio::spawn(async move {
+                let name = reqwest::dns::Name::from_str("concurrent-rebind.example").unwrap();
+                let mut iter = r.resolve(name).await.unwrap();
+                iter.next().unwrap().ip()
+            }));
+        }
+        for h in handles {
+            let ip = h.await.unwrap();
+            assert_eq!(
+                ip, public_ip,
+                "concurrent resolution returned wrong IP: {ip}"
+            );
+        }
+    }
+
+    /// Verify that pin_url_to_first_addr correctly handles IPv6 addresses
+    /// by emitting bracketed notation in the URL.
+    #[test]
+    fn pin_url_rewrites_hostname_to_ipv6_literal() {
+        let v6_ip: IpAddr = "2001:db8::1".parse().unwrap();
+        let addrs = vec![SocketAddr::new(v6_ip, 443)];
+        let (pinned, host) =
+            pin_url_to_first_addr("https://example.com/path", &addrs).unwrap();
+        assert_eq!(host, "example.com");
+        // IPv6 in URLs requires brackets: https://[2001:db8::1]/path
+        assert!(
+            pinned.contains("[2001:db8::1]"),
+            "IPv6 URL must use bracketed notation, got: {pinned}"
+        );
+        assert!(
+            !pinned.contains("example.com"),
+            "hostname must not appear after pinning, got: {pinned}"
+        );
+    }
 }
