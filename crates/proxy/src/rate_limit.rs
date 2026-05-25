@@ -195,4 +195,83 @@ mod tests {
             h.await.unwrap();
         }
     }
+
+    // ── NaN / non-finite input sanitization ──────────────────────────────
+
+    #[tokio::test]
+    async fn nan_rps_treated_as_unlimited_no_panic() {
+        // Regression: NaN.max(0.0) returns NaN in Rust, so rps=NaN
+        // bypassed the is_unlimited() guard and later caused
+        // Duration::from_secs_f64(NaN) to panic.
+        let l = RateLimiter::new(f64::NAN, 0.0);
+        assert!(l.is_unlimited(), "NaN rps must be treated as unlimited");
+        // acquire must not panic.
+        let start = TokioInstant::now();
+        l.acquire("h").await;
+        assert!(start.elapsed() < Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn negative_rps_treated_as_unlimited() {
+        let l = RateLimiter::new(-1.0, 0.0);
+        assert!(l.is_unlimited());
+        l.acquire("h").await; // must not panic or block
+    }
+
+    #[tokio::test]
+    async fn infinite_rps_treated_as_unlimited() {
+        // f64::INFINITY.max(0.0) returns INFINITY, which is not < EPSILON,
+        // so is_unlimited() returns false and acquire would compute
+        // Duration::from_secs_f64(need / INF) = 0s — which loops forever
+        // without the sanitize fix.
+        let l = RateLimiter::new(f64::INFINITY, 0.0);
+        assert!(l.is_unlimited(), "infinite rps must be treated as unlimited");
+        l.acquire("h").await;
+    }
+
+    #[tokio::test]
+    async fn nan_burst_does_not_cause_nan_token_calculation() {
+        // NaN burst means every token comparison (tokens >= 1.0) returns
+        // false, parking every request forever. The sanitizer must clamp
+        // NaN burst to a sane value.
+        let l = RateLimiter::new(100.0, f64::NAN);
+        assert!(!l.is_unlimited(), "valid rps with NaN burst must not be unlimited");
+        // With high enough rps and clamped burst, first acquire should succeed quickly.
+        let start = TokioInstant::now();
+        l.acquire("h").await;
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+    #[tokio::test]
+    async fn zero_rps_nonzero_burst_is_unlimited() {
+        // rps=0 but burst>0: is_unlimited() checks rps, so this is a
+        // no-op limiter. acquire must not block.
+        let l = RateLimiter::new(0.0, 100.0);
+        assert!(l.is_unlimited());
+        let start = TokioInstant::now();
+        for _ in 0..200 {
+            l.acquire("h").await;
+        }
+        assert!(start.elapsed() < Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn host_cap_evicts_lru_and_new_host_added() {
+        // Regression: an unbounded map would OOM on long-running sessions.
+        // Confirm that after MAX_TRACKED_HOSTS insertions, adding a new
+        // host does NOT grow the map beyond the cap.
+        let l = RateLimiter::new(1_000_000.0, 1_000_000.0);
+        // Fill to cap.
+        for i in 0..super::MAX_TRACKED_HOSTS {
+            l.acquire(&format!("host-{i}.example.com")).await;
+        }
+        assert_eq!(l.tracked_host_count().await, super::MAX_TRACKED_HOSTS);
+        // One more unique host: triggers LRU eviction, must stay at cap.
+        l.acquire("overflow-host.example.com").await;
+        assert_eq!(
+            l.tracked_host_count().await,
+            super::MAX_TRACKED_HOSTS,
+            "tracked host count must never exceed MAX_TRACKED_HOSTS"
+        );
+    }
 }
