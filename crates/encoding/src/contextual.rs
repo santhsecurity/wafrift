@@ -270,7 +270,16 @@ pub fn validate_in_context(
             }
         }
         InjectionContext::XmlAttribute => {
+            // F137: pre-fix the `&` branch did `chars.by_ref().take(6).collect()`
+            // which UNCONDITIONALLY consumed the next 6 chars regardless of
+            // whether an entity matched. Those 6 chars were never validated,
+            // so a payload like `&lt;<script>` slipped past — the validator
+            // saw `&`, ate `lt;<sc` to "check" for a known entity, recognised
+            // `lt;`, and then never inspected the `<` it had already swallowed.
+            // Switch to a lookahead via `chars.clone()` (cheap — `Chars` is a
+            // slice cursor) and advance only as far as a matched entity.
             let mut chars = payload.chars();
+            const ENTITIES: &[&str] = &["quot;", "apos;", "amp;", "lt;", "gt;"];
             while let Some(c) = chars.next() {
                 if c == '"' {
                     return Err(ContextualEncodeError::ContextIncompatible {
@@ -282,8 +291,6 @@ pub fn validate_in_context(
                 // Single-quoted XML attributes (attr='...') are equally valid in
                 // XML 1.0 §3.1. An unescaped `'` inside such an attribute breaks
                 // out of the value just as `"` does in a double-quoted attribute.
-                // The previous validator missed this, allowing `' onclick='alert(1)`
-                // to pass as a well-formed XML attribute value.
                 if c == '\'' {
                     return Err(ContextualEncodeError::ContextIncompatible {
                         strategy: "validate".into(),
@@ -291,19 +298,30 @@ pub fn validate_in_context(
                         reason: "unescaped single quote in XML attribute".into(),
                     });
                 }
+                if c == '<' {
+                    return Err(ContextualEncodeError::ContextIncompatible {
+                        strategy: "validate".into(),
+                        context,
+                        reason: "unescaped `<` in XML attribute".into(),
+                    });
+                }
                 if c == '&' {
-                    // Allow known entity references; anything else starting with & is suspicious
-                    let remainder: String = chars.by_ref().take(6).collect();
-                    if !remainder.starts_with("quot;")
-                        && !remainder.starts_with("apos;")
-                        && !remainder.starts_with("amp;")
-                        && !remainder.starts_with("lt;")
-                        && !remainder.starts_with("gt;")
+                    let lookahead: String = chars.clone().take(6).collect();
+                    if let Some(matched) =
+                        ENTITIES.iter().find(|e| lookahead.starts_with(*e))
                     {
-                        // Not a known entity — could be an unescaped &
-                        // (We keep scanning rather than erroring, since & alone
-                        // is technically valid XML text if followed by whitespace.)
+                        // Consume exactly the entity body (name + `;`). The
+                        // rest of the payload stays in `chars` for the next
+                        // iteration so every other byte is still validated.
+                        for _ in 0..matched.len() {
+                            chars.next();
+                        }
                     }
+                    // Lenient on unknown `&`: leave `chars` untouched and
+                    // keep scanning. An `&` alone is technically valid XML
+                    // text per XML 1.0 §2.4 only when not followed by an
+                    // entity-like shape; we don't reject it here so the
+                    // existing permissive contract holds.
                 }
             }
         }
@@ -562,6 +580,50 @@ mod tests {
         assert!(
             err.to_string().contains("single quote"),
             "error must mention single quote, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_validator_does_not_swallow_chars_after_entity() {
+        // F137 regression: pre-fix `&lt;<script>` passed validation
+        // because the validator consumed 6 chars after every `&` to
+        // peek at the entity name. After matching `lt;` it had already
+        // eaten the next 2 chars (`<s`) and never validated them — so
+        // the unescaped `<` rode straight through. Post-fix the
+        // validator clones the cursor for lookahead and advances only
+        // by the matched entity length, so the trailing `<` is caught.
+        let err = validate_in_context("&lt;<script>", InjectionContext::XmlAttribute)
+            .expect_err("unescaped `<` after &lt; MUST reject");
+        assert!(
+            err.to_string().contains('<') || err.to_string().contains("unescaped"),
+            "error should mention the unescaped `<`, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_validator_catches_quote_after_short_entity() {
+        // Same F137 hazard, different exploit: `&amp;"` — after `&amp;`
+        // (4 chars), the pre-fix code consumed 2 chars beyond (the `"`
+        // and one more), bypassing the unescaped-quote check.
+        let err = validate_in_context("&amp;\"breakout", InjectionContext::XmlAttribute)
+            .expect_err("unescaped `\"` after &amp; MUST reject");
+        assert!(
+            err.to_string().contains("double quote"),
+            "error should mention double quote, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_validator_allows_multiple_entities_in_a_row() {
+        // The fix must not over-correct: a payload of nothing-but-
+        // entities still passes.
+        assert!(
+            validate_in_context(
+                "&amp;&lt;&gt;&quot;&apos;",
+                InjectionContext::XmlAttribute,
+            )
+            .is_ok(),
+            "chain of well-formed entities must pass validation"
         );
     }
 
