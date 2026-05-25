@@ -21,6 +21,7 @@ pub mod result;
 pub mod session;
 pub mod technique;
 pub mod verdict;
+pub mod waf_class;
 
 // ──────────────────────────────────────────────
 //  Workspace-wide tunables (single source of truth so the proxy,
@@ -58,3 +59,4 @@ pub use request::{Method, Request};
 pub use result::EvasionResult;
 pub use technique::Technique;
 pub use verdict::{BlockReason, ConnectionBehavior, Signal, Verdict};
+pub use waf_class::WafClass;
