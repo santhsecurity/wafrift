@@ -67,9 +67,13 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
         "--timeout-secs",
         "3",
     ]);
+    // F78: when every H2 probe fails (H1-only mock), h2-diff exits 6
+    // (inconclusive). Pre-fix the command exited 0 with no divergences,
+    // silently hiding the fact that the H2 leg was never measured.
+    // Callers must handle exit 6 as "did not cleanly measure H1/H2 diff".
     assert_eq!(
-        code, 0,
-        "h2-diff exit 0 even on H1-only target — stderr:\n{stderr}"
+        code, 6,
+        "h2-diff must exit 6 (inconclusive) on H1-only target — stderr:\n{stderr}"
     );
     let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let results = p["results"].as_array().expect("results");
@@ -87,7 +91,7 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
 }
 
 #[test]
-fn h2_diff_against_unreachable_target_still_exits_cleanly() {
+fn h2_diff_against_unreachable_target_exits_inconclusive() {
     let (code, _stdout, _stderr) = wafrift(&[
         "h2-diff",
         "http://127.0.0.1:1/",
@@ -97,10 +101,14 @@ fn h2_diff_against_unreachable_target_still_exits_cleanly() {
         "--timeout-secs",
         "1",
     ]);
-    // Informational tool — exits 0 even when both H1 and H2 fail.
+    // F78: when every H2 probe fails (unreachable target → all H1+H2
+    // probes error), h2-diff exits 6 to signal "inconclusive — not a
+    // clean differential measurement." Callers must not treat exit 6 as
+    // "no H1/H2 divergence found"; they must treat it as "we could not
+    // measure." Exit 0 means "cleanly measured, no divergence."
     assert_eq!(
-        code, 0,
-        "h2-diff is informational; should exit 0 even on transport failure"
+        code, 6,
+        "h2-diff must exit 6 (inconclusive) on unreachable target"
     );
 }
 
