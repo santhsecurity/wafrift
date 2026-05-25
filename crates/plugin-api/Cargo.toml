@@ -18,6 +18,7 @@ regex = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # WASM sandbox: no WASI, no syscalls, no network, no filesystem from guest.
+# Workspace entry declares: version = "30", features = ["runtime", "cranelift"]
 wasmtime = { workspace = true }
 
 [dev-dependencies]

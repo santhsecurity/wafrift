@@ -43,6 +43,11 @@ pub mod deserialization;
 /// JWK, jku/x5u SSRF, kid path-traversal + SQLi + log4shell, empty
 /// signature, crit-header bypass, b64 padding tricks, duplicate alg.
 pub mod jwt;
+/// Single-packet race-condition primitives (Kettle BH23 "Smashing the
+/// State Machine"): HTTP/1.1 pipelined coalesce + HTTP/2 last-byte-sync
+/// frame builders. Builds wire bytes only; the transport layer
+/// handles the TCP_NODELAY-off + writev coalesce.
+pub mod race;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
