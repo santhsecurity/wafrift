@@ -72,8 +72,17 @@ impl Rng {
         (self.next_u64() % n as u64) as usize
     }
     /// Pick one reference from a non-empty slice.
+    ///
+    /// # Panics
+    /// Panics if `xs` is empty — all call sites guarantee non-empty inputs.
+    /// The old implementation computed `xs.len() - 1` before checking for
+    /// emptiness, which in debug builds panics on `0usize - 1` (subtraction
+    /// overflow), and in release builds wraps to `usize::MAX` then hits an
+    /// out-of-bounds index. The assertion makes the precondition explicit and
+    /// the error message actionable rather than a cryptic index panic.
     pub fn pick<'a, T>(&mut self, xs: &'a [T]) -> &'a T {
-        &xs[self.below(xs.len().max(1)).min(xs.len() - 1)]
+        assert!(!xs.is_empty(), "Rng::pick called with an empty slice");
+        &xs[self.below(xs.len())]
     }
     pub fn chance(&mut self, num: u32, den: u32) -> bool {
         den != 0 && (self.next_u64() % u64::from(den)) < u64::from(num)

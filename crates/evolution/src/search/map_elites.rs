@@ -425,4 +425,79 @@ mod tests {
         let alg = MapElites::new();
         assert!(alg.best().is_none());
     }
+
+    // ── Saturating-arithmetic regression tests ────────────────────────────────
+
+    /// `eval_counter` must saturate at `u64::MAX` rather than wrapping to 0.
+    /// A wrap-around would collide with existing in-flight IDs and silently
+    /// drop grid updates.
+    #[test]
+    fn eval_counter_saturates_at_u64_max() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(99);
+        alg.initialize(
+            vec![dummy_chromosome("UrlEncode", "sqli", "json")],
+            &pool,
+            &mut rng,
+        );
+        alg.eval_counter = u64::MAX;
+        // request_evaluations must use saturating_add — counter must stay at MAX.
+        let _ = alg.request_evaluations(1, &mut rng);
+        assert_eq!(
+            alg.eval_counter,
+            u64::MAX,
+            "eval_counter must saturate at u64::MAX, not wrap to 0"
+        );
+    }
+
+    /// `generation` must saturate at `u32::MAX` rather than wrapping.
+    #[test]
+    fn generation_saturates_at_u32_max() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(100);
+        alg.initialize(vec![], &pool, &mut rng);
+        alg.generation = u32::MAX;
+        // submit_evaluations increments generation.
+        alg.submit_evaluations(vec![]);
+        assert_eq!(
+            alg.generation,
+            u32::MAX,
+            "generation must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    /// Across many `request_evaluations` + `submit_evaluations` cycles,
+    /// the `eval_counter` must always increment monotonically and IDs must
+    /// never collide.
+    #[test]
+    fn eval_counter_is_strictly_increasing() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(101);
+        alg.initialize(
+            vec![dummy_chromosome("CaseAlternation", "xss", "json")],
+            &pool,
+            &mut rng,
+        );
+        let mut all_ids: Vec<u64> = Vec::new();
+        for _ in 0..5 {
+            let batch = alg.request_evaluations(3, &mut rng);
+            for c in &batch {
+                all_ids.push(c.id);
+            }
+            let verdicts: Vec<_> = batch
+                .into_iter()
+                .map(|c| (c.id, OracleVerdict::from_bool(false)))
+                .collect();
+            alg.submit_evaluations(verdicts);
+        }
+        let unique: std::collections::HashSet<_> = all_ids.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            all_ids.len(),
+            "all eval_counter-derived IDs must be unique across generations"
+        );
+    }
 }
