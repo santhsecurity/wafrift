@@ -140,6 +140,23 @@ fn candidates(attack: &str) -> Vec<(String, String)> {
     v
 }
 
+/// Same as [`candidates`] but excludes normalization-mismatch preimage types
+/// that require transforms beyond the CRS set (`UrlDecodeUni`, `HtmlEntityDecode`,
+/// `Lowercase`). Specifically, `norm_mismatch_json_unescape` is excluded because
+/// ModSecurity/Coraza do not implement JSON string unescaping as a transform —
+/// a rule with those three transforms provably cannot block `\uXXXX`-encoded
+/// input, so including it in a "closure proven" test would produce a false
+/// negative (proven=false for correct behaviour).
+///
+/// Used by `run_harden_inner` so the closure assertion matches what the
+/// synthesized rules can actually enforce.
+fn harden_candidates(attack: &str) -> Vec<(String, String)> {
+    candidates(attack)
+        .into_iter()
+        .filter(|(label, _)| label != "norm_mismatch_json_unescape")
+        .collect()
+}
+
 pub fn run_audit(args: AuditArgs) -> ExitCode {
     ExitCode::from(run_audit_inner(args))
 }
@@ -262,11 +279,13 @@ fn run_harden_inner(args: HardenArgs) -> u8 {
     let mut results: Vec<ClassHardenResult> = Vec::new();
 
     for (class, attacks, tokens) in class_data(&args.class) {
-        // Holes before (over the realistic candidate set).
+        // Holes before (over the CRS-decodable candidate set: raw, case-
+        // flipped, URL-encoded, HTML-entity encoded — but NOT json_unescape
+        // which requires a transform CRS/ModSecurity does not provide).
         let mut pre = waf.with_rules_added(vec![]);
         let holes_before: usize = attacks
             .iter()
-            .flat_map(|a| candidates(a))
+            .flat_map(|a| harden_candidates(a))
             .filter(|(_, c)| classify_pass(&mut pre, &body(c.as_bytes())).unwrap_or(false))
             .count();
 
@@ -305,7 +324,7 @@ fn run_harden_inner(args: HardenArgs) -> u8 {
 
         let holes_after: usize = attacks
             .iter()
-            .flat_map(|a| candidates(a))
+            .flat_map(|a| harden_candidates(a))
             .filter(|(_, c)| classify_pass(&mut hardened, &body(c.as_bytes())).unwrap_or(false))
             .count();
         let fp: usize = benign
