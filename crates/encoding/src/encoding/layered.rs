@@ -158,6 +158,18 @@ pub fn aggressiveness(strategy: Strategy) -> f64 {
         Strategy::ChunkedSplit => 0.92,
         Strategy::GzipEncode => 0.95,
         Strategy::DeflateEncode => 0.95,
+        // Invisible-character strategies — moderate to aggressive.
+        // They are highly evasive against ASCII-keyword WAFs but
+        // may break backends that don't perform Unicode normalization,
+        // so they sit in the 0.40–0.85 band.
+        Strategy::SoftHyphenInject => 0.40,
+        Strategy::WordJoinerWrap => 0.42,
+        Strategy::VariationSelectorPad => 0.50,
+        Strategy::VariationSelectorSupplementaryPad => 0.55,
+        Strategy::TagCharEncode => 0.70,
+        Strategy::LigatureEncode => 0.72,
+        Strategy::CircledLetterEncode => 0.74,
+        Strategy::ParenthesizedLetterEncode => 0.76,
     }
 }
 
