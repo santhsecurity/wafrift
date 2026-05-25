@@ -18,6 +18,7 @@
 //! per-consumer surface-area to chase.
 
 use crate::coverage_feedback::PayloadClass;
+use crate::edge_pop_coverage::EdgePopCoverage;
 use crate::rule_corpus::RuleBypassCorpus;
 
 /// What the oracle decided about a single probe. Mirrors the
@@ -80,6 +81,31 @@ pub fn record_outcome(
 /// a specific rule. Exposed so the corpus reporter can distinguish
 /// "we don't know which CF rule fired" from "we know it's rule X."
 pub const UNATTRIBUTED_BUCKET: &str = "unattributed";
+
+/// Record an observed CF edge-POP for an `(egress, target)` probe.
+///
+/// Called by the hunt loop after `parse_cf_block` returns a
+/// `CfBlockSignal`. The signal's `edge_pop` field is what gets
+/// passed as `pop_raw`. If the probe didn't hit CF (no `cf-ray`
+/// header, raw TCP error, etc), pass `None` and the call increments
+/// the probe counter without adding a POP.
+///
+/// This is a one-line glue around [`EdgePopCoverage::record`] so
+/// every consumer routes through the same logic and the public API
+/// stays small.
+pub fn record_pop_observation(
+    coverage: &mut EdgePopCoverage,
+    egress: &str,
+    target: &str,
+    pop_raw: Option<&str>,
+) {
+    match pop_raw {
+        Some(pop) => {
+            coverage.record(egress, target, pop);
+        }
+        None => coverage.record_no_pop(egress, target),
+    }
+}
 
 /// Apply a single drift event to the corpus — the hunt loop calls
 /// this when the strategy's `drift_window` detector fires
@@ -269,6 +295,30 @@ mod tests {
         // Pin the bucket-name string so corpus files keyed under it
         // continue to load after a rename refactor.
         assert_eq!(UNATTRIBUTED_BUCKET, "unattributed");
+    }
+
+    #[test]
+    fn pop_observation_valid_pop_recorded() {
+        let mut cov = EdgePopCoverage::new();
+        record_pop_observation(&mut cov, "egress-a", "target.example", Some("SJC"));
+        assert_eq!(cov.pops_for("egress-a", "target.example").len(), 1);
+        assert_eq!(cov.probes_for("egress-a", "target.example"), 1);
+    }
+
+    #[test]
+    fn pop_observation_none_increments_probe_counter_only() {
+        let mut cov = EdgePopCoverage::new();
+        record_pop_observation(&mut cov, "egress-a", "target.example", None);
+        assert!(cov.pops_for("egress-a", "target.example").is_empty());
+        assert_eq!(cov.probes_for("egress-a", "target.example"), 1);
+    }
+
+    #[test]
+    fn pop_observation_invalid_pop_still_counts() {
+        let mut cov = EdgePopCoverage::new();
+        record_pop_observation(&mut cov, "egress-a", "target.example", Some("not-a-pop"));
+        assert!(cov.pops_for("egress-a", "target.example").is_empty());
+        assert_eq!(cov.probes_for("egress-a", "target.example"), 1);
     }
 
     #[test]

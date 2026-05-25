@@ -23,6 +23,7 @@ wiremock = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 prost = "0.12"
+proptest = { workspace = true }
 
 [lints]
 workspace = true

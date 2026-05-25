@@ -191,6 +191,11 @@ pub enum PluginError {
 #[derive(Debug, Deserialize)]
 struct TomlPluginFile {
     manifest: TomlManifest,
+    /// Rules are optional — a manifest-only plugin loads as an
+    /// identity tamper. Used by external contributors who want to
+    /// register metadata (e.g. for a future WASM upgrade path) without
+    /// shipping regex rules yet.
+    #[serde(default)]
     rules: Vec<TomlRule>,
 }
 

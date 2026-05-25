@@ -6340,6 +6340,7 @@ dependencies = [
 name = "wafrift-grpc-evasion"
 version = "0.2.21"
 dependencies = [
+ "proptest",
  "prost",
  "reqwest 0.12.28",
  "thiserror 2.0.18",
@@ -6391,6 +6392,7 @@ name = "wafrift-plugin-api"
 version = "0.2.21"
 dependencies = [
  "dirs",
+ "proptest",
  "regex",
  "serde",
  "tempfile",
