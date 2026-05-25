@@ -4,7 +4,6 @@ use colored::Colorize;
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use tracing_subscriber::EnvFilter;
 
 mod attack_cmd;
 mod bank;
@@ -40,8 +39,13 @@ mod listener_cmd;
 mod man_cmd;
 mod method_diff_cmd;
 mod origin_hints;
+/// Target-permission gate. Refuse-by-default for non-bounty,
+/// non-allowlist hosts; `--i-have-permission &lt;reason&gt;` overrides.
+/// Local Docker bench targets (loopback / RFC1918) always pass.
+mod permission;
 mod parser_diff_cmd;
 mod parser_diff_common;
+mod poc_emit;
 mod probe_classify;
 mod probe_cmd;
 mod query_diff_cmd;
@@ -656,17 +660,17 @@ struct CompletionArgs {
 }
 fn main() -> ExitCode {
     // Structured tracing — honours RUST_LOG (e.g. `RUST_LOG=wafrift=debug`).
-    // Uses compact format to keep debug lines brief on the operator's
-    // terminal. The subscriber is a no-op unless RUST_LOG is set, so
-    // default (no env var) behaviour is unchanged.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
-        )
-        .with_target(true)
-        .with_writer(std::io::stderr)
-        .compact()
-        .init();
+    // Delegates to santh_tracing so every Santh CLI shares one
+    // subscriber init path; the InitConfig knobs reproduce the
+    // pre-wire hand-rolled `tracing_subscriber::fmt()...compact()`
+    // shape byte-for-byte: stderr writer, target field on, single-
+    // line compact format, fallback to `warn` when RUST_LOG is unset.
+    let _ = santh_tracing::init_with(
+        santh_tracing::InitConfig::new("wafrift", santh_tracing::LogLevel::Warn)
+            .with_target(true)
+            .stderr()
+            .compact(),
+    );
 
     // Pentesters routinely pipe wafrift's output to `head`, `jq`, `grep
     // -m 1`, etc. Rust's default behaviour is to ignore SIGPIPE and
