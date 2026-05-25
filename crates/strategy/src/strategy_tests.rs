@@ -531,4 +531,94 @@ mod tests {
         let result = evade(&req, &state, &config);
         assert_eq!(result.request.method.as_str(), "PUT");
     }
+
+    #[test]
+    fn winner_pick_varies_with_request_url() {
+        // F146 regression: pre-fix `current_winner` used
+        // `state.rotation_index % state.proven_winners.len()` but `evade`
+        // gets a CLONED &HostState that is dropped after each call —
+        // `rotation_index` is never advanced from the transport path, so
+        // every request picked `proven_winners[0]` and the round-robin
+        // claim was a lie. Post-fix the pick hashes (URL + method), so
+        // distinct requests rotate across the winner pool naturally
+        // even when state is immutable.
+        //
+        // Use POST with bodies so the encoding techniques actually fire
+        // (apply_encoding skips bodyless requests, which would mask the
+        // bug).
+        let mut state = HostState::default();
+        state.proven_winners = vec![
+            "encoding:UrlEncode".to_string(),
+            "encoding:DoubleUrlEncode".to_string(),
+            "encoding:Base64Encode".to_string(),
+            "encoding:HexEncode".to_string(),
+        ];
+        state.discovery_complete = true;
+        let config = EvasionConfig::default();
+
+        let mut seen_techniques = std::collections::HashSet::new();
+        for url in [
+            "https://target/api/users",
+            "https://target/api/posts",
+            "https://target/api/login",
+            "https://target/api/admin",
+            "https://target/health",
+            "https://target/search",
+            "https://target/v1/data",
+            "https://target/v2/data",
+        ] {
+            let req = Request::post(url, b"q=admin' OR 1=1--".to_vec());
+            let result = evade(&req, &state, &config);
+            // Extract just the PayloadEncoding entries (fingerprint
+            // techniques aren't gated on URL so they'd add noise).
+            let encoding_techs: Vec<String> = result
+                .techniques
+                .iter()
+                .filter_map(|t| match t {
+                    Technique::PayloadEncoding(name) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            seen_techniques.insert(format!("{encoding_techs:?}"));
+        }
+        assert!(
+            seen_techniques.len() >= 2,
+            "winner pick must vary across distinct URLs (pre-fix every URL got encoding:UrlEncode); saw only {} distinct encoding choices: {seen_techniques:?}",
+            seen_techniques.len()
+        );
+    }
+
+    #[test]
+    fn winner_pick_is_deterministic_per_url() {
+        // Same URL -> same winner -> same evasion. Replay safety.
+        let mut state = HostState::default();
+        state.proven_winners = vec![
+            "encoding:UrlEncode".to_string(),
+            "encoding:DoubleUrlEncode".to_string(),
+            "encoding:HexEncode".to_string(),
+        ];
+        state.discovery_complete = true;
+        let config = EvasionConfig::default();
+        let req = Request::post(
+            "https://target/api/x",
+            b"q=admin' OR 1=1--".to_vec(),
+        );
+        let a = evade(&req, &state, &config);
+        let b = evade(&req, &state, &config);
+        let a_enc: Vec<&Technique> = a
+            .techniques
+            .iter()
+            .filter(|t| matches!(t, Technique::PayloadEncoding(_)))
+            .collect();
+        let b_enc: Vec<&Technique> = b
+            .techniques
+            .iter()
+            .filter(|t| matches!(t, Technique::PayloadEncoding(_)))
+            .collect();
+        assert_eq!(
+            format!("{a_enc:?}"),
+            format!("{b_enc:?}"),
+            "same URL must pick the same winner deterministically"
+        );
+    }
 }
