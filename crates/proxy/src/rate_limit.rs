@@ -39,11 +39,26 @@ impl RateLimiter {
     /// Build a limiter capped at `rps` requests/sec per host with a
     /// burst capacity equal to `burst` (defaults to `rps` if zero).
     /// Passing `rps == 0` returns a no-op limiter.
+    ///
+    /// NaN, negative, or infinite inputs are clamped to 0 (no-op).
+    /// This prevents a division-by-zero / `Duration::from_secs_f64(NaN)`
+    /// panic in `acquire` when a caller passes a non-finite value.
     #[must_use]
     pub fn new(rps: f64, burst: f64) -> Arc<Self> {
-        let burst = if burst > 0.0 { burst } else { rps.max(1.0) };
+        // Sanitize: NaN or negative → treat as 0 (unlimited / no-op).
+        let rps = if rps.is_finite() && rps > 0.0 { rps } else { 0.0 };
+        let burst_raw = if burst.is_finite() && burst > 0.0 {
+            burst
+        } else {
+            0.0
+        };
+        let burst = if burst_raw > 0.0 {
+            burst_raw
+        } else {
+            rps.max(1.0)
+        };
         Arc::new(Self {
-            rps: rps.max(0.0),
+            rps,
             burst,
             buckets: Mutex::new(HashMap::new()),
         })
