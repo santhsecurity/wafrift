@@ -41,6 +41,7 @@
 pub mod advisor;
 pub mod ast_mcts;
 pub mod body_padding;
+pub mod coverage_feedback;
 pub mod custom_rules;
 pub mod differential;
 pub mod dilution;
