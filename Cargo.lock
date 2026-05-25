@@ -6332,6 +6332,7 @@ dependencies = [
 name = "wafrift-graphql"
 version = "0.2.21"
 dependencies = [
+ "proptest",
  "serde_json",
 ]
 

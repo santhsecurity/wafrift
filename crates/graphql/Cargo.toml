@@ -13,5 +13,8 @@ categories = ["network-programming", "web-programming"]
 [dependencies]
 serde_json = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lints]
 workspace = true
