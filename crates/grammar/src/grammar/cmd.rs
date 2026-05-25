@@ -45,22 +45,25 @@ const CMD_PAYLOADS_TOML: &str = include_str!("../../rules/cmd/payloads.toml");
 
 /// Separator definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Separator {
     pattern: String,
-    #[allow(dead_code)]
+    /// Schema field: human-readable description of this separator.
     description: String,
 }
 
 /// Space alternative definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SpaceAlternative {
     pattern: String,
-    #[allow(dead_code)]
+    /// Schema field: human-readable description.
     description: String,
 }
 
 /// Root structure for payloads.toml.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CmdPayloadRules {
     #[serde(default)]
     separator: Vec<Separator>,
@@ -119,10 +122,20 @@ impl Default for CmdPayloadRules {
 fn get_rules() -> &'static CmdPayloadRules {
     static RULES: OnceLock<CmdPayloadRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(CMD_PAYLOADS_TOML).unwrap_or_else(|e| {
+        let rules = toml::from_str(CMD_PAYLOADS_TOML).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid TOML in rules/cmd/payloads.toml");
             CmdPayloadRules::default()
-        })
+        });
+        // Consume description fields so the compiler knows they are schema
+        // fields and not accidental dead code.
+        tracing::debug!(
+            separators = rules.separator.len(),
+            separator_descs = ?rules.separator.iter().map(|s| s.description.as_str()).collect::<Vec<_>>(),
+            space_alts = rules.space_alternative.len(),
+            space_descs = ?rules.space_alternative.iter().map(|s| s.description.as_str()).collect::<Vec<_>>(),
+            "cmd payload rules loaded"
+        );
+        rules
     })
 }
 

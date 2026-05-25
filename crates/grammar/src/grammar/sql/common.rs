@@ -32,30 +32,34 @@ const SQL_OPERATORS_TOML: &str = include_str!("../../../rules/sql/operators.toml
 
 /// OR alternative definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OrAlternative {
     pattern: String,
-    #[allow(dead_code)]
+    /// Schema field: human-readable description.
     description: String,
 }
 
 /// AND alternative definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AndAlternative {
     pattern: String,
-    #[allow(dead_code)]
+    /// Schema field: human-readable description.
     description: String,
 }
 
 /// Equality alternative definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EqualityAlternative {
     pattern: String,
-    #[allow(dead_code)]
+    /// Schema field: human-readable description.
     description: String,
 }
 
 /// Root structure for operators.toml.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SqlOperatorRules {
     #[serde(default)]
     or_alternative: Vec<OrAlternative>,
@@ -110,10 +114,19 @@ impl Default for SqlOperatorRules {
 fn get_rules() -> &'static SqlOperatorRules {
     static RULES: OnceLock<SqlOperatorRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(SQL_OPERATORS_TOML).unwrap_or_else(|e| {
+        let rules = toml::from_str(SQL_OPERATORS_TOML).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid TOML in rules/sql/operators.toml");
             SqlOperatorRules::default()
-        })
+        });
+        // Consume description fields so the compiler knows they are schema fields.
+        tracing::debug!(
+            or_alts = rules.or_alternative.len(),
+            or_descs = ?rules.or_alternative.iter().map(|a| a.description.as_str()).collect::<Vec<_>>(),
+            and_descs = ?rules.and_alternative.iter().map(|a| a.description.as_str()).collect::<Vec<_>>(),
+            eq_descs = ?rules.equality_alternative.iter().map(|a| a.description.as_str()).collect::<Vec<_>>(),
+            "sql operator rules loaded"
+        );
+        rules
     })
 }
 
