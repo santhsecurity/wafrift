@@ -209,7 +209,23 @@ impl Environment for WafRiftEnv {
         // defeats the search. Now we expose every known header trick
         // as a distinct action so MCTS can actually choose between
         // them.
-        if !self.header_applied {
+        // F145: only expose HeaderTrick if there's actually a
+        // Content-Type header to mutate. The apply() arm is
+        // implemented purely against Content-Type — if no such
+        // header exists (e.g. GET request, or a POST whose
+        // Content-Type was already stripped by an earlier stage),
+        // every trick is a silent no-op AND sets
+        // `header_applied = true`, locking out future tries even
+        // though zero bytes changed. Same hazard class as the
+        // duplicate-grammar-action F138: MCTS spends budget on
+        // structural no-ops. Gating on the header's actual
+        // presence makes the action space honest.
+        let has_content_type = self
+            .req
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+        if !self.header_applied && has_content_type {
             // Only expose tricks the apply() arm can actually execute
             // on the structured Vec<(name, value)> the proxy hands
             // to reqwest. Wire-format-only tricks (TabSeparator,
@@ -534,7 +550,20 @@ mod tests {
 
     #[test]
     fn action_space_includes_multiple_dimensions() {
-        let req = Request::post("http://example.com/search", b"q=admin' OR 1=1--".to_vec());
+        // ALL four dimensions need their preconditions: Encoding always
+        // applies, Grammar fires on classifiable payloads, ContentType
+        // needs a form-decodable body with at least one param, and
+        // HeaderTrick (F145) needs a Content-Type header on the request.
+        // Build a request that satisfies every gate so the test
+        // asserts breadth of the action space, not a single gate.
+        let mut req = Request::post(
+            "http://example.com/search",
+            b"q=admin' OR 1=1--".to_vec(),
+        );
+        req.headers.push((
+            "Content-Type".into(),
+            "application/x-www-form-urlencoded".into(),
+        ));
         let env = WafRiftEnv::new(req, 3);
         let actions = env.legal_actions();
 
@@ -777,6 +806,50 @@ mod tests {
                 "wire-only trick {must_not} should not appear — got {header_tricks:?}"
             );
         }
+    }
+
+    #[test]
+    fn header_trick_actions_not_offered_when_content_type_header_missing() {
+        // F145 regression: pre-fix legal_actions advertised the 4
+        // HeaderTrick names regardless of whether a Content-Type
+        // header actually existed on the request. The apply() arm
+        // only mutates Content-Type, so for any request without
+        // one (e.g. a plain GET, or a POST whose CT was stripped),
+        // every HeaderTrick was a silent no-op AND sets
+        // header_applied=true, locking out future tries — burning
+        // an MCTS node on an action that can't change a single byte.
+        // Post-fix legal_actions checks for Content-Type's presence
+        // and skips the whole branch when it's absent.
+        let req_no_ct = Request::get("http://example.com/");
+        assert!(
+            !req_no_ct
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type")),
+            "preconditions: GET request must have no Content-Type"
+        );
+        let env = WafRiftEnv::new(req_no_ct, 4);
+        let header_trick_count = env
+            .legal_actions()
+            .iter()
+            .filter(|a| matches!(a, TechniqueAction::HeaderTrick(_)))
+            .count();
+        assert_eq!(
+            header_trick_count, 0,
+            "no HeaderTrick action should be offered when Content-Type is absent"
+        );
+        // Positive: same env shape WITH a Content-Type still offers
+        // the tricks (proves the gate isn't a blanket disable).
+        let env_with_ct = WafRiftEnv::new(req_with_ct(), 4);
+        let with_ct_tricks: usize = env_with_ct
+            .legal_actions()
+            .iter()
+            .filter(|a| matches!(a, TechniqueAction::HeaderTrick(_)))
+            .count();
+        assert!(
+            with_ct_tricks >= 4,
+            "with Content-Type set, all 4 HeaderTrick names must still be advertised; got {with_ct_tricks}"
+        );
     }
 
     // ── Grammar-action deduplication (F138) ──────────────────────────────
