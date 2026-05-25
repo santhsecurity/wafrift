@@ -72,5 +72,10 @@ pub mod hunt_corpus_bridge;
 /// submission queue rejects bypasses already filed in the public
 /// CumulusFire archive.
 pub mod h1_dedup;
+/// Encoding-stack lattice search — enumerate compositions of N
+/// encoders to find chains that defeat a target WAF rule. The
+/// systematic-search engine the hunt loop uses to fill the
+/// (rule × class) cells of the corpus.
+pub mod encoding_lattice;
 pub mod search;
 pub mod types;
