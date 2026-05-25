@@ -1,0 +1,38 @@
+{
+    # Disable automatic HTTPS — the bench talks plain HTTP.
+    auto_https off
+
+    # coraza_waf must run before the reverse_proxy so it can inspect and
+    # optionally block before any upstream connection is made.
+    order coraza_waf first
+}
+
+:80 {
+    coraza_waf {
+        # load_owasp_crs downloads OWASP CRS from the Coraza CRS module
+        # embedded in the image. No external network access required at
+        # request time.
+        load_owasp_crs
+
+        directives `
+            # coraza.conf-recommended enables SecRuleEngine DetectionOnly by
+            # default. We override to On so every matched rule produces a 403,
+            # giving the bench a clear block signal.
+            Include @coraza.conf-recommended
+            SecRuleEngine On
+
+            # CRS setup: use CRS defaults (PL1). Extend this block to test
+            # Coraza at higher paranoia levels — add:
+            #   SecAction "id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=2"
+            Include @crs-setup.conf.example
+            Include @owasp_crs/*.conf
+
+            # Tuning: Coraza's multi-part parser is stricter than libmodsecurity3
+            # on boundary whitespace. Disable the strict boundary check so the
+            # bench exercises the WAF rule engine, not parser quirks.
+            SecRequestBodyLimitAction ProcessPartial
+        `
+    }
+
+    reverse_proxy backend:80
+}
