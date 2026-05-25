@@ -344,7 +344,8 @@ fn accept_all_sfa() -> wafrift_wafmodel::Sfa {
 // ── Main entry point ───────────────────────────────────────────────────────
 
 /// Run `wafrift model-evade`.
-pub fn run_model_evade(args: ModelEvadeArgs) -> ExitCode {
+pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
+    args.target_url = crate::helpers::normalize_target_url(&args.target_url);
     // ── Step 0: permission gate ──────────────────────────────────────
     if let Err(msg) = check_permission(&args.target_url, &args.i_have_permission) {
         eprintln!("{} {msg}", "Permission error:".red().bold());
