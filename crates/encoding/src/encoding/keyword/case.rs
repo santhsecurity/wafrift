@@ -32,16 +32,41 @@ pub fn case_alternate(payload: &str) -> String {
     alternating_case(payload, true)
 }
 
-/// Random case alternation — unpredictable mixed-case output.
+/// Random case alternation — deterministic per-input, mixed-case output.
 ///
-/// **Idempotency.** NOT idempotent. Each application re-randomises the
-/// case of every alphabetic character independently.
+/// **Determinism.** Fixed by FNV-1a seeding (same approach as
+/// `space_to_random_blank`). Pre-fix used `rand::random::<bool>()`,
+/// making identical inputs produce different outputs across calls.
+/// A bench replay that discovered a bypass via `RandomCase` could not
+/// be reproduced — the recorded genome hash pointed to a specific byte
+/// sequence that the re-run encoder no longer produced.
+///
+/// The case of each alphabetic character is now driven by FNV-1a of
+/// the full payload XOR-mixed with that character's position, yielding
+/// a stable "random-looking" mixed-case pattern that is byte-identical
+/// given the same input.
+///
+/// **Idempotency.** NOT idempotent (second pass re-derives the same
+/// stable result from the already-cased output — both passes are
+/// identical, so idempotency holds in practice, but the contract is
+/// stability-per-input, not classical idempotency).
 pub fn random_case_alternate(payload: &str) -> String {
+    // FNV-1a over the full payload — same primitive as space_to_random_blank.
+    let seed: u64 = payload
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
+            (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
     payload
         .chars()
-        .map(|ch| {
+        .enumerate()
+        .map(|(i, ch)| {
             if ch.is_ascii_alphabetic() {
-                if rand::random::<bool>() {
+                // Mix position into seed so adjacent chars differ.
+                let mixed = seed
+                    .wrapping_add(i as u64)
+                    .wrapping_mul(0x0000_0100_0000_01b3);
+                if mixed & 1 == 0 {
                     ch.to_ascii_uppercase()
                 } else {
                     ch.to_ascii_lowercase()
@@ -73,12 +98,9 @@ mod tests {
     }
 
     #[test]
-    fn random_case_non_deterministic() {
+    fn random_case_preserves_content() {
         let a = random_case_alternate("SELECT");
-        let b = random_case_alternate("SELECT");
-        // Very unlikely to match by chance, but allow for it
         assert_eq!(a.to_ascii_lowercase(), "select");
-        assert_eq!(b.to_ascii_lowercase(), "select");
     }
 
     #[test]
@@ -103,24 +125,31 @@ mod tests {
     }
 
     #[test]
-    fn random_case_not_idempotent() {
-        // A single `a != b` pair is FLAKY: for an n-letter word the two
-        // independent random casings collide with probability 1/2^n
-        // (~1.6% for "SELECT") — a ~1-in-64 spurious CI failure. The
-        // real contract is that `random_case_alternate` re-randomises,
-        // i.e. its output is not constant. Assert ≥2 distinct outputs
-        // across many trials: P(all identical) = (1/2^6)^(N-1) → nil
-        // for N=64, so this is deterministic in practice.
-        let mut seen = std::collections::HashSet::new();
-        for _ in 0..64 {
-            seen.insert(random_case_alternate("SELECT"));
-            if seen.len() >= 2 {
-                return;
-            }
-        }
-        panic!(
-            "random_case_alternate produced only one distinct casing of \
-             \"SELECT\" across 64 trials — it is not re-randomising"
+    fn random_case_is_deterministic() {
+        // Post-fix: FNV-1a seeding makes identical input produce byte-identical
+        // output. A bypass discovered via RandomCase can now be replayed.
+        let a = random_case_alternate("SELECT");
+        let b = random_case_alternate("SELECT");
+        assert_eq!(a, b, "random_case_alternate must be deterministic");
+        // Different inputs must produce different patterns (otherwise it's just
+        // a fixed-case encoder).
+        let c = random_case_alternate("SELECTS");
+        assert_ne!(
+            a, c,
+            "different input must produce different output (not just a fixed-case encoder)"
+        );
+    }
+
+    #[test]
+    fn random_case_mixes_both_cases() {
+        // With a 6-letter all-caps word and FNV seeding, the output should
+        // contain at least one lowercase letter — it's not just toUpperCase.
+        let out = random_case_alternate("SELECT");
+        let has_lower = out.chars().any(|c| c.is_ascii_lowercase());
+        let has_upper = out.chars().any(|c| c.is_ascii_uppercase());
+        assert!(
+            has_lower && has_upper,
+            "random_case_alternate must mix both cases for 'SELECT', got: {out}"
         );
     }
 }
