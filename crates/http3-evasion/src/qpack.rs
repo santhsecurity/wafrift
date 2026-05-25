@@ -408,19 +408,18 @@ fn encode_int_tail(value: u64, prefix_bits: u8) -> Vec<u8> {
 /// Wrap a QPACK field block in an HTTP/3 HEADERS frame (type = 0x01).
 ///
 /// HTTP/3 frame layout: `type (varint) | length (varint) | payload`
+///
+/// The length field is encoded as a full QUIC variable-length integer (RFC 9000
+/// §16) supporting all four encoding widths (1, 2, 4, 8 bytes). The previous
+/// implementation only handled 1-byte (`< 64`) and 2-byte (`< 16384`) forms,
+/// silently corrupting the length field for field blocks of 16384+ bytes by
+/// overflowing the 14-bit 2-byte varint capacity.
 fn http3_headers_frame(field_block: &[u8]) -> Vec<u8> {
     let mut buf = Vec::new();
     // Frame type = 0x01 (HEADERS)
     buf.push(0x01);
-    // Frame length (varint — for simplicity, 1-byte if < 64)
-    let len = field_block.len() as u64;
-    if len < 64 {
-        buf.push(len as u8);
-    } else {
-        // 2-byte varint: 0b01_xxxxxx | length_high, length_low
-        buf.push(0x40 | ((len >> 8) as u8));
-        buf.push((len & 0xFF) as u8);
-    }
+    // Frame length: full QUIC varint, all four widths supported.
+    buf.extend_from_slice(&crate::quic_cid::quic_varint(field_block.len() as u64));
     buf.extend_from_slice(field_block);
     buf
 }
@@ -533,8 +532,29 @@ mod tests {
         let field_block = vec![0u8; 100];
         let frame = http3_headers_frame(&field_block);
         assert_eq!(frame[0], 0x01); // type
-        // 2-byte varint prefix = 0x40..
-        assert!(frame[1] >= 0x40, "large payload must use 2-byte varint");
+        // 2-byte varint prefix: RFC 9000 §16 — 64..=16383 uses `01` high bits.
+        assert_eq!(frame[1] >> 6, 1, "100-byte payload must use 2-byte varint (01 prefix)");
+    }
+
+    #[test]
+    fn http3_headers_frame_16384_byte_payload_uses_4byte_length() {
+        // Pre-fix: field blocks >= 16384 bytes overflowed the 2-byte varint
+        // (14-bit capacity = 16383 max), silently corrupting the length field.
+        // The frame would declare length = (16384 >> 8) & 0xFF = 0x40 OR'd into
+        // 0x40 = 0x40, then low byte 0x00 — encoding only 2 bytes but the value
+        // 0x4000 = 16384 as a QUIC varint requires 4 bytes (0x80 prefix flag).
+        let field_block = vec![0u8; 16384];
+        let frame = http3_headers_frame(&field_block);
+        assert_eq!(frame[0], 0x01); // type
+        // Must use 4-byte varint: `10` prefix (high 2 bits = 0b10).
+        assert_eq!(frame[1] >> 6, 2, "16384-byte payload must use 4-byte varint (10 prefix)");
+        // The 4 length bytes encode 16384 = 0x4000.
+        // With 4-byte quic_varint: 0x80 | (16384>>24)=0x80, then 0x00, 0x40, 0x00.
+        let len_encoded = u32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]);
+        let decoded_len = (len_encoded & 0x3FFF_FFFF) as usize;
+        assert_eq!(decoded_len, 16384, "decoded frame length must be 16384");
+        // Total frame size: 1 (type) + 4 (length varint) + 16384 (payload)
+        assert_eq!(frame.len(), 1 + 4 + 16384);
     }
 
     // ── QpackEncoder ──────────────────────────────────────────────────────
