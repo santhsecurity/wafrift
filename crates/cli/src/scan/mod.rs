@@ -369,8 +369,11 @@ pub(crate) async fn run_scan(
     // `--from-discovery` expansion (handled in main.rs) always sets a
     // concrete target; the direct path is clap-guaranteed to have one
     // via the `target_positional` OR `--target` arms of `ScanArgs`.
-    let target_owned = args.resolved_target().unwrap_or("").to_string();
-    let target = target_owned.trim_end_matches('/');
+    let target_owned = crate::helpers::normalize_target_url(
+        args.resolved_target().unwrap_or(""),
+    );
+    let target_owned = target_owned.trim_end_matches('/').to_string();
+    let target = target_owned.as_str();
 
     // Permission gate: refuse to fire against any target the operator
     // hasn't authorized. Local/RFC1918 targets and the built-in bounty

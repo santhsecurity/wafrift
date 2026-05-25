@@ -12,7 +12,7 @@
 //!   triggers the GraphQL battery; form-urlencoded does not.
 
 use std::process::Command;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -120,7 +120,7 @@ async fn spawn_graphql_mock() -> (std::net::SocketAddr, Arc<tokio::sync::Mutex<V
         }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    addr
+    (addr, log)
 }
 
 fn find_double_crlf(buf: &[u8]) -> Option<usize> {

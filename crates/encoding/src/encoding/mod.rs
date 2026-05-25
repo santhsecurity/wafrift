@@ -68,6 +68,19 @@ pub mod dom_clobber;
 /// gadget. Covers Express, lodash, jQuery, Mongoose, Hoek vulnerable
 /// libraries.
 pub mod proto_pollution;
+/// Server-Side Template Injection (SSTI) sandbox-escape library
+/// across 12 template engines: Jinja2 (3 escape vectors), Twig,
+/// Smarty (PHP block + write-file), Freemarker (Execute + Spring),
+/// Velocity, ERB (direct + Kernel.const_get bypass), Handlebars,
+/// Nunjucks, Pebble, Liquid (SSRF), Mako, Razor, AngularJS legacy.
+/// Plus a 6-probe engine-fingerprint set.
+pub mod ssti_escape;
+/// SAML XML Signature Wrapping (XSW1-XSW8) attack library per
+/// Somorovsky USENIX Security 2012. Re-shape a signed SAML response
+/// so the verifier validates the original assertion but the consumer
+/// reads attacker-controlled data. Every commercial SSO has shipped
+/// at least one XSW vulnerability — XSW7/XSW8 are still common.
+pub mod saml_xsw;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.

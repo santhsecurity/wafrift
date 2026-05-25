@@ -238,9 +238,9 @@ fn ast_mcts_algorithm_name_matches_registration() {
     let budget = Budget::default();
     let engine = EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
     assert_eq!(
-        engine.algorithm.name(),
+        engine.algorithm_name(),
         "ast_mcts",
-        "engine.algorithm.name() must match the registration key"
+        "engine.algorithm_name() must match the registration key"
     );
 }
 
@@ -250,45 +250,47 @@ fn ast_mcts_algorithm_checkpoint_roundtrip() {
     let pool = GenePool::default_wafrift();
     let mut rng = StdRng::seed_from_u64(7);
     alg.initialize(make_sql_seed("'x'='x'"), &pool, &mut rng);
-    alg.bypass_found = true; // simulate a bypass for richer state
+
+    // Simulate a bypass by submitting a bypass verdict so bypass_found
+    // transitions to true via the public API (private field is not accessible
+    // from integration tests — we test the observable contract instead).
+    let candidates = alg.request_evaluations(2, &mut rng);
+    if !candidates.is_empty() {
+        alg.submit_evaluations(vec![(candidates[0].id, bypass_verdict())]);
+    }
+
+    // Capture state before checkpoint.
+    use wafrift_evolution::types::{Budget as Bgt, SearchStats};
+    let stats = SearchStats::new();
+    let bgt = Bgt { max_requests: 1000, ..Default::default() };
+    let was_terminated = alg.should_terminate(&stats, &bgt);
+    let best_payload_before = alg
+        .best()
+        .and_then(|c| c.gene("ast_mcts_payload"))
+        .unwrap_or("")
+        .to_string();
 
     let bytes = alg.checkpoint().unwrap();
     let mut restored = AstMctsAlgorithm::new();
     restored.restore(&bytes).unwrap();
 
+    let restored_payload = restored
+        .best()
+        .and_then(|c| c.gene("ast_mcts_payload"))
+        .unwrap_or("")
+        .to_string();
+    let restored_terminated = restored.should_terminate(&stats, &bgt);
+
     assert_eq!(
-        restored.best_payload, alg.best_payload,
+        restored_payload, best_payload_before,
         "best_payload must survive checkpoint/restore"
     );
     assert_eq!(
-        restored.bypass_found, alg.bypass_found,
-        "bypass_found must survive checkpoint/restore"
+        restored_terminated, was_terminated,
+        "bypass_found state must survive checkpoint/restore"
     );
 }
 
-// Make bypass_found field accessible for tests by going through the trait.
-// The field is private — we route through a submit to set it.
-trait BypassAccessor {
-    fn bypass_found(&self) -> bool;
-    fn best_payload(&self) -> &str;
-}
-
-impl BypassAccessor for AstMctsAlgorithm {
-    fn bypass_found(&self) -> bool {
-        // We use the `should_terminate` contract: if bypass_found is true,
-        // should_terminate must return true.
-        use wafrift_evolution::types::{Budget, SearchStats};
-        let stats = SearchStats::new();
-        let budget = Budget::default();
-        // Only the bypass_found path triggers immediate termination;
-        // stagnation/budget paths need nonzero counters.
-        self.should_terminate(&stats, &budget)
-    }
-
-    fn best_payload(&self) -> &str {
-        self.best().and_then(|c| c.gene("ast_mcts_payload")).unwrap_or("")
-    }
-}
 
 #[test]
 fn ast_mcts_budget_is_honoured() {

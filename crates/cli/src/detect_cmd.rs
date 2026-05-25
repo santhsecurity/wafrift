@@ -439,7 +439,9 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // `--status`/`--headers`/`--body` triple. clap's
     // `required_unless_present`/`conflicts_with_all` guarantees exactly
     // one mode is selected.
-    let resolved_url = args.resolved_url().map(str::to_owned);
+    let resolved_url = args
+        .resolved_url()
+        .map(|u| crate::helpers::normalize_target_url(u));
     let (status, headers, body): (u16, Vec<(String, String)>, Vec<u8>) =
         if let Some(ref url) = resolved_url {
             match fetch_for_detect(url, args.timeout_secs, args.insecure) {
