@@ -1,10 +1,9 @@
-//! Comprehensive property-based test suite across every encoding
-//! attack module.
+//! Property-based test suite for WAF-evasion primitives.
 //!
 //! Each `proptest!` macro runs 256 cases by default — so this file
 //! contributes thousands of effective test executions per
 //! `cargo test` invocation. The properties enforce three invariants
-//! every payload library MUST hold:
+//! every WAF-evasion primitive MUST hold:
 //!
 //! 1. **No panic on arbitrary string input.** Operator-supplied
 //!    strings come from untrusted sources (request bodies, CLI
@@ -13,19 +12,17 @@
 //! 2. **Determinism.** Same input → same output. Required so
 //!    `wafrift bench` results are reproducible and the genome
 //!    registry can store stable hashes.
-//! 3. **Non-empty output for non-empty input.** A payload generator
-//!    that silently returns empty bytes is a stub disguised as a
-//!    function — and the engine would happily fire an empty
-//!    request expecting a payload.
+//! 3. **Wire-format invariants.** Per-primitive shape rules: no
+//!    embedded CRLF in single-line outputs, balanced braces,
+//!    output preserves the operator's target markers, etc.
 
 use proptest::prelude::*;
 use wafrift_encoding::encoding::{
-    cookie_attacks, csv_formula, deserialization, dom_clobber, invisible, jwt, oauth, path_norm,
-    proto_pollution, request_line, saml_xsw, ssti_escape,
+    cache_poison, invisible, method_override, path_norm, race, request_line,
 };
 
 // ───────────────────────────────────────────────────────────────
-// invisible.rs
+// invisible.rs — keyword-bypass via codepoint substitution
 // ───────────────────────────────────────────────────────────────
 
 proptest! {
@@ -45,7 +42,7 @@ proptest! {
     #[test]
     fn invisible_tag_char_encode_preserves_length_for_ascii(s in "[A-Za-z0-9]{0,200}") {
         // Every ASCII byte becomes a 4-byte plane-14 codepoint, so
-        // codepoint count equals input length. Byte count is 4×.
+        // codepoint count equals input length.
         let out = invisible::tag_char_encode(&s);
         prop_assert_eq!(out.chars().count(), s.len());
     }
@@ -57,8 +54,6 @@ proptest! {
 
     #[test]
     fn invisible_ligature_encode_idempotent_on_no_match(s in "[^fis]*") {
-        // Without any of the ligature-trigger chars, the output
-        // equals the input byte-for-byte.
         prop_assert_eq!(invisible::ligature_encode(&s), s);
     }
 
@@ -89,7 +84,7 @@ proptest! {
 }
 
 // ───────────────────────────────────────────────────────────────
-// path_norm.rs
+// path_norm.rs — RFC 3986 §5.2.4 differential
 // ───────────────────────────────────────────────────────────────
 
 proptest! {
@@ -132,7 +127,7 @@ proptest! {
 }
 
 // ───────────────────────────────────────────────────────────────
-// request_line.rs
+// request_line.rs — exotic methods / URI forms / version strings
 // ───────────────────────────────────────────────────────────────
 
 proptest! {
@@ -167,6 +162,8 @@ proptest! {
         host in "[a-z]{1,10}",
         path in "/[a-z]{1,20}"
     ) {
+        // Multi-line request-line outputs are smuggling-class, not
+        // request_line-class. Keep the layer boundary clean.
         let outputs = vec![
             request_line::absolute_uri_request_line(&method, &host, &path),
             request_line::absolute_uri_https_request_line(&method, &host, &path),
@@ -182,387 +179,135 @@ proptest! {
 }
 
 // ───────────────────────────────────────────────────────────────
-// deserialization.rs
+// race.rs — Kettle BH23 single-packet attack frame builders
 // ───────────────────────────────────────────────────────────────
 
 proptest! {
     #[test]
-    fn deser_java_no_panic(bytes in proptest::collection::vec(any::<u8>(), 0..=4096)) {
-        let _ = deserialization::java_serialized_blob(&bytes);
+    fn race_pipelined_h1_no_panic(
+        n in 0usize..=50,
+        method in "[A-Z]{1,8}",
+        path in "/[a-zA-Z0-9_-]{1,40}",
+        host in "[a-z]{1,20}\\.example",
+        body in "[a-zA-Z0-9=&]{0,200}"
+    ) {
+        let _ = race::pipelined_h1_coalesce(n, &method, &path, &host, &[], body.as_bytes());
     }
 
     #[test]
-    fn deser_java_starts_with_magic(bytes in proptest::collection::vec(any::<u8>(), 0..=512)) {
-        let p = deserialization::java_serialized_blob(&bytes);
-        prop_assert!(p.starts_with(deserialization::JAVA_SER_MAGIC));
+    fn race_h2_last_byte_sync_rejects_mismatched_lengths(n in 1usize..=10) {
+        let stream_ids: Vec<u32> = (1..=n as u32).map(|i| i * 2 - 1).collect();
+        let bytes: Vec<u8> = (0..n + 1).map(|i| i as u8).collect();
+        // Mismatched lengths -> None.
+        prop_assert!(race::h2_last_byte_sync_frames(&stream_ids, &bytes).is_none());
     }
 
     #[test]
-    fn deser_pickle_no_panic(bytes in proptest::collection::vec(any::<u8>(), 0..=4096)) {
-        let _ = deserialization::python_pickle_blob(&bytes);
-        let _ = deserialization::python_pickle_v2_blob(&bytes);
+    fn race_h2_last_byte_sync_accepts_odd_stream_ids(n in 1usize..=20) {
+        let stream_ids: Vec<u32> = (1..=n as u32).map(|i| i * 2 - 1).collect();
+        let bytes: Vec<u8> = (0..n).map(|i| i as u8).collect();
+        prop_assert!(race::h2_last_byte_sync_frames(&stream_ids, &bytes).is_some());
     }
 
     #[test]
-    fn deser_pickle_v4_starts_with_proto_4(bytes in proptest::collection::vec(any::<u8>(), 0..=512)) {
-        let p = deserialization::python_pickle_blob(&bytes);
-        prop_assert!(p.starts_with(deserialization::PICKLE_PROTO_4));
-    }
-
-    #[test]
-    fn deser_php_no_panic(class in "[A-Za-z][A-Za-z0-9_]{0,30}", n in 0usize..20) {
-        let fields: Vec<(String, String)> = (0..n)
-            .map(|i| (format!("k{i}"), format!("v{i}")))
-            .collect();
-        let refs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let _ = deserialization::php_serialized_object(&class, &refs);
-    }
-
-    #[test]
-    fn deser_php_class_length_correct(class in "[A-Za-z]{1,30}") {
-        let p = deserialization::php_serialized_object(&class, &[]);
-        prop_assert!(p.starts_with(&format!("O:{}:", class.len())));
-    }
-
-    #[test]
-    fn deser_dotnet_no_panic(bytes in proptest::collection::vec(any::<u8>(), 0..=4096)) {
-        let _ = deserialization::dotnet_binary_formatter_blob(&bytes);
-    }
-
-    #[test]
-    fn deser_ruby_starts_with_marshal_magic(bytes in proptest::collection::vec(any::<u8>(), 0..=512)) {
-        let p = deserialization::ruby_marshal_blob(&bytes);
-        prop_assert!(p.starts_with(deserialization::RUBY_MARSHAL_4_8));
-    }
-
-    #[test]
-    fn deser_detect_round_trip_java(bytes in proptest::collection::vec(any::<u8>(), 0..=512)) {
-        let p = deserialization::java_serialized_blob(&bytes);
-        prop_assert_eq!(
-            deserialization::detect_deserialization_format(&p),
-            Some("java-ser")
-        );
-    }
-}
-
-// ───────────────────────────────────────────────────────────────
-// jwt.rs
-// ───────────────────────────────────────────────────────────────
-
-fn arb_jwt_segment() -> impl Strategy<Value = String> {
-    // Random b64url-clean segment: alnum + -_ (no padding).
-    "[A-Za-z0-9_-]{1,40}"
-}
-
-proptest! {
-    #[test]
-    fn jwt_split_then_join_round_trip(h in arb_jwt_segment(), p in arb_jwt_segment(), s in arb_jwt_segment()) {
-        let token = jwt::join_jwt(&h, &p, &s);
-        let split = jwt::split_jwt(&token);
-        prop_assert!(split.is_some());
-        let (h2, p2, s2) = split.unwrap();
-        prop_assert_eq!(h, h2);
-        prop_assert_eq!(p, p2);
-        prop_assert_eq!(s, s2);
-    }
-
-    #[test]
-    fn jwt_split_rejects_non_three_parts(parts_count in 1usize..=10) {
-        let parts: Vec<&str> = (0..parts_count).map(|_| "x").collect();
-        let token = parts.join(".");
-        if parts_count == 3 {
-            prop_assert!(jwt::split_jwt(&token).is_some());
+    fn race_h2_last_byte_sync_rejects_even_stream_ids(id in 2u32..=1000, even_step in 2u32..=10) {
+        let id = id - (id % 2); // ensure even
+        if id == 0 {
+            prop_assert!(race::h2_last_byte_sync_frames(&[id], &[b'X']).is_none());
         } else {
-            prop_assert!(jwt::split_jwt(&token).is_none());
+            let _ = even_step; // (parameter unused — proptest just shrinks both)
+            prop_assert!(race::h2_last_byte_sync_frames(&[id], &[b'X']).is_none());
         }
     }
+}
 
+// ───────────────────────────────────────────────────────────────
+// method_override.rs — WAF↔framework method disagreement
+// ───────────────────────────────────────────────────────────────
+
+proptest! {
     #[test]
-    fn jwt_alg_none_family_count(h in arb_jwt_segment(), p in arb_jwt_segment(), s in arb_jwt_segment()) {
-        // Construct a JWT with a valid JSON header so the b64-decode
-        // path succeeds — random b64 doesn't decode to valid JSON.
-        let _ = (h, p, s);
-        // Use a fixture token.
-        let header = base64::engine::Engine::encode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            br#"{"alg":"RS256","typ":"JWT"}"#,
-        );
-        let token = format!("{header}.eyJzdWIiOiJ4In0.sig");
-        let v = jwt::alg_none_family(&token);
-        prop_assert_eq!(v.len(), 5);
+    fn method_override_header_no_panic(method in "[A-Z]{1,12}") {
+        let _ = method_override::override_header(&method);
+        let _ = method_override::override_header_alt(&method);
+        let _ = method_override::override_header_express(&method);
+        let _ = method_override::override_header_case_mix(&method);
+        let _ = method_override::override_header_padded(&method);
     }
 
     #[test]
-    fn jwt_kid_attacks_minimum_count() {
-        let header = base64::engine::Engine::encode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            br#"{"alg":"RS256"}"#,
-        );
-        let token = format!("{header}.eyJzdWIiOiJ4In0.sig");
-        let v = jwt::kid_attacks(&token);
+    fn method_override_form_field_basic(method in "[A-Z]{1,10}") {
+        let p = method_override::form_field_method(&method);
+        prop_assert!(p.starts_with("_method="));
+        prop_assert!(p.contains(&method));
+    }
+
+    #[test]
+    fn method_override_query_starts_with_question_mark(method in "[A-Z]{1,10}") {
+        let p = method_override::query_method(&method);
+        prop_assert!(p.starts_with('?'));
+        prop_assert!(p.contains(&method));
+    }
+
+    #[test]
+    fn method_override_all_variants_minimum(method in "[A-Z]{1,10}") {
+        let v = method_override::all_override_variants(&method);
         prop_assert!(v.len() >= 10);
     }
 
     #[test]
-    fn jwt_jku_ssrf_count(attacker in "[a-z]{1,20}", trusted in "[a-z]{1,20}") {
-        let header = base64::engine::Engine::encode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            br#"{"alg":"RS256"}"#,
-        );
-        let token = format!("{header}.eyJzdWIiOiJ4In0.sig");
-        let v = jwt::jku_ssrf(&token, &attacker, &trusted);
-        prop_assert!(v.len() >= 4);
-    }
-}
-
-// ───────────────────────────────────────────────────────────────
-// dom_clobber.rs
-// ───────────────────────────────────────────────────────────────
-
-proptest! {
-    #[test]
-    fn dom_shadow_global_no_panic(name in "[A-Za-z0-9_]{1,40}", href in "[a-zA-Z0-9:/_.-]{0,200}") {
-        let _ = dom_clobber::shadow_global(&name, &href);
-    }
-
-    #[test]
-    fn dom_form_clobber_contains_name(name in "[A-Za-z]{1,30}", action in "[a-z:/.]{1,50}") {
-        let out = dom_clobber::form_clobber(&name, &action);
-        prop_assert!(out.contains(&name));
-        prop_assert!(out.contains(&action));
-    }
-
-    #[test]
-    fn dom_all_clobbers_minimum_count(name in "[A-Za-z]{1,30}", payload in "[A-Za-z]{1,30}") {
-        let v = dom_clobber::all_clobbers_for_global(&name, &payload);
-        prop_assert!(v.len() >= 9);
-    }
-
-    #[test]
-    fn dom_all_clobbers_no_script_tag(name in "[A-Za-z]{1,20}", payload in "[A-Za-z]{1,20}") {
-        // The whole point of DOM clobbering is to defeat WAFs that
-        // scan for <script>. The library MUST NOT smuggle one.
-        let v = dom_clobber::all_clobbers_for_global(&name, &payload);
-        for p in &v {
-            prop_assert!(!p.to_lowercase().contains("<script"));
+    fn method_override_all_variants_carry_method(method in "[A-Z]{3,12}") {
+        let v = method_override::all_override_variants(&method);
+        for (name, payload) in &v {
+            prop_assert!(
+                payload.contains(&method.to_string())
+                    || payload.contains(&method.to_lowercase())
+                    || payload.contains(&method_override::override_header_case_mix(&method)),
+                "{} dropped method: {}",
+                name,
+                payload
+            );
         }
     }
 }
 
 // ───────────────────────────────────────────────────────────────
-// proto_pollution.rs
+// cache_poison.rs — CDN/edge cache poisoning primitives
 // ───────────────────────────────────────────────────────────────
 
 proptest! {
     #[test]
-    fn pp_json_proto_no_panic(prop in "[A-Za-z]{1,30}", value in "[A-Za-z]{1,30}") {
-        let _ = proto_pollution::json_proto_pollute(&prop, &value);
+    fn cache_poison_x_forwarded_host_no_panic(host in "[a-z0-9.-]{1,80}") {
+        let _ = cache_poison::x_forwarded_host(&host);
     }
 
     #[test]
-    fn pp_json_proto_is_valid_json(prop in "[A-Za-z]{1,20}", value in "[A-Za-z]{1,20}") {
-        let p = proto_pollution::json_proto_pollute(&prop, &value);
-        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&p);
-        prop_assert!(parsed.is_ok());
+    fn cache_poison_x_forwarded_port_full_range(port in 0u16..=u16::MAX) {
+        let p = cache_poison::x_forwarded_port(port);
+        prop_assert!(p.starts_with("X-Forwarded-Port:"));
+        prop_assert!(p.contains(&port.to_string()));
     }
 
     #[test]
-    fn pp_deep_merge_no_panic(depth in 0u8..=50, prop in "[A-Za-z]{1,20}", value in "[A-Za-z]{1,20}") {
-        let _ = proto_pollution::deep_merge_pollute(depth, &prop, &value);
+    fn cache_poison_web_cache_deception_paths_count(prefix in "/[A-Za-z]{1,20}") {
+        let v = cache_poison::web_cache_deception_paths(&prefix);
+        prop_assert!(v.len() >= 10);
     }
 
     #[test]
-    fn pp_all_pollution_minimum_count(prop in "[A-Za-z]{1,20}", value in "[A-Za-z]{1,20}") {
-        let v = proto_pollution::all_pollution_payloads(&prop, &value);
+    fn cache_poison_key_normalization_variants_count(base in "/[A-Za-z]{1,20}") {
+        let v = cache_poison::cache_key_normalization_variants(&base);
         prop_assert!(v.len() >= 8);
     }
 
     #[test]
-    fn pp_all_pollution_unique_names(prop in "[A-Za-z]{1,20}", value in "[A-Za-z]{1,20}") {
-        let v = proto_pollution::all_pollution_payloads(&prop, &value);
-        let names: std::collections::HashSet<&String> = v.iter().map(|(n, _)| n).collect();
-        prop_assert_eq!(names.len(), v.len());
-    }
-}
-
-// ───────────────────────────────────────────────────────────────
-// ssti_escape.rs
-// ───────────────────────────────────────────────────────────────
-
-proptest! {
-    #[test]
-    fn ssti_jinja2_class_walk_no_panic(cmd in "[a-zA-Z0-9 _-]{0,200}") {
-        let _ = ssti_escape::jinja2_class_walk(&cmd);
-    }
-
-    #[test]
-    fn ssti_jinja2_class_walk_balanced_braces(cmd in "[a-zA-Z0-9 _-]{0,100}") {
-        let p = ssti_escape::jinja2_class_walk(&cmd);
-        prop_assert_eq!(p.matches('{').count(), p.matches('}').count());
-    }
-
-    #[test]
-    fn ssti_all_escapes_minimum_count(cmd in "[a-zA-Z]{1,30}") {
-        let v = ssti_escape::all_ssti_escapes(&cmd);
-        prop_assert!(v.len() >= 16);
-    }
-
-    #[test]
-    fn ssti_all_escapes_carry_cmd(cmd in "[a-zA-Z]{3,30}") {
-        let v = ssti_escape::all_ssti_escapes(&cmd);
-        for (name, payload) in &v {
-            prop_assert!(payload.contains(&cmd), "engine {} dropped cmd: {}", name, payload);
-        }
-    }
-
-    #[test]
-    fn ssti_velocity_contains_runtime(cmd in "[a-zA-Z]{1,30}") {
-        let p = ssti_escape::velocity_runtime(&cmd);
-        prop_assert!(p.contains("java.lang.Runtime"));
-    }
-
-    #[test]
-    fn ssti_freemarker_contains_execute(cmd in "[a-zA-Z]{1,30}") {
-        let p = ssti_escape::freemarker_execute(&cmd);
-        prop_assert!(p.contains("freemarker.template.utility.Execute"));
-    }
-}
-
-// ───────────────────────────────────────────────────────────────
-// saml_xsw.rs
-// ───────────────────────────────────────────────────────────────
-
-fn arb_fixture_saml() -> &'static str {
-    // Static minimal fixture — small enough for proptest, valid
-    // landmarks for each XSW builder.
-    r#"<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_r" Version="2.0"><saml:Assertion ID="_a" Version="2.0" IssueInstant="2026-01-01T00:00:00Z"><ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo><ds:Reference URI="#_a"/></ds:SignedInfo><ds:SignatureValue>AA</ds:SignatureValue></ds:Signature><saml:Subject><saml:NameID>victim</saml:NameID></saml:Subject><saml:AttributeStatement><saml:Attribute Name="role"><saml:AttributeValue>user</saml:AttributeValue></saml:Attribute></saml:AttributeStatement></saml:Assertion></samlp:Response>"#
-}
-
-proptest! {
-    #[test]
-    fn xsw_no_panic_random_subject(subject in "[a-zA-Z]{1,30}") {
-        let saml = arb_fixture_saml();
-        let _ = saml_xsw::xsw1(saml, &subject);
-        let _ = saml_xsw::xsw2(saml, &subject);
-        let _ = saml_xsw::xsw3(saml, &subject);
-        let _ = saml_xsw::xsw4(saml, &subject);
-        let _ = saml_xsw::xsw5(saml, &subject);
-        let _ = saml_xsw::xsw6(saml, &subject);
-        let _ = saml_xsw::xsw7(saml, &subject);
-        let _ = saml_xsw::xsw8(saml, &subject);
-    }
-
-    #[test]
-    fn xsw_all_variants_emits_eight(subject in "[a-zA-Z]{1,20}") {
-        let v = saml_xsw::all_xsw_variants(arb_fixture_saml(), &subject);
-        prop_assert_eq!(v.len(), 8);
-    }
-
-    #[test]
-    fn xsw_each_variant_preserves_signature(subject in "[a-zA-Z]{1,20}") {
-        let v = saml_xsw::all_xsw_variants(arb_fixture_saml(), &subject);
-        for (name, payload) in &v {
-            prop_assert!(payload.contains("AA"), "{} lost signature: {}", name, payload);
-        }
-    }
-
-    #[test]
-    fn xsw1_inserts_attacker_subject(subject in "[a-zA-Z]{3,20}") {
-        let out = saml_xsw::xsw1(arb_fixture_saml(), &subject).unwrap();
-        prop_assert!(out.contains(&subject));
-    }
-}
-
-// ───────────────────────────────────────────────────────────────
-// cookie_attacks.rs
-// ───────────────────────────────────────────────────────────────
-
-proptest! {
-    #[test]
-    fn cookie_toss_no_panic(domain in "[a-z]{1,30}\\.example", name in "[a-z]{1,20}", value in "[a-zA-Z]{0,100}") {
-        let _ = cookie_attacks::cookie_toss(&domain, &name, &value);
-    }
-
-    #[test]
-    fn cookie_jar_overflow_exact_count(n in 0usize..=500) {
-        let v = cookie_attacks::jar_overflow_headers(n);
-        prop_assert_eq!(v.len(), n);
-    }
-
-    #[test]
-    fn cookie_double_encoded_alnum_passthrough(name in "[a-z]{1,20}", value in "[A-Za-z0-9]{0,40}") {
-        let c = cookie_attacks::double_encoded_value(&name, &value);
-        // No %25 in output since the input is pure alphanumeric.
-        if !value.is_empty() {
-            prop_assert!(!c.contains("%25"));
-        }
-        prop_assert!(c.starts_with(&format!("{name}=")));
-    }
-
-    #[test]
-    fn cookie_oversized_exact_size(padding in 0usize..=10_000) {
-        let c = cookie_attacks::oversized_cookie("n", padding);
-        prop_assert_eq!(c.matches('A').count(), padding);
-    }
-
-    #[test]
-    fn cookie_all_attacks_minimum_count(name in "[a-z]{1,20}", value in "[a-z]{1,20}", domain in "[a-z]{1,20}\\.com") {
-        let v = cookie_attacks::all_cookie_attacks(&name, &value, &domain);
-        prop_assert!(v.len() >= 10);
-    }
-}
-
-// ───────────────────────────────────────────────────────────────
-// csv_formula.rs
-// ───────────────────────────────────────────────────────────────
-
-proptest! {
-    #[test]
-    fn csv_excel_dde_starts_with_equals(cmd in "[a-z]{1,50}") {
-        let p = csv_formula::excel_dde(&cmd);
-        prop_assert!(p.starts_with('='));
-        prop_assert!(p.contains(&cmd));
-    }
-
-    #[test]
-    fn csv_hyperlink_phish_contains_url(url in "[a-z:/.]{1,80}", text in "[a-z]{1,30}") {
-        let p = csv_formula::hyperlink_phish(&url, &text);
-        prop_assert!(p.contains(&url));
-        prop_assert!(p.contains(&text));
-    }
-
-    #[test]
-    fn csv_all_attacks_minimum_count(url in "[a-z:/.]{1,30}", cmd in "[a-z]{1,30}") {
-        let v = csv_formula::all_csv_attacks(&url, &cmd);
-        prop_assert!(v.len() >= 14);
-    }
-
-    #[test]
-    fn csv_prefix_variants_each_starts_with_their_char(content in "[a-zA-Z0-9]{1,40}") {
-        prop_assert!(csv_formula::plus_prefix(&content).starts_with('+'));
-        prop_assert!(csv_formula::minus_prefix(&content).starts_with('-'));
-        prop_assert!(csv_formula::at_prefix(&content).starts_with('@'));
-        prop_assert!(csv_formula::tab_prefix(&content).starts_with('\t'));
-        prop_assert!(csv_formula::cr_prefix(&content).starts_with('\r'));
-        prop_assert!(csv_formula::lf_prefix(&content).starts_with('\n'));
-    }
-}
-
-// ───────────────────────────────────────────────────────────────
-// oauth.rs (uses agent's API — best-effort property test)
-// ───────────────────────────────────────────────────────────────
-
-proptest! {
-    #[test]
-    fn oauth_redirect_uri_attacks_no_panic(
-        trusted in "[a-z]{1,30}\\.example",
-        attacker in "[a-z]{1,30}\\.attacker"
+    fn cache_poison_all_variants_carry_marker(
+        host in "[A-Z][A-Z_]{5,15}",
+        path in "/[A-Z][A-Z_]{5,15}"
     ) {
-        let _ = oauth::redirect_uri_attacks(&trusted, &attacker);
-    }
-
-    #[test]
-    fn oauth_state_attack_payloads_no_panic(state in "[A-Za-z0-9]{0,40}") {
-        let _ = oauth::state_attack_payloads(&state);
+        let v = cache_poison::all_cache_poison_payloads(&host, &path);
+        let any_host = v.iter().any(|(_, p)| p.contains(&host));
+        let any_path = v.iter().any(|(_, p)| p.contains(&path));
+        prop_assert!(any_host || any_path);
     }
 }

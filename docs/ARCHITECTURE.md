@@ -93,33 +93,29 @@ graph TD
 
 ## `wafrift-encoding` internal layout
 
-The encoding crate has two distinct sub-concepts, each a separate
-sub-tree under `crates/encoding/src/encoding/`:
+Every module in this crate is a **WAF-evasion primitive**: it transforms
+a payload so the WAF's matcher misses it while the origin's parser still
+recovers the original. Origin-level attack payloads (SQLi/XSS/SSTI/JWT/
+LDAP/etc) live in sibling Santh tools, not here.
 
-**Encoder transforms** — take an existing payload, output a re-shaped
-version of the SAME logical payload. The receiver decodes back. Pure
-byte / token transforms.
+Modules under `crates/encoding/src/encoding/`:
 
-- `url`, `unicode`, `keyword`, `structural`, `layered`, `strategy`,
-  `invisible` (Plan 9 tags / variation selectors / ligatures),
-  `path_norm` (RFC 3986 differential), `request_line` (method /
-  version / URI-form tricks)
+- `url`, `unicode`, `keyword`, `structural`, `layered`, `strategy` —
+  classic encoding strategies registered in the `Strategy` enum
+- `invisible` — Plan 9 tag chars / variation selectors / stylistic
+  ligatures / soft hyphens / word joiners (defeats keyword regex)
+- `path_norm` — RFC 3986 §5.2.4 differential normalization variants
+  (WAF↔origin path parser disagreement)
+- `request_line` — exotic methods, version strings, absolute-form /
+  asterisk-form / authority-form URIs (WAF↔origin request-line parser
+  disagreement)
+- `race` — Kettle BH23 single-packet attack frame builders
+- `method_override` — `X-HTTP-Method-Override` / `_method` framework
+  re-interpret tricks (WAF sees POST, framework executes DELETE/PUT)
+- `cache_poison` — `X-Forwarded-*`, web cache deception paths, Vary
+  header confusion, cache-key normalization variants
 
-**Attack-payload libraries** — generate a NEW payload for a specific
-vuln class. Each one ships a per-class `all_<class>_attacks()`
-fan-out + per-shape `pub fn`s.
-
-- `jwt`, `oauth`, `saml_xsw` (auth/session)
-- `ssti_escape`, `cmd_inject`, `xxe_attacks` (server-side execution)
-- `mongo_nosqli`, `ldap_inject`, `xpath_inject` (datastore)
-- `mass_assignment`, `proto_pollution`, `dom_clobber` (parser/runtime)
-- `csv_formula`, `deserialization` (file-format / sink)
-- `cookie_attacks`, `method_override`, `cache_poison`,
-  `ssrf_schemes`, `race` (HTTP-layer)
-
-Total: 30+ modules, all sibling files under one directory — flat,
-greppable, zero hierarchy depth. Adding a new module is one file plus
-one line in `mod.rs`.
+Adding a new evasion primitive: one file + one line in `mod.rs`.
 
 ---
 
@@ -157,8 +153,7 @@ one line in `mod.rs`.
 
 | What | Where |
 |---|---|
-| New **encoder transform** (URL/Unicode/whitespace/case/…) | `crates/encoding/src/encoding/` — add a function, register in the `Strategy` enum in `strategy.rs`, add a doctest. Examples: `invisible.rs`, `path_norm.rs`, `request_line.rs` |
-| New **attack-payload library** (per vuln-class: SSTI, JWT, NoSQLi, LDAP, XPath, XXE, SSRF schemes, deserialization, …) | `crates/encoding/src/encoding/<class>.rs` — independent file with `all_<class>_attacks()` fan-out + per-shape `pub fn`s. Pattern: see `ssti_escape.rs`, `mongo_nosqli.rs`, `xxe_attacks.rs` |
+| New **WAF-evasion primitive** (encoder, request-line trick, path differential, smuggling primitive, cache-poison header, …) | `crates/encoding/src/encoding/` — add a function, register in the `Strategy` enum in `strategy.rs`. Examples: `invisible.rs`, `path_norm.rs`, `request_line.rs`, `race.rs`, `method_override.rs`, `cache_poison.rs`. **Origin-level attack payloads do NOT belong in wafrift.** |
 | New **payload grammar** (mutation engine for a class) | `crates/grammar/src/grammar/` — add a mutator, extend `PayloadType` + `mutate_as`, add a semantic oracle in `crates/oracle/src/` |
 | New **smuggling primitive** | `crates/smuggling/src/smuggling.rs` (CL.TE family) or sibling file (`rapid_reset.rs`, `ws_fragmentation.rs`, `sse_smuggle.rs`) — add a builder function |
 | New **plugin / tamper** (no Rust rebuild) | `~/.wafrift/tampers/*.toml` for regex-substitution, `~/.wafrift/tampers/*.wasm` for arbitrary logic. See `docs/PLUGIN_API.md` |
