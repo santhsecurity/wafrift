@@ -10,7 +10,6 @@
 //! Reference: "WAFFLED: Exploiting Parsing Discrepancies to Bypass WAFs"
 //!            Akhavani et al., IEEE S&P 2025
 
-use rand::Rng;
 use std::fmt::Write as _;
 
 /// A Content-Type variant with the transformed body.
@@ -183,38 +182,49 @@ pub fn parse_form_body(body: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Generate a random boundary string.
-fn random_boundary() -> String {
-    let mut rng = rand::thread_rng();
-    let mut hex = String::with_capacity(32);
+/// FNV-1a hash of params bytes for deterministic boundary generation.
+fn fnv1a_params_hash(params: &[(String, String)]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for (k, v) in params {
+        for b in k.bytes().chain(v.bytes()) {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    }
+    h
+}
 
-    for _ in 0..16 {
-        let _ = write!(&mut hex, "{:02x}", rng.r#gen::<u8>());
+/// Generate a boundary derived deterministically from FNV-1a of params + salt.
+fn fnv_boundary(params: &[(String, String)], salt: u64) -> String {
+    let mut h: u64 = fnv1a_params_hash(params);
+    h ^= salt;
+    h = h.wrapping_mul(0x100000001b3);
+    let mut hex = String::with_capacity(32);
+    let h2 = h.wrapping_mul(0x517cc1b727220a95);
+    for b in h.to_le_bytes().iter().chain(h2.to_le_bytes().iter()) {
+        let _ = write!(&mut hex, "{b:02x}");
     }
     format!("----WafriftBoundary{hex}")
 }
 
-/// Generate a boundary guaranteed not to appear in any of the supplied
-/// values (collision-free framing). Falls back to plain `random_boundary`
-/// once a fresh value clears the inputs — the 128-bit hex tail makes
-/// this loop terminate on the first attempt with overwhelming probability,
-/// but checking explicitly costs nothing and prevents the once-in-the-
-/// universe case where a payload happens to embed our boundary.
+/// Generate a boundary that is guaranteed not to appear in any of the supplied
+/// values. Derived deterministically from FNV-1a of the values, mixed with
+/// an incrementing salt so multiple calls in the same request produce distinct boundaries.
 #[must_use]
 pub fn unique_boundary(values: &[&str]) -> String {
-    // Bounded retry: if the entropy source wedges, give up and ship the
-    // last candidate rather than spin forever. 16 attempts is already
-    // 16 * 128 = 2048 bits of separation from any plausible adversarial
-    // collision attempt.
-    let mut candidate = random_boundary();
-    for _ in 0..16 {
+    let pseudo_params: Vec<(String, String)> = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (i.to_string(), (*v).to_string()))
+        .collect();
+    for salt in 0u64..16 {
+        let candidate = fnv_boundary(&pseudo_params, salt);
         let needle = format!("--{candidate}");
         if !values.iter().any(|v| v.contains(&needle)) {
             return candidate;
         }
-        candidate = random_boundary();
     }
-    candidate
+    fnv_boundary(&pseudo_params, u64::MAX)
 }
 
 fn cdata_escape(value: &str) -> String {
