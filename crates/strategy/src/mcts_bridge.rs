@@ -274,11 +274,11 @@ impl Environment for WafRiftEnv {
                         // the rest of the form body so the request remains valid.
                         if let Some((first_pair, rest)) = body_str.split_once('&') {
                             if let Some((key, _value)) = first_pair.split_once('=') {
-                                let new_body = format!("{key}={}&{rest}", mutation.payload);
+                                let new_body = format!("{key}={}&{rest}", urlencoding::encode(&mutation.payload));
                                 self.req.body = Some(new_body.into_bytes());
                             }
                         } else if let Some((key, _value)) = body_str.split_once('=') {
-                            let new_body = format!("{key}={}", mutation.payload);
+                            let new_body = format!("{key}={}", urlencoding::encode(&mutation.payload));
                             self.req.body = Some(new_body.into_bytes());
                         } else {
                             self.req.body = Some(mutation.payload.clone().into_bytes());
