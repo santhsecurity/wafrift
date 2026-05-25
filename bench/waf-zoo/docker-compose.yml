@@ -1,0 +1,27 @@
+# waf-zoo/docker-compose.yml — bring up ALL zoo stacks in one command.
+#
+# Usage:
+#   docker compose -f bench/waf-zoo/docker-compose.yml up -d
+#
+# Each WAF stack is isolated in its own Docker network and uses a distinct
+# container name prefix (wafrift-zoo-*) so it does not conflict with the
+# wafrift-bench/targets/* stacks.
+#
+# Ports assigned (non-conflicting with wafrift-bench/targets ports 18081-18087):
+#   18101  modsec-aws      ModSecurity + AWS-CRS-emulation (PL2 + AWS exclusions)
+#   18102  modsec-azure    ModSecurity + Azure AppGW WAF v2 emulation (PL2 + Azure exclusions)
+#   18103  coraza          Coraza (Go reimpl of ModSec) + OWASP CRS default PL1
+#   18104  naxsi           Naxsi positive-security WAF (nginx module, built from source)
+#   18105  shadowdaemon    Shadow Daemon (connector-model WAF, PHP demo app)
+#
+# Note: naxsi requires --build on first run (~5 min to compile nginx).
+# Note: modsec-aws and modsec-azure reference their per-stack compose files via
+#       'extends' is not supported in all compose versions, so each service is
+#       inlined here as a standalone definition.
+
+include:
+  - path: ./modsec-aws/docker-compose.yml
+  - path: ./modsec-azure/docker-compose.yml
+  - path: ./coraza/docker-compose.yml
+  - path: ./naxsi/docker-compose.yml
+  - path: ./shadowdaemon/docker-compose.yml
