@@ -147,6 +147,13 @@ pub mod xpath_inject;
 /// `-EncodedCommand` UTF-16LE base64, `[char]` casting, perl/python
 /// reverse-shell one-liners.
 pub mod cmd_inject;
+/// XML External Entity (XXE) comprehensive attack library: classic
+/// file-read, Windows file paths, HTTP SSRF, AWS IMDS, internal-
+/// service SSRF, parameter-entity (`%xxe`) blind XXE, remote-DTD
+/// blind XXE, Billion Laughs (9-level recursive expansion),
+/// quadratic blowup, SVG-wrapped XXE for image consumers, SOAP
+/// envelope XXE, JSON-as-XML XXE, Phithon local-DTD-reuse trick.
+pub mod xxe_attacks;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
