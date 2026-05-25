@@ -33,6 +33,11 @@ pub mod path_norm;
 /// strings (HTTP/0.9, HTTP/1.99, HTTP/2.0-on-h1-wire), absolute-form
 /// URI (RFC 7230 §5.3.2), asterisk-form, authority-form.
 pub mod request_line;
+/// Deserialization-vulnerability payload generators across Java, .NET,
+/// Python, Ruby, PHP, YAML, Hessian. WAFs that scan for keywords miss
+/// these because they don't carry keywords — the vulnerability is in
+/// the receiving deserializer.
+pub mod deserialization;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
