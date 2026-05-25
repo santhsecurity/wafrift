@@ -19,6 +19,7 @@
 
 use crate::coverage_feedback::PayloadClass;
 use crate::edge_pop_coverage::EdgePopCoverage;
+use crate::h1_dedup::{BypassFingerprint, fingerprint};
 use crate::rule_corpus::RuleBypassCorpus;
 
 /// What the oracle decided about a single probe. Mirrors the
@@ -105,6 +106,86 @@ pub fn record_pop_observation(
         }
         None => coverage.record_no_pop(egress, target),
     }
+}
+
+/// One-call adapter for the full probe-result wire-up. Used by
+/// the bench / hunt / scan loops to route ONE response through
+/// rule_corpus, edge_pop_coverage, AND h1_dedup with a single
+/// call. Returns the bypass fingerprint so the caller can check
+/// it against an H1Archive before claiming "novel" submission.
+///
+/// `rule_id` is the corpus-key form: for CF this is
+/// `cf:<edge-pop>:<ruleset_hint>` from
+/// `wafrift_oracle::cloudflare::CfBlockSignal::corpus_key()`. For
+/// ModSec / Coraza it's the raw CRS rule id. `None` lands in the
+/// [`UNATTRIBUTED_BUCKET`].
+///
+/// `pop_raw` is the IATA edge-POP string from `parse_cf_block`'s
+/// `signal.edge_pop` field. `None` for non-CF responses.
+///
+/// Returns the [`BypassFingerprint`] that uniquely identifies this
+/// bypass — call `H1Archive::contains()` against it before queuing
+/// for submission.
+pub struct ProbeRecord<'a> {
+    /// Per-rule corpus (mutable — gets the recorded outcome).
+    pub corpus: &'a mut RuleBypassCorpus,
+    /// Cross-region edge-POP map (mutable — gets the recorded POP).
+    pub coverage: &'a mut EdgePopCoverage,
+    /// Outcome the oracle decided about this probe.
+    pub outcome: ProbeOutcome,
+    /// Canonical rule attribution; `None` → unattributed bucket.
+    pub rule_id: Option<&'a str>,
+    /// The payload as it went on the wire.
+    pub payload: &'a str,
+    /// Attack class (`sql`, `xss`, …).
+    pub payload_class: PayloadClass,
+    /// Ordered encoder chain that produced the payload.
+    pub encoding_chain: Vec<String>,
+    /// Hash of the response body for dedup of near-identical blocks.
+    pub response_hash: u64,
+    /// Egress label this probe used (proxy / exit node / direct).
+    pub egress_label: &'a str,
+    /// Target host the probe was aimed at.
+    pub target_host: &'a str,
+    /// Raw CF edge POP string from the oracle. `None` for non-CF.
+    pub pop_raw: Option<&'a str>,
+}
+
+/// Route one probe outcome through rule_corpus + edge_pop_coverage +
+/// h1_dedup in one call. Returns the bypass fingerprint so the
+/// caller can dedup-check before claiming novel.
+pub fn record_probe(probe: ProbeRecord<'_>) -> BypassFingerprint {
+    let ProbeRecord {
+        corpus,
+        coverage,
+        outcome,
+        rule_id,
+        payload,
+        payload_class,
+        encoding_chain,
+        response_hash,
+        egress_label,
+        target_host,
+        pop_raw,
+    } = probe;
+    let key = rule_id.unwrap_or(UNATTRIBUTED_BUCKET);
+    // Compute the dedup fingerprint up-front so the caller can use it
+    // even on Block outcomes (which is fine — operators dedup their
+    // submission queue, and blocks-that-look-like-bypasses are worth
+    // counting against the dedup archive too).
+    let fp = fingerprint(key, &encoding_chain, payload);
+
+    record_outcome(
+        corpus,
+        outcome,
+        rule_id,
+        payload,
+        payload_class,
+        encoding_chain,
+        response_hash,
+    );
+    record_pop_observation(coverage, egress_label, target_host, pop_raw);
+    fp
 }
 
 /// Apply a single drift event to the corpus — the hunt loop calls
@@ -295,6 +376,73 @@ mod tests {
         // Pin the bucket-name string so corpus files keyed under it
         // continue to load after a rename refactor.
         assert_eq!(UNATTRIBUTED_BUCKET, "unattributed");
+    }
+
+    #[test]
+    fn record_probe_routes_bypass_to_corpus_and_pop_to_coverage() {
+        let mut corpus = RuleBypassCorpus::new("cf:cumulus");
+        let mut coverage = EdgePopCoverage::new();
+        let fp = record_probe(ProbeRecord {
+            corpus: &mut corpus,
+            coverage: &mut coverage,
+            outcome: ProbeOutcome::Bypass,
+            rule_id: Some("cf:sjc:waf-managed-rule"),
+            payload: "' OR 1=1--",
+            payload_class: cls("sql"),
+            encoding_chain: vec!["url".into(), "lower".into()],
+            response_hash: 0xC0FFEE,
+            egress_label: "egress-a",
+            target_host: "cumulus.example",
+            pop_raw: Some("SJC"),
+        });
+        // Corpus got the bypass.
+        assert_eq!(corpus.bypasses_for_rule("cf:sjc:waf-managed-rule").len(), 1);
+        // Coverage got the POP.
+        let pops = coverage.pops_for("egress-a", "cumulus.example");
+        assert!(pops.contains("SJC"));
+        // Fingerprint was computed (non-zero).
+        assert_ne!(fp.hash, 0);
+    }
+
+    #[test]
+    fn record_probe_with_none_pop_only_increments_probe_count() {
+        let mut corpus = RuleBypassCorpus::new("t");
+        let mut coverage = EdgePopCoverage::new();
+        let _ = record_probe(ProbeRecord {
+            corpus: &mut corpus,
+            coverage: &mut coverage,
+            outcome: ProbeOutcome::Block,
+            rule_id: Some("942100"),
+            payload: "x",
+            payload_class: cls("sql"),
+            encoding_chain: vec![],
+            response_hash: 1,
+            egress_label: "egress-a",
+            target_host: "no-cf.example",
+            pop_raw: None,
+        });
+        assert!(coverage.pops_for("egress-a", "no-cf.example").is_empty());
+        assert_eq!(coverage.probes_for("egress-a", "no-cf.example"), 1);
+    }
+
+    #[test]
+    fn record_probe_unattributed_rule_lands_in_unattributed_bucket() {
+        let mut corpus = RuleBypassCorpus::new("t");
+        let mut coverage = EdgePopCoverage::new();
+        let _ = record_probe(ProbeRecord {
+            corpus: &mut corpus,
+            coverage: &mut coverage,
+            outcome: ProbeOutcome::Block,
+            rule_id: None,
+            payload: "x",
+            payload_class: cls("sql"),
+            encoding_chain: vec![],
+            response_hash: 1,
+            egress_label: "egress-a",
+            target_host: "t",
+            pop_raw: None,
+        });
+        assert_eq!(corpus.blocked_for_rule(UNATTRIBUTED_BUCKET).len(), 1);
     }
 
     #[test]
