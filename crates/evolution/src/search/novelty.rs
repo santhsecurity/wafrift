@@ -1,7 +1,7 @@
 use crate::evolution::crossover::mutation::mutate_with_log;
 use crate::evolution::{Chromosome, GenePool, population::random_chromosome};
 use crate::lineage::Lineage;
-use crate::search::{EvalCandidate, SearchAlgorithm};
+use crate::search::{EvalCandidate, SearchAlgorithm, fitness_cmp};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
 use rand::Rng;
 use rand::rngs::StdRng;
@@ -160,14 +160,15 @@ impl SearchAlgorithm for NoveltySearch {
     }
 
     fn best(&self) -> Option<&Chromosome> {
+        // F144 sibling: route through fitness_cmp so a NaN-fitness
+        // chromosome can never beat a finite one. Bare partial_cmp
+        // with `.unwrap_or(Equal)` collapsed every NaN comparison
+        // into Equal, letting a poisoned chromosome become "best"
+        // by simple iteration order.
         self.population
             .iter()
             .chain(self.archive.iter())
-            .max_by(|a, b| {
-                a.fitness
-                    .partial_cmp(&b.fitness)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|a, b| fitness_cmp(a.fitness, b.fitness))
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, EvolutionError> {
