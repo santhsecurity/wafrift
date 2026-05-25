@@ -89,6 +89,10 @@ pub mod sql;
 pub mod ssrf;
 /// SSTI (Server-Side Template Injection) oracle.
 pub mod ssti;
+/// Timing oracle — confirms blind attacks via latency anomaly when
+/// the DNS callback channel is blocked and the error oracle is
+/// squashed by the WAF.
+pub mod timing;
 /// Oracle trait definition.
 pub mod traits;
 /// XSS (Cross-Site Scripting) oracle.
