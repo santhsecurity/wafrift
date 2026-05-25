@@ -25,6 +25,20 @@ use tracing::{info, warn};
 
 use crate::ProxyState;
 
+/// Hard cap on the persisted gene-bank file size accepted at load
+/// time. A real gene-bank for a long-running proxy session against
+/// ~thousands of hosts × handful of per-host fields is well under
+/// 1 MiB; 64 MiB is generous head-room and small enough that a
+/// pathological / adversarial / corrupted multi-GB file won't OOM
+/// the proxy on startup. F141 — same hazard class as the strategy
+/// crate's gene-bank cap.
+pub const MAX_GENE_BANK_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Cap on hosts restored from a persisted bank. Matches the runtime
+/// cap in `restore` so a million-host bank can't trigger a million
+/// `entry(...).or_default()` allocations before we start evicting.
+pub const MAX_RESTORED_HOSTS: usize = 10_000;
+
 /// Subset of `HostState` worth persisting across proxy restarts.
 /// Block counts and pending discovery state re-accumulate naturally;
 /// what we don't want to lose is the painstakingly-discovered winners
@@ -73,6 +87,36 @@ pub fn default_gene_bank_path(supplied: &str) -> Option<PathBuf> {
 /// deliberate: proxy startup must not be blocked by a corrupt
 /// gene-bank.
 pub fn load(path: &Path) -> PersistedGeneBank {
+    // F141: cap the file size BEFORE reading so a multi-GB
+    // gene-bank.json (corrupted, adversarial, or wrong path
+    // pointing at a tarball) can't OOM the proxy at startup.
+    // Pre-fix `std::fs::read_to_string(path)` would happily slurp
+    // any file the OS would let it allocate for. The "always
+    // succeed" contract is preserved — an oversized file logs a
+    // warning and returns the default empty bank, matching the
+    // malformed-JSON branch behavior.
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.len() > MAX_GENE_BANK_BYTES => {
+            warn!(
+                path = %path.display(),
+                size = meta.len(),
+                cap = MAX_GENE_BANK_BYTES,
+                "gene bank file exceeds {MAX_GENE_BANK_BYTES}-byte cap; starting fresh. \
+                 Fix: this file is far larger than any real bank — inspect for corruption \
+                 or remove it. If a legitimate operator workflow needs more, raise \
+                 MAX_GENE_BANK_BYTES rather than disabling the guard."
+            );
+            return PersistedGeneBank::default();
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Fall through to read_to_string so the existing
+            // "not found = fresh bank" branch handles the log.
+        }
+        Err(_) => {
+            // Same — read_to_string will surface the same error.
+        }
+    }
     match std::fs::read_to_string(path) {
         Ok(s) => {
             if s.trim().is_empty() {
@@ -199,6 +243,19 @@ pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
     let mut fifo_seen: std::collections::HashSet<String> =
         state.host_fifo.iter().cloned().collect();
     for (host, persisted) in bank.hosts {
+        // F141: stop accepting new hosts once we hit the runtime
+        // cap. Pre-fix this loop inserted EVERY host first and then
+        // popped down to 10_000 at the end — a corrupted /
+        // adversarial gene-bank with a million hosts allocated a
+        // million HostState entries before the cap kicked in,
+        // briefly spiking proxy RAM by ~GBs during startup.
+        // Skipping new entries (vs. evicting one to make room) is
+        // the bounded-work choice — the persisted set is already
+        // truncated by the time the cap fires, and the proxy will
+        // discover the missing hosts on first request.
+        if !state.hosts.contains_key(&host) && state.hosts.len() >= MAX_RESTORED_HOSTS {
+            continue;
+        }
         let hs = state.hosts.entry(host.clone()).or_default();
         if !persisted.proven_winners.is_empty() {
             hs.proven_winners = persisted.proven_winners;
@@ -216,10 +273,10 @@ pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
             state.host_fifo.push_back(host);
         }
     }
-    // Enforce the same runtime cap that applies during request processing.
-    // A malicious or corrupted gene-bank with millions of hosts must not
-    // exhaust proxy RAM on startup.
-    while state.hosts.len() > 10_000 {
+    // Belt-and-braces: if anything else inserted into state.hosts
+    // before restore was called (shouldn't, given the lock contract),
+    // pop back down to the cap so the post-condition holds.
+    while state.hosts.len() > MAX_RESTORED_HOSTS {
         if let Some(oldest) = state.host_fifo.pop_front() {
             state.hosts.remove(&oldest);
         } else {
@@ -302,5 +359,71 @@ mod tests {
         let bank = load(&path);
         assert!(bank.hosts.is_empty());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_oversized_file_returns_empty_bank_does_not_oom() {
+        // F141 regression: pre-fix `std::fs::read_to_string` would
+        // happily slurp any file size, so a multi-GB corrupted
+        // gene-bank.json (or wrong path pointing at a tarball)
+        // OOMed the proxy at startup. Write a file fractionally
+        // over the cap and assert load() returns the empty bank
+        // without reading the bytes.
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-genebank-load-oversize-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // Write a sparse-feeling file just past the cap — we don't
+        // actually need every byte, set_len is enough on most
+        // filesystems and the metadata().len() check catches it.
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(MAX_GENE_BANK_BYTES + 1).unwrap();
+        drop(f);
+        let bank = load(&path);
+        assert_eq!(
+            bank.schema, 0,
+            "oversize file must return default empty bank, not partial parse"
+        );
+        assert!(bank.hosts.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn restore_caps_hosts_during_loop_not_only_at_end() {
+        // F141 regression: pre-fix restore() inserted every host
+        // first and only popped down at the end. For a million-host
+        // bank that briefly allocated a million HostState entries
+        // — gigabytes of transient RAM during startup. Synthesize a
+        // bank with cap + 50 hosts and verify the final state.hosts
+        // length never exceeds the cap (the in-loop guard fires).
+        let mut bank = PersistedGeneBank {
+            schema: 1,
+            hosts: HashMap::new(),
+        };
+        for i in 0..(MAX_RESTORED_HOSTS + 50) {
+            bank.hosts.insert(
+                format!("h{i}.example"),
+                PersistedHostState {
+                    proven_winners: vec!["url_encode".into()],
+                    blocklisted: vec![],
+                    waf_name: None,
+                },
+            );
+        }
+        let mut state = ProxyState::default();
+        let restored = restore(&mut state, bank);
+        assert!(
+            state.hosts.len() <= MAX_RESTORED_HOSTS,
+            "restore must never leave state.hosts above the cap (saw {})",
+            state.hosts.len()
+        );
+        assert!(
+            restored <= MAX_RESTORED_HOSTS,
+            "restore must not report more entries than the cap"
+        );
     }
 }
