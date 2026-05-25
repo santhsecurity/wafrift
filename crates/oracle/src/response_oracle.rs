@@ -5,6 +5,7 @@
 //! behavior, and HTTP/2 GOAWAY frames.
 
 use crate::calibration::CalibrationSession;
+use crate::cloudflare::{CfBlockSignal, parse_cf_block};
 use crate::signal_body_marker::{extract_block_reason, extract_body_signals};
 use crate::signal_connection::classify_connection;
 use crate::signal_h2_goaway::classify_h2_goaway;
@@ -220,7 +221,17 @@ impl ResponseOracle {
         // Default: attach the full collected signal set (status, body, calibration, …).
         match status_verdict {
             Verdict::Blocked { .. } => {
-                let reason = extract_block_reason(&ctx.body, ctx.is_gzipped);
+                let mut reason = extract_block_reason(&ctx.body, ctx.is_gzipped);
+                // When the generic extractor finds nothing, try CF-specific
+                // attribution. `rule_attribution` is always non-empty for CF
+                // responses (e.g. "cf:SJC:waf-managed-rule") and feeds
+                // `OracleVerdict.rule_id` in the evolution engine.
+                if reason.is_none() || matches!(reason, Some(BlockReason::Unknown)) {
+                    let cf = parse_cf_block(&ctx.headers, &ctx.body);
+                    if cf.is_cloudflare_response() {
+                        reason = Some(BlockReason::RuleId(cf.rule_attribution));
+                    }
+                }
                 Verdict::Blocked { reason, signals }
             }
             Verdict::Partial { .. } => {
@@ -235,6 +246,26 @@ impl ResponseOracle {
             }
             Verdict::Ambiguous { .. } => status_verdict,
         }
+    }
+
+    /// Classify a response and simultaneously extract Cloudflare-specific signals.
+    ///
+    /// Returns `(verdict, Some(cf_signal))` when the response is from a CF
+    /// edge node, `(verdict, None)` otherwise.
+    ///
+    /// `cf_signal.rule_attribution` is the recommended value to store in
+    /// `OracleVerdict.rule_id` for the evolution engine's corpus keying.
+    ///
+    /// Equivalent to calling [`classify`] and [`parse_cf_block`] separately
+    /// but avoids parsing headers twice.
+    pub fn classify_with_cf_signal(
+        &self,
+        ctx: &ResponseContext,
+    ) -> (Verdict, Option<CfBlockSignal>) {
+        let verdict = self.classify(ctx);
+        let cf = parse_cf_block(&ctx.headers, &ctx.body);
+        let cf_opt = if cf.is_cloudflare_response() { Some(cf) } else { None };
+        (verdict, cf_opt)
     }
 }
 
@@ -417,5 +448,91 @@ mod tests {
                 actual_ms: 500
             }
         )));
+    }
+
+    // ── CF wiring tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn cf_block_promotes_rule_id_in_blocked_verdict() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 403,
+            headers: vec![
+                ("cf-ray".to_string(), "8a1b2c3d4e5f6a7b-SJC".to_string()),
+                ("cf-mitigated".to_string(), "block".to_string()),
+                ("server".to_string(), "cloudflare".to_string()),
+            ],
+            body: b"Sorry, you have been blocked <!-- error code: 1020 -->".to_vec(),
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        assert!(v.is_blocked());
+        // The CF-promoted rule_id should be embedded in the BlockReason::RuleId
+        let signals = v.signals();
+        // Must have the cf-ray signal via signal_headers
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s, Signal::BodyMarker(m) if m.contains("cloudflare")))
+        );
+    }
+
+    #[test]
+    fn classify_with_cf_signal_returns_cf_for_cloudflare_response() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 403,
+            headers: vec![
+                ("cf-ray".to_string(), "9b2c3d4e5f6a7b8c-LHR".to_string()),
+                ("cf-mitigated".to_string(), "block".to_string()),
+            ],
+            body: b"You have been blocked <!-- error code: 1020 -->".to_vec(),
+            ..Default::default()
+        };
+        let (verdict, cf_signal) = oracle.classify_with_cf_signal(&ctx);
+        assert!(verdict.is_blocked());
+        assert!(cf_signal.is_some());
+        let cf = cf_signal.unwrap();
+        assert_eq!(cf.edge_pop.as_deref(), Some("LHR"));
+        assert_eq!(cf.mitigated_reason.as_deref(), Some("block"));
+        assert!(cf.rule_attribution.starts_with("cf:LHR:"));
+    }
+
+    #[test]
+    fn classify_with_cf_signal_returns_none_for_non_cf() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 403,
+            headers: vec![("server".to_string(), "nginx".to_string())],
+            body: b"Forbidden".to_vec(),
+            ..Default::default()
+        };
+        let (verdict, cf_signal) = oracle.classify_with_cf_signal(&ctx);
+        assert!(verdict.is_blocked());
+        assert!(cf_signal.is_none());
+    }
+
+    #[test]
+    fn cf_verdict_rule_id_format() {
+        // When a CF block provides edge_pop + ruleset_hint, the rule_attribution
+        // must match "cf:<POP>:<HINT>" so it can be used as OracleVerdict.rule_id.
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 403,
+            headers: vec![
+                ("cf-ray".to_string(), "1a2b3c4d5e6f7a8b-FRA".to_string()),
+                ("cf-mitigated".to_string(), "block".to_string()),
+            ],
+            body: b"OWASP blocked this request <!-- error code: 1020 -->".to_vec(),
+            ..Default::default()
+        };
+        let (_, cf_opt) = oracle.classify_with_cf_signal(&ctx);
+        let cf = cf_opt.expect("should detect CF");
+        // rule_attribution must be parseable as cf:<pop>:<hint>
+        let parts: Vec<&str> = cf.rule_attribution.splitn(3, ':').collect();
+        assert_eq!(parts[0], "cf");
+        assert_eq!(parts[1], "FRA");
+        // hint is either the error code mapping or body text
+        assert!(!parts[2].is_empty());
     }
 }

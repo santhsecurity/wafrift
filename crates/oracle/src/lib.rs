@@ -62,6 +62,8 @@
 mod ascii_scan;
 /// Per-target calibration session.
 pub mod calibration;
+/// Cloudflare-specific WAF response parser.
+pub mod cloudflare;
 /// Command injection oracle.
 pub mod cmdi;
 /// LDAP injection oracle.
