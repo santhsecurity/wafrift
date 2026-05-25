@@ -251,6 +251,10 @@ struct CaseResult {
     raw_blocked: bool,
     raw_status: u16,
     raw_latency_ms: f64,
+    /// B2: true when the HTTP request itself failed (network error / timeout).
+    /// Excluded from raw_block_rate denominator to avoid inflating with infra failures.
+    #[serde(default)]
+    raw_error: bool,
     evaded: Option<EvadeResult>,
 }
 
@@ -723,7 +727,19 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
                     extra_delay_ms.store(prev.max(50) + args.delay_ms, Ordering::Relaxed);
                     consecutive_errors.store(0, Ordering::Relaxed);
                 }
-                (0, true, 0.0)
+                // B2: push error record and skip; do not map to (0, true, 0.0)
+                // because that would count infra failures as WAF blocks.
+                results.push(CaseResult {
+                    id: case.id.clone(),
+                    class: case.class.clone(),
+                    description: case.description.clone(),
+                    raw_blocked: false,
+                    raw_status: 0,
+                    raw_latency_ms: 0.0,
+                    raw_error: true,
+                    evaded: None,
+                });
+                continue;
             }
         };
 
@@ -740,6 +756,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
             raw_blocked,
             raw_status,
             raw_latency_ms,
+            raw_error: false, // B2: successful HTTP send
             evaded,
         });
     }
@@ -1837,6 +1854,17 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         })
         .collect();
 
+    // B2: compute block rate excluding network-error cases so infra
+    // failures do not inflate the block denominator.
+    let raw_error_count = results.iter().filter(|r| r.raw_error).count();
+    let raw_valid_count = results.len().saturating_sub(raw_error_count);
+    let raw_blocked_count = results.iter().filter(|r| r.raw_blocked).count();
+    let raw_block_rate_val = if raw_valid_count > 0 {
+        raw_blocked_count as f64 / raw_valid_count as f64
+    } else {
+        0.0
+    };
+
     let aggregate = serde_json::json!({
         // Schema version for downstream consumers (bench-diff, dashboards,
         // CI parsers). Bump when the JSON shape changes incompatibly so
@@ -1849,9 +1877,9 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         "variants_per_case_per_strategy": args.variants,
         "lineage_output": args.lineage_output.as_ref().map(|p| p.display().to_string()),
         "total_cases": results.len(),
-        "raw_blocked": results.iter().filter(|r| r.raw_blocked).count(),
-        "raw_block_rate": results.iter().filter(|r| r.raw_blocked).count() as f64
-            / results.len() as f64,
+        "raw_error_cases": raw_error_count,
+        "raw_blocked": raw_blocked_count,
+        "raw_block_rate": raw_block_rate_val,
         "evaded_summary": args.evade.then(|| {
             let total: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_total).sum();
             let bypassed: usize = results.iter().filter_map(|r| r.evaded.as_ref()).map(|e| e.variants_bypassed).sum();
