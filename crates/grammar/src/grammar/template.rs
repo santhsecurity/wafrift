@@ -34,17 +34,16 @@ use std::collections::BTreeSet;
 /// Template engine definition loaded from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct Engine {
-    /// Engine name (e.g., "jinja2", "twig")
-    #[allow(dead_code)]
+    /// Engine name (e.g., "jinja2", "twig") — used by `supported_engines()`.
     name: String,
     /// Detection delimiters (e.g., ["{{", "}}"])
     delimiters: Vec<String>,
-    /// Human-readable description
-    #[allow(dead_code)]
-    description: String,
-    /// Category: python, java, php, ruby, javascript
-    #[allow(dead_code)]
-    category: String,
+    /// Human-readable description in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
+    /// Category in TOML (python, java, php, …); not consumed at runtime.
+    #[serde(rename = "category", default)]
+    _category: String,
     /// List of payloads for this engine
     #[serde(default)]
     payloads: Vec<Payload>,
@@ -53,24 +52,25 @@ struct Engine {
 /// Individual payload definition.
 #[derive(Debug, Clone, Deserialize)]
 struct Payload {
-    /// Payload type: expression, rce, `control_flow`, introspection, etc.
-    #[allow(dead_code)]
-    #[serde(rename = "type")]
-    payload_type: String,
+    /// Payload type in TOML (expression, rce, …); not consumed at runtime.
+    #[serde(rename = "type", default)]
+    _payload_type: String,
     /// The actual payload string
     payload: String,
-    /// Human-readable description
-    #[allow(dead_code)]
-    description: String,
+    /// Human-readable description in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
 }
 
 /// Polyglot payload definition.
 #[derive(Debug, Clone, Deserialize)]
 struct Polyglot {
-    #[allow(dead_code)]
-    name: String,
-    #[allow(dead_code)]
-    description: String,
+    /// Name in TOML; not consumed at runtime.
+    #[serde(rename = "name", default)]
+    _name: String,
+    /// Description in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
     payload: String,
 }
 
@@ -89,17 +89,17 @@ impl Default for TemplateRules {
             engine: vec![Engine {
                 name: "jinja2".into(),
                 delimiters: vec!["{{".into(), "}}".into(), "{%".into(), "%}".into()],
-                description: "Python Jinja2".into(),
-                category: "python".into(),
+                _description: "Python Jinja2".into(),
+                _category: "python".into(),
                 payloads: vec![Payload {
-                    payload_type: "expression".into(),
+                    _payload_type: "expression".into(),
                     payload: "{{7*7}}".into(),
-                    description: "Basic arithmetic".into(),
+                    _description: "Basic arithmetic".into(),
                 }],
             }],
             polyglot: vec![Polyglot {
-                name: "polyglot_probe".into(),
-                description: "Universal probe".into(),
+                _name: "polyglot_probe".into(),
+                _description: "Universal probe".into(),
                 payload: "${{<%[%'\"}}%\\.".into(),
             }],
         }

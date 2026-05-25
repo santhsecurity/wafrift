@@ -17,9 +17,9 @@ struct BlockingRules {
 #[derive(Deserialize)]
 struct BlockingIndicator {
     phrase: String,
-    #[serde(default)]
-    #[allow(dead_code)] // Schema field for human readers of the TOML; not consumed at runtime.
-    description: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
 }
 
 static BLOCK_INDICATORS: Lazy<Vec<String>> = Lazy::new(|| {

@@ -47,16 +47,18 @@ const CMD_PAYLOADS_TOML: &str = include_str!("../../rules/cmd/payloads.toml");
 #[derive(Debug, Clone, Deserialize)]
 struct Separator {
     pattern: String,
-    #[allow(dead_code)]
-    description: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
 }
 
 /// Space alternative definition from TOML.
 #[derive(Debug, Clone, Deserialize)]
 struct SpaceAlternative {
     pattern: String,
-    #[allow(dead_code)]
-    description: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
 }
 
 /// Root structure for payloads.toml.
@@ -74,41 +76,41 @@ impl Default for CmdPayloadRules {
             separator: vec![
                 Separator {
                     pattern: "; ".into(),
-                    description: "Semicolon".into(),
+                    _description: "Semicolon".into(),
                 },
                 Separator {
                     pattern: "| ".into(),
-                    description: "Pipe".into(),
+                    _description: "Pipe".into(),
                 },
                 Separator {
                     pattern: "|| ".into(),
-                    description: "OR-else".into(),
+                    _description: "OR-else".into(),
                 },
                 Separator {
                     pattern: "&& ".into(),
-                    description: "AND-then".into(),
+                    _description: "AND-then".into(),
                 },
                 Separator {
                     pattern: "\n".into(),
-                    description: "Newline".into(),
+                    _description: "Newline".into(),
                 },
             ],
             space_alternative: vec![
                 SpaceAlternative {
                     pattern: " ".into(),
-                    description: "Space".into(),
+                    _description: "Space".into(),
                 },
                 SpaceAlternative {
                     pattern: "${IFS}".into(),
-                    description: "IFS".into(),
+                    _description: "IFS".into(),
                 },
                 SpaceAlternative {
                     pattern: "$IFS".into(),
-                    description: "IFS shorthand".into(),
+                    _description: "IFS shorthand".into(),
                 },
                 SpaceAlternative {
                     pattern: "\t".into(),
-                    description: "Tab".into(),
+                    _description: "Tab".into(),
                 },
             ],
         }

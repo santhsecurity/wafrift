@@ -482,11 +482,6 @@ impl StealthClient {
     }
 }
 
-// Ensure unused-import warnings don't fire on the `Instant` / `Duration`
-// imports when the feature is off.
-#[cfg(not(feature = "tls-impersonate"))]
-#[allow(dead_code)]
-fn _unused_imports(_: std::time::Instant, _: Duration) {}
 
 #[cfg(test)]
 mod tests {
