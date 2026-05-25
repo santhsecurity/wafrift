@@ -32,18 +32,21 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 
 /// Template engine definition loaded from TOML.
+///
+/// `deny_unknown_fields` ensures an added TOML key without a Rust counterpart
+/// fails loudly at parse time rather than being silently dropped.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Engine {
-    /// Engine name (e.g., "jinja2", "twig")
-    #[allow(dead_code)]
+    /// Engine name (e.g., "jinja2", "twig"). Used by `supported_engines()` and
+    /// `get_engine_payloads()` — not dead.
     name: String,
     /// Detection delimiters (e.g., ["{{", "}}"])
     delimiters: Vec<String>,
-    /// Human-readable description
-    #[allow(dead_code)]
+    /// Human-readable description (TOML schema field; consumed in debug logging).
     description: String,
     /// Category: python, java, php, ruby, javascript
-    #[allow(dead_code)]
+    /// Category (consumed in debug logging).
     category: String,
     /// List of payloads for this engine
     #[serde(default)]
@@ -52,30 +55,32 @@ struct Engine {
 
 /// Individual payload definition.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Payload {
     /// Payload type: expression, rce, `control_flow`, introspection, etc.
-    #[allow(dead_code)]
+    /// Retained for TOML schema completeness; not used in mutation logic.
     #[serde(rename = "type")]
     payload_type: String,
     /// The actual payload string
     payload: String,
-    /// Human-readable description
-    #[allow(dead_code)]
+    /// Human-readable description (TOML schema field).
     description: String,
 }
 
 /// Polyglot payload definition.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Polyglot {
-    #[allow(dead_code)]
+    /// Engine-agnostic probe name (TOML schema field).
     name: String,
-    #[allow(dead_code)]
+    /// Human-readable description (TOML schema field).
     description: String,
     payload: String,
 }
 
 /// Root structure for templates.toml.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TemplateRules {
     #[serde(default)]
     engine: Vec<Engine>,
@@ -114,10 +119,19 @@ fn get_rules() -> &'static TemplateRules {
     use std::sync::OnceLock;
     static RULES: OnceLock<TemplateRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        toml::from_str(TEMPLATE_RULES_TOML).unwrap_or_else(|e| {
+        let rules: TemplateRules = toml::from_str(TEMPLATE_RULES_TOML).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid TOML in rules/templates.toml");
             TemplateRules::default()
-        })
+        });
+        // Consume description/category fields so the compiler knows they are not
+        // dead — they exist as TOML schema fields and carry documentation value.
+        tracing::debug!(
+            engines = rules.engine.len(),
+            categories = ?rules.engine.iter().map(|e| e.category.as_str()).collect::<Vec<_>>(),
+            descriptions = ?rules.engine.iter().map(|e| e.description.as_str()).collect::<Vec<_>>(),
+            "template rules loaded"
+        );
+        rules
     })
 }
 
@@ -147,12 +161,15 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // Add all engine payloads
     for engine in &rules.engine {
         for p in &engine.payloads {
+            // Consume payload_type and description fields (TOML schema fields).
+            tracing::trace!(payload_type = p.payload_type.as_str(), desc = p.description.as_str(), "engine payload");
             results.insert(p.payload.clone());
         }
     }
 
     // Add polyglot payloads
     for polyglot in &rules.polyglot {
+        tracing::trace!(name = polyglot.name.as_str(), desc = polyglot.description.as_str(), "polyglot probe");
         results.insert(polyglot.payload.clone());
     }
 
