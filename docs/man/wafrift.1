@@ -1,6 +1,6 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH wafrift 1  "wafrift 0.2.17" 
+.TH wafrift 1  "wafrift 0.2.21" 
 .SH NAME
 wafrift \- WAF evasion toolkit — run without arguments for interactive mode
 .SH SYNOPSIS
@@ -10,11 +10,10 @@ WAF evasion toolkit — run without arguments for interactive mode.
 .PP
 Exit codes (CI\-friendly):
 0  success
-1  generic error (bad input, IO, etc.)
-2  bench\-waf: zero bypasses across ALL corpus cases in \-\-evade mode
-2  replay:    saved bypass got blocked (regression signal)
+1  generic error (IO failure, runtime error, etc.)
+2  argument / input error (unknown flag, contradictory selectors, malformed value, unknown technique selector, unrecognised algorithm, missing required field) — clap convention; ALSO used by bench\-waf for \*(Aqzero bypasses\*(Aq and by replay for \*(Aqsaved bypass blocked\*(Aq (legacy: per perf\-hunt N01 the dual usage is documented rather than split because the bench\-waf/replay overload is well\-established in CI scripts)
 3  bench\-diff: regression vs baseline (see \-\-bypass\-drop\-pp)
-4  bench\-waf \-\-validate\-only: corpus integrity errors
+4  bench\-waf \-\-validate\-only: corpus integrity errors (duplicate id, TOML parse failure, missing required field)
 5  scan: aborted — target rate\-limited the probes (inconclusive, not \*(Aqno bypass\*(Aq)
 .SH OPTIONS
 .TP
@@ -91,6 +90,9 @@ Differential bypass scanner against a single protected URL. Fires 230 auth\-bypa
 wafrift\-man(1)
 Generate a troff man page for `wafrift` (and optionally subcommands)
 .TP
+wafrift\-model\-evade(1)
+Active\-learning WAF bypass: learn the target\*(Aqs decision boundary online (L* membership queries via HTTP), mine bypass candidates offline against the learned SFA at ~1M/sec, and verify each online. Deduces bypasses from the WAF\*(Aqs decision boundary — not from mutation luck. Use `\-\-budget` to cap live queries
+.TP
 wafrift\-audit(1)
 Decompile a CRS\-class ruleset and report the holes an attacker can drive through it (the WAF X\-ray). Zero\-config; `\-\-ruleset` audits a custom Tier\-B config
 .TP
@@ -148,7 +150,19 @@ CORS misconfiguration scanner. Probes 10 known Access\-Control\-Allow\-Origin va
 wafrift\-trailer\-diff(1)
 HTTP/1.1 chunked\-trailer field injection scanner. WAFs typically inspect the initial header block but NOT trailing headers (the trailer fields after the final chunk in chunked Transfer\-Encoding). This command fires two raw chunked POSTs — one baseline (no trailer sent) and one attack (payload injected as a trailer field) — and reports any response divergence. A divergence is evidence the backend processed the trailer while the WAF did not
 .TP
+wafrift\-tmin(1)
+Corpus minimization via Zeller\*(Aqs ddmin — alias for `wafrift distill`. Familiar to AFL/libFuzzer users as `afl\-tmin` / `tmin`. Takes a KNOWN\-working bypass payload and finds the minimum\-edit\-distance substring that STILL bypasses. Reads payload from `\-\-payload <P>` or stdin. Outputs: minimal payload + reduction stats (original length, final length, probes spent)
+.TP
+wafrift\-cluster(1)
+Offline bypass clustering: group a `bench\-waf \-\-output` JSON by rule_id, payload class, and edit\-distance similarity. Outputs clusters with a representative technique and member count per cluster. Pure offline — no HTTP. Useful for triaging large bypass corpora and identifying duplicate root causes
+.TP
+wafrift\-hunt(1)
+Long\-running autonomous bypass campaign. Repeatedly runs `bench\-waf \-\-evade` rounds against a target with rotating mutators/strategies, saves every confirmed bypass to a campaign JSON at `~/.wafrift/hunt\-<campaign\-id>.json`, and exits cleanly on Ctrl\-C. Resumable: re\-run with the same `\-\-campaign\-id`
+.TP
+wafrift\-corpus(1)
+Inspect a `wafrift corpus` artifact (rule_corpus + edge\-POP coverage maps written by `wafrift bench\-waf \-\-corpus\-out`). Subcommands:
+.TP
 wafrift\-help(1)
 Print this message or the help of the given subcommand(s)
 .SH VERSION
-v0.2.17
+v0.2.21

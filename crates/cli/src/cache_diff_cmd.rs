@@ -811,7 +811,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn run_cache_diff_against_mock_succeeds() {
         let addr = spawn_cache_mock().await;
         let args = CacheDiffArgs {
@@ -819,7 +819,8 @@ mod tests {
             param: "q".into(),
             delay_ms: 0,
             concurrency: 4,
-            timeout_secs: 8,
+            // 30s: Windows loopback + starved current_thread runtime.
+            timeout_secs: 30,
             insecure: false,
             proxy: None,
             header: Vec::new(),

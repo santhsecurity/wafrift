@@ -563,7 +563,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn distill_rejects_when_input_payload_is_blocked_by_target() {
         // Mock blocks anything containing "FOO". Try to distill a
         // payload that contains "FOO" → baseline probe sees a block
@@ -580,7 +580,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn distill_succeeds_when_input_payload_bypasses() {
         // Mock blocks on "BLOCK"; our input "abXYcd" doesn't contain
         // it → bypass → distill runs successfully.
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn distill_honors_cancel_token() {
         // Cancel before baseline fires — the baseline still runs
         // (so we can tell the operator their payload doesn't bypass),

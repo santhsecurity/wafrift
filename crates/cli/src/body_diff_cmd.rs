@@ -620,7 +620,9 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    // multi_thread: mock runs on a separate worker so it is never CPU-starved
+    // by the 1362+ other async tests sharing the default current_thread runtime.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn run_body_diff_against_mock_succeeds() {
         let addr = spawn_body_aware_mock().await;
         let args = BodyDiffArgs {
@@ -628,7 +630,10 @@ mod tests {
             baseline_body: r#"{"q":"safe"}"#.into(),
             delay_ms: 0,
             concurrency: 4,
-            timeout_secs: 8,
+            // 30s: under heavy parallel test load (1362+ tests), Windows
+            // loopback connect + mock scheduling can take 10+ seconds when
+            // the tokio event loop is CPU-starved. 8s was too tight.
+            timeout_secs: 30,
             insecure: false,
             proxy: None,
             header: Vec::new(),

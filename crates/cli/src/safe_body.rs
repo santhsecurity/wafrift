@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn read_bounded_defends_against_real_gzip_bomb() {
         // `#[serial]` because this test spawns a real HTTP server +
         // a reqwest client.  Under parallel cargo-test the localhost
