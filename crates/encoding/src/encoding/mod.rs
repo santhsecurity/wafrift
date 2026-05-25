@@ -81,6 +81,20 @@ pub mod ssti_escape;
 /// reads attacker-controlled data. Every commercial SSO has shipped
 /// at least one XSW vulnerability — XSW7/XSW8 are still common.
 pub mod saml_xsw;
+/// Cookie-layer attack library: cookie tossing (parent-domain plant),
+/// path tossing, jar overflow, quote encapsulation, double-encoded
+/// values, `__Host-`/`__Secure-` prefix violations, CRLF injection
+/// in Set-Cookie values, SameSite=None over plaintext, unpartitioned
+/// merge, name-whitespace confusion, duplicate-cookie precedence,
+/// oversized-cookie proxy truncation.
+pub mod cookie_attacks;
+/// CSV / spreadsheet formula injection (CWE-1236): DDE, HYPERLINK
+/// phishing, WEBSERVICE exfil (Excel 2013+), IMPORTDATA / IMPORTXML
+/// (Google Sheets), +/-/@/TAB/CR/LF formula prefixes, CSV row
+/// injection, quoted-formula evasion, R1C1 reference, XLM EXEC()
+/// macro. Bypasses sanitizers that scan for XSS/SQLi but not formula
+/// triggers.
+pub mod csv_formula;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
