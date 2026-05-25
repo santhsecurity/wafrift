@@ -333,6 +333,17 @@ wafrift bank export --output bundle.json    # share with teammate
 wafrift bank import bundle.json             # on teammate's machine
 ```
 
+**Community genome registry.** Bundles can be signed (ed25519) and pulled from a community registry — the trust list lives at `~/.wafrift/trust.toml` (per-host publisher allowlist), so an untrusted bundle is rejected on `wafrift bank pull` before it ever lands on disk:
+
+```bash
+wafrift bank sign --bundle bundle.json --key signing.key --output bundle.signed.json
+wafrift bank trust add --pubkey <ed25519-hex> --label "alice@example"
+wafrift bank pull --url https://registry.example/bundles/cloudflare-2026q2.signed.json
+wafrift bank submit --url https://registry.example/upload --bundle bundle.signed.json
+```
+
+The signing + trust primitives live in the `wafrift-genome-registry` crate; the HTTP pull/submit transport is wired in `wafrift bank pull` / `wafrift bank submit`. There is **no central wafrift-hosted registry** today — operators run their own (a single static-file HTTP server is enough for pull; submit needs a tiny POST endpoint). See `crates/genome-registry/README.md` for the bundle wire format.
+
 Replay any saved finding deterministically:
 
 ```bash
