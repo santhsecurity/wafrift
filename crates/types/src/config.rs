@@ -162,6 +162,15 @@ impl EvasionConfig {
         }
     }
 
+    /// Maximum permitted `body_padding_bytes`. Requests padded beyond this
+    /// (256 MiB) would exhaust memory on the sending host before reaching
+    /// the WAF.
+    pub const MAX_BODY_PADDING_BYTES: usize = 256 * 1024 * 1024;
+
+    /// Maximum permitted `max_attempts`. Values above this would effectively
+    /// make the retry loop infinite for any non-trivial target.
+    pub const MAX_ATTEMPTS: u32 = 10_000;
+
     /// Validate the configuration for conflicts or missing dependencies.
     pub fn validate(&self) -> Result<(), String> {
         if self.insecure_tls {
@@ -178,6 +187,34 @@ impl EvasionConfig {
 
         if self.max_attempts == 0 {
             return Err("max_attempts must be greater than 0".to_string());
+        }
+        if self.max_attempts > Self::MAX_ATTEMPTS {
+            return Err(format!(
+                "max_attempts {} exceeds maximum allowed value {}",
+                self.max_attempts,
+                Self::MAX_ATTEMPTS,
+            ));
+        }
+
+        if self.body_padding_bytes > Self::MAX_BODY_PADDING_BYTES {
+            return Err(format!(
+                "body_padding_bytes {} exceeds maximum allowed value {} (256 MiB)",
+                self.body_padding_bytes,
+                Self::MAX_BODY_PADDING_BYTES,
+            ));
+        }
+
+        if !self.dilution_weight.is_finite() {
+            return Err(format!(
+                "dilution_weight must be finite, got {}",
+                self.dilution_weight
+            ));
+        }
+        if self.dilution_weight < 0.0 || self.dilution_weight > 1.0 {
+            return Err(format!(
+                "dilution_weight {} is out of range [0.0, 1.0]",
+                self.dilution_weight
+            ));
         }
 
         self.validate_proxies()?;
@@ -241,5 +278,128 @@ mod tests {
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: EvasionConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.max_attempts, config.max_attempts);
+    }
+
+    // ── validate() bounds checks ─────────────────────────────────
+
+    #[test]
+    fn validate_rejects_max_attempts_zero() {
+        let mut cfg = EvasionConfig::default();
+        cfg.max_attempts = 0;
+        assert!(cfg.validate().is_err(), "max_attempts=0 must be rejected");
+    }
+
+    #[test]
+    fn validate_rejects_max_attempts_above_ceiling() {
+        let mut cfg = EvasionConfig::default();
+        cfg.max_attempts = EvasionConfig::MAX_ATTEMPTS + 1;
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.contains("max_attempts"),
+            "error must mention field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_max_attempts_at_ceiling() {
+        let mut cfg = EvasionConfig::default();
+        cfg.max_attempts = EvasionConfig::MAX_ATTEMPTS;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_body_padding_above_ceiling() {
+        let mut cfg = EvasionConfig::default();
+        cfg.body_padding_bytes = EvasionConfig::MAX_BODY_PADDING_BYTES + 1;
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.contains("body_padding_bytes"),
+            "error must mention field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_body_padding_at_ceiling() {
+        let mut cfg = EvasionConfig::default();
+        cfg.body_padding_bytes = EvasionConfig::MAX_BODY_PADDING_BYTES;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_dilution_weight_nan() {
+        let mut cfg = EvasionConfig::default();
+        cfg.dilution_weight = f64::NAN;
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.contains("dilution_weight"),
+            "error must mention field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_dilution_weight_inf() {
+        let mut cfg = EvasionConfig::default();
+        cfg.dilution_weight = f64::INFINITY;
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("dilution_weight"));
+        cfg.dilution_weight = f64::NEG_INFINITY;
+        let err2 = cfg.validate().unwrap_err();
+        assert!(err2.contains("dilution_weight"));
+    }
+
+    #[test]
+    fn validate_rejects_dilution_weight_out_of_range() {
+        let mut cfg = EvasionConfig::default();
+        cfg.dilution_weight = 1.1;
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("dilution_weight"), "got: {err}");
+        cfg.dilution_weight = -0.1;
+        let err2 = cfg.validate().unwrap_err();
+        assert!(err2.contains("dilution_weight"), "got: {err2}");
+    }
+
+    #[test]
+    fn validate_accepts_dilution_weight_boundary_values() {
+        let mut cfg = EvasionConfig::default();
+        cfg.dilution_weight = 0.0;
+        assert!(cfg.validate().is_ok());
+        cfg.dilution_weight = 1.0;
+        assert!(cfg.validate().is_ok());
+        cfg.dilution_weight = 0.5;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_proxy_scheme() {
+        let mut cfg = EvasionConfig::default();
+        cfg.proxies = vec!["ftp://bad.proxy:21".to_string()];
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_accepts_valid_proxy_schemes() {
+        let mut cfg = EvasionConfig::default();
+        for scheme in &[
+            "http://proxy:8080",
+            "https://proxy:8443",
+            "socks5://proxy:1080",
+            "socks5h://proxy:1080",
+        ] {
+            cfg.proxies = vec![(*scheme).to_string()];
+            assert!(
+                cfg.validate().is_ok(),
+                "scheme {scheme} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn maximum_config_passes_validate() {
+        assert!(EvasionConfig::maximum().validate().is_ok());
+    }
+
+    #[test]
+    fn encoding_only_config_passes_validate() {
+        assert!(EvasionConfig::encoding_only().validate().is_ok());
     }
 }
