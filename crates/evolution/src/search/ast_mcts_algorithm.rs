@@ -156,7 +156,7 @@ impl AstMctsAlgorithm {
         if self.best_payload.is_empty() {
             // No payload yet — emit baseline chromosomes drawn from gene pool.
             for _ in 0..n {
-                self.eval_counter += 1;
+                self.eval_counter = self.eval_counter.saturating_add(1);
                 let mut c = random_chromosome(&self.gene_pool, rng);
                 c.genes.push(("ast_mcts_payload".into(), String::new()));
                 c.lineage = Lineage::genesis(self.generation);
@@ -181,8 +181,23 @@ impl AstMctsAlgorithm {
         if let Some(ref r) = result {
             for &(action, visits, mean_reward) in &r.arm_stats {
                 let entry = self.rule_stats.entry(action.rule.0).or_insert((0, 0.0));
-                entry.0 += visits;
-                entry.1 += mean_reward * visits as f64;
+                entry.0 = entry.0.saturating_add(visits);
+                // Guard against non-finite mean_reward to prevent Inf/NaN
+                // accumulation in the running total. visits is u64 cast to f64;
+                // above 2^53 the cast loses precision but cannot produce NaN/Inf.
+                let addend = if mean_reward.is_finite() {
+                    mean_reward * (visits as f64)
+                } else {
+                    0.0
+                };
+                entry.1 = if entry.1.is_finite() {
+                    entry.1 + addend
+                } else {
+                    // The running total somehow became non-finite (adversarial
+                    // oracle, upstream bug). Reset to the current observation
+                    // rather than propagating the poison.
+                    addend
+                };
             }
         }
 
@@ -191,7 +206,7 @@ impl AstMctsAlgorithm {
         // Always include the MCTS-best payload if it produced one.
         if let Some(ref r) = result {
             if !r.best_payload.is_empty() && seen.insert(r.best_payload.clone()) {
-                self.eval_counter += 1;
+                self.eval_counter = self.eval_counter.saturating_add(1);
                 let mut c = self.best.clone();
                 let payload = r.best_payload.clone();
                 set_gene(&mut c, "ast_mcts_payload", &payload);
@@ -217,7 +232,7 @@ impl AstMctsAlgorithm {
             if payload.is_empty() || !seen.insert(payload.clone()) {
                 continue;
             }
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let mut c = self.best.clone();
             set_gene(&mut c, "ast_mcts_payload", &payload);
             c.lineage = Lineage::mutation(
@@ -235,7 +250,7 @@ impl AstMctsAlgorithm {
 
         // If MCTS produced nothing useful, emit the original payload as a fallback.
         if self.pending.is_empty() {
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let mut c = self.best.clone();
             set_gene(&mut c, "ast_mcts_payload", &self.best_payload);
             c.lineage = Lineage::genesis(self.generation);
@@ -328,7 +343,7 @@ impl SearchAlgorithm for AstMctsAlgorithm {
                 self.best = chromosome;
             }
         }
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn should_terminate(&self, stats: &SearchStats, budget: &Budget) -> bool {

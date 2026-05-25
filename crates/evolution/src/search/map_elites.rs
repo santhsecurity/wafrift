@@ -134,7 +134,7 @@ impl SearchAlgorithm for MapElites {
     fn request_evaluations(&mut self, n: usize, rng: &mut StdRng) -> Vec<EvalCandidate> {
         let mut out = Vec::with_capacity(n);
         for _ in 0..n {
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let candidate = self.generate_individual(rng);
             self.in_flight.insert(self.eval_counter, candidate.clone());
             out.push(EvalCandidate {
@@ -180,7 +180,7 @@ impl SearchAlgorithm for MapElites {
                 }
             }
         }
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn should_terminate(&self, stats: &SearchStats, budget: &Budget) -> bool {
