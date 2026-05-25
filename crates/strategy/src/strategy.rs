@@ -881,8 +881,14 @@ fn apply_content_type_switch(
     // gRPC-evasion variant (nested > split > flat) and apply it.
     if is_grpc_request(req) {
         let body_str = String::from_utf8_lossy(body).into_owned();
-        let tried_nested = state.tried_content_types.contains("grpc:nested-5");
-        let tried_split = state.tried_content_types.contains("grpc:split-10");
+        let tried_nested = state
+            .technique_stats
+            .iter()
+            .any(|(n, _, _)| n == "grpc:nested-5");
+        let tried_split = state
+            .technique_stats
+            .iter()
+            .any(|(n, _, _)| n == "grpc:split-10");
 
         let (variant_body, variant_tag) = if !tried_nested {
             (
@@ -1022,6 +1028,22 @@ fn build_description(techniques: &[Technique]) -> String {
                 .join(", ")
         )
     }
+}
+
+/// Returns `true` when `req` targets a gRPC endpoint.
+///
+/// Detection heuristic: the request carries `Content-Type: application/grpc`
+/// (or a sub-type such as `application/grpc+proto`). This is the standard
+/// gRPC-over-HTTP/2 content type per RFC.
+///
+/// Pure, synchronous, I/O-free so the strategy crate stays unit-testable.
+#[must_use]
+pub fn is_grpc_request(req: &Request) -> bool {
+    req.headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.to_ascii_lowercase())
+        .is_some_and(|ct| ct.starts_with("application/grpc"))
 }
 
 /// Returns `true` when `req` looks like a GraphQL request.
