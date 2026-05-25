@@ -24,6 +24,7 @@ members = [
     "crates/genome-registry",
     "crates/captchaforge-bridge",
     "crates/graphql",
+    "crates/http3-evasion",
 ]
 
 [workspace.package]
@@ -87,7 +88,10 @@ wafrift-pool = { path = "crates/pool", version = "0.2.21" }
 wafrift-recon = { path = "crates/recon", version = "0.2.21" }
 wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.21" }
 wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.21" }
+wafrift-graphql = { path = "crates/graphql", version = "0.2.21" }
+wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.2.21" }
 mctrust = "=0.4.0"
+pocgen = { path = "../../libs/offensive/pocgen" }
 # External dependencies (unavailable in this environment)
 # attackstr = { path = "../../libs/offensive/attackstr" }
 # scanclient = { path = "../../libs/scanner/scanclient" }

@@ -1996,7 +1996,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "guise"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "tracing",
@@ -3639,19 +3639,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pocgen"
-version = "0.2.0"
-dependencies = [
- "serde",
- "shell-words",
- "tempfile",
- "thiserror 2.0.18",
- "toml",
- "url",
- "urlencoding",
-]
-
-[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4540,22 +4527,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "santh-error"
-version = "0.1.0"
-dependencies = [
- "regex",
-]
-
-[[package]]
-name = "santh-tracing"
-version = "0.1.0"
-dependencies = [
- "santh-error",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "scanclient"
 version = "0.2.0"
 dependencies = [
@@ -4849,12 +4820,6 @@ checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
 ]
-
-[[package]]
-name = "shell-words"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
 name = "shlex"
@@ -5603,16 +5568,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-serde"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
-dependencies = [
- "serde",
- "tracing-core",
-]
-
-[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5622,15 +5577,12 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
- "serde",
- "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
- "tracing-serde",
 ]
 
 [[package]]
@@ -5863,17 +5815,15 @@ dependencies = [
  "erroracle",
  "flate2",
  "futures-util",
- "guise",
+ "hex",
  "httpdate",
  "libc",
- "pocgen",
  "proptest",
  "rand 0.8.5",
  "ratatui",
  "regex",
  "reqwest 0.12.28",
  "respdiff",
- "santh-tracing",
  "serde",
  "serde_json",
  "serial_test",
@@ -5891,6 +5841,7 @@ dependencies = [
  "wafrift-fingerprint",
  "wafrift-genome-registry",
  "wafrift-grammar",
+ "wafrift-graphql",
  "wafrift-oracle",
  "wafrift-recon",
  "wafrift-smuggling",
@@ -5899,6 +5850,7 @@ dependencies = [
  "wafrift-types",
  "wafrift-wafmodel",
  "webpki-roots",
+ "wiremock",
 ]
 
 [[package]]
@@ -5996,13 +5948,13 @@ dependencies = [
  "wafrift-detect",
  "wafrift-encoding",
  "wafrift-types",
+ "wafrift-wafmodel",
 ]
 
 [[package]]
 name = "wafrift-fingerprint"
 version = "0.2.21"
 dependencies = [
- "guise",
  "proptest",
  "rand 0.8.5",
  "wafrift-detect",
@@ -6049,13 +6001,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "wafrift-http3-evasion"
+version = "0.2.21"
+dependencies = [
+ "base64",
+ "bytes",
+ "proptest",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "wafrift-types",
+]
+
+[[package]]
 name = "wafrift-oracle"
 version = "0.2.21"
 dependencies = [
  "async-trait",
+ "base64",
  "flate2",
  "interactsh",
  "proptest",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sqlparser",
@@ -6178,9 +6148,11 @@ dependencies = [
  "wafrift-evolution",
  "wafrift-fingerprint",
  "wafrift-grammar",
+ "wafrift-graphql",
  "wafrift-oracle",
  "wafrift-smuggling",
  "wafrift-types",
+ "wafrift-wafmodel",
 ]
 
 [[package]]
@@ -6219,7 +6191,6 @@ dependencies = [
 name = "wafrift-types"
 version = "0.2.21"
 dependencies = [
- "bogon",
  "rand 0.8.5",
  "serde",
  "serde_json",
