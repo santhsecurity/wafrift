@@ -292,6 +292,7 @@ mod tests {
                     latency_ms: 10,
                     confidence: 0.9,
                     triggered_rules: 0,
+                    ..Default::default()
                 },
             ),
             (
@@ -303,6 +304,7 @@ mod tests {
                     latency_ms: 10,
                     confidence: 0.1,
                     triggered_rules: 1,
+                    ..Default::default()
                 },
             ),
         ]);
@@ -332,6 +334,7 @@ mod tests {
                         latency_ms: 10,
                         confidence: 0.9,
                         triggered_rules: 0,
+                        ..Default::default()
                     },
                 )
             })
