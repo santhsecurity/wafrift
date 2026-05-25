@@ -90,7 +90,8 @@ pub struct AttackArgs {
 }
 
 /// Entry point for `wafrift attack`.
-pub async fn run_attack(args: AttackArgs) -> ExitCode {
+pub async fn run_attack(mut args: AttackArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let scan_text = args.format == "text";
     if scan_text && !args.quiet {
         eprintln!(

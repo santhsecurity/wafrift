@@ -831,7 +831,9 @@ mod tests {
 
     #[test]
     fn apply_rule_paren_wrap_fires_on_or() {
-        let wrapped = format!("{WRAP_PREFIX}'a'='a' OR 1=1");
+        // Use a nested fragment so WRAP_NEEDLE extraction works:
+        // WHERE x = (1=1 OR 2=2) gives a clean OR inside Nested.
+        let wrapped = format!("{WRAP_PREFIX}(1=1 OR 2=2)");
         let stmts = Parser::parse_sql(&GenericDialect {}, &wrapped).unwrap();
         let result = apply_rule(&stmts[0], RuleId::PAREN_WRAP, 0);
         assert!(result.is_some(), "paren_wrap must fire on OR");
@@ -869,7 +871,9 @@ mod tests {
 
     #[test]
     fn apply_rule_case_when_wrap_fires_on_eq() {
-        let wrapped = format!("{WRAP_PREFIX}'a'='a'");
+        // Use nested fragment so WRAP_NEEDLE extraction succeeds:
+        // WHERE x = (1=1) puts the target Eq inside Nested.
+        let wrapped = format!("{WRAP_PREFIX}(1=1)");
         let stmts = Parser::parse_sql(&GenericDialect {}, &wrapped).unwrap();
         let result = apply_rule(&stmts[0], RuleId::CASE_WHEN_WRAP, 0);
         assert!(result.is_some(), "case_when_wrap must fire on eq");
@@ -977,7 +981,8 @@ mod tests {
 
     #[test]
     fn mcts_commute_or_fires() {
-        let wrapped = format!("{WRAP_PREFIX}'a'='a' OR 1=1");
+        // Use nested fragment so WRAP_NEEDLE extraction succeeds.
+        let wrapped = format!("{WRAP_PREFIX}(1=1 OR 2=2)");
         let stmts = Parser::parse_sql(&GenericDialect {}, &wrapped).unwrap();
         let result = apply_rule(&stmts[0], RuleId::COMMUTE_OR, 0);
         // commute_or swaps the two sides of OR — fragment changes.

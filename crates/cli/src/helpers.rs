@@ -142,6 +142,28 @@ pub fn url_query_repro_curl(target: &str, param: &str, payload: &str) -> String 
     )
 }
 
+/// Normalise a user-supplied URL or hostname into a fully-qualified URL.
+///
+/// Rules (applied in order):
+/// 1. Strip leading/trailing whitespace.
+/// 2. If the result contains `://`, return it as-is (already has a scheme).
+/// 3. If the result starts with `//` (protocol-relative), promote to `https://`.
+/// 4. Otherwise, prepend `https://`.
+///
+/// This fixes the "relative URL without a base" error that occurs when a user
+/// passes `example.com` instead of `https://example.com` to any subcommand.
+#[must_use]
+pub fn normalize_target_url(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.contains("://") {
+        trimmed.to_string()
+    } else if let Some(rest) = trimmed.strip_prefix("//") {
+        format!("https://{rest}")
+    } else {
+        format!("https://{trimmed}")
+    }
+}
+
 pub fn strategies_for_level(level: Level) -> Vec<Strategy> {
     let all = encoding::all_strategies();
     match level {

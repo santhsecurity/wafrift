@@ -215,6 +215,34 @@ pub struct BenchWafArgs {
     /// `ast-mcts` forces AST Monte-Carlo Tree Search for every evolution case.
     #[arg(long, default_value = "default", value_parser = ["default", "ast-mcts"])]
     pub mutator: String,
+
+    /// Weight for ensemble-dilution score in evolutionary fitness (0.0–1.0).
+    ///
+    /// When targeting a multi-rule-group ensemble WAF (Cloudflare Managed
+    /// Ruleset, AWS Core Rule Set), the evolution engine blends the oracle
+    /// bypass signal with a dilution score that estimates how well the
+    /// current chromosome keeps the WAF's total anomaly score below the
+    /// block threshold.
+    ///
+    /// 0.0 = pure oracle fitness (default, safe for all WAF types).
+    /// 0.3 = recommended for known ensemble targets.
+    /// 1.0 = pure dilution score (use only when oracle signal is noisy).
+    ///
+    /// Has no effect when targeting rule-based or ML-backed WAFs.
+    #[arg(long, default_value_t = 0.0, value_parser = parse_dilution_weight)]
+    pub dilution_weight: f64,
+}
+
+fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
+    let v: f64 = s
+        .parse()
+        .map_err(|_| format!("expected a float, got {s:?}"))?;
+    if !(0.0..=1.0).contains(&v) {
+        return Err(format!(
+            "--dilution-weight must be in [0.0, 1.0], got {v}"
+        ));
+    }
+    Ok(v)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1455,7 +1483,8 @@ async fn run_mcts_strategy(
     bypass_techs: &mut Vec<String>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
-    let config = EvasionConfig::maximum();
+    let mut config = EvasionConfig::maximum();
+    config.dilution_weight = args.dilution_weight;
     let base_req = build_request(base_url, case);
 
     // MCTS is deterministic per (request, config, depth). Sweep depths so we

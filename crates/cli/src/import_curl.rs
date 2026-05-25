@@ -493,6 +493,14 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         // GraphQL probing is off by default for import-curl — operators
         // who want the GraphQL battery use `wafrift scan --graphql` directly.
         graphql: false,
+        // Egress rotation not used for import-curl; operators who need egress
+        // control run `wafrift scan` directly.
+        egress_socks5: Vec::new(),
+        egress_http_proxy: Vec::new(),
+        egress_tailscale_nodes: Vec::new(),
+        egress_tailscale_socks_addr: "127.0.0.1:1055".to_string(),
+        egress_challenge_threshold: 3,
+        egress_cooldown_secs: 300,
     };
 
     let cancel = tokio_util::sync::CancellationToken::new();
