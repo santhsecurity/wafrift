@@ -19,10 +19,12 @@ members = [
     "crates/core",
     "crates/cli",
     "crates/proxy",  # May require external dependencies
-    "crates/transport", "crates/oracle", "crates/pool",
+    "crates/transport", "crates/oracle",
     "crates/recon",
     "crates/genome-registry",
     "crates/captchaforge-bridge",
+    # Observability
+    "crates/telemetry",
 ]
 
 [workspace.package]
@@ -62,10 +64,10 @@ wafrift-wafmodel = { path = "crates/wafmodel", version = "0.2.17" }
 wafrift-strategy = { path = "crates/strategy", version = "0.2.17" }
 wafrift-oracle = { path = "crates/oracle", version = "0.2.17" }
 wafrift-transport = { path = "crates/transport", version = "0.2.17" }
-wafrift-pool = { path = "crates/pool", version = "0.2.17" }
 wafrift-recon = { path = "crates/recon", version = "0.2.17" }
 wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.17" }
 wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.17" }
+wafrift-telemetry = { path = "crates/telemetry", version = "0.2.17" }
 mctrust = "=0.4.0"
 # External dependencies (unavailable in this environment)
 # attackstr = { path = "../../libs/offensive/attackstr" }
@@ -147,6 +149,10 @@ wiremock = "0.6.5"
 async-trait = "0.1.89"
 futures-util = "0.3.32"
 moka = { version = "0.12.15", features = ["future"] }
+# LRU cache used by wafrift-strategy for MCTS PV memoization (H2).
+# Pinned to the same major as wafrift-evolution so no second copy of hashbrown is pulled.
+lru = "0.18"
+parking_lot = "0.12"
 rustls-pki-types = "1.14.0"
 
 webpki-roots = "1.0.6"
