@@ -29,7 +29,7 @@ pub const MAX_PAYLOAD_SIZE: usize = 8 * 1024 * 1024;
 /// # Context hints
 /// Many strategies are only semantically correct in specific parser contexts.
 /// Use [`Strategy::contexts`] to query the applicable contexts for a strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Strategy {
     /// Standard URL encoding (%XX) — preserves unreserved chars per RFC 3986.

@@ -357,12 +357,14 @@ mod tests {
             let stripped = v.split('?').next().unwrap_or(v);
             let stripped = stripped.split('#').next().unwrap_or(stripped);
             let collapsed = rfc3986_remove_dot_segments(stripped);
-            // Either the collapsed path mentions admin (after the
-            // dot-dot took us up), OR the path uses an encoded form
-            // that the rfc-canonicalizer can't see through. Both are
-            // legitimate differential conditions — what matters is
-            // that the variant doesn't accidentally fold to the
-            // benign prefix alone.
+            // Either the collapsed path mentions admin (after the dot-dot took us
+            // up), OR the variant uses an opaque encoding the RFC canonicalizer
+            // can't see through (percent-encoded dots/slashes/backslashes,
+            // fullwidth slash), OR the variant embeds the traversal in the query /
+            // fragment component (e.g. `?/../admin` — not visible to the path
+            // canonicalizer but processed by many origin servers).  All are
+            // legitimate differential conditions — what matters is that the
+            // variant doesn't accidentally fold to the benign prefix alone.
             let touched_target = collapsed.contains("admin")
                 || v.contains("%2e")
                 || v.contains("%2E")
@@ -371,7 +373,10 @@ mod tests {
                 || v.contains('\\')
                 || v.contains("%5c")
                 || v.contains("%5C")
-                || v.contains('\u{FF0F}');
+                || v.contains('\u{FF0F}')
+                // query-string / fragment traversal: `?/../` or `#/../`
+                || (v.contains("?/") && v.contains("../"))
+                || (v.contains('#') && v.contains("../"));
             assert!(
                 touched_target,
                 "variant must encode dot-dot or reach admin: {v} → {collapsed}"

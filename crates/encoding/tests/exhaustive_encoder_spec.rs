@@ -222,20 +222,24 @@ fn case_strategies_preserve_bytes_modulo_case() {
     }
 }
 
-/// 4. JsonEncode yields a COMPLETE JSON string value — surrounding
-///    quotes plus an RFC 8259-escaped body (pinned by
-///    `wafrift_encoding::encoding::unicode::tests::json_encode_*`). It
-///    must parse, as-is, back to the exact original input.
+/// 4. JsonEncode escapes string content only — NO surrounding quotes (F67).
+///    Callers inject the output directly into an existing JSON string field;
+///    adding our own quotes would break the host document. The content is
+///    RFC 8259-valid after wrapping in quotes, so we verify round-trip by
+///    wrapping manually before parsing.
 #[test]
 fn json_encode_is_a_valid_json_string_round_trip() {
     for inp in inputs() {
         let out = encode(inp, Strategy::JsonEncode).unwrap();
+        // No surrounding quotes — content-escaping only.
         assert!(
-            out.starts_with('"') && out.ends_with('"') && out.len() >= 2,
-            "JsonEncode({inp:?}) must be a quoted JSON string value: {out:?}"
+            !out.starts_with('"') || inp.starts_with('"'),
+            "JsonEncode({inp:?}) must NOT add surrounding quotes: {out:?}"
         );
-        let parsed: String = serde_json::from_str(&out).unwrap_or_else(|e| {
-            panic!("JsonEncode({inp:?}) = {out:?} is not a valid JSON string: {e}")
+        // Wrapping manually must produce a valid JSON string.
+        let wrapped = format!("\"{out}\"");
+        let parsed: String = serde_json::from_str(&wrapped).unwrap_or_else(|e| {
+            panic!("JsonEncode({inp:?}) = {out:?} (wrapped: {wrapped:?}) is not valid JSON content: {e}")
         });
         assert_eq!(parsed, inp, "JsonEncode round-trip lost {inp:?}");
     }

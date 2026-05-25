@@ -17,7 +17,9 @@ fn encode_pure_strategies_twice_are_byte_identical() {
     let pollution_payload = b"k=v";
 
     for &strategy in all_strategies() {
-        if matches!(strategy, S::RandomCase | S::SpaceToRandomBlank) {
+        // RandomCase uses rand::random — intentionally non-deterministic.
+        // SpaceToRandomBlank is now deterministic (FNV-1a hash, bench-safe).
+        if matches!(strategy, S::RandomCase) {
             continue;
         }
 
@@ -51,20 +53,16 @@ fn encode_random_case_negative_not_identical_across_calls() {
 }
 
 #[test]
-fn encode_space_to_random_blank_negative_not_stable() {
+fn encode_space_to_random_blank_is_deterministic() {
+    // SpaceToRandomBlank was made deterministic (FNV-1a hash of payload + position)
+    // so bench-waf --seed produces byte-identical output on repeated runs.
     let payload = "SELECT * FROM t WHERE a = 1 AND b = 2";
-    let mut diff = 0_u32;
-    for _ in 0..40 {
-        let u = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
-        let v = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
-        if u != v {
-            diff += 1;
-        }
-    }
-    assert!(
-        diff > 0,
-        "negative twin: SpaceToRandomBlank must vary across repeated calls"
-    );
+    let a = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
+    let b = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
+    assert_eq!(a, b, "SpaceToRandomBlank must be deterministic for identical input");
+    // Distinct inputs must produce distinct outputs (not a constant encoder).
+    let c = encode(b"SELECT 1 FROM x".as_ref(), S::SpaceToRandomBlank).unwrap();
+    assert_ne!(a, c, "SpaceToRandomBlank must vary with input");
 }
 
 #[test]
@@ -113,7 +111,9 @@ fn tamper_random_case_negative_unstable() {
 }
 
 #[test]
-fn header_functions_deterministic_except_whitespace_pad_rng() {
+fn header_functions_all_deterministic() {
+    // whitespace_pad was made deterministic (FNV-1a hash of name+value drives
+    // pad width) so bench-waf --seed produces byte-identical output.
     let name = "Content-Type";
     let value = common::unicode_stress();
     assert_eq!(case_mix(name), case_mix(name));
@@ -121,18 +121,19 @@ fn header_functions_deterministic_except_whitespace_pad_rng() {
         tab_separator(name, value.as_str()),
         tab_separator(name, value.as_str())
     );
-
-    let mut varied = false;
-    for _ in 0..40 {
-        let x = whitespace_pad(name, value.as_str());
-        let y = whitespace_pad(name, value.as_str());
-        if x != y {
-            varied = true;
-            break;
-        }
+    assert_eq!(
+        whitespace_pad(name, value.as_str()),
+        whitespace_pad(name, value.as_str()),
+        "whitespace_pad must be deterministic for identical input (bench-safe)"
+    );
+    // Distinct values → distinct pad widths (not a constant encoder).
+    let mut seen = std::collections::HashSet::new();
+    for v in ["a.com", "b.net", "c.org", "d.io", "e.dev"] {
+        seen.insert(whitespace_pad(name, v));
     }
     assert!(
-        varied,
-        "negative twin: whitespace_pad must eventually diverge (RNG padding)"
+        seen.len() >= 2,
+        "whitespace_pad should vary across distinct values, got {} unique outputs",
+        seen.len()
     );
 }

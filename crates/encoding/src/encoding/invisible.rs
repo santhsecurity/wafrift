@@ -331,9 +331,13 @@ mod tests {
 
     #[test]
     fn ligature_encode_replaces_known_digraphs() {
-        let out = ligature_encode("offload official suffix");
-        assert!(out.contains('\u{FB00}'), "ff → ﬀ in 'offload': {out:?}");
+        // "effect"  → ef·ff·ect — `ff` not followed by `i`/`l`, so ﬀ (U+FB00).
+        // "official" → o·ffi·cial — `ffi` matches before `ff`, so ﬃ (U+FB03).
+        // "offload"  → o·ffl·oad — `ffl` matches before `ff`, so ﬄ (U+FB04).
+        let out = ligature_encode("effect official offload");
+        assert!(out.contains('\u{FB00}'), "ff → ﬀ in 'effect': {out:?}");
         assert!(out.contains('\u{FB03}'), "ffi → ﬃ in 'official': {out:?}");
+        assert!(out.contains('\u{FB04}'), "ffl → ﬄ in 'offload': {out:?}");
     }
 
     #[test]
