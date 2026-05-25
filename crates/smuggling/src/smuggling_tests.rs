@@ -1291,6 +1291,45 @@ mod tests {
         }
     }
 
+    /// `malformed_host_split` with a multi-byte UTF-8 host must not panic.
+    ///
+    /// Pre-fix: `host_value.len().min(3)` computed a byte-index that could fall
+    /// inside a multi-byte UTF-8 character, causing `&host_value[..insert_pos]`
+    /// to panic.  E.g. the Japanese character '日' is 3 bytes; slicing a 2-char
+    /// host `"日本"` at byte 3 hits the boundary of the second char OK, but a
+    /// 1-char host `"日"` is exactly 3 bytes and slicing at 3 means "end", which
+    /// is fine — but a 2-byte char preceded by 1 ASCII byte (like `"x£"`) would
+    /// have the `£` span bytes 1-2, and slicing at byte 3 (mid-char) panics.
+    ///
+    /// Fixed: use `char_indices().nth(3)` to find the first safe char boundary
+    /// that is ≥ 3 code-points in.
+    #[test]
+    fn malformed_host_split_multibyte_utf8_no_panic() {
+        // "x£" — 'x' is 1 byte, '£' is 2 bytes (U+00A3). Total = 3 bytes.
+        // Pre-fix slicing at byte-index 3 hit the end (OK), but "日本a" would hit
+        // mid-char. Use a representative mix.
+        let cases = &[
+            "日本語.com",   // 3-byte chars
+            "x£.com",      // 1-byte + 2-byte
+            "€€.eu",       // 3-byte + 3-byte
+            "a",           // shorter than 3 chars
+            "",            // empty
+            "abc",         // exactly 3 ASCII
+            "abcd",        // > 3 ASCII
+        ];
+        for case in cases {
+            // Must not panic.
+            let variants = malformed_host_split(case);
+            assert_eq!(variants.len(), 8, "must always produce 8 variants for input {case:?}");
+            for v in &variants {
+                // Must produce a syntactically valid GET request with a Host header.
+                let s = String::from_utf8_lossy(&v.raw_bytes);
+                assert!(s.contains("Host: "), "multibyte host {case:?} must produce Host header");
+                assert!(s.starts_with("GET / HTTP/1.1\r\n"), "must start with GET request line");
+            }
+        }
+    }
+
     // ── 8. browser_powered_h2_downgrade ─────────────────────────────────────
 
     /// `browser_powered_h2_downgrade` returns an H2Evasion with conflicting CL.
