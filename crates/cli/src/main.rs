@@ -62,6 +62,7 @@ mod smuggle_cmd;
 mod target_context;
 mod technique_filter;
 mod trailer_diff_cmd;
+mod model_evade_cmd;
 mod wafmodel_cmd;
 
 // All per-command helpers are imported by their command modules now.
@@ -176,6 +177,13 @@ enum Commands {
     BypassProbe(bypass_probe::BypassProbeArgs),
     /// Generate a troff man page for `wafrift` (and optionally subcommands).
     Man(man_cmd::ManArgs),
+    /// Active-learning WAF bypass: learn the target's decision boundary
+    /// online (L* membership queries via HTTP), mine bypass candidates
+    /// offline against the learned SFA at ~1M/sec, and verify each online.
+    /// Deduces bypasses from the WAF's decision boundary — not from
+    /// mutation luck. Use `--budget` to cap live queries.
+    #[command(name = "model-evade")]
+    ModelEvade(model_evade_cmd::ModelEvadeArgs),
     /// Decompile a CRS-class ruleset and report the holes an attacker
     /// can drive through it (the WAF X-ray). Zero-config; `--ruleset`
     /// audits a custom Tier-B config.
@@ -687,17 +695,17 @@ struct CompletionArgs {
 }
 fn main() -> ExitCode {
     // Structured tracing — honours RUST_LOG (e.g. `RUST_LOG=wafrift=debug`).
-    // Delegates to santh_tracing so every Santh CLI shares one
-    // subscriber init path; the InitConfig knobs reproduce the
-    // pre-wire hand-rolled `tracing_subscriber::fmt()...compact()`
-    // shape byte-for-byte: stderr writer, target field on, single-
-    // line compact format, fallback to `warn` when RUST_LOG is unset.
-    let _ = santh_tracing::init_with(
-        santh_tracing::InitConfig::new("wafrift", santh_tracing::LogLevel::Warn)
-            .with_target(true)
-            .stderr()
-            .compact(),
-    );
+    // Compact single-line format on stderr; target field on; fallback to `warn`
+    // when RUST_LOG is unset.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .with_target(true)
+        .compact()
+        .with_writer(std::io::stderr)
+        .try_init();
 
     // Pentesters routinely pipe wafrift's output to `head`, `jq`, `grep
     // -m 1`, etc. Rust's default behaviour is to ignore SIGPIPE and
@@ -1025,6 +1033,7 @@ fn main() -> ExitCode {
             }
         },
         Some(Commands::Man(args)) => man_cmd::run_man(args),
+        Some(Commands::ModelEvade(args)) => model_evade_cmd::run_model_evade(args),
         Some(Commands::Audit(args)) => wafmodel_cmd::run_audit(args),
         Some(Commands::Harden(args)) => wafmodel_cmd::run_harden(args),
         Some(Commands::Legendary(args)) => legendary::run_legendary(args),

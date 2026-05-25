@@ -171,7 +171,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     let req = Request::with_method(method.clone(), target_url)
         .header(
             "User-Agent",
-            guise::profile::ua::DEFAULT_CHROME_WINDOWS.ua_string,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         )
         .header("Accept", "*/*");
 
