@@ -512,14 +512,15 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn run_gql_diff_finds_introspection_leak_on_permissive_mock() {
         let addr = spawn_gql_mock().await;
         let args = GqlDiffArgs {
             url: format!("http://{addr}/graphql"),
             delay_ms: 0,
             concurrency: 4,
-            timeout_secs: 8,
+            // 30s: Windows loopback + starved current_thread runtime.
+            timeout_secs: 30,
             insecure: false,
             proxy: None,
             header: Vec::new(),

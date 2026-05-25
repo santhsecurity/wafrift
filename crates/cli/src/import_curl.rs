@@ -922,7 +922,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_parsed_applies_headers_cookie_and_user_agent() {
         // Stands up a one-shot localhost server that echoes back the
         // headers it received. Verifies send_parsed pushes

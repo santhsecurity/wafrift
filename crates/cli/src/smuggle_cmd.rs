@@ -1105,7 +1105,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn time_first_byte_returns_timeout_value_when_server_silent() {
         // Spawn a TcpListener that accepts the connection and
         // does NOTHING — never writes a response. Confirms our
@@ -1152,7 +1152,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn time_first_byte_returns_quickly_when_server_responds() {
         // `#[serial_test::serial]` — binds a fresh `127.0.0.1:0`
         // listener; under Windows parallel test runs the ephemeral-

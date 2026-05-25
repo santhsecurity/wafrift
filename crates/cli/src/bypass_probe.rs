@@ -1234,7 +1234,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn retry_after_extends_cooldown_across_subsequent_probes() {
         // Server: baseline 200, next 2 probes return 429 + Retry-After:1,
         // the rest return 200. After the first concurrent batch trips
