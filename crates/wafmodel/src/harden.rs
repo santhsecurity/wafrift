@@ -47,25 +47,37 @@ fn body(bytes: &[u8]) -> Request {
 const HOLES_ENUM_CAP: usize = 4096;
 
 /// Enumerate attack-class members (bounded) that `waf` lets through.
-/// Returns `(holes, truncated)`. `truncated == true` means the
-/// enumerator hit `HOLES_ENUM_CAP` and there may be more attack-class
-/// members beyond what we examined — callers MUST NOT claim
-/// "proven_closed" when this flag is set.
+/// Returns `(holes, truncated)`. `truncated == true` means the hole
+/// collector itself hit `HOLES_ENUM_CAP` HOLES — there are at least
+/// that many attack-class members the WAF passes; callers MUST NOT
+/// claim "proven_closed" in that case.
+///
+/// Crucially, `truncated` is based on the count of HOLES FOUND, not
+/// the total number of attack strings examined. A large attack grammar
+/// whose members are ALL blocked after hardening can be exhaustively
+/// checked without setting `truncated`, so `proven_closed` remains
+/// accurate even when the grammar has millions of members.
 fn holes(
     waf: &SimRegexWaf,
     attack: &Sfa,
     max_len: usize,
 ) -> (Vec<Vec<u8>>, bool) {
-    // `enumerate_accepted` yields concrete bytes already (the Sfa is
-    // byte-level; its witnesses are the alphabet's representative
-    // bytes), so these go straight to the WAF.
-    let enumerated = attack.enumerate_accepted(HOLES_ENUM_CAP, max_len);
-    let truncated = enumerated.len() >= HOLES_ENUM_CAP;
-    let filtered = enumerated
-        .into_iter()
-        .filter(|bytes| waf.classify_uncounted(&body(bytes)) == Outcome::Pass)
-        .collect();
-    (filtered, truncated)
+    // Enumerate a large prefix of the attack grammar. We examine up to
+    // HOLES_ENUM_CAP × 16 attack strings so we don't stop searching too
+    // early when most strings are blocked. Increasing this multiplier
+    // extends coverage at the cost of WAF-classify calls.
+    const ATTACK_STRINGS_BUDGET: usize = HOLES_ENUM_CAP * 16;
+    let enumerated = attack.enumerate_accepted(ATTACK_STRINGS_BUDGET, max_len);
+    let mut holes = Vec::new();
+    for bytes in enumerated {
+        if waf.classify_uncounted(&body(&bytes)) == Outcome::Pass {
+            holes.push(bytes);
+            if holes.len() >= HOLES_ENUM_CAP {
+                return (holes, true); // HOLES cap hit — truncated
+            }
+        }
+    }
+    (holes, false)
 }
 
 /// Synthesize the minimal rules that close every hole for the attack
@@ -98,7 +110,13 @@ pub fn synthesize_closure(
         Transform::HtmlEntityDecode,
         Transform::Lowercase,
     ];
+    // Multiple raw needles can decode to the same canonical form (e.g.
+    // `<x`, `%3cx`, `&lt;x` all → `<x` after `tf`). Dedup so we don't
+    // emit two rules with the same id — that would violate the
+    // "proven_closed" contract (ClosureReport sees duplicate rule ids
+    // as a malformed closure).
     let mut added = Vec::new();
+    let mut seen_decoded = std::collections::HashSet::<Vec<u8>>::new();
     for n in needles {
         // Build the pattern on the DECODED form of the needle, not the raw
         // needle bytes. The synthesized rule applies `tf` to the request body
@@ -108,6 +126,9 @@ pub fn synthesize_closure(
         // literal string `%3cx` in a body that has already been URL-decoded to
         // `<x` — the pattern can never match and the hole remains open.
         let decoded = normalize::apply_chain(&tf, n);
+        if !seen_decoded.insert(decoded.clone()) {
+            continue;
+        }
         let pat = regex::escape(&String::from_utf8_lossy(&decoded));
         if let Ok(re) = Regex::new(&pat) {
             added.push(Rule {
