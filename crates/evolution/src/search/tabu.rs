@@ -86,7 +86,7 @@ impl SearchAlgorithm for TabuSearch {
         let mut attempts = 0;
         while out.len() < n && attempts < n * 10 {
             attempts += 1;
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let candidate = self.neighbor(rng);
             let hash = candidate.hash();
             // Tabu check. The aspiration criterion ("allow a tabu move
@@ -121,7 +121,7 @@ impl SearchAlgorithm for TabuSearch {
                 }
             }
         }
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn should_terminate(&self, stats: &SearchStats, budget: &Budget) -> bool {

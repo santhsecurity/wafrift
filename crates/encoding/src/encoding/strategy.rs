@@ -24,6 +24,23 @@ use crate::error::EncodeError;
 /// Maximum input payload size to prevent OOM on adversarial input.
 pub const MAX_PAYLOAD_SIZE: usize = 8 * 1024 * 1024;
 
+/// Default chunk size for `Strategy::ChunkedSplit`.
+///
+/// 1 KiB chunks are large enough to avoid excessive chunk-count overhead
+/// on typical SQLi payloads (< 1 KB) while small enough that a WAF
+/// scanning only the first chunk misses the rest. Callers needing a
+/// different split granularity can call `structural::chunked_split` directly.
+pub const CHUNKED_SPLIT_DEFAULT_CHUNK_SIZE: usize = 1024;
+
+/// MySQL version number used in `/*!VERSIONKEYWORD*/` versioned comments.
+///
+/// `50000` = MySQL 5.0.0, the baseline for the `/*!...*/` conditional-
+/// execution syntax. Any MySQL 5.0+ instance will execute the wrapped
+/// keyword; WAFs that don't implement the MySQL comment parser will skip it.
+/// Virtually every production MySQL installation targeted by Cloudflare
+/// CumulusFire runs >= 5.0.0.
+pub const MYSQL_VERSIONED_COMMENT_VERSION: u32 = 50_000;
+
 /// Available encoding strategies.
 ///
 /// # Context hints
@@ -343,13 +360,13 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
         }
         Strategy::MysqlVersionedComment => {
             let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
-            Ok(mysql_versioned_comment(text, 50_000))
+            Ok(mysql_versioned_comment(text, MYSQL_VERSIONED_COMMENT_VERSION))
         }
         Strategy::NullByte => Ok(null_byte_inject(payload)?),
         Strategy::OverlongUtf8 => Ok(overlong_utf8(payload)?),
         Strategy::OverlongUtf8More => Ok(overlong_utf8_more(payload)?),
         Strategy::ChunkedSplit => {
-            let body = chunked_split(payload, 1024)?.body;
+            let body = chunked_split(payload, CHUNKED_SPLIT_DEFAULT_CHUNK_SIZE)?.body;
             String::from_utf8(body).map_err(|_| EncodeError::InvalidUtf8)
         }
         Strategy::ParameterPollution => Ok(parameter_pollute(payload)?),

@@ -73,7 +73,7 @@ impl SearchAlgorithm for SimulatedAnnealing {
     fn request_evaluations(&mut self, n: usize, rng: &mut StdRng) -> Vec<EvalCandidate> {
         let mut out = Vec::with_capacity(n);
         for _ in 0..n {
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             out.push(EvalCandidate {
                 id: self.eval_counter,
                 chromosome: self.neighbor(rng),
@@ -104,7 +104,7 @@ impl SearchAlgorithm for SimulatedAnnealing {
                 }
             }
         }
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
         self.temperature = (self.temperature * self.cooling_rate).max(self.min_temperature);
     }
 
