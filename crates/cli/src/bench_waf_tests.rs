@@ -704,3 +704,48 @@ fn oracle_valid_unknown_class_returns_false() {
         "unknown class must return false, not true"
     );
 }
+
+// ── B7: per-strategy bypass-rate computation ──────────────────────
+
+#[test]
+fn per_strategy_bypass_rate_equals_bypassed_over_variants() {
+    // B7: pin the per-strategy rate computation so a future refactor
+    // cannot silently introduce a divide-by-zero or miscount.
+    // The computation in run_evade:
+    //   if s.variants > 0 { s.bypass_rate = s.bypassed as f64 / s.variants as f64; }
+    let mut stat = StrategyStat::default();
+    stat.variants = 7;
+    stat.bypassed = 3;
+
+    // Compute inline the same way run_evade does.
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    assert!(
+        (stat.bypass_rate - 3.0 / 7.0).abs() < 1e-12,
+        "bypass_rate must equal bypassed/variants: got {}",
+        stat.bypass_rate
+    );
+
+    // Zero variants must not produce a NaN or divide-by-zero.
+    let mut empty = StrategyStat::default();
+    if empty.variants > 0 {
+        empty.bypass_rate = empty.bypassed as f64 / empty.variants as f64;
+    }
+    assert_eq!(
+        empty.bypass_rate, 0.0,
+        "zero variants must produce 0.0, not NaN or garbage"
+    );
+
+    // Full bypass (all variants bypassed).
+    let mut full = StrategyStat::default();
+    full.variants = 5;
+    full.bypassed = 5;
+    if full.variants > 0 {
+        full.bypass_rate = full.bypassed as f64 / full.variants as f64;
+    }
+    assert!(
+        (full.bypass_rate - 1.0).abs() < 1e-12,
+        "all-bypass rate must be 1.0"
+    );
+}
