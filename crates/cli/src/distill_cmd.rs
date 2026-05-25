@@ -107,7 +107,8 @@ pub struct DistillArgs {
 }
 
 /// Entry point — dispatched from `main::Commands::Distill`.
-pub async fn run_distill(args: DistillArgs, cancel: CancellationToken) -> ExitCode {
+pub async fn run_distill(mut args: DistillArgs, cancel: CancellationToken) -> ExitCode {
+    args.target = crate::helpers::normalize_target_url(&args.target);
     if args.payload.is_empty() {
         eprintln!(
             "{} --payload must not be empty",
