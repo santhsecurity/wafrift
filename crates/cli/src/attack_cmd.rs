@@ -286,9 +286,18 @@ fn push_common_flags(out: &mut Vec<String>, args: &AttackArgs) {
 
 /// Spawn one `wafrift <subcmd> ...` subprocess, await it under a
 /// timeout, and parse the JSON output into a `Value`. On any
-/// failure (subprocess didn't launch, returned non-zero, returned
-/// non-JSON, timed out) returns the error string — the orchestrator
-/// converts it into a structured `{ "error": "..." }` value.
+/// failure (subprocess didn't launch, returned non-JSON, timed out)
+/// returns the error string — the orchestrator converts it into a
+/// structured `{ "error": "..." }` value.
+///
+/// Exit code handling:
+/// - 0 = success, parse JSON from stdout.
+/// - 6 = `h2-diff` inconclusive (all H2 probes failed: H1-only
+///   target, ALPN mismatch). stdout still carries valid JSON; parse
+///   it. Do NOT treat this as an error — the operator should see
+///   "H2 not reachable on this target" from the sub-probe's JSON,
+///   not "subprobe h2-diff exited 6 — stderr: …".
+/// - any other non-zero = genuine error; surface as Err.
 async fn spawn_subprobe(subcmd: &str, args: &[String], timeout_secs: u64) -> Result<Value, String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("could not locate current wafrift exe: {e}"))?;
@@ -300,7 +309,15 @@ async fn spawn_subprobe(subcmd: &str, args: &[String], timeout_secs: u64) -> Res
         .await
         .map_err(|_| format!("subprobe {subcmd} timed out after {timeout_secs}s"))?
         .map_err(|e| format!("subprobe {subcmd} failed to launch: {e}"))?;
-    if !result.status.success() {
+    let exit_code = result.status.code().unwrap_or(-1);
+    let is_ok = result.status.success()
+        // Exit 6 = h2-diff "inconclusive" (all H2 legs failed to negotiate).
+        // The stdout still carries valid JSON; don't surface it as an error
+        // to the `attack` orchestrator — let the sub-probe's JSON speak for
+        // itself (it says "h2_errors == total_probes", which is informative,
+        // not a subprobe crash).
+        || exit_code == 6;
+    if !is_ok {
         let stderr = String::from_utf8_lossy(&result.stderr).to_string();
         return Err(format!(
             "subprobe {subcmd} exited {} — stderr: {stderr}",

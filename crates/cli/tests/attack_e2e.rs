@@ -160,6 +160,58 @@ fn attack_marks_subprobe_failures_without_taking_down_the_whole_run() {
     }
 }
 
+/// Regression test for the h2-diff exit-6 false-error bug.
+///
+/// h2-diff exits 6 when all H2 probes fail (H1-only target — see F78).
+/// Pre-fix: `attack` treated exit 6 as an error and surfaced
+/// `"error": "subprobe h2-diff exited 6 — stderr: …"` in the unified
+/// report. After the fix, exit 6 is recognized as a valid "inconclusive
+/// but parseable" result and the h2 sub-probe object must NOT have an
+/// "error" field.
+#[serial_test::serial]
+#[test]
+fn attack_h2_exit6_is_not_treated_as_subprobe_error() {
+    // Spawn an H1-only mock (never speaks H2). h2-diff will exit 6.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .unwrap();
+    let addr = rt.block_on(spawn_mock());
+
+    let (code, stdout, stderr) = wafrift(&[
+        "attack",
+        &format!("http://{addr}/path"),
+        "--format",
+        "json",
+        "--quiet",
+        "--delay-ms",
+        "0",
+        "--timeout-secs",
+        "3",
+        "--probe-timeout-secs",
+        "30",
+    ]);
+    assert_eq!(
+        code, 0,
+        "attack must exit 0 even when h2-diff exits 6 — stderr:\n{stderr}"
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let h2 = &parsed["probes"]["h2"];
+    assert!(
+        h2.get("error").is_none(),
+        "h2 sub-probe must not have an 'error' field when h2-diff exits 6 (inconclusive); \
+         got: {h2}"
+    );
+    // h2_errors must be present (h2-diff always emits it, exit 6 included).
+    // Can't assert > 0 because in some envs HTTP/1.1 mock still negotiates H2 via ALPN.
+    assert!(
+        h2.get("h2_errors").is_some() || h2.get("probes").is_some(),
+        "h2 sub-probe JSON must have h2_errors or probes field: {h2}"
+    );
+}
+
 #[test]
 fn attack_help_documents_orchestrator_role() {
     let (code, stdout, _) = wafrift(&["attack", "--help"]);
