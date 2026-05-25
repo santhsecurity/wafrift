@@ -67,6 +67,22 @@ pub struct EvasionConfig {
     /// (2026-05-10).
     #[serde(default)]
     pub allow_private_upstream: bool,
+
+    /// Weight for the ensemble sub-score dilution component in evolutionary
+    /// fitness scoring (`--dilution-weight`). Range `[0.0, 1.0]`.
+    ///
+    /// When `> 0`, the evolution engine blends a dilution-plausibility
+    /// score (from `wafrift-wafmodel::ensemble_dilution`) into the oracle
+    /// fitness at submission time:
+    ///   `final_fitness = oracle_fitness * (1 - w) + dilution_score * w`
+    ///
+    /// Only active when the target WAF fingerprint shows a multi-rule-group
+    /// ensemble (Cloudflare Managed Rules, AWS Core Rule Set). On non-ensemble
+    /// WAFs this field has no effect regardless of value.
+    ///
+    /// Default `0.0` (disabled) — callers opt in explicitly via CLI or TOML.
+    #[serde(default)]
+    pub dilution_weight: f64,
 }
 
 impl Default for EvasionConfig {
@@ -86,6 +102,7 @@ impl Default for EvasionConfig {
             body_padding_bytes: 0,
             mutate_url: false,
             allow_private_upstream: false,
+            dilution_weight: 0.0,
         }
     }
 }
@@ -109,6 +126,7 @@ impl EvasionConfig {
             body_padding_bytes: 0,
             mutate_url: false,
             allow_private_upstream: false,
+            dilution_weight: 0.0,
         }
     }
 
@@ -138,6 +156,9 @@ impl EvasionConfig {
             // loopback / RFC1918 targets are normal. Stays false in
             // production via the default; flips true here.
             allow_private_upstream: true,
+            // maximum() enables dilution scoring at the recommended
+            // operational weight. Callers that don't want it use default().
+            dilution_weight: 0.3,
         }
     }
 
