@@ -30,6 +30,7 @@ use wafrift_evolution::types::Budget;
 use wafrift_grammar::grammar::{self, PayloadType};
 use wafrift_smuggling::smuggling::all_payloads as smuggling_all_payloads;
 use wafrift_strategy::{EvasionConfig, evade_mcts};
+use wafrift_strategy::gene_bank::GeneBank;
 use wafrift_types::Request;
 
 use crate::Level;
@@ -181,6 +182,19 @@ pub struct BenchWafArgs {
     /// no chromosome.
     #[arg(long)]
     pub lineage_output: Option<PathBuf>,
+
+    /// Restrict gene-bank writes to this payload class (sql, xss, cmdi, ...).
+    /// When set, persists stats under this class key so future scans
+    /// warm-start from class-specific winners. Uses per-case class from
+    /// the corpus when unset. Only effective when --evade + --waf-name are set.
+    #[arg(long)]
+    pub payload_class: Option<String>,
+
+    /// WAF vendor name for gene-bank persistence (e.g. "Cloudflare",
+    /// "ModSecurity"). When set with --evade, per-class bypass stats
+    /// are merged into the gene bank after the bench completes.
+    #[arg(long)]
+    pub waf_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -733,6 +747,61 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
                 corpus.entries.len(),
                 path.display()
             );
+        }
+    }
+
+    // Gene Bank (C1): persist per-class bypass stats so subsequent bench/scan
+    // runs against the same WAF warm-start from class-specific winners.
+    // Runs only when --evade AND --waf-name are both set; skips silently otherwise.
+    if args.evade {
+        if let Some(waf_name) = args.waf_name.as_deref() {
+            let mut class_stats: std::collections::HashMap<
+                String,
+                std::collections::HashMap<String, (u32, u32)>,
+            > = std::collections::HashMap::new();
+
+            for result in &results {
+                if let Some(evaded) = &result.evaded {
+                    let class = args
+                        .payload_class
+                        .as_deref()
+                        .unwrap_or(result.class.as_str())
+                        .to_string();
+                    let class_map = class_stats.entry(class).or_default();
+                    for (strat, stat) in &evaded.by_strategy {
+                        if stat.variants == 0 {
+                            continue;
+                        }
+                        let e = class_map.entry(strat.clone()).or_insert((0u32, 0u32));
+                        e.0 = e.0.saturating_add(stat.bypassed as u32);
+                        e.1 = e.1.saturating_add(stat.variants as u32);
+                    }
+                }
+            }
+
+            match GeneBank::open_default() {
+                Ok(mut bank) => {
+                    for (class, tech_map) in &class_stats {
+                        let stats: Vec<(String, u32, u32)> = tech_map
+                            .iter()
+                            .map(|(name, (s, a))| (name.clone(), *s, *a))
+                            .collect();
+                        if stats.is_empty() {
+                            continue;
+                        }
+                        match bank.merge_and_save_for_class(waf_name, class, &stats) {
+                            Ok(()) => eprintln!(
+                                "gene bank: {} technique(s) saved for {waf_name}/{class}",
+                                stats.len()
+                            ),
+                            Err(e) => eprintln!(
+                                "warn: gene bank save failed for {waf_name}/{class}: {e}"
+                            ),
+                        }
+                    }
+                }
+                Err(e) => eprintln!("warn: could not open gene bank: {e}"),
+            }
         }
     }
 
@@ -1466,11 +1535,19 @@ async fn run_smuggling_strategy(
         .trim_end_matches('/')
         .to_string();
     // Build the smuggled prefix as a POST containing the payload.
+    // Content-Length must reflect the BYTE LENGTH of the body
+    // actually on the wire — `q=` + URL-encoded payload. Pre-fix
+    // the CL was computed on the RAW payload length (`+ 2` for
+    // `q=`), but the body sent was URL-encoded: every `<`, `>`,
+    // `&`, `"`, space, and non-ASCII byte expanded to 3-byte
+    // `%XX`. A `<script>` payload (raw 8 bytes) URL-encodes to
+    // 28 bytes, so CL would be 10 while body was 30 — server
+    // truncates the body mid-payload AND falsely records a WAF
+    // block in the bench score.
+    let encoded_body = format!("q={}", urlencoding::encode(&case.payload));
     let smuggled = format!(
-        "POST /post HTTP/1.1\r\nHost: {}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\nq={}",
-        host,
-        case.payload.len() + 2,
-        urlencoding::encode(&case.payload)
+        "POST /post HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{encoded_body}",
+        encoded_body.len()
     );
     let payloads = match smuggling_all_payloads(&host, &smuggled) {
         Ok(p) => p,
@@ -1934,7 +2011,6 @@ fn truncate(s: &str, n: usize) -> String {
     }
     format!("{}…", &s[..end])
 }
-
 
 #[cfg(test)]
 #[path = "bench_waf_tests.rs"]
