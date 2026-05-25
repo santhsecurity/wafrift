@@ -32,6 +32,9 @@
 
 pub mod h2_evasion;
 pub mod parser;
+pub mod rapid_reset;
 pub mod rules;
 pub mod safety;
 pub mod smuggling;
+pub mod sse_smuggle;
+pub mod ws_fragmentation;
