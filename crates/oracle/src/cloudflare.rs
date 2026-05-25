@@ -382,14 +382,26 @@ fn classify_block_class(
     body_has_manual_review: bool,
     body_has_rate_limit: bool,
 ) -> BlockClass {
-    // Rate limiting wins early — 429 with Retry-After is unambiguous.
-    if has_retry_after || body_has_rate_limit {
+    // `Retry-After` header is the strongest unambiguous rate-limit signal —
+    // it wins over everything, even an explicit cf-mitigated header, because
+    // a cf-mitigated:block response that ALSO carries Retry-After is CF's
+    // way of combining a temporary ban with a structured retry directive.
+    if has_retry_after {
         return BlockClass::RateLimited;
     }
 
     if let Some(reason) = mitigated_reason {
         return match reason.as_str() {
-            "block" => BlockClass::ManagedRulesetBlock,
+            "block" => {
+                // cf-mitigated: block is a strong explicit signal that takes
+                // priority over weak body-text rate-limit patterns.  A block
+                // page that mentions "rate limit" in its footer (e.g. CF's own
+                // "your IP was rate-limited and then blocked" copy) must NOT
+                // be reclassified — only an explicit header or a body-only
+                // rate-limit page without cf-mitigated should trigger
+                // RateLimited.
+                BlockClass::ManagedRulesetBlock
+            }
             "challenge" => {
                 if body_has_turnstile {
                     BlockClass::Captcha
@@ -401,16 +413,29 @@ fn classify_block_class(
             }
             "jschallenge" | "managed_challenge" => BlockClass::BotChallenge,
             "rate-limit" => BlockClass::RateLimited,
-            _ => classify_from_body(
-                body_has_jschl,
-                body_has_challenge_platform,
-                body_has_turnstile,
-                body_has_under_attack,
-                body_has_browser_check,
-                body_has_blocked_phrase,
-                body_has_manual_review,
-            ),
+            _ => {
+                // Unknown mitigated value: fall back to body signals, including
+                // weak body-text rate-limit patterns.
+                if body_has_rate_limit {
+                    return BlockClass::RateLimited;
+                }
+                classify_from_body(
+                    body_has_jschl,
+                    body_has_challenge_platform,
+                    body_has_turnstile,
+                    body_has_under_attack,
+                    body_has_browser_check,
+                    body_has_blocked_phrase,
+                    body_has_manual_review,
+                )
+            }
         };
+    }
+
+    // No cf-mitigated header: body-text rate-limit patterns are the only
+    // signal available, so they're authoritative in this branch.
+    if body_has_rate_limit {
+        return BlockClass::RateLimited;
     }
 
     classify_from_body(
@@ -1219,5 +1244,188 @@ mod tests {
         let hdrs = vec![h("cf-ray", "34bc7d8e9f0a1b2c-ABU")];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("challenge-loop"));
+    }
+
+    // ── Bug fix tests: cf-mitigated:block must not be overridden by body
+    //    rate-limit text (weak signal).  Retry-After (strong) still wins. ────
+
+    #[test]
+    fn block_mitigated_with_rate_limit_body_text_stays_managed_block() {
+        // A block page that mentions "too many requests" in its body (e.g. a
+        // CF custom block page template that includes rate-limit copy) must NOT
+        // be reclassified as RateLimited when cf-mitigated: block is present.
+        let body = b"<html><body>\
+            <h1>Sorry, you have been blocked</h1>\
+            <p>Too many requests from this IP. Please contact support.</p>\
+            </body></html>";
+        let hdrs = vec![
+            h("cf-ray", "45cd8e9f0a1b2c3d-AMS"),
+            h("cf-mitigated", "block"),
+        ];
+        let sig = parse_cf_block(&hdrs, body);
+        // cf-mitigated: block must win over body text "too many requests"
+        assert_eq!(
+            sig.block_class,
+            BlockClass::ManagedRulesetBlock,
+            "cf-mitigated:block must not be overridden by body rate-limit text"
+        );
+    }
+
+    #[test]
+    fn block_mitigated_with_rate_limit_phrase_stays_managed_block() {
+        // "rate limit" in the body footer should not override cf-mitigated: block
+        let body = b"<html><body>\
+            <h1>Access Denied</h1>\
+            <p>This site enforces a rate limit on suspicious traffic.</p>\
+            </body></html>";
+        let hdrs = vec![
+            h("cf-ray", "56de9f0a1b2c3d4e-CDG"),
+            h("cf-mitigated", "block"),
+        ];
+        let sig = parse_cf_block(&hdrs, body);
+        assert_eq!(sig.block_class, BlockClass::ManagedRulesetBlock);
+    }
+
+    #[test]
+    fn no_mitigated_header_rate_limit_body_is_rate_limited() {
+        // Without cf-mitigated, body "too many requests" is the only signal
+        // and should correctly produce RateLimited.
+        let body = b"<html><body><h1>Too Many Requests</h1></body></html>";
+        let hdrs = vec![h("cf-ray", "67ef0a1b2c3d4e5f-DFW")];
+        let sig = parse_cf_block(&hdrs, body);
+        assert_eq!(sig.block_class, BlockClass::RateLimited);
+    }
+
+    #[test]
+    fn retry_after_overrides_block_mitigated_to_rate_limited() {
+        // Retry-After header (strong) must still win even over cf-mitigated: block —
+        // this is the "temporary ban with retry directive" CF pattern.
+        let hdrs = vec![
+            h("cf-ray", "78f00b1c2d3e4f5a-EWR"),
+            h("cf-mitigated", "block"),
+            h("retry-after", "120"),
+        ];
+        let sig = parse_cf_block(&hdrs, b"<html><body>Blocked.</body></html>");
+        assert_eq!(sig.block_class, BlockClass::RateLimited);
+    }
+
+    #[test]
+    fn unknown_mitigated_with_rate_limit_body_is_rate_limited() {
+        // An unknown cf-mitigated value falls back to body signals,
+        // where body-text rate-limit IS authoritative.
+        let body = b"<html><body><h1>Too Many Requests</h1><p>rate-limit exceeded</p></body></html>";
+        let hdrs = vec![
+            h("cf-ray", "890a1c2d3e4f5a6b-HKG"),
+            h("cf-mitigated", "redirect"),
+        ];
+        let sig = parse_cf_block(&hdrs, body);
+        assert_eq!(sig.block_class, BlockClass::RateLimited);
+    }
+
+    // ── Adversarial fixture tests ─────────────────────────────────────────
+
+    #[test]
+    fn malformed_utf8_body_does_not_panic() {
+        // Responses with invalid UTF-8 sequences (truncated multi-byte,
+        // overlong encodings, surrogate pairs) must not panic.  The parser
+        // must fall back gracefully to an empty body.
+        let body: Vec<u8> = vec![0xff, 0xfe, 0x00, 0x41, 0x42, 0x43, 0x80, 0x81];
+        let hdrs = vec![h("cf-ray", "9a1b2c3d4e5f6a7b-IAD"), h("cf-mitigated", "block")];
+        let sig = parse_cf_block(&hdrs, &body);
+        // Must not panic; block_class may be Unknown (body unreadable) or
+        // ManagedRulesetBlock (from cf-mitigated header alone).
+        assert!(sig.is_cloudflare_response());
+        // cf-mitigated: block wins even when body is garbage
+        assert_eq!(sig.block_class, BlockClass::ManagedRulesetBlock);
+    }
+
+    #[test]
+    fn nul_bytes_in_body_do_not_panic() {
+        // NUL bytes embedded in an otherwise valid body must not crash the
+        // parser.  Some WAFs inject NUL bytes as anti-scraping measures.
+        let mut body = b"<html><body>Sorry, you have been blocked\x00\x00</body></html>".to_vec();
+        body.push(0x00);
+        let hdrs = vec![h("cf-ray", "ab2c3d4e5f6a7b8c-ORD")];
+        let sig = parse_cf_block(&hdrs, &body);
+        // NUL bytes after valid UTF-8 are ignored by str::from_utf8 fallback
+        // but from_utf8_lossy keeps the valid prefix — "blocked" phrase fires.
+        assert!(sig.is_cloudflare_response());
+    }
+
+    #[test]
+    fn empty_header_value_does_not_panic() {
+        // Empty cf-ray and cf-mitigated values must not cause panics or
+        // incorrect edge_pop extraction.
+        let hdrs = vec![
+            h("cf-ray", ""),
+            h("cf-mitigated", ""),
+            h("server", "cloudflare"),
+        ];
+        let sig = parse_cf_block(&hdrs, b"");
+        // Empty cf-ray: rsplit('-').next() returns "" which has len 0 != 3 → None
+        assert_eq!(sig.edge_pop, None);
+        // Empty cf-mitigated: stored as empty string, not None
+        assert_eq!(sig.mitigated_reason.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn mixed_encoding_body_cf_error_extraction() {
+        // Bodies with latin-1 / windows-1252 high bytes mixed into otherwise
+        // ASCII content — str::from_utf8 will fail, should fall back to empty
+        // body rather than returning garbage extracted codes.
+        let mut body = b"<!-- error code: 1020 -->".to_vec();
+        body.extend_from_slice(&[0xc0, 0x80]); // overlong NUL in modified UTF-8
+        body.extend_from_slice(b"<h1>blocked</h1>");
+        let hdrs = vec![h("cf-ray", "bc3d4e5f6a7b8c9d-MIA"), h("cf-mitigated", "block")];
+        let sig = parse_cf_block(&hdrs, &body);
+        // Even with mixed encoding, the parser must not panic.
+        // It may or may not extract the error code depending on from_utf8 result.
+        assert!(sig.is_cloudflare_response());
+        assert_eq!(sig.block_class, BlockClass::ManagedRulesetBlock);
+    }
+
+    #[test]
+    fn very_long_body_does_not_stack_overflow() {
+        // 512 KB of repeated block-page content — must complete without stack
+        // overflow and return a result within bounded time.
+        let chunk = b"<html><body><p>Sorry, you have been blocked.</p>";
+        let body: Vec<u8> = chunk.iter().cloned().cycle().take(512 * 1024).collect();
+        let hdrs = vec![h("cf-ray", "cd4e5f6a7b8c9d0e-LHR"), h("cf-mitigated", "block")];
+        let sig = parse_cf_block(&hdrs, &body);
+        assert_eq!(sig.block_class, BlockClass::ManagedRulesetBlock);
+    }
+
+    #[test]
+    fn cve_id_with_insufficient_digit_count_is_not_extracted() {
+        // CVE IDs with fewer than 4 trailing digits must not fire — "CVE-2021-123"
+        // is not a valid CVE ID (needs >= 4 digits in the sequence number).
+        let body = b"<html><body><p>Matched CVE-2021-123 heuristic.</p></body></html>";
+        let hdrs = vec![h("cf-ray", "de5f6a7b8c9d0e1f-SYD")];
+        let sig = parse_cf_block(&hdrs, body);
+        // Should not extract CVE-2021-123 (only 3 digit suffix)
+        assert_ne!(sig.ruleset_hint.as_deref(), Some("CVE-2021-123"));
+    }
+
+    #[test]
+    fn cf_ray_with_only_a_dash_produces_no_edge_pop() {
+        // cf-ray = "-" → rsplit('-') yields ["", ""] → first = "" → len 0 ≠ 3 → None
+        let hdrs = vec![h("cf-ray", "-")];
+        let sig = parse_cf_block(&hdrs, b"");
+        assert_eq!(sig.edge_pop, None);
+        assert_eq!(sig.cf_ray.as_deref(), Some("-"));
+    }
+
+    #[test]
+    fn multiple_cf_ray_headers_last_one_wins() {
+        // HTTP/2 allows duplicate header names; the parser processes them in
+        // order so the last `cf-ray` entry wins (same as most HTTP stacks).
+        let hdrs = vec![
+            h("cf-ray", "first-SJC"),
+            h("cf-ray", "second-LHR"),
+        ];
+        let sig = parse_cf_block(&hdrs, b"");
+        // The last cf-ray processed overwrites the earlier one.
+        assert_eq!(sig.cf_ray.as_deref(), Some("second-LHR"));
+        assert_eq!(sig.edge_pop.as_deref(), Some("LHR"));
     }
 }
