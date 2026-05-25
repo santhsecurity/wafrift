@@ -60,5 +60,8 @@ pub mod dilution;
 pub mod evolution;
 pub mod intelligence;
 pub mod lineage;
+/// Persistent per-rule bypass corpus — accumulates rule-level bypass records
+/// across hunt rounds and surfaces them to the genome-registry submission gate.
+pub mod rule_corpus;
 pub mod search;
 pub mod types;
