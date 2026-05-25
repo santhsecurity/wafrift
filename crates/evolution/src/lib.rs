@@ -77,5 +77,10 @@ pub mod h1_dedup;
 /// systematic-search engine the hunt loop uses to fill the
 /// (rule × class) cells of the corpus.
 pub mod encoding_lattice;
+/// Cross-region CF edge-POP coverage map. Tracks
+/// `(egress_label, target_host) → seen-POPs` so the hunt loop can
+/// bias rotation toward egresses that haven't yet hit a given POP,
+/// detect anycast pinning early, and report total POP coverage.
+pub mod edge_pop_coverage;
 pub mod search;
 pub mod types;
