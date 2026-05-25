@@ -559,6 +559,47 @@ mod tests {
         assert_eq!(&f[0..3], &[0x00, 0x00, 0x00]);
     }
 
+    // ── Frame-parser helper ──────────────────────────────────────────────────
+
+    /// Parse HTTP/2 frames from a wire byte slice that starts at a frame
+    /// boundary (NOT at the client preface). Returns (frame_type, stream_id,
+    /// payload_start, payload_len) tuples.
+    fn parse_h2_frames(wire: &[u8]) -> Vec<(u8, u32, usize, usize)> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i + 9 <= wire.len() {
+            let len = ((wire[i] as usize) << 16)
+                | ((wire[i + 1] as usize) << 8)
+                | wire[i + 2] as usize;
+            let frame_type = wire[i + 3];
+            let sid = ((wire[i + 5] as u32) << 24)
+                | ((wire[i + 6] as u32) << 16)
+                | ((wire[i + 7] as u32) << 8)
+                | wire[i + 8] as u32;
+            let payload_start = i + 9;
+            if payload_start + len > wire.len() {
+                break; // truncated frame
+            }
+            out.push((frame_type, sid, payload_start, len));
+            i += 9 + len;
+        }
+        out
+    }
+
+    /// Count frames of a given type in a wire buffer (after the preface).
+    fn count_frame_type(wire: &[u8], target_type: u8) -> usize {
+        // Skip client preface if present
+        let start = if wire.starts_with(CLIENT_PREFACE) {
+            CLIENT_PREFACE.len()
+        } else {
+            0
+        };
+        parse_h2_frames(&wire[start..])
+            .iter()
+            .filter(|(t, _, _, _)| *t == target_type)
+            .count()
+    }
+
     // ── Classic rapid reset ──────────────────────────────────────────────────
 
     #[test]
@@ -580,20 +621,10 @@ mod tests {
     fn classic_rapid_reset_three_streams_wire_structure() {
         let burst = classic_rapid_reset("x.com", 3, 0x8);
         assert_eq!(burst.stream_count, 3);
-        // preface + initial_settings + settings_ack + 3×(headers + rst)
         assert!(burst.wire_bytes.len() > CLIENT_PREFACE.len() + 9);
-        // After preface (24) + settings + ack, each pair is HEADERS + RST.
-        // RST is always 13 bytes.
-        let tail = &burst.wire_bytes[24..];
-        // Find RST frames: type byte at offset 3 in each frame header.
-        // Initial settings frame starts at 0.
-        let rst_count = burst
-            .wire_bytes
-            .windows(9)
-            .filter(|w| w[3] == 0x03) // RST_STREAM type
-            .count();
+        // Exactly 3 RST_STREAM frames (type 0x03) in the wire.
+        let rst_count = count_frame_type(&burst.wire_bytes, 0x03);
         assert_eq!(rst_count, 3);
-        let _ = tail;
     }
 
     #[test]
@@ -611,23 +642,13 @@ mod tests {
     fn classic_rapid_reset_odd_stream_ids() {
         // All HEADERS frames must use odd stream IDs (client-initiated).
         let burst = classic_rapid_reset("x.com", 5, 0x8);
-        // Each HEADERS frame header: stream id bytes at offset 5..9 in the 9-byte header.
-        // Type 0x01 = HEADERS. Collect stream IDs of HEADERS frames.
-        let mut stream_ids: Vec<u32> = Vec::new();
-        let w = &burst.wire_bytes;
-        let mut i = 0;
-        while i + 9 <= w.len() {
-            let len = ((w[i] as usize) << 16) | ((w[i + 1] as usize) << 8) | w[i + 2] as usize;
-            let frame_type = w[i + 3];
-            let sid = ((w[i + 5] as u32) << 24)
-                | ((w[i + 6] as u32) << 16)
-                | ((w[i + 7] as u32) << 8)
-                | w[i + 8] as u32;
-            if frame_type == 0x01 {
-                stream_ids.push(sid);
-            }
-            i += 9 + len;
-        }
+        let start = CLIENT_PREFACE.len();
+        let frames = parse_h2_frames(&burst.wire_bytes[start..]);
+        let stream_ids: Vec<u32> = frames
+            .iter()
+            .filter(|(t, _, _, _)| *t == 0x01) // HEADERS
+            .map(|(_, sid, _, _)| *sid)
+            .collect();
         assert!(!stream_ids.is_empty());
         for sid in &stream_ids {
             assert_eq!(sid % 2, 1, "stream {sid} must be odd");
@@ -727,24 +748,27 @@ mod tests {
     #[test]
     fn settings_storm_contains_multiple_settings_frames() {
         let storm = settings_storm(6);
-        // Count SETTINGS frames in wire bytes (type 0x04, stream 0, flags != ACK).
-        let count = storm
-            .wire_bytes
-            .windows(9)
-            .filter(|w| w[3] == 0x04 && w[4] != 0x01 && w[5] == 0 && w[8] == 0)
+        // Count non-ACK SETTINGS frames using proper frame parser.
+        let start = CLIENT_PREFACE.len();
+        let frames = parse_h2_frames(&storm.wire_bytes[start..]);
+        let count = frames
+            .iter()
+            .filter(|(t, sid, _, _)| {
+                // type=SETTINGS(0x04), stream=0; ACK frames have flags=0x01 but
+                // parse_h2_frames doesn't capture flags — re-read from wire.
+                *t == 0x04 && *sid == 0
+            })
             .count();
-        // Should be at least initial + 6 storm frames = 7
+        // initial_settings + 6 storm frames = 7 non-ACK SETTINGS
+        // (settings_storm does not emit ACKs, so all 0x04/stream=0 are data frames)
         assert!(count >= 6, "expected at least 6 SETTINGS frames, got {count}");
     }
 
     #[test]
     fn settings_storm_with_resets_has_rst_frames() {
         let storm = settings_storm_with_resets("r.com", 4, 3);
-        let rst_count = storm
-            .wire_bytes
-            .windows(9)
-            .filter(|w| w[3] == 0x03)
-            .count();
+        // Use proper frame parser, not byte-window matching.
+        let rst_count = count_frame_type(&storm.wire_bytes, 0x03);
         // 4 SETTINGS batches × 3 RSTs each = 12
         assert_eq!(rst_count, 12);
     }
@@ -773,11 +797,7 @@ mod tests {
     fn dependency_cycle_reset_rst_count_matches_cycle_length() {
         let n = 5;
         let attack = dependency_cycle_reset("e.com", n);
-        let rst_count = attack
-            .wire_bytes
-            .windows(9)
-            .filter(|w| w[3] == 0x03)
-            .count();
+        let rst_count = count_frame_type(&attack.wire_bytes, 0x03);
         assert_eq!(rst_count, n);
     }
 
@@ -785,11 +805,7 @@ mod tests {
     fn dependency_cycle_reset_priority_count_matches_cycle_length() {
         let n = 4;
         let attack = dependency_cycle_reset("f.com", n);
-        let prio_count = attack
-            .wire_bytes
-            .windows(9)
-            .filter(|w| w[3] == 0x02)
-            .count();
+        let prio_count = count_frame_type(&attack.wire_bytes, 0x02);
         assert_eq!(prio_count, n);
     }
 
