@@ -185,3 +185,5 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 # WASM sandbox engine for plugin-api external tampers.
 wasmtime = { version = "30", default-features = false, features = ["runtime", "cranelift"] }
 tempfile = "3"
+lru = "0.18"
+parking_lot = "0.12"
