@@ -92,22 +92,57 @@ fn malformed_urls_fail_fast() {
 }
 
 #[test]
-fn non_http_schemes_parse_but_are_unusual_proxy_urls() {
-    // `url::Url` accepts many schemes; the pool does not whitelist. Document
-    // adversarial input that parses yet is not a typical HTTP/SOCKS proxy.
-    let pool = ProxyPool::new(&[
-        "javascript:alert(1)".to_string(),
-        "ftp://127.0.0.1:21".to_string(),
-    ])
-    .expect("construction")
-    .expect("non-empty");
-    assert_eq!(pool.len(), 2);
-    let u0 = pool.next_url();
-    let scheme = u0.scheme().to_string();
-    assert!(
-        scheme == "javascript" || scheme == "ftp",
-        "unexpected scheme: {scheme}"
-    );
+fn non_http_schemes_are_rejected() {
+    // The pool must reject any scheme that is not http|https|socks4|socks5.
+    // Previously `javascript:alert(1)` and `ftp:` were silently accepted —
+    // the reqwest proxy engine would forward them verbatim, creating an SSRF
+    // / security-context confusion vector.
+    for bad_scheme in [
+        "javascript:alert(1)",
+        "ftp://127.0.0.1:21",
+        "file:///etc/passwd",
+        "data:text/html,<script>alert(1)</script>",
+    ] {
+        let err = ProxyPool::new(&[bad_scheme.to_string()])
+            .expect_err(&format!("must reject {bad_scheme:?}"));
+        assert!(
+            matches!(err, PoolError::UnsupportedScheme { .. }),
+            "expected UnsupportedScheme for {bad_scheme:?}, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unsupported proxy scheme"),
+            "error message must name the problem: {msg}"
+        );
+    }
+}
+
+#[test]
+fn valid_proxy_schemes_accepted() {
+    for scheme_url in [
+        "http://127.0.0.1:8080",
+        "https://127.0.0.1:8443",
+        "socks4://127.0.0.1:1080",
+        "socks5://127.0.0.1:9050",
+    ] {
+        let pool = ProxyPool::new(&[scheme_url.to_string()])
+            .expect("construction must succeed")
+            .expect("non-empty pool");
+        assert_eq!(pool.len(), 1);
+    }
+}
+
+#[test]
+fn unsupported_scheme_error_names_scheme_and_url() {
+    let err = ProxyPool::new(&["ftp://proxy.example.com:21".to_string()])
+        .expect_err("ftp must be rejected");
+    match err {
+        PoolError::UnsupportedScheme { ref scheme, ref url } => {
+            assert_eq!(scheme, "ftp");
+            assert!(url.contains("proxy.example.com"), "url must echo the input: {url}");
+        }
+        other => panic!("expected UnsupportedScheme, got {other:?}"),
+    }
 }
 
 proptest! {

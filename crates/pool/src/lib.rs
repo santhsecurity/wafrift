@@ -40,6 +40,21 @@ pub enum PoolError {
         #[source]
         source: url::ParseError,
     },
+    /// A URL scheme that is not a supported proxy transport.
+    ///
+    /// Only `http`, `https`, `socks4`, and `socks5` are valid proxy schemes.
+    /// Accepting arbitrary schemes (e.g. `javascript:`, `ftp:`) would let a
+    /// misconfigured or attacker-supplied proxy list inject URLs that look
+    /// valid but are silently forwarded to the underlying HTTP client in a
+    /// way that can bypass intent (SSRF via `file://`, JS execution context
+    /// confusion, etc.).
+    #[error("unsupported proxy scheme '{scheme}' in URL '{url}' (expected http|https|socks4|socks5)")]
+    UnsupportedScheme {
+        /// The scheme that was rejected.
+        scheme: String,
+        /// The full URL string.
+        url: String,
+    },
 }
 
 /// A thread-safe, round-robin rotating pool of proxy URLs.
@@ -67,6 +82,18 @@ impl ProxyPool {
                 url: url_str.clone(),
                 source: e,
             })?;
+            // Reject any scheme that is not a recognised HTTP/SOCKS proxy
+            // transport. Permitting arbitrary schemes (javascript:, ftp:,
+            // file:, data:) lets a malformed or attacker-controlled wordlist
+            // silently inject URLs the reqwest proxy engine will forward
+            // verbatim, creating an SSRF or security-context confusion vector.
+            let scheme = parsed.scheme();
+            if !matches!(scheme, "http" | "https" | "socks4" | "socks5") {
+                return Err(PoolError::UnsupportedScheme {
+                    scheme: scheme.to_string(),
+                    url: url_str.clone(),
+                });
+            }
             urls.push(parsed);
         }
 
