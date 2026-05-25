@@ -6174,6 +6174,7 @@ dependencies = [
  "wafrift-genome-registry",
  "wafrift-grammar",
  "wafrift-graphql",
+ "wafrift-http3-evasion",
  "wafrift-oracle",
  "wafrift-recon",
  "wafrift-smuggling",

