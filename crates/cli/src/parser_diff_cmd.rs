@@ -341,7 +341,8 @@ fn severity_of(baseline_status: u16, probe_status: u16, body_delta: f64) -> &'st
 /// Returns `Err(String)` if the URL is malformed or the HTTP client
 /// cannot be built. Individual probe failures are non-fatal and
 /// surfaced in the report.
-pub fn run_parser_diff(args: ParserDiffArgs) -> Result<(), String> {
+pub fn run_parser_diff(mut args: ParserDiffArgs) -> Result<(), String> {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

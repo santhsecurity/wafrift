@@ -299,7 +299,8 @@ pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
 /// Run the header-diff scanner. Returns SUCCESS on a clean run
 /// (regardless of whether any divergences were found); exit 1 on
 /// HTTP-client setup failure.
-pub async fn run_header_diff(args: HeaderDiffArgs) -> ExitCode {
+pub async fn run_header_diff(mut args: HeaderDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
