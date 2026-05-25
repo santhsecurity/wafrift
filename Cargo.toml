@@ -23,6 +23,7 @@ members = [
     "crates/recon",
     "crates/genome-registry",
     "crates/captchaforge-bridge",
+    "crates/graphql",
 ]
 
 [workspace.package]

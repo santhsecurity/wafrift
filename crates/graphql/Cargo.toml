@@ -1,0 +1,17 @@
+[package]
+name = "wafrift-graphql"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "GraphQL-specific WAF evasion payloads (alias batching, introspection bypass, depth bombs, op-name mismatch). Vendored from sibling Santh project `gqlprobe` with wafrift-specific mutators on top."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "graphql", "evasion", "security", "bypass"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
