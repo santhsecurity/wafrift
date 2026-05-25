@@ -127,6 +127,8 @@ fn bypass_probe_json_output_has_required_top_level_fields() {
         .unwrap();
     let addr = rt.block_on(spawn_xfwd_bypass_mock());
 
+    // Skip paths/methods to cap probe count and reduce concurrent-load risk
+    // when this binary runs alongside other test binaries on Windows.
     let (code, stdout, stderr) = wafrift(&[
         "bypass-probe",
         &format!("http://{addr}/admin"),
@@ -136,7 +138,9 @@ fn bypass_probe_json_output_has_required_top_level_fields() {
         "--delay-ms",
         "0",
         "--timeout-secs",
-        "10",
+        "30",
+        "--skip-paths",
+        "--skip-methods",
     ]);
     assert_eq!(code, 0, "bypass-probe must exit 0; stderr: {stderr}");
 

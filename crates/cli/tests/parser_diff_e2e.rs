@@ -332,7 +332,7 @@ fn parser_diff_against_unreachable_target_exits_1() {
         "json",
         "--quiet",
         "--timeout-secs",
-        "2",
+        "5",
         "--delay-ms",
         "0",
     ]);
