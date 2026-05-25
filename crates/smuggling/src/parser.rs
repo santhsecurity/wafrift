@@ -20,8 +20,7 @@ impl HttpResponse {
         let mut headers = [httparse::EMPTY_HEADER; 64];
         let mut resp = httparse::Response::new(&mut headers);
         match resp.parse(data) {
-            Ok(status) if status.is_complete() => {
-                let header_end = status.unwrap();
+            Ok(httparse::Status::Complete(header_end)) => {
                 let version = resp.version.ok_or(ParseError::MissingVersion)?;
                 let status = resp.code.ok_or(ParseError::MissingStatus)?;
                 let headers: Vec<(String, String)> = resp
