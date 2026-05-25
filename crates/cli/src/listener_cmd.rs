@@ -439,7 +439,16 @@ async fn handle_conn(
             let k_lc = k.trim().to_ascii_lowercase();
             let v_trim = v.trim().to_string();
             if k_lc == "content-length" && !content_length_seen {
-                content_length = v_trim.parse().unwrap_or(0);
+                // F-LISTENER-CL-01: parse_or_0 was a request-smuggling
+                // vector. A hostile client sending `Content-Length: abc`
+                // would silently set content_length=0; the listener would
+                // then read zero body bytes and treat the actual body as
+                // the next request's headers — classic CL desync. Reject
+                // malformed CL with an actionable error so the connection
+                // is closed before any framing damage.
+                content_length = v_trim
+                    .parse::<usize>()
+                    .map_err(|e| format!("malformed Content-Length {v_trim:?}: {e}"))?;
                 content_length_seen = true;
             }
             headers.push((k_lc, v_trim));
