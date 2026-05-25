@@ -566,7 +566,18 @@ fn load_or_init_state(path: &PathBuf, campaign_id: &str, target_url: &str) -> Ca
 
 fn persist_state(path: &PathBuf, state: &CampaignState) -> Result<(), String> {
     let json = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    // Write to a sibling `.json.tmp` file first, then rename atomically into
+    // place.  `std::fs::write` truncates the file before writing: a crash or
+    // SIGKILL between the truncate and the final flush leaves an empty /
+    // partial JSON file, silently destroying the campaign state.  The rename
+    // syscall is atomic on all POSIX filesystems and on Windows NTFS (via
+    // MoveFileExW), so the destination is either the old complete file or the
+    // new complete file — never a partially-written one.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &json)
+        .map_err(|e| format!("write tmp {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .map_err(|e| format!("rename {} → {}: {e}", tmp.display(), path.display()))?;
     Ok(())
 }
 
@@ -850,5 +861,124 @@ mod tests {
         };
         // Without auto_submit, no submission path is ever reached.
         assert!(!args.auto_submit);
+    }
+
+    // ── Test 13: persist_state is atomic — no orphaned .tmp on success ───
+    // After a successful persist_state call, the sibling `.json.tmp` file
+    // must NOT exist (it was renamed into the final path).
+
+    #[test]
+    fn persist_state_no_orphaned_tmp_file() {
+        let tmp_dir = std::env::temp_dir();
+        let path = tmp_dir.join("wafrift-hunt-atomic-test.json");
+        let tmp_sibling = tmp_dir.join("wafrift-hunt-atomic-test.json.tmp");
+        // Clean up any leftovers from previous runs.
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&tmp_sibling);
+
+        let state = CampaignState {
+            campaign_id: "atomic-test".into(),
+            target_url: "http://localhost".into(),
+            started_at: 0,
+            rounds_completed: 3,
+            total_bypasses: 1,
+            schema_version: CampaignState::SCHEMA_VERSION,
+            bypasses: vec![],
+        };
+        persist_state(&path, &state).unwrap();
+
+        // Destination file must exist and be valid JSON.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["campaign_id"], "atomic-test");
+
+        // The .tmp sibling must be gone — rename succeeded.
+        assert!(
+            !tmp_sibling.exists(),
+            ".json.tmp sibling was not cleaned up: {:?}",
+            tmp_sibling
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Test 14: persist_state destination file contains all state fields ─
+    // A round-trip through persist + load must preserve every field.
+
+    #[test]
+    fn persist_state_round_trip_all_fields() {
+        let path = std::env::temp_dir().join("wafrift-hunt-roundtrip-test.json");
+        let _ = std::fs::remove_file(&path);
+
+        let bypass = CampaignBypass {
+            discovered_at: 999,
+            round: 5,
+            class: "xss".into(),
+            technique: "tamper/unicode".into(),
+            submitted: true,
+        };
+        let state = CampaignState {
+            campaign_id: "roundtrip-id".into(),
+            target_url: "https://example.com/path?foo=bar".into(),
+            started_at: 1_700_000_000,
+            rounds_completed: 42,
+            total_bypasses: 1,
+            schema_version: CampaignState::SCHEMA_VERSION,
+            bypasses: vec![bypass],
+        };
+        persist_state(&path, &state).unwrap();
+
+        let loaded = load_or_init_state(&path, "roundtrip-id", "https://example.com/path?foo=bar");
+        assert_eq!(loaded.campaign_id, "roundtrip-id");
+        assert_eq!(loaded.rounds_completed, 42);
+        assert_eq!(loaded.total_bypasses, 1);
+        assert_eq!(loaded.bypasses.len(), 1);
+        assert_eq!(loaded.bypasses[0].technique, "tamper/unicode");
+        assert!(loaded.bypasses[0].submitted);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Test 15: persist_state overwrites existing content atomically ─────
+    // A second persist must fully replace the first write, not append to it.
+
+    #[test]
+    fn persist_state_overwrites_previous_content() {
+        let path = std::env::temp_dir().join("wafrift-hunt-overwrite-test.json");
+        let _ = std::fs::remove_file(&path);
+
+        let mk_state = |rounds: u64, bypasses: u64| CampaignState {
+            campaign_id: "overwrite-test".into(),
+            target_url: "http://localhost".into(),
+            started_at: 0,
+            rounds_completed: rounds,
+            total_bypasses: bypasses,
+            schema_version: CampaignState::SCHEMA_VERSION,
+            bypasses: vec![],
+        };
+
+        persist_state(&path, &mk_state(1, 0)).unwrap();
+        persist_state(&path, &mk_state(7, 3)).unwrap();
+
+        // Only the second write's values must be present.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["rounds_completed"], 7, "stale content from first write");
+        assert_eq!(v["total_bypasses"], 3, "stale content from first write");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Test 16: persist_state returns Err for unwritable directory ───────
+
+    #[test]
+    fn persist_state_returns_err_for_bad_path() {
+        // A path whose parent does not exist must produce an Err, not a panic.
+        let bad_path = std::path::PathBuf::from(
+            "/this/directory/does/not/exist/campaign.json",
+        );
+        let state = CampaignState::default();
+        let result = persist_state(&bad_path, &state);
+        assert!(result.is_err(), "expected Err for non-existent parent dir");
     }
 }

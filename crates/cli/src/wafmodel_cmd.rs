@@ -141,11 +141,18 @@ fn candidates(attack: &str) -> Vec<(String, String)> {
 }
 
 pub fn run_audit(args: AuditArgs) -> ExitCode {
+    ExitCode::from(run_audit_inner(args))
+}
+
+/// Same as [`run_audit`] but returns a plain `u8` so tests can
+/// assert exact exit codes — `std::process::ExitCode` is opaque and
+/// has no public conversion back to its inner byte.
+fn run_audit_inner(args: AuditArgs) -> u8 {
     let mut waf = match load_ruleset(&args.ruleset) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::from(2);
+            return 2;
         }
     };
 
@@ -208,7 +215,7 @@ pub fn run_audit(args: AuditArgs) -> ExitCode {
             println!("Run `wafrift harden` to synthesize verified closing rules.");
         }
     }
-    ExitCode::SUCCESS
+    0
 }
 
 /// Per-class result collected before rendering, so JSON and human
@@ -223,11 +230,18 @@ struct ClassHardenResult {
 }
 
 pub fn run_harden(args: HardenArgs) -> ExitCode {
+    ExitCode::from(run_harden_inner(args))
+}
+
+/// Same as [`run_harden`] but returns a plain `u8` so tests can
+/// assert exact exit codes — `std::process::ExitCode` is opaque and
+/// has no public conversion back to its inner byte.
+fn run_harden_inner(args: HardenArgs) -> u8 {
     let waf = match load_ruleset(&args.ruleset) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::from(2);
+            return 2;
         }
     };
     let tf = vec![
@@ -414,11 +428,7 @@ pub fn run_harden(args: HardenArgs) -> ExitCode {
         }
     }
 
-    if all_proven {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
-    }
+    if all_proven { 0 } else { 1 }
 }
 
 #[cfg(test)]
@@ -440,10 +450,9 @@ mod tests {
         // run_audit prints to stdout/stderr but returns SUCCESS regardless
         // of holes found (it's a reporting tool, not a CI gate). The
         // relevant invariant is: it does NOT panic or exit(2).
-        let code = run_audit(args);
+        let code = run_audit_inner(args);
         assert_eq!(
-            u8::from(code),
-            0,
+            code, 0,
             "run_audit must succeed (exit 0) when using the embedded ruleset"
         );
     }
@@ -455,7 +464,7 @@ mod tests {
             class: "sqli".into(),
             format: "human".into(),
         };
-        assert_eq!(u8::from(run_audit(args)), 0);
+        assert_eq!(run_audit_inner(args), 0);
     }
 
     #[test]
@@ -519,8 +528,8 @@ mod tests {
             class: "xss".into(),
             format: "human".into(),
         };
-        let code = run_audit(args);
-        assert_eq!(u8::from(code), 2, "bad ruleset file must exit 2");
+        let code = run_audit_inner(args);
+        assert_eq!(code, 2, "bad ruleset file must exit 2");
     }
 
     // ── run_harden ───────────────────────────────────────────────────────
@@ -535,10 +544,9 @@ mod tests {
             format: "human".into(),
         };
         // `all_proven` → exit 0.
-        let code = run_harden(args);
+        let code = run_harden_inner(args);
         assert_eq!(
-            u8::from(code),
-            0,
+            code, 0,
             "harden must prove closure (exit 0) for both classes on the embedded ruleset"
         );
     }
@@ -706,7 +714,7 @@ mod tests {
             class: "all".into(),
             format: "human".into(),
         };
-        assert_eq!(u8::from(run_harden(args)), 2);
+        assert_eq!(run_harden_inner(args), 2);
     }
 
     // ── class_data / helpers ─────────────────────────────────────────────

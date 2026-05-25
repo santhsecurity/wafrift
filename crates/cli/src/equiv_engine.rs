@@ -275,8 +275,13 @@ pub struct ProbeEnvelope {
     /// Response headers as `(name, value)` pairs in the order returned
     /// by reqwest. Name is lowercased on the wire; we preserve it
     /// verbatim so callers can pattern-match on case as the WAF saw it.
+    // Consumed by CorpusRecorder::record → parse_cf_block. Suppress the
+    // "never read" lint until the per-probe hook in bench_waf is wired up.
+    #[allow(dead_code)]
     pub headers: Vec<(String, String)>,
     /// Response body bytes (bounded by `safe_body::DEFAULT_MAX_RESPONSE_BYTES`).
+    // Consumed by CorpusRecorder::record → parse_cf_block + fnv1a_64.
+    #[allow(dead_code)]
     pub body: Vec<u8>,
     /// Same `is_waf_block` signal `send()` returns.
     pub blocked: bool,

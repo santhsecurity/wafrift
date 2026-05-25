@@ -41,6 +41,16 @@ use crate::equiv_engine::ProbeEnvelope;
 ///
 /// We accumulate these and write to disk in `flush()` rather than
 /// after every probe so the bench loop stays fast.
+///
+/// # Wiring status
+///
+/// The struct is complete and tested. The production call site lives in
+/// bench_waf's per-probe loop (see `crates/cli/src/bench_waf.rs`). The
+/// connection requires bench_waf to expose a per-probe callback so the
+/// recorder can be called inside the loop — that per-probe hook is the
+/// next architectural step. Until then, suppress the "never constructed"
+/// lint here rather than in callers.
+#[allow(dead_code)]
 pub struct CorpusRecorder {
     /// Per-rule bypass / block corpus.
     corpus: RuleBypassCorpus,
@@ -59,6 +69,7 @@ pub struct CorpusRecorder {
     novel_bypass_count: u64,
 }
 
+#[allow(dead_code)]
 impl CorpusRecorder {
     /// Create a recorder bound to the given target fingerprint and
     /// output paths. Loads any existing corpus / coverage / archive
@@ -166,6 +177,8 @@ impl CorpusRecorder {
 }
 
 /// FNV-1a 64-bit hash of a byte slice.
+// Used by CorpusRecorder::record (pending bench_waf per-probe hook wiring).
+#[allow(dead_code)]
 fn fnv1a_64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
     for &b in bytes {
