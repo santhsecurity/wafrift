@@ -298,10 +298,13 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             let variant_objs: Vec<_> = variants
                 .iter()
                 .map(|variant| {
+                    // Round to 2 dp to suppress floating-point noise
+                    // (e.g. 0.93 stored as 0.9299999999999999 in f64).
+                    let conf = (variant.confidence * 100.0).round() / 100.0;
                     json!({
                         "payload": variant.payload,
                         "techniques": variant.techniques,
-                        "confidence": variant.confidence,
+                        "confidence": conf,
                     })
                 })
                 .collect();
@@ -330,10 +333,11 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
         } else {
             // Legacy NDJSON form: one object per line.
             for variant in &variants {
+                let conf = (variant.confidence * 100.0).round() / 100.0;
                 let obj = json!({
                     "payload": variant.payload,
                     "techniques": variant.techniques,
-                    "confidence": variant.confidence,
+                    "confidence": conf,
                 });
                 if args.output.is_some() {
                     buf.push_str(&obj.to_string());

@@ -101,7 +101,9 @@ pub struct DryRunArgs {
     pub variant: VariantSelector,
 
     /// Host the payload claims to target (goes into the `Host:` header).
-    #[arg(long)]
+    /// Accepts either a bare hostname (`example.com`) or a full URL
+    /// (`https://example.com`) — the scheme and path are stripped.
+    #[arg(long, alias = "target", value_parser = parse_host_or_url)]
     pub host: String,
 
     /// Optional smuggled request prefix (for CL.TE / TE.CL / etc.).
@@ -252,6 +254,27 @@ pub const VARIANTS: &[VariantInfo] = &[
 #[derive(Debug, Clone, Copy)]
 pub struct VariantSelector {
     pub info: &'static VariantInfo,
+}
+
+/// Accept either a bare hostname or a full URL; strip scheme + path so
+/// `--host example.com` and `--target https://example.com/path` both
+/// produce the same `Host:` header value (`example.com`).
+fn parse_host_or_url(s: &str) -> Result<String, String> {
+    // If it looks like a URL (contains "://"), parse and extract the host.
+    if let Some(rest) = s.strip_prefix("http://").or_else(|| s.strip_prefix("https://")) {
+        // rest is "host/path?query" — take up to the first '/' or '?'
+        let host = rest
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or(rest);
+        if host.is_empty() {
+            return Err(format!("no host found in URL `{s}`"));
+        }
+        Ok(host.to_string())
+    } else {
+        // Bare hostname (or host:port) — pass through as-is.
+        Ok(s.to_string())
+    }
 }
 
 fn parse_variant_name(s: &str) -> Result<VariantSelector, String> {
@@ -944,6 +967,48 @@ mod tests {
         // Error message must enumerate known variants so the
         // operator knows what to type.
         assert!(msg.contains("cl-te"));
+    }
+
+    // ── parse_host_or_url ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_host_or_url_bare_hostname_passes_through() {
+        assert_eq!(parse_host_or_url("example.com").unwrap(), "example.com");
+    }
+
+    #[test]
+    fn parse_host_or_url_host_with_port_passes_through() {
+        assert_eq!(parse_host_or_url("example.com:8080").unwrap(), "example.com:8080");
+    }
+
+    #[test]
+    fn parse_host_or_url_https_url_extracts_host() {
+        assert_eq!(
+            parse_host_or_url("https://example.com/path?q=1").unwrap(),
+            "example.com"
+        );
+    }
+
+    #[test]
+    fn parse_host_or_url_http_url_extracts_host() {
+        assert_eq!(
+            parse_host_or_url("http://example.com").unwrap(),
+            "example.com"
+        );
+    }
+
+    #[test]
+    fn parse_host_or_url_url_with_port_keeps_port() {
+        assert_eq!(
+            parse_host_or_url("https://example.com:443/").unwrap(),
+            "example.com:443"
+        );
+    }
+
+    #[test]
+    fn parse_host_or_url_url_with_empty_host_errors() {
+        let r = parse_host_or_url("https:///path");
+        assert!(r.is_err(), "empty host should error: {r:?}");
     }
 
     #[test]
