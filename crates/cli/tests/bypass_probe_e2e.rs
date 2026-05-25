@@ -18,6 +18,7 @@
 
 use std::process::Command;
 
+use serial_test::serial;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Mock that simulates an X-Forwarded-For header bypass:
@@ -119,6 +120,7 @@ fn bypass_probe_appears_in_main_help() {
 // ── JSON schema ───────────────────────────────────────────────────────────
 
 #[test]
+#[serial]
 fn bypass_probe_json_output_has_required_top_level_fields() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -168,6 +170,7 @@ fn bypass_probe_json_output_has_required_top_level_fields() {
 }
 
 #[test]
+#[serial]
 fn bypass_probe_detects_xfwd_header_bypass() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -208,6 +211,7 @@ fn bypass_probe_detects_xfwd_header_bypass() {
 }
 
 #[test]
+#[serial]
 fn bypass_probe_divergences_carry_curl_cmd() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -244,6 +248,7 @@ fn bypass_probe_divergences_carry_curl_cmd() {
 }
 
 #[test]
+#[serial]
 fn bypass_probe_probes_fired_positive() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -274,6 +279,7 @@ fn bypass_probe_probes_fired_positive() {
 }
 
 #[test]
+#[serial]
 fn bypass_probe_skip_headers_reduces_probe_count() {
     // Two runs: one with all probes, one with --skip-headers.
     // The --skip-headers run must fire fewer probes.
