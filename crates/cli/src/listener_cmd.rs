@@ -812,25 +812,27 @@ mod tests {
                     .expect("handle_conn returned a callback (not a management response)")
             }
         });
-        // Tiny pause so the listener has time to be ready before we
-        // connect.
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        // Connect with a short retry loop — Windows TCP under
-        // parallel test load occasionally returns OS error 10060
-        // (timed out) on the first connect even though the listener
-        // is bound. We retry up to 5× with a 100ms backoff; total
-        // wait stays well under the 30s integration-test budget.
+        // Pause so the listener task has time to reach accept() before
+        // the client connects. On Windows under heavy parallel test
+        // load the spawned task may need more than a few milliseconds
+        // to be scheduled for the first time.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Connect with a retry loop — Windows TCP loopback under heavy
+        // parallel test load occasionally returns OS error 10060 (timed
+        // out) even though the listener is bound. We retry up to 10× with
+        // 200 ms backoff; total budget ≤ 2 s, well within the integration-
+        // test wall-clock limit.
         let mut client = None;
-        for attempt in 0..5 {
+        for attempt in 0..10 {
             match tokio::net::TcpStream::connect(addr).await {
                 Ok(s) => {
                     client = Some(s);
                     break;
                 }
-                Err(_e) if attempt < 4 => {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                Err(_e) if attempt < 9 => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
                 }
-                Err(e) => panic!("connect after 5 attempts: {e}"),
+                Err(e) => panic!("connect after 10 attempts: {e}"),
             }
         }
         let mut client = client.expect("connected");
@@ -1166,18 +1168,68 @@ mod tests {
         );
     }
 
+    /// Same as `drive_one_callback` but returns the raw `Result` from
+    /// `handle_conn` instead of unwrapping. Used for adversarial tests
+    /// where the connection is expected to be rejected (e.g. malformed
+    /// Content-Length) — we want to assert the listener doesn't panic or
+    /// hang, not that it records a callback.
+    async fn drive_one_conn_result(
+        registry: Arc<Registry>,
+        request: &[u8],
+    ) -> Result<Option<Callback>, String> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let req = request.to_vec();
+        let server = tokio::spawn({
+            let registry = registry.clone();
+            async move {
+                let (sock, peer) = listener.accept().await.expect("accept");
+                handle_conn(sock, peer, &registry, 8 * 1024, Duration::from_secs(5)).await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut connected = false;
+        for attempt in 0..10 {
+            match tokio::net::TcpStream::connect(addr).await {
+                Ok(mut s) => {
+                    s.write_all(&req).await.expect("write");
+                    let _ = s.shutdown().await;
+                    connected = true;
+                    break;
+                }
+                Err(_) if attempt < 9 => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Err(e) => panic!("connect after 10 attempts: {e}"),
+            }
+        }
+        assert!(connected, "client must connect");
+        server.await.expect("server task did not panic")
+    }
+
     #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_negative_content_length_does_not_crash() {
-        // Adversarial Content-Length: garbage value. Our parser
-        // falls back to 0 on parse-failure (already-have body bytes
-        // are still captured), and the listener must NOT crash or
-        // hang on the read loop.
+        // Adversarial Content-Length: negative integer. The F-LISTENER-CL-01
+        // fix changed the fallback-to-zero behaviour to a hard reject (to
+        // close CL desync attacks); so `handle_conn` now returns Err for a
+        // malformed CL. The contract here is that the listener terminates
+        // cleanly — no panic, no hang — not that it records a callback.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
         let req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: -7\r\n\r\n");
-        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
-        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+        let result = drive_one_conn_result(registry, req.as_bytes()).await;
+        assert!(
+            result.is_err(),
+            "malformed Content-Length must be rejected: {result:?}"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("malformed Content-Length"),
+            "error message must name the cause: {err:?}"
+        );
     }
 
     #[serial_test::serial]

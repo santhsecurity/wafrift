@@ -1049,26 +1049,39 @@ mod tests {
         // bound to `_sock` (not `_`) on purpose — `let _ = ...`
         // drops immediately and would close the connection,
         // making `read` return Ok(0) instantly instead of hanging.
+        //
+        // timeout_secs=3 rather than 1: on Windows under heavy
+        // parallel test load the loopback TCP connect can take up to
+        // ~1s itself (OS stack loaded by other tests). A 1s budget
+        // was too narrow — the connect timeout fired before the server
+        // could accept, returning Err instead of Ok(elapsed). 3s gives
+        // headroom for the connect while still proving the READ timeout
+        // fires before the server holds the socket open (10s).
+        let timeout_secs: u64 = 3;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             if let Ok((_sock, _peer)) = listener.accept().await {
                 // Hold the socket open without writing anything
-                // for 5s — longer than our 1s probe timeout below.
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                // for 10s — longer than the probe timeout.
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
         let elapsed = time_first_byte(
             &addr.ip().to_string(),
             addr.port(),
             b"GET / HTTP/1.1\r\nHost: x\r\n\r\n",
-            1,
+            timeout_secs,
         )
         .await
         .unwrap();
-        assert!(elapsed >= 900, "should have hung ~1s, got {elapsed}");
+        let expected_ms = timeout_secs * 1000;
         assert!(
-            elapsed < 2500,
+            elapsed >= expected_ms - 100,
+            "should have hung ~{expected_ms}ms, got {elapsed}"
+        );
+        assert!(
+            elapsed < expected_ms + 1500,
             "should not exceed timeout+margin, got {elapsed}"
         );
     }
