@@ -270,7 +270,8 @@ struct BypassVariantSummary {
 /// surfaced in the report itself, not propagated as an exit code,
 /// because the demo's value is showing **what wafrift saw**, including
 /// "we tried this and the target threw a 503."
-pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
+pub fn run_legendary(mut args: LegendaryArgs) -> ExitCode {
+    args.target = crate::helpers::normalize_target_url(&args.target);
     let start = Instant::now();
     let started_at = unix_now_iso8601();
     let mut report = LegendaryReport {
