@@ -33,7 +33,7 @@ use std::time::Instant;
 use wafrift_types::Request;
 use wafrift_wafmodel::{
     Alphabet, BoundedExhaustiveEq, FnOracle, LearnReport, Outcome, WafModelError, WafOracle,
-    attack_grammar, l_star_budgeted, minimal_bypass, mine_bypasses,
+    attack_grammar, l_star_budgeted, mine_bypasses,
 };
 
 /// Arguments for `wafrift model-evade`.
@@ -707,7 +707,7 @@ fn emit_output(path: Option<&std::path::Path>, content: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wafrift_wafmodel::{BytePred, Sfa};
+    use wafrift_wafmodel::{BytePred, Sfa, minimal_bypass};
 
     // ── check_permission unit tests ─────────────────────────────────
 
