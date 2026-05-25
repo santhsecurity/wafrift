@@ -20,6 +20,7 @@ mod cors_diff_cmd;
 mod detect_cmd;
 mod discover_cmd;
 mod distill_cmd;
+mod corpus_cmd;
 mod corpus_recorder;
 mod egress_example;
 mod equiv_engine;
@@ -381,6 +382,14 @@ enum Commands {
     /// With `--target cumulusfire`: pre-fills the CF testing endpoint and
     /// authorization reason for the CumulusFire public bug-bounty scope.
     Hunt(hunt_cmd::HuntArgs),
+    /// Inspect a `wafrift corpus` artifact (rule_corpus + edge-POP coverage
+    /// maps written by `wafrift bench-waf --corpus-out`). Subcommands:
+    ///
+    /// `stats` — print a structured summary of rules seen, total bypasses /
+    /// blocks, and edge POPs covered. Supports `--format json` for CI
+    /// gate integration (if rules_seen < N, fail the hunt).
+    #[command(name = "corpus")]
+    Corpus(corpus_cmd::CorpusArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -1137,6 +1146,7 @@ fn main() -> ExitCode {
         }
         Some(Commands::Cluster(args)) => cluster_cmd::run_cluster(args),
         Some(Commands::Hunt(args)) => hunt_cmd::run_hunt(args),
+        Some(Commands::Corpus(args)) => corpus_cmd::run_corpus(args),
     }
 }
 
@@ -1361,7 +1371,13 @@ async fn run_scan_from_discovery(
         match serde_json::to_string_pretty(&envelope) {
             Ok(s) => {
                 if let Some(out_path) = args.output.as_ref() {
-                    if let Err(e) = std::fs::write(out_path, &s) {
+                    // Atomic write: tmp sibling → rename, so a kill mid-write
+                    // never leaves a truncated JSON file on disk.
+                    let tmp = out_path.with_extension("json.tmp");
+                    let write_result = std::fs::write(&tmp, &s)
+                        .and_then(|()| std::fs::rename(&tmp, out_path));
+                    if let Err(e) = write_result {
+                        let _ = std::fs::remove_file(&tmp);
                         eprintln!(
                             "[wafrift scan] failed to write discovery output to {}: {e}",
                             out_path.display()
