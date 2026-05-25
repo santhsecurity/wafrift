@@ -4,11 +4,22 @@
 //! have been tried, which succeeded, and how aggressively we need
 //! to escalate. Maintains a pool of proven winners and continuously
 //! re-evaluates as the WAF adapts.
+//!
+//! # Drift detection
+//!
+//! The [`DriftDetector`] embedded in every [`HostState`] tracks four CUSUM
+//! signal streams (median latency, P95 latency, block rate, body-hash entropy)
+//! and fires a [`RegimeChange`] when ≥ 2 signals agree that the WAF has
+//! changed its enforcement posture.  When [`RegimeChange::LooserNow`] fires,
+//! `previously_blocked` is re-queued so the strategy can retry payloads that
+//! were blocked under the old regime.
 
 use wafrift_content_type as content_type;
 use wafrift_encoding::encoding;
 use wafrift_types::Technique;
 use wafrift_types::escalation::EscalationLevel;
+
+use crate::drift_window::{DriftDetector, ProbeObservation, RegimeChange};
 
 /// Minimum number of attempts before a technique is eligible for
 /// promotion to the winner pool or demotion to the blocklist.
@@ -90,9 +101,99 @@ pub struct HostState {
     pub rate_limits: u32,
     /// Number of JS challenges (Cloudflare captcha pages, etc.) seen.
     pub challenges: u32,
+
+    // ── Drift-aware evasion window (#115) ───────────────────────────
+    /// CUSUM-based drift detector tracking per-target WAF regime changes.
+    /// Updated on every probe result via `observe_probe`.
+    pub drift: DriftDetector,
+    /// Payloads (technique key strings) that were blocked under a previous
+    /// WAF regime and are eligible for retry when `LooserNow` fires.
+    pub previously_blocked: Vec<String>,
+    /// Payloads queued for retry after a `LooserNow` regime change.
+    /// The strategy drains this queue before generating new candidates.
+    pub drift_retry_queue: Vec<String>,
 }
 
 impl HostState {
+    // ── Drift-aware probe observation (#115) ────────────────────────────
+
+    /// Feed a probe result into the drift detector.
+    ///
+    /// Call this on **every** probe, in addition to the technique-tracking
+    /// methods (`record_block_for`, `record_success_for_many`, etc.).
+    ///
+    /// When [`RegimeChange::LooserNow`] fires, all entries in
+    /// `previously_blocked` are moved to `drift_retry_queue` so the
+    /// strategy engine can retry them under the new, more permissive regime.
+    ///
+    /// Returns the detected [`RegimeChange`] if one was fired, `None`
+    /// otherwise.
+    pub fn observe_probe(&mut self, obs: ProbeObservation) -> Option<RegimeChange> {
+        // Track blocked technique keys for potential retry on LooserNow.
+        if obs.was_blocked {
+            // `previously_blocked` is drained into `drift_retry_queue` on
+            // LooserNow, so it naturally cycles. Cap at 1000 entries to
+            // bound memory on a long-running proxy session against a target
+            // that blocks 100% of probes.
+            const MAX_PREVIOUSLY_BLOCKED: usize = 1_000;
+            if self.previously_blocked.len() < MAX_PREVIOUSLY_BLOCKED {
+                // Record the probe-level event as a sentinel; callers that
+                // have richer context (technique key) can push directly to
+                // `previously_blocked` instead of relying on the sentinel.
+                // The sentinel keeps the retry queue functional even for
+                // callers that only call `observe_probe`.
+                let sentinel = format!("probe:{}", self.blocks.saturating_add(1));
+                self.previously_blocked.push(sentinel);
+            }
+        }
+
+        let change = self.drift.observe(obs)?;
+
+        match &change {
+            RegimeChange::LooserNow => {
+                // WAF relaxed: move the entire blocked corpus to retry queue.
+                // The strategy drains `drift_retry_queue` with
+                // `drain_drift_retry_queue()`.
+                self.drift_retry_queue
+                    .extend(self.previously_blocked.drain(..));
+            }
+            RegimeChange::StricterNow => {
+                // WAF tightened: discard the retry queue (those techniques
+                // will fail again under the stricter regime).
+                self.drift_retry_queue.clear();
+            }
+            RegimeChange::Unclear => {
+                // Mixed signals: keep the retry queue intact but don't add
+                // to it. The next observation may resolve the direction.
+            }
+        }
+
+        Some(change)
+    }
+
+    /// Enqueue a specific blocked technique key for potential retry on the
+    /// next `LooserNow` regime change.
+    ///
+    /// Call this alongside `record_block_for` when you have the technique
+    /// key handy.  Bounded at 1000 entries per host.
+    pub fn mark_blocked_for_retry(&mut self, technique_key: &str) {
+        const MAX_PREVIOUSLY_BLOCKED: usize = 1_000;
+        if self.previously_blocked.len() < MAX_PREVIOUSLY_BLOCKED
+            && !self.previously_blocked.contains(&technique_key.to_string())
+        {
+            self.previously_blocked.push(technique_key.to_string());
+        }
+    }
+
+    /// Drain the drift retry queue, returning all technique keys that should
+    /// be retried under the newly-detected permissive WAF regime.
+    ///
+    /// Returns an empty `Vec` if no regime change has fired yet or if the
+    /// queue has already been drained.
+    pub fn drain_drift_retry_queue(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.drift_retry_queue)
+    }
+
     /// Record a blocked response (no technique tracking).
     pub fn record_block(&mut self) {
         self.blocks = self.blocks.saturating_add(1);

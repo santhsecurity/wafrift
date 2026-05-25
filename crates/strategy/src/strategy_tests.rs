@@ -621,4 +621,110 @@ mod tests {
             "same URL must pick the same winner deterministically"
         );
     }
+
+    // ============================================
+    // GraphQL routing tests (61-67)
+    // ============================================
+
+    #[test]
+    fn is_graphql_request_detects_application_graphql_content_type() {
+        use crate::strategy::is_graphql_request;
+        let req = Request::post(
+            "https://example.com/graphql",
+            b"{ user { id name } }".to_vec(),
+        )
+        .header("Content-Type", "application/graphql");
+        assert!(
+            is_graphql_request(&req),
+            "application/graphql Content-Type must be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn is_graphql_request_detects_json_body_with_query_key() {
+        use crate::strategy::is_graphql_request;
+        let body = br#"{"query":"{ user { id name } }","variables":{}}"#;
+        let req = Request::post("https://example.com/graphql", body.to_vec())
+            .header("Content-Type", "application/json");
+        assert!(
+            is_graphql_request(&req),
+            "JSON body containing \"query\": key must be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn is_graphql_request_rejects_plain_form_body() {
+        use crate::strategy::is_graphql_request;
+        let req = Request::post(
+            "https://example.com/api",
+            b"q=SELECT+1+FROM+users".to_vec(),
+        )
+        .header("Content-Type", "application/x-www-form-urlencoded");
+        assert!(
+            !is_graphql_request(&req),
+            "form-urlencoded body must NOT be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn is_graphql_request_rejects_get_without_body() {
+        use crate::strategy::is_graphql_request;
+        let req = Request::get("https://example.com/graphql?query={__typename}");
+        assert!(
+            !is_graphql_request(&req),
+            "GET without body must not be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn graphql_payloads_for_request_returns_battery_for_graphql_request() {
+        use crate::strategy::{graphql_payloads_for_request, is_graphql_request};
+        let body = br#"{"query":"{ __typename }"}"#;
+        let req = Request::post("https://example.com/graphql", body.to_vec())
+            .header("Content-Type", "application/json");
+        assert!(is_graphql_request(&req));
+        let payloads = graphql_payloads_for_request(&req);
+        assert!(
+            !payloads.is_empty(),
+            "graphql_payloads_for_request must return the full battery for a GraphQL request"
+        );
+        // Verify all three core classes are present.
+        let has_alias = payloads.iter().any(|p| p.contains("AliasFlood"));
+        let has_intro = payloads.iter().any(|p| p.contains("__schema"));
+        let has_mismatch = payloads.iter().any(|p| p.contains("operationName"));
+        assert!(has_alias, "alias-flood payloads missing from battery");
+        assert!(has_intro, "introspection payloads missing from battery");
+        assert!(has_mismatch, "op-name-mismatch payloads missing from battery");
+    }
+
+    #[test]
+    fn graphql_payloads_for_request_empty_for_non_graphql() {
+        use crate::strategy::graphql_payloads_for_request;
+        let req = Request::get("https://example.com/api?q=test");
+        let payloads = graphql_payloads_for_request(&req);
+        assert!(
+            payloads.is_empty(),
+            "graphql_payloads_for_request must return empty Vec for non-GraphQL requests"
+        );
+    }
+
+    #[test]
+    fn content_type_routing_application_graphql_returns_battery() {
+        use crate::strategy::graphql_payloads_for_request;
+        let req = Request::post(
+            "https://api.example.com/graphql",
+            b"query { viewer { login } }".to_vec(),
+        )
+        .header("Content-Type", "application/graphql");
+        let payloads = graphql_payloads_for_request(&req);
+        assert!(
+            !payloads.is_empty(),
+            "application/graphql Content-Type must route to GraphQL battery"
+        );
+        assert!(
+            payloads.len() >= 10,
+            "GraphQL battery must have at least 10 payloads, got {}",
+            payloads.len()
+        );
+    }
 }
