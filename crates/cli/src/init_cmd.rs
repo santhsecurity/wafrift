@@ -22,6 +22,13 @@ pub struct InitArgs {
     /// expectation that `wafrift init` would destroy in-flight tuning.
     #[arg(long, default_value_t = false)]
     pub force: bool,
+
+    /// Suppress all human-readable output — only errors are emitted.
+    /// The success confirmation ("wrote scaffold … bytes") and the
+    /// "Next steps" advisory are silenced so `wafrift init` can be
+    /// called from scripts without polluting their output.
+    #[arg(short, long)]
+    pub quiet: bool,
 }
 
 pub fn run_init(args: InitArgs) -> ExitCode {
@@ -43,34 +50,36 @@ pub fn run_init(args: InitArgs) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    eprintln!(
-        "wrote scaffold ({} bytes) → {}",
-        SCAFFOLD.len(),
-        out_path.display()
-    );
-    eprintln!("Next steps:");
-    eprintln!(
-        "  1. Edit the file — uncomment the keys you want. `wafrift scan` \
-         auto-loads it (CLI flags still win)."
-    );
-    match locate_proxy() {
-        Some(p) => eprintln!(
-            "  2. Run `{} --listen 127.0.0.1:8080 --mitm` and point your client at it.",
-            p.display()
-        ),
-        None => {
-            eprintln!(
-                "  2. `wafrift-proxy` is NOT on your PATH. It is a separate binary in the \
-                 same workspace — build/install it with:"
-            );
-            eprintln!("       cargo install --path crates/proxy   # from a wafrift checkout");
-            eprintln!(
-                "       (or `cargo build -p wafrift-proxy` and run target/.../wafrift-proxy)"
-            );
-            eprintln!("     then: wafrift-proxy --listen 127.0.0.1:8080 --mitm");
+    if !args.quiet {
+        eprintln!(
+            "wrote scaffold ({} bytes) → {}",
+            SCAFFOLD.len(),
+            out_path.display()
+        );
+        eprintln!("Next steps:");
+        eprintln!(
+            "  1. Edit the file — uncomment the keys you want. `wafrift scan` \
+             auto-loads it (CLI flags still win)."
+        );
+        match locate_proxy() {
+            Some(p) => eprintln!(
+                "  2. Run `{} --listen 127.0.0.1:8080 --mitm` and point your client at it.",
+                p.display()
+            ),
+            None => {
+                eprintln!(
+                    "  2. `wafrift-proxy` is NOT on your PATH. It is a separate binary in the \
+                     same workspace — build/install it with:"
+                );
+                eprintln!("       cargo install --path crates/proxy   # from a wafrift checkout");
+                eprintln!(
+                    "       (or `cargo build -p wafrift-proxy` and run target/.../wafrift-proxy)"
+                );
+                eprintln!("     then: wafrift-proxy --listen 127.0.0.1:8080 --mitm");
+            }
         }
+        eprintln!("  3. Run `wafrift report` after you have findings.");
     }
-    eprintln!("  3. Run `wafrift report` after you have findings.");
     ExitCode::SUCCESS
 }
 
