@@ -51,6 +51,31 @@ pub enum ContentTypeTechnique {
     MixedContentType,
 }
 
+impl ContentTypeTechnique {
+    /// Return a stable string key for this technique variant.
+    ///
+    /// Prefer this over  — the Debug representation
+    /// is controlled by the compiler and can change between Rust versions
+    /// or if the enum derives a custom Debug. This key is used as the
+    /// action name in the MCTS bridge so both the push site (legal_actions)
+    /// and the match site (apply) refer to the same literal.
+    #[must_use]
+    pub fn technique_key(&self) -> &'static str {
+        match self {
+            Self::Multipart => "Multipart",
+            Self::MultipartQuotedBoundary => "MultipartQuotedBoundary",
+            Self::MultipartWhitespaceBoundary => "MultipartWhitespaceBoundary",
+            Self::MultipartDuplicateBoundary => "MultipartDuplicateBoundary",
+            Self::MultipartCharsetPrefix => "MultipartCharsetPrefix",
+            Self::JsonUnicodeEscape => "JsonUnicodeEscape",
+            Self::JsonWithComments => "JsonWithComments",
+            Self::XmlNamespace => "XmlNamespace",
+            Self::XmlCdata => "XmlCdata",
+            Self::MixedContentType => "MixedContentType",
+        }
+    }
+}
+
 /// Maximum size of a form-encoded body before parsing is refused.
 ///
 /// Prevents `DoS` via adversarial multi-gigabyte inputs that would be

@@ -174,13 +174,17 @@ impl Environment for WafRiftEnv {
         {
             let params = wafrift_content_type::parse_form_body(body);
             if !params.is_empty() {
-                actions.push(TechniqueAction::ContentTypeSwitch("Multipart".to_string()));
                 actions.push(TechniqueAction::ContentTypeSwitch(
-                    "JsonUnicodeEscape".to_string(),
+                    wafrift_content_type::ContentTypeTechnique::Multipart.technique_key().to_string(),
                 ));
-                actions.push(TechniqueAction::ContentTypeSwitch("XmlCdata".to_string()));
                 actions.push(TechniqueAction::ContentTypeSwitch(
-                    "MultipartQuotedBoundary".to_string(),
+                    wafrift_content_type::ContentTypeTechnique::JsonUnicodeEscape.technique_key().to_string(),
+                ));
+                actions.push(TechniqueAction::ContentTypeSwitch(
+                    wafrift_content_type::ContentTypeTechnique::XmlCdata.technique_key().to_string(),
+                ));
+                actions.push(TechniqueAction::ContentTypeSwitch(
+                    wafrift_content_type::ContentTypeTechnique::MultipartQuotedBoundary.technique_key().to_string(),
                 ));
             }
         }
@@ -196,19 +200,26 @@ impl Environment for WafRiftEnv {
         // as a distinct action so MCTS can actually choose between
         // them.
         if !self.header_applied {
+            // Only expose tricks the apply() arm can actually execute
+            // on the structured Vec<(name, value)> the proxy hands
+            // to reqwest. Wire-format-only tricks (TabSeparator,
+            // WhitespacePadding, LineFolding, LfOnlyLineFolding,
+            // MultiLineFolding, LfOnlyMultiLineFolding, TrailingSpace,
+            // CommaJoin) produce headers reqwest re-normalises, so
+            // exposing them here would let MCTS waste budget on
+            // actions that fabricate "success" without changing the
+            // wire bytes. Those belong in transport-level
+            // serialisation, not strategy-level planning.
+            //
+            // Pre-fix the apply() arm ignored the trick name and ran
+            // case_mix unconditionally — every choice MCTS made was
+            // identical at execution and the search couldn't learn
+            // ANY ordering among header tricks.
             for trick in [
                 "CaseMixing",
-                "TabSeparator",
-                "WhitespacePadding",
-                "LineFolding",
-                "LfOnlyLineFolding",
-                "DuplicateHeader",
                 "UnderscoreSubstitution",
                 "NullByteInjection",
-                "TrailingSpace",
-                "MultiLineFolding",
-                "LfOnlyMultiLineFolding",
-                "CommaJoin",
+                "DuplicateHeader",
             ] {
                 actions.push(TechniqueAction::HeaderTrick(trick.to_string()));
             }
@@ -278,9 +289,14 @@ impl Environment for WafRiftEnv {
                     let params = wafrift_content_type::parse_form_body(body);
                     if !params.is_empty() {
                         let variants = wafrift_content_type::generate_variants(&params);
+                        // Use technique_key() for a stable, compiler-independent match
+                        // instead of format!("{:?}", …) which relies on the Debug impl.
+                        // Only set content_type_applied when a variant actually matched
+                        // and the body/headers were mutated — previously this flag was set
+                        // unconditionally, fabricating an "applied" signal on every no-op.
                         if let Some(variant) = variants
                             .into_iter()
-                            .find(|v| format!("{:?}", v.technique) == *technique_name)
+                            .find(|v| v.technique.technique_key() == technique_name.as_str())
                         {
                             self.req
                                 .headers
@@ -289,23 +305,68 @@ impl Environment for WafRiftEnv {
                                 .headers
                                 .push(("Content-Type".into(), variant.content_type));
                             self.req.body = Some(variant.body);
+                            self.content_type_applied = true;
                         }
                     }
                 }
-                self.content_type_applied = true;
             }
-            TechniqueAction::HeaderTrick(_) => {
-                // Apply case mixing to Content-Type header
+            TechniqueAction::HeaderTrick(trick_name) => {
+                // Dispatch on the trick name so MCTS-chosen actions
+                // actually do what they say. Pre-fix this discarded
+                // the trick_name and ran case_mix every time — 11
+                // of 12 advertised tricks were silent no-ops.
+                // legal_actions() above only exposes the 4 tricks
+                // that survive the structured (name, value) → reqwest
+                // round-trip; the wire-only tricks (TabSeparator,
+                // line folding, etc.) live in transport.
                 if let Some(ct_idx) = self
                     .req
                     .headers
                     .iter()
                     .position(|(k, _)| k.eq_ignore_ascii_case("content-type"))
                 {
-                    let (_, value) = &self.req.headers[ct_idx];
-                    let mixed_name = wafrift_encoding::header::case_mix("Content-Type");
-                    let value_clone = value.clone();
-                    self.req.headers[ct_idx] = (mixed_name, value_clone);
+                    let (name, value) = self.req.headers[ct_idx].clone();
+                    match trick_name.as_str() {
+                        "CaseMixing" => {
+                            self.req.headers[ct_idx] =
+                                (wafrift_encoding::header::case_mix("Content-Type"), value);
+                        }
+                        "UnderscoreSubstitution" => {
+                            // Some legacy WAFs treat - and _ as
+                            // equivalent in header names; many CGI
+                            // backends do too. Pairing them lets the
+                            // WAF normalise away the mutation while
+                            // the origin still sees the variant.
+                            self.req.headers[ct_idx] = (
+                                wafrift_encoding::header::underscore_substitute(&name),
+                                value,
+                            );
+                        }
+                        "NullByteInjection" => {
+                            self.req.headers[ct_idx] =
+                                (wafrift_encoding::header::null_byte_inject(&name), value);
+                        }
+                        "DuplicateHeader" => {
+                            // Push a SECOND Content-Type entry with
+                            // an alternate benign value — some
+                            // intermediaries take the first, others
+                            // the last (CL+TE-style desync at the
+                            // header level).
+                            self.req
+                                .headers
+                                .push((name.clone(), "text/plain".to_string()));
+                        }
+                        _ => {
+                            // Unrecognised trick — fall back to
+                            // case-mix rather than no-op, so a
+                            // future trick added to legal_actions
+                            // without an apply() arm still produces
+                            // SOME mutation rather than fabricating
+                            // a no-op "success".
+                            self.req.headers[ct_idx] =
+                                (wafrift_encoding::header::case_mix("Content-Type"), value);
+                        }
+                    }
                 }
                 self.header_applied = true;
             }
@@ -617,5 +678,94 @@ mod tests {
         let mut engine = TreeSearch::new(env, config);
         // Should not panic; XSS oracle is used for validation
         let _ = engine.run();
+    }
+
+    // ── HeaderTrick dispatch (F42 regression) ─────────────────
+
+    fn req_with_ct() -> Request {
+        let mut r = Request::post("http://example.com/api", b"hi".to_vec());
+        r.headers
+            .push(("Content-Type".into(), "application/json".into()));
+        r
+    }
+
+    #[test]
+    fn header_trick_case_mixing_mutates_header_name_case() {
+        let mut env = WafRiftEnv::new(req_with_ct(), 4);
+        env.apply(&TechniqueAction::HeaderTrick("CaseMixing".into()));
+        let (name, _) = env
+            .req
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .expect("CT survives");
+        // case_mix mixes upper/lower → at least one char differs
+        // from the canonical "Content-Type".
+        assert_ne!(name, "Content-Type", "case_mix should mutate case");
+    }
+
+    #[test]
+    fn header_trick_underscore_substitution_replaces_dash() {
+        let mut env = WafRiftEnv::new(req_with_ct(), 4);
+        env.apply(&TechniqueAction::HeaderTrick(
+            "UnderscoreSubstitution".into(),
+        ));
+        let header = env.req.headers.iter().find(|(k, _)| k.contains('_'));
+        assert!(
+            header.is_some(),
+            "expected `_` in mutated header name, got headers: {:?}",
+            env.req.headers
+        );
+    }
+
+    #[test]
+    fn header_trick_duplicate_header_pushes_second_content_type() {
+        let mut env = WafRiftEnv::new(req_with_ct(), 4);
+        env.apply(&TechniqueAction::HeaderTrick("DuplicateHeader".into()));
+        let ct_count = env
+            .req
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .count();
+        assert_eq!(
+            ct_count, 2,
+            "DuplicateHeader must push a second Content-Type entry"
+        );
+    }
+
+    #[test]
+    fn header_trick_legal_actions_only_lists_executable_tricks() {
+        // Lock the contract: legal_actions must not advertise tricks
+        // the apply() dispatcher can't actually execute (was the F42
+        // bug — 11 of 12 advertised tricks fell through to case_mix).
+        let env = WafRiftEnv::new(req_with_ct(), 4);
+        let header_tricks: Vec<String> = env
+            .legal_actions()
+            .iter()
+            .filter_map(|a| match a {
+                TechniqueAction::HeaderTrick(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        // Exactly the 4 names the apply() arm dispatches on.
+        for must_have in [
+            "CaseMixing",
+            "UnderscoreSubstitution",
+            "NullByteInjection",
+            "DuplicateHeader",
+        ] {
+            assert!(
+                header_tricks.iter().any(|t| t == must_have),
+                "missing trick {must_have} — got {header_tricks:?}"
+            );
+        }
+        // Wire-only tricks must NOT be advertised at this layer.
+        for must_not in ["TabSeparator", "LineFolding", "WhitespacePadding"] {
+            assert!(
+                !header_tricks.iter().any(|t| t == must_not),
+                "wire-only trick {must_not} should not appear — got {header_tricks:?}"
+            );
+        }
     }
 }
