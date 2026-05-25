@@ -399,7 +399,7 @@ pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
         use std::time::{SystemTime, UNIX_EPOCH};
         let bp_nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
+            .map(|d| d.as_nanos())
             .unwrap_or(0);
         let bp_tmp = std::env::temp_dir().join(format!(
             "wafrift-legendary-bp-{}-{bp_nanos}.json",
@@ -593,7 +593,7 @@ fn run_inline_scan(a: InlineScanArgs<'_>) -> Result<serde_json::Value, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
     let tmp = std::env::temp_dir().join(format!(
         "wafrift-legendary-scan-{}-{nanos}.json",
