@@ -138,8 +138,14 @@ fn bound_params(params: &[(String, String)]) -> std::borrow::Cow<'_, [(String, S
         let remaining = MAX_VARIANT_INPUT_BYTES - used;
         let cost = k.len() + v.len();
         if cost > remaining {
+            // The key alone already exhausts the budget — skip entirely
+            // rather than emitting (key, "") which wastes budget and
+            // misrepresents the param with an empty value.
+            if k.len() >= remaining {
+                break;
+            }
             // Trim the value to fit the remaining budget exactly.
-            let vb = floor_char_boundary(&v, remaining.saturating_sub(k.len()));
+            let vb = floor_char_boundary(&v, remaining - k.len());
             out.push((k.clone(), v[..vb].to_string()));
             break;
         }
