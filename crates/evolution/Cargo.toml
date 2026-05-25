@@ -14,6 +14,7 @@ categories = ["algorithms", "network-programming"]
 wafrift-types = { workspace = true }
 wafrift-encoding = { workspace = true }
 wafrift-detect = { workspace = true }
+wafrift-wafmodel = { workspace = true }
 rand = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
@@ -23,6 +24,7 @@ thiserror = { workspace = true }
 lru = "0.18"
 sha2 = "0.10"
 tokio = { workspace = true }
+sqlparser = { workspace = true }
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }
