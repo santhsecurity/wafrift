@@ -28,6 +28,11 @@ pub mod keyword;
 /// is RFC 3986 §5.2.4-equivalent to the same target — but most WAFs
 /// don't run that exact algorithm.
 pub mod path_norm;
+/// HTTP request-line differential tricks: exotic methods (WebDAV,
+/// CalDAV, cache-private), method case/whitespace tricks, version
+/// strings (HTTP/0.9, HTTP/1.99, HTTP/2.0-on-h1-wire), absolute-form
+/// URI (RFC 7230 §5.3.2), asterisk-form, authority-form.
+pub mod request_line;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
