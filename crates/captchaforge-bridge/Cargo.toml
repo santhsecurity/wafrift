@@ -13,7 +13,12 @@ categories = ["network-programming", "web-programming"]
 [dependencies]
 wafrift-transport = { workspace = true }
 captchaforge = "0.1"
-chromiumoxide = { version = "0.9", default-features = true }
+# All Chromium driving goes through `runtime_headless` (which re-exports
+# `chromiumoxide` for any consumer that still needs raw CDP types). The
+# direct `chromiumoxide = "0.9"` dep was vestigial — every call site in
+# this crate already routes through `runtime_headless::{BrowserRuntime,
+# BrowserLaunchOptions}` (Phase 09).
+runtime-headless = { path = "../../../../libs/runtime/headless" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
