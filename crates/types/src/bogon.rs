@@ -36,9 +36,30 @@ pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
             false
         }
         IpAddr::V6(v) => {
+            // Check native IPv6 properties FIRST so that special addresses
+            // like ::1 (loopback) are handled correctly before the
+            // IPv4-compat extraction below.
+            //
+            // Bug: the old ordering put to_ipv4() BEFORE v.is_loopback().
+            // ::1 has to_ipv4() == Some(0.0.0.1), which is NOT a bogon in
+            // the IPv4 branch, so ip_addr_is_bogon(::1) returned false —
+            // a silent SSRF bypass for IPv6 loopback. Fix: gate
+            // IPv6-native checks first.
+            if v.is_loopback()
+                || v.is_multicast()
+                || v.is_unspecified()
+                || v.is_unique_local()
+                || v.is_unicast_link_local()
+            {
+                return true;
+            }
+            // IPv4-mapped (::ffff:x.x.x.x): classify by the embedded v4.
             if let Some(mapped) = v.to_ipv4_mapped() {
                 return ip_addr_is_bogon(IpAddr::V4(mapped));
             }
+            // IPv4-compatible (::x.x.x.x, deprecated RFC 4291 §2.5.5.1):
+            // classify by the embedded v4, but only after the native checks
+            // so that ::1 (loopback) is already caught above.
             if let Some(compat) = v.to_ipv4() {
                 return ip_addr_is_bogon(IpAddr::V4(compat));
             }
@@ -66,11 +87,7 @@ pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
             if segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 {
                 return true; // 100::/64 discard
             }
-            v.is_loopback()
-                || v.is_multicast()
-                || v.is_unspecified()
-                || v.is_unique_local()
-                || v.is_unicast_link_local()
+            false
         }
     }
 }
