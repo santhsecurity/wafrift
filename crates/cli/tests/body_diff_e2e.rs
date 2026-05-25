@@ -7,7 +7,6 @@
 //! verifies divergent probes are reported with curl reproducers.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -42,10 +41,28 @@ async fn spawn_body_aware_mock() -> std::net::SocketAddr {
             });
         }
     });
-    // 200ms settle: under heavy parallel test load (1352+ tests), Windows
-    // loopback accept() can take longer than the prior 40ms and the wafrift
-    // subprocess's baseline probe arrives before the mock is ready.
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Probe-until-ready: don't sleep a fixed interval — actually connect
+    // to the listener to verify it is accepting. Under heavy parallel test
+    // load (1352+ tests) a fixed 200ms sleep can still race on Windows;
+    // polling confirms readiness deterministically. 30s deadline handles
+    // worst-case Windows loopback latency under high concurrency.
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 

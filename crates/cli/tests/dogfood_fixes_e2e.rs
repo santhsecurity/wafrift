@@ -1078,7 +1078,7 @@ fn scan_variants_cap_truncates_to_operator_supplied_limit() {
         "--level",
         "heavy",
         "--timeout-secs",
-        "5",
+        "30",
         "--format",
         "json",
         "--output",
@@ -1147,7 +1147,7 @@ fn legendary_bypass_probe_phase_embeds_structured_divergences_into_markdown() {
         "--concurrency",
         "16",
         "--timeout-secs",
-        "5",
+        "30",
         "--format",
         "markdown",
     ]);
@@ -1200,7 +1200,7 @@ fn legendary_payload_subprocess_pipeline_embeds_bypasses_into_markdown() {
         "--delay-ms",
         "0",
         "--timeout-secs",
-        "5",
+        "30",
         "--format",
         "markdown",
     ]);

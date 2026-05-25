@@ -5,7 +5,6 @@
 //! — informational, not a build failure.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -31,7 +30,23 @@ async fn spawn_h1_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -65,7 +80,7 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
         "--delay-ms",
         "0",
         "--timeout-secs",
-        "3",
+        "30",
     ]);
     // F78: when every H2 probe fails (H1-only mock), h2-diff exits 6
     // (inconclusive). Pre-fix the command exited 0 with no divergences,

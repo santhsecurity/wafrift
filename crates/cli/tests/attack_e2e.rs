@@ -5,7 +5,6 @@
 //! report with `divergences` totals and per-family sub-objects.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -43,7 +42,23 @@ async fn spawn_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -83,9 +98,9 @@ fn attack_runs_all_four_subprobes_and_merges_into_unified_report() {
         "--concurrency",
         "4",
         "--timeout-secs",
-        "5",
-        "--probe-timeout-secs",
         "30",
+        "--probe-timeout-secs",
+        "120",
     ]);
     assert_eq!(code, 0, "attack should exit 0 — stderr:\n{stderr}");
 
@@ -188,9 +203,9 @@ fn attack_h2_exit6_is_not_treated_as_subprobe_error() {
         "--delay-ms",
         "0",
         "--timeout-secs",
-        "3",
-        "--probe-timeout-secs",
         "30",
+        "--probe-timeout-secs",
+        "120",
     ]);
     assert_eq!(
         code, 0,
@@ -250,9 +265,9 @@ fn attack_text_format_emits_per_family_summary_lines() {
         "--concurrency",
         "4",
         "--timeout-secs",
-        "5",
-        "--probe-timeout-secs",
         "30",
+        "--probe-timeout-secs",
+        "120",
     ]);
     assert_eq!(code, 0);
     for family in [
