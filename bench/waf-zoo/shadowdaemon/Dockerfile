@@ -55,7 +55,9 @@ COPY --from=build /app/vendor /app/vendor
 # The autoloader references the source at /shadowd_php_src — keep it in runtime.
 COPY --from=build /shadowd_php_src /shadowd_php_src
 COPY echo.php /app/public/index.php
-COPY shadowd.ini /etc/shadowd/shadowd.ini
+# The connector's SHADOWD_DEFAULT_CONFIG_FILE constant is /etc/shadowd/connectors.ini
+# (not shadowd.ini). Copy our config to that path so it is found without env var.
+COPY shadowd.ini /etc/shadowd/connectors.ini
 COPY nginx.conf /etc/nginx/nginx.conf
 
 RUN mkdir -p /var/log/shadowd /run/php

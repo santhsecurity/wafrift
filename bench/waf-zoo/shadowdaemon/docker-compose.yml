@@ -25,9 +25,13 @@ services:
     image: postgres:15-alpine
     container_name: wafrift-zoo-shadowd-db
     environment:
-      POSTGRES_DB:       shadowd
-      POSTGRES_USER:     shadowd
-      POSTGRES_PASSWORD: shadowd
+      POSTGRES_DB:               shadowd
+      POSTGRES_USER:             shadowd
+      POSTGRES_PASSWORD:         shadowd
+      # Use md5 auth so old libdbd-pgsql inside zecure/shadowd (Ubuntu 20.04 era)
+      # can authenticate. scram-sha-256 (postgres 15 default) is unsupported
+      # by that libdbi version.
+      POSTGRES_HOST_AUTH_METHOD: md5
     volumes:
       - ./pgsql_layout.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
       - ./init.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
