@@ -55,14 +55,15 @@ pub fn severity_badge(severity: &str) -> ColoredString {
 /// Test-harness settle delay — the time tests sleep between
 /// spawning a mock TCP listener + invoking the wafrift binary so
 /// the listener is reliably accepting before the first probe.
-/// Hardcoded as `Duration::from_millis(40)` in 17 cli test sites
-/// pre-extract; lifting the constant means tuning it (e.g. for
-/// slower CI runners) is one edit instead of 17.
+/// Previously 40ms; bumped to 200ms after observing Windows loopback
+/// TCP accept latency spikes under heavy parallel test load (1352+
+/// tests) causing flaky baseline-probe failures in the e2e suite.
+/// 200ms matches the retry backoff used in listener_cmd tests.
 ///
 /// Gated `#[cfg(test)]` because every caller is in a test block;
 /// without the gate the bin compilation flags this as dead code.
 #[cfg(test)]
-pub const TEST_SETTLE: Duration = Duration::from_millis(40);
+pub const TEST_SETTLE: Duration = Duration::from_millis(200);
 
 /// Print `value` to stdout as 2-space-indented JSON, or on
 /// serialisation failure print a `JSON error: {e}` line to stderr

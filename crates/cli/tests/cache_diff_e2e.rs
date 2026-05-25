@@ -35,7 +35,7 @@ async fn spawn_cache_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
     addr
 }
 

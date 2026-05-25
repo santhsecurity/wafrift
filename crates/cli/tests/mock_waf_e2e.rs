@@ -82,7 +82,7 @@ async fn spawn_mock_modsec() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
     (addr, counter)
 }
 
@@ -1310,7 +1310,7 @@ mod wafrift_cli_test_harness {
                 let _ = sock.shutdown().await;
             }
         });
-        tokio::time::sleep(Duration::from_millis(40)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(3))
             .build()

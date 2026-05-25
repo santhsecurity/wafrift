@@ -47,7 +47,7 @@ async fn spawn_mock(magic: &'static str) -> (std::net::SocketAddr, Arc<AtomicUsi
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
     (addr, counter)
 }
 

@@ -42,7 +42,10 @@ async fn spawn_body_aware_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    // 200ms settle: under heavy parallel test load (1352+ tests), Windows
+    // loopback accept() can take longer than the prior 40ms and the wafrift
+    // subprocess's baseline probe arrives before the mock is ready.
+    tokio::time::sleep(Duration::from_millis(200)).await;
     addr
 }
 
@@ -78,6 +81,8 @@ fn body_diff_finds_divergences_against_body_aware_mock() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--timeout-secs",
+        "15",
     ]);
     assert_eq!(code, 0, "body-diff should exit 0 — stderr:\n{stderr}");
 
@@ -160,6 +165,8 @@ fn body_diff_json_results_carry_content_type_field_per_probe() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--timeout-secs",
+        "15",
     ]);
     assert_eq!(code, 0);
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
