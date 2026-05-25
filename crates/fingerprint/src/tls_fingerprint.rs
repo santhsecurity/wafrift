@@ -18,7 +18,6 @@
 //!   includes ALPN and SNI behavior. Harder to evade because
 //!   randomizing the order doesn't change the hash.
 
-use rand::Rng;
 
 /// A TLS fingerprint profile that mimics a specific browser.
 #[derive(Debug, Clone)]
@@ -364,10 +363,32 @@ const GREASE_VALUES: &[u16] = &[
     0xCACA, 0xDADA, 0xEAEA, 0xFAFA,
 ];
 
-/// Pick a random GREASE value.
+
+// ──────────────────────────────────────────────
+//  FNV-1a helpers for deterministic GREASE + profile selection
+// ──────────────────────────────────────────────
+
+/// FNV-1a hash of context bytes for deterministic GREASE and profile selection.
+fn fnv1a_tls(data: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in data {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Pick a GREASE value deterministically from context bytes.
+fn grease_from_context(context: &[u8]) -> u16 {
+    let h = fnv1a_tls(context);
+    GREASE_VALUES[(h as usize) % GREASE_VALUES.len()]
+}
+
+/// Pick a GREASE value with a stable deterministic default.
+///
+/// For per-host variation, use `grease_from_context(host.as_bytes())`.
 fn random_grease() -> u16 {
-    let mut rng = rand::thread_rng();
-    GREASE_VALUES[rng.r#gen_range(0..GREASE_VALUES.len())]
+    grease_from_context(b"wafrift-stable-grease-seed")
 }
 
 // ──────────────────────────────────────────────
@@ -389,14 +410,24 @@ pub fn profile_for(browser: &str) -> Option<&'static TlsProfile> {
         .find(|p| p.name.to_ascii_lowercase().contains(&lower))
 }
 
-/// Pick a random TLS profile.
+/// Pick a TLS profile deterministically from context bytes (e.g. host name).
+///
+/// Two calls with identical `context` always return the same profile.
 #[must_use]
-pub fn random_profile() -> Option<&'static TlsProfile> {
+pub fn random_profile_from(context: &[u8]) -> Option<&'static TlsProfile> {
     if ALL_PROFILES.is_empty() {
         return None;
     }
-    let mut rng = rand::thread_rng();
-    Some(&ALL_PROFILES[rng.gen_range(0..ALL_PROFILES.len())])
+    let h = fnv1a_tls(context);
+    Some(&ALL_PROFILES[(h as usize) % ALL_PROFILES.len()])
+}
+
+/// Pick a TLS profile. Returns a stable deterministic pick (Chrome 122).
+///
+/// Callers that need per-host variation should use `random_profile_from`.
+#[must_use]
+pub fn random_profile() -> Option<&'static TlsProfile> {
+    ALL_PROFILES.first()
 }
 
 /// Generate the cipher suite list for a profile (with GREASE if applicable).

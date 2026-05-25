@@ -86,14 +86,34 @@ pub const PROFILES: &[BrowserProfile] = &[
     },
 ];
 
-/// Select a random browser profile.
+/// FNV-1a hash of context bytes for deterministic profile selection.
+fn fnv1a_profile_hash(data: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in data {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Select a browser profile deterministically from context bytes (e.g. host name).
+///
+/// Two calls with identical `context` always return the same profile.
 #[must_use]
-pub fn random_profile() -> Option<&'static BrowserProfile> {
+pub fn random_profile_from(context: &[u8]) -> Option<&'static BrowserProfile> {
     if PROFILES.is_empty() {
         return None;
     }
-    let idx = rand::random::<usize>() % PROFILES.len();
-    Some(&PROFILES[idx])
+    let h = fnv1a_profile_hash(context);
+    Some(&PROFILES[(h as usize) % PROFILES.len()])
+}
+
+/// Select a browser profile. Returns a stable deterministic pick (first profile).
+///
+/// Callers that need per-host variation should use `random_profile_from`.
+#[must_use]
+pub fn random_profile() -> Option<&'static BrowserProfile> {
+    PROFILES.first()
 }
 
 /// Apply a browser profile to a request's headers.
