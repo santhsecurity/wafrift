@@ -483,6 +483,16 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         // want a bounded run can pass --level light or re-run with
         // `wafrift scan --variants-cap N`.
         variants_cap: 0,
+        // import-curl callers haven't historically asserted permission
+        // explicitly; the permission gate treats localhost / RFC1918
+        // targets as always-allowed, and the built-in bounty list covers
+        // the standard bench targets. Operators running against a live
+        // external target via import-curl should use `wafrift scan
+        // --i-have-permission "..." ` directly.
+        i_have_permission: None,
+        // GraphQL probing is off by default for import-curl — operators
+        // who want the GraphQL battery use `wafrift scan --graphql` directly.
+        graphql: false,
     };
 
     let cancel = tokio_util::sync::CancellationToken::new();

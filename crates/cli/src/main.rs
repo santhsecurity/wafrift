@@ -598,6 +598,33 @@ pub struct ScanArgs {
     /// to see the cap took effect.
     #[arg(long, default_value_t = 0)]
     pub variants_cap: usize,
+
+    /// Explicit authorization statement for this scan target. Required
+    /// for any target that is NOT on wafrift's built-in allowlist
+    /// (localhost, 127.0.0.1, ::1, waf.cumulusfire.net, testing.santh.dev,
+    /// ginandjuice.shop) and NOT in the operator's
+    /// `~/.wafrift/permission.toml`. Supply any non-empty justification
+    /// string — e.g. `--i-have-permission "HackerOne #12345 pentest scope"`.
+    ///
+    /// This guard is wafrift's refuse-by-default posture: the tool is
+    /// a real attack engine and the operator must assert authorization
+    /// explicitly for each non-lab target. Private/RFC1918 targets are
+    /// always allowed (your own Docker bench, internal pentest target).
+    #[arg(long, value_name = "REASON")]
+    pub i_have_permission: Option<String>,
+
+    /// Force GraphQL evasion probing — inject the full
+    /// `wafrift-graphql` payload battery (alias-flood, introspection,
+    /// op-name-mismatch, depth-bomb, batch) into the scan regardless
+    /// of whether auto-detection identifies a GraphQL endpoint.
+    ///
+    /// Without this flag, wafrift probes `/graphql`, `/api/graphql`,
+    /// and `/v1/graphql` automatically; if a GraphQL response is
+    /// detected there the payload battery is injected for that path
+    /// automatically. Use `--graphql` to override when the endpoint
+    /// lives at a non-standard path or behind a redirect.
+    #[arg(long, default_value_t = false)]
+    pub graphql: bool,
 }
 
 impl ScanArgs {
@@ -1185,6 +1212,10 @@ async fn run_scan_from_discovery(
             callback_timeout_secs: args.callback_timeout_secs,
             exploit_cap: args.exploit_cap,
             variants_cap: args.variants_cap,
+            // Forward the permission token to every per-discovery job.
+            i_have_permission: args.i_have_permission.clone(),
+            // Forward GraphQL probing flag to every per-discovery job.
+            graphql: args.graphql,
         };
         last = scan::run_scan(job_args, cancel.clone()).await;
         if let Some(ref p) = tmp_path {
