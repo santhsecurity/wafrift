@@ -194,6 +194,10 @@ fn novelty_search_still_works_backward_compat() {
 #[test]
 fn ast_mcts_deterministic_per_seed() {
     // Same seed → same sequence of payloads across two independent runs.
+    //
+    // `mcts_search` now uses `BTreeMap<MctsAction, BanditArm>` (sorted by
+    // rule-id asc, position asc) so arm iteration order is OS-entropy-
+    // independent and the UCB1 selection is fully reproducible.
     let payload = "1=1";
     let budget_size = 8;
 
@@ -221,6 +225,7 @@ fn ast_mcts_deterministic_per_seed() {
 
     let run_a = run(42);
     let run_b = run(42);
+    assert!(!run_a.is_empty(), "run must produce at least one candidate");
     assert_eq!(
         run_a, run_b,
         "same seed must produce the same candidate sequence"

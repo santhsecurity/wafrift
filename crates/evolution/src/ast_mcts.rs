@@ -45,7 +45,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::Span;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 const SPAN_EMPTY: Span = Span::empty();
 const WRAP_PREFIX: &str = "SELECT * FROM t WHERE x = ";
@@ -58,7 +58,7 @@ const WRAP_NEEDLE: &str = "WHERE x = ";
 /// Rules must be semantics-preserving: the rewritten expression must evaluate
 /// to the same value in any SQL engine. The UCB1 bandit learns which rules
 /// most reliably evade the target WAF at the active node position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuleId(pub u8);
 
 impl RuleId {
@@ -144,7 +144,12 @@ impl AstMctsOracle for AlwaysBlockedOracle {
 // ── MCTS node ─────────────────────────────────────────────────────────────
 
 /// An (arm, position) pair used as the MCTS action key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// `Ord` is derived so `BTreeMap<MctsAction, BanditArm>` gives a fully
+/// deterministic iteration order (by rule id ascending, then position
+/// ascending) regardless of the OS-seeded `HashMap::RandomState`. This
+/// makes `mcts_search` reproducible across process invocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MctsAction {
     pub rule: RuleId,
     pub position: u8, // which occurrence of the matched node type to rewrite
@@ -568,7 +573,7 @@ pub fn mcts_search<O: AstMctsOracle>(
 
     // Build the action space: (rule × position) pairs that are applicable.
     // We pre-screen to avoid wasting oracle budget on no-op arms.
-    let mut arms: HashMap<MctsAction, BanditArm> = HashMap::new();
+    let mut arms: BTreeMap<MctsAction, BanditArm> = BTreeMap::new();
     let max_pos = 4u8; // up to 4 occurrences per rule
     for &rule in RuleId::ALL {
         for pos in 0..max_pos {
@@ -590,11 +595,12 @@ pub fn mcts_search<O: AstMctsOracle>(
     let mut bypass_found = false;
 
     while oracle_queries < budget && !bypass_found {
-        // UCB1 selection — use a sorted Vec for deterministic tiebreaking.
-        // HashMap iteration order is unspecified; sorting by (ucb1 desc,
-        // rule asc, position asc) makes the selection reproducible across
-        // runs with the same seed even when multiple arms are tied at ∞
-        // (all-unvisited at round zero).
+        // UCB1 selection — sort for deterministic tiebreaking.
+        // BTreeMap iteration order is (rule asc, position asc); the Vec
+        // built from it already has that order, and the sort below is a
+        // no-op for the all-unvisited-arms case. We keep it so that once
+        // some arms have been visited their UCB1 scores are correctly
+        // ranked in descending order.
         let mut ranked: Vec<(&MctsAction, f64)> = arms
             .iter()
             .map(|(k, a)| (k, a.ucb1(total_visits + 1.0, c)))
@@ -682,7 +688,7 @@ fn mcts_text_only<O: AstMctsOracle>(
         RuleId::CHAR_CONCAT,
         RuleId::UNION_VARIANT,
     ];
-    let mut arms: HashMap<MctsAction, BanditArm> = HashMap::new();
+    let mut arms: BTreeMap<MctsAction, BanditArm> = BTreeMap::new();
     for &rule in &text_rules {
         for pos in 0u8..4 {
             let action = MctsAction { rule, position: pos };

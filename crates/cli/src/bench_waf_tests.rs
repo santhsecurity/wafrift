@@ -500,6 +500,14 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         adaptive_pause_secs: 2,
         validate_only: false,
         lineage_output: None,
+        egress_socks5: Vec::new(),
+        egress_http_proxy: Vec::new(),
+        egress_tailscale_nodes: Vec::new(),
+        egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
+        egress_challenge_threshold: 3,
+        egress_cooldown_secs: 300,
+        mutator: "default".into(),
+        dilution_weight: 0.0,
     }
 }
 
