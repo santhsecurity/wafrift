@@ -38,7 +38,8 @@ use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::rate_limit::RateLimiter;
 use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
-    BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed, resolve_forward_url_pinned,
+    PinningResolver, UpstreamPolicy, assert_forward_url_allowed,
+    pin_url_to_first_addr, resolve_forward_url_pinned,
 };
 use wafrift_strategy::gene_bank::GeneBank;
 use wafrift_strategy::strategy::{evade, evade_smart};
@@ -918,9 +919,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
     )
     .redirect(reqwest::redirect::Policy::none())
-    .dns_resolver(Arc::new(BogonFilteringResolver {
-        policy: policy.clone(),
-    }));
+    .dns_resolver(Arc::new(PinningResolver::new(policy.clone())));
     if args.no_conn_reuse {
         // Force a fresh TCP connection per request. Kernel chooses a
         // new ephemeral source port each time, defeating per-source-
@@ -1750,7 +1749,23 @@ async fn forward_wafrift_request(
                 ));
             }
         };
-        let mut builder = client.request(method, &evasion_result.request.url);
+        // DNS-rebinding defence: rewrite the URL to use the IP literal
+        // from pinned_upstream so reqwest never issues a second DNS lookup
+        // for this hostname. Restore the original hostname as the Host
+        // header so virtual-hosting on the upstream still works.
+        let (pinned_url, pinned_host) = match pin_url_to_first_addr(
+            &evasion_result.request.url,
+            &pinned_upstream,
+        ) {
+            Ok(v) => v,
+            Err(msg) => {
+                warn!(host = %host, "{}", msg);
+                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+            }
+        };
+        let mut builder = client.request(method, &pinned_url);
+        // Always set Host to the original hostname (not the IP literal).
+        builder = builder.header("Host", &pinned_host);
         for (k, v) in &evasion_result.request.headers {
             if k.eq_ignore_ascii_case("host")
                 // Strip Content-Length: evasion may have mutated the body. Reqwest
@@ -2647,7 +2662,25 @@ async fn forward_passthrough(
                 ));
             }
         };
-        let mut builder = client.request(method, &req.url);
+        // DNS-rebinding defence: resolve the URL to a pinned IP before
+        // forwarding so that reqwest never issues a second DNS lookup.
+        let pinned_addrs = match resolve_forward_url_pinned(&req.url, &policy).await {
+            Ok(v) => v,
+            Err(msg) => {
+                warn!(host = %host, url = %req.url, "{}", msg);
+                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+            }
+        };
+        let (pinned_url, pinned_host) = match pin_url_to_first_addr(&req.url, &pinned_addrs) {
+            Ok(v) => v,
+            Err(msg) => {
+                warn!(host = %host, "{}", msg);
+                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+            }
+        };
+        let mut builder = client.request(method, &pinned_url);
+        // Always set Host to the original hostname (not the IP literal).
+        builder = builder.header("Host", &pinned_host);
         for (k, v) in &req.headers {
             if k.eq_ignore_ascii_case("host")
                 || k.eq_ignore_ascii_case("content-length")
