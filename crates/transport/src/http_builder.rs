@@ -109,6 +109,7 @@ mod tests {
         use crate::egress_pool::EgressPool;
         let pool = EgressPool::builder()
             .socks5_str(vec!["socks5://127.0.0.1:1080".to_owned()])
+            .expect("valid socks5 url")
             .build()
             .unwrap();
         let client =

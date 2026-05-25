@@ -1251,6 +1251,13 @@ async fn run_scan_from_discovery(
             i_have_permission: args.i_have_permission.clone(),
             // Forward GraphQL probing flag to every per-discovery job.
             graphql: args.graphql,
+            // Forward egress rotation settings to every per-discovery job.
+            egress_socks5: args.egress_socks5.clone(),
+            egress_http_proxy: args.egress_http_proxy.clone(),
+            egress_tailscale_nodes: args.egress_tailscale_nodes.clone(),
+            egress_tailscale_socks_addr: args.egress_tailscale_socks_addr.clone(),
+            egress_challenge_threshold: args.egress_challenge_threshold,
+            egress_cooldown_secs: args.egress_cooldown_secs,
         };
         last = scan::run_scan(job_args, cancel.clone()).await;
         if let Some(ref p) = tmp_path {

@@ -496,7 +496,7 @@ mod tests {
         let seed = Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())]);
         alg.initialize(vec![seed], &pool, &mut rng);
 
-        let mut cloned = alg.clone_box();
+        let cloned = alg.clone_box();
         // Mutate clone — original must not change.
         alg.bypass_found = true;
         assert!(!cloned.best().unwrap().has_gene("non_existent"));

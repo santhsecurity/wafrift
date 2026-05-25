@@ -310,6 +310,7 @@ impl EgressEntry {
 /// Round-robin egress pool with per-target cooldown tracking.
 ///
 /// See the module-level documentation for usage.
+#[derive(Debug)]
 pub struct EgressPool {
     entries: Vec<Arc<EgressEntry>>,
     /// Number of consecutive challenge responses before an entry is cooled.

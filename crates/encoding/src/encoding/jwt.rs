@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn crit_bypass() {
+    fn crit_bypass_test() {
         let t = fixture_jwt();
         let mutated = crit_bypass(&t).expect("crit");
         let (h, _, _) = split_jwt(&mutated).expect("split");

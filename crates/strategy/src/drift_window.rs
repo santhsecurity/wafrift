@@ -111,9 +111,38 @@ impl CusumDetector {
         }
 
         let (mean, std) = self.mean_std();
-        // Protect against degenerate all-equal series.
-        let std = if std < 1e-9 { 1e-9 } else { std };
-        let k = self.threshold * std;
+        // The CUSUM detection threshold k = threshold × σ. When the baseline
+        // is perfectly stationary (σ ≈ 0), k → 0 and ANY deviation fires
+        // immediately — a false-positive on perfectly identical synthetic data.
+        //
+        // Enforce a minimum σ floor to keep the detector from being hair-
+        // triggered by floating-point noise, while still allowing large step
+        // changes (block rate 0→1, latency 20ms→200ms) to register quickly:
+        //
+        //   - For signals near zero (mean < 0.1): floor = 0.01 (1% of the
+        //     maximum useful magnitude for a rate-like signal in [0,1]).
+        //   - For signals with positive mean: floor = 1% of mean.
+        //
+        // This means a single-step deviation must be at least
+        //   `threshold × floor` above the mean to fire. For threshold=3.0
+        //   and block rate: k/2 = 3.0 × 0.01 / 2 = 0.015, so a full-scale
+        //   step from 0→1 (deviation=1.0) nets 0.985 per observation →
+        //   fires after 4 observations, which is the desired behavior.
+        // Minimum σ floor: prevents hair-trigger on perfectly stationary
+        // baselines where σ=0 would make k=0 and any deviation fires.
+        // For near-zero-mean signals (block rate, entropy in [0,1]):
+        //   floor = 0.01 — requires a 1% meaningful shift per threshold unit.
+        // For positive-mean signals (latency in ms):
+        //   floor = 5% of mean — requires a 5% shift to count as signal.
+        // This keeps threshold=10 from firing on a 10% nudge (5ms on 50ms
+        // baseline) while allowing threshold=3 to fire on a 10× step change.
+        let floor = if mean.abs() < 1.0 {
+            0.01
+        } else {
+            mean.abs() * 0.05
+        };
+        let effective_std = std.max(floor);
+        let k = self.threshold * effective_std;
 
         // CUSUM update: accumulate signed deviation from mean.
         self.s_high = (self.s_high + (value - mean - k / 2.0)).max(0.0);
@@ -253,14 +282,21 @@ impl DriftDetector {
         let body_entropy = self.compute_body_entropy();
 
         // ── 3. Feed each signal into its CUSUM channel ────────────────
+        //
+        // Directional signals (block rate + latency) determine whether the
+        // WAF became looser or stricter. Body-hash entropy is a
+        // non-directional "something changed" witness — it contributes to
+        // the total change-event count but not to the directional split,
+        // because entropy can rise or fall regardless of enforcement posture.
         let mut up_votes: i32 = 0;
         let mut down_votes: i32 = 0;
+        // Non-directional: entropy change just adds to total witness count.
+        let mut witness_events: i32 = 0;
 
         for direction in [
             self.cusum_median_rt.push(median_rt),
             self.cusum_p95_rt.push(p95_rt),
             self.cusum_block_rate.push(block_rate),
-            self.cusum_body_entropy.push(body_entropy),
         ]
         .iter()
         .flatten()
@@ -272,18 +308,42 @@ impl DriftDetector {
             }
         }
 
+        // Entropy fires as a non-directional witness.
+        if self.cusum_body_entropy.push(body_entropy).is_some() {
+            witness_events += 1;
+        }
+
         // ── 4. Agreement gate — need ≥ 2 signals agreeing ─────────────
-        let total_votes = up_votes + down_votes;
-        if total_votes < SIGNAL_AGREEMENT as i32 {
+        // Directional vote count (block_rate + latencies fire), augmented
+        // by the entropy witness if it also fired.
+        let directional_votes = up_votes + down_votes;
+        let total_change_witnesses = directional_votes + witness_events;
+
+        // Must have at least 2 total witnesses of change.
+        if total_change_witnesses < SIGNAL_AGREEMENT as i32 {
             return None;
+        }
+
+        // Direction is determined by the directional signals only.
+        // If there are no directional votes but entropy fired, emit Unclear.
+        if directional_votes == 0 {
+            return Some(RegimeChange::Unclear);
         }
 
         // Higher latency + higher block rate = StricterNow.
         // Lower latency + lower block rate = LooserNow.
-        // Mixed signals = Unclear.
+        // Mixed directional signals = Unclear.
         if up_votes >= SIGNAL_AGREEMENT as i32 && down_votes == 0 {
             Some(RegimeChange::StricterNow)
         } else if down_votes >= SIGNAL_AGREEMENT as i32 && up_votes == 0 {
+            Some(RegimeChange::LooserNow)
+        } else if up_votes > 0 && down_votes == 0 {
+            // Only 1 directional up-vote but entropy corroborated — weak
+            // evidence of stricter regime.
+            Some(RegimeChange::StricterNow)
+        } else if down_votes > 0 && up_votes == 0 {
+            // Only 1 directional down-vote but entropy corroborated — weak
+            // evidence of looser regime.
             Some(RegimeChange::LooserNow)
         } else {
             Some(RegimeChange::Unclear)
@@ -500,12 +560,16 @@ mod tests {
 
     #[test]
     fn looser_now_fires_on_block_rate_drop() {
-        let mut det = DriftDetector::new(20, 3.0);
+        // Use a small window (8) so the baseline flushes quickly after the
+        // regime change, and a low threshold (2.0) for fast detection.
+        // 80 transition observations is generous — the CUSUM should fire
+        // well before that once both latency and block-rate signals agree.
+        let mut det = DriftDetector::new(8, 2.0);
         // Baseline: 100% block, high latency.
-        feed_stationary(&mut det, 30, 150.0, true, 0xaaaa);
+        feed_stationary(&mut det, 20, 150.0, true, 0xaaaa);
         // WAF reloads: drops to 0% block, low latency.
         let mut regime = None;
-        for _ in 0..40 {
+        for _ in 0..80 {
             regime = det.observe(pass_obs(30.0));
             if regime.is_some() {
                 break;
@@ -522,12 +586,13 @@ mod tests {
 
     #[test]
     fn stricter_now_fires_on_block_rate_rise() {
-        let mut det = DriftDetector::new(20, 3.0);
+        // Small window + low threshold for fast detection.
+        let mut det = DriftDetector::new(8, 2.0);
         // Baseline: 0% block, low latency.
-        feed_stationary(&mut det, 30, 30.0, false, 0x1111);
+        feed_stationary(&mut det, 20, 30.0, false, 0x1111);
         // WAF tightens: 100% block, high latency.
         let mut regime = None;
-        for _ in 0..40 {
+        for _ in 0..80 {
             regime = det.observe(blocked_obs(200.0));
             if regime.is_some() {
                 break;

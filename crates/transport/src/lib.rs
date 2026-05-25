@@ -61,5 +61,6 @@ pub use signal::{BlockClass, ResponseProfileDb, ResponseSignal};
 pub use stealth::{ImpersonateProfile, StealthClient, StealthError, StealthResponse};
 pub use url_util::host_from_url;
 
+pub mod alpn_confusion;
 pub mod jwt;
 pub mod session;
