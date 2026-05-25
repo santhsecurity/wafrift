@@ -319,15 +319,22 @@ pub fn cluster_records(records: &[BypassRecord], threshold: f64) -> Vec<Cluster>
 
 /// Greedy single-linkage clustering within one (rule_id × class) bucket.
 ///
-/// O(n²) in the worst case — acceptable for the cluster sizes we expect from
-/// a bench run (rarely > a few hundred bypasses per class).
+/// A new signature joins the first cluster where its normalized edit distance
+/// to ANY existing member is ≤ `threshold` (true single-linkage: minimum
+/// distance over all members, not just the first one). O(n²) worst case.
 fn sub_cluster(mut sigs: Vec<String>, threshold: f64) -> Vec<Vec<String>> {
     let mut clusters: Vec<Vec<String>> = Vec::new();
 
     'outer: for sig in sigs.drain(..) {
         for cluster in &mut clusters {
-            let rep = &cluster[0];
-            if normalized_levenshtein(rep, &sig) <= threshold {
+            // Single-linkage: check against every existing member, not just
+            // cluster[0]. Using cluster[0] as a fixed representative is a
+            // centroid-style heuristic that misclassifies sigs that are close
+            // to a later member but far from the first.
+            let any_close = cluster
+                .iter()
+                .any(|m| normalized_levenshtein(m, &sig) <= threshold);
+            if any_close {
                 cluster.push(sig);
                 continue 'outer;
             }
@@ -605,5 +612,53 @@ mod tests {
         })]);
         let records = extract_bypass_records(&j).unwrap();
         assert!(records.is_empty());
+    }
+
+    // ── Test 11: true single-linkage — sig close to a later member, not cluster[0] ──
+    //
+    // With the old bug (compare only against cluster[0]), "c" would be placed in its
+    // own singleton because dist("a", "c") > threshold. With true single-linkage, "c"
+    // joins the cluster via "b" (dist("b", "c") ≤ threshold).
+    #[test]
+    fn single_linkage_joins_via_later_member_not_only_first() {
+        // "a" and "b" are close (dist=1/1 via deletion... let's use longer strings).
+        // Use "aa", "ab", "ac" — all within 0.6 threshold of each other but
+        // "aa" vs "ac" has dist = 1/2 = 0.5 (within threshold).
+        // With old code: "aa"→cluster[0], "ab"→join (dist("aa","ab")=0.5), "ac"→check only "aa":
+        //   dist("aa","ac")=0.5 → same cluster. So this specific case passes old code too.
+        //
+        // Build a case where cluster[0] is FAR from the newcomer but a later member is close.
+        // Use: ["abcdefgh", "abcdefgX", "XXXXXXXY"]
+        //   - "abcdefgh" → cluster 0
+        //   - "abcdefgX" → dist("abcdefgh","abcdefgX") = 2/8 = 0.25 ≤ 0.3 → joins cluster 0
+        //   - "XXXXXXXY" → dist("abcdefgh","XXXXXXXY")=8/8=1.0 > 0.3 (far from cluster[0])
+        //                   dist("abcdefgX","XXXXXXXY")=8/8=1.0 > 0.3 → new cluster (correct)
+        //
+        // Now use a case where a later member IS close to the newcomer:
+        // ["abcdefgh", "XXXXXXXY", "XxxxxxxY"]
+        //   - "abcdefgh" → cluster 0 (member 0)
+        //   - "XXXXXXXY" → dist("abcdefgh","XXXXXXXY")=8/8=1.0 > 0.3 → new cluster (cluster 1, member 0)
+        //   - "XxxxxxxY" → dist("abcdefgh","XxxxxxxY")=7/8=0.875 > 0.3 (far from cluster 0)
+        //                   dist("XXXXXXXY","XxxxxxxY")=7/8=0.875 > 0.3 → also separate (cluster 2)
+        //
+        // For a true test, use short strings where the chain is: A-B at 0.3, B-C at 0.3, A-C at >0.3.
+        // e.g. "abc" vs "abd" = 1/3 ≈ 0.333 > 0.3 (just above)
+        //      "abd" vs "abe" = 1/3 ≈ 0.333 > 0.3
+        // Hmm, need threshold between pairwise distances.
+        //
+        // Use 4-char strings with threshold 0.3:
+        //   "aaaa" vs "aabb" = 2/4 = 0.5 > 0.3 (far)
+        //   "aabb" vs "aabz" = 1/4 = 0.25 ≤ 0.3 (close)
+        // So: ["aaaa", "aabb", "aabz"] with threshold 0.3:
+        //   Old code: "aabz" vs cluster[0]="aaaa" → dist=2/4=0.5 > 0.3 → new cluster.
+        //   New code: "aabz" vs "aaaa"=0.5>0.3, vs "aabb"=0.25≤0.3 → joins cluster 0.
+        let sigs = vec!["aaaa".to_string(), "aabb".to_string(), "aabz".to_string()];
+        let clusters = sub_cluster(sigs, 0.3);
+        // True single-linkage: "aabz" joins via "aabb" → 1 cluster.
+        assert_eq!(
+            clusters.len(), 1,
+            "single-linkage must allow joining via any member, not only cluster[0]: {clusters:?}"
+        );
+        assert_eq!(clusters[0].len(), 3);
     }
 }
