@@ -106,12 +106,14 @@ pub(crate) fn fitness_cmp(a: f64, b: f64) -> Ordering {
         .unwrap_or(Ordering::Equal)
 }
 
+pub mod ast_mcts_algorithm;
 pub mod hill_climb;
 pub mod map_elites;
 pub mod novelty;
 pub mod sim_anneal;
 pub mod tabu;
 
+pub use ast_mcts_algorithm::AstMctsAlgorithm;
 pub use hill_climb::HillClimbing;
 pub use map_elites::MapElites;
 pub use novelty::NoveltySearch;

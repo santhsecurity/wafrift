@@ -38,6 +38,11 @@ pub mod request_line;
 /// these because they don't carry keywords — the vulnerability is in
 /// the receiving deserializer.
 pub mod deserialization;
+/// JWT-mutation attack library: alg:none family (4 case variants),
+/// algorithm confusion (HS256-with-RSA-key, RS256-flip), embedded
+/// JWK, jku/x5u SSRF, kid path-traversal + SQLi + log4shell, empty
+/// signature, crit-header bypass, b64 padding tricks, duplicate alg.
+pub mod jwt;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
