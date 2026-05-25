@@ -398,9 +398,12 @@ proptest! {
     #[test]
     fn unicode_bidi_inject_no_panic(s in ".*") {
         let a = unicode::bidi_inject(&s);
-        // Must start with RLO and end with PDF.
-        prop_assert!(a.starts_with('\u{202E}'));
-        prop_assert!(a.ends_with('\u{202C}'));
+        // Must start with RLO (U+202E) and end with PDF (U+202C).
+        // Use char literals via named bindings to avoid `{...}` in format strings.
+        let rlo: char = '\u{202E}';
+        let pdf: char = '\u{202C}';
+        prop_assert!(a.starts_with(rlo), "expected RLO at start of bidi_inject output");
+        prop_assert!(a.ends_with(pdf), "expected PDF at end of bidi_inject output");
     }
 
     #[test]
