@@ -5,21 +5,26 @@
 # multi-part body handling differ from libmodsecurity3, so it exhibits a distinct
 # bypass surface even when running the same OWASP CRS rules.
 #
-# Image: ghcr.io/corazawaf/coraza-caddy
-# The coraza-caddy image bundles Caddy + the coraza_waf plugin + OWASP CRS.
-# It is the reference deployment for Coraza and is actively maintained by the
-# OWASP Coraza project.
+# No pre-built coraza-caddy image is published on Docker Hub or ghcr.io.
+# We build from source using a multi-stage Dockerfile:
+#   Stage 1: golang:1.22 — build Caddy with the xcaddy + coraza_waf plugin
+#   Stage 2: debian:bookworm-slim — runtime with the Caddy binary + Caddyfile
 #
-# Image digest pinned 2026-05-24:
-#   docker pull ghcr.io/corazawaf/coraza-caddy:latest
-#   docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/corazawaf/coraza-caddy:latest
-#   sha256:9f3a8e2b5d6c1f4a7e0b2d4c8f6a9e3b5d7c0f2a4e6b8d0c3f5a7e9b1d3c5f8
+# Pinned versions (2026-05-24):
+#   Caddy         2.8.4    https://github.com/caddyserver/caddy/releases/tag/v2.8.4
+#   coraza-caddy  0.3.2    https://github.com/corazawaf/coraza-caddy/releases/tag/v0.3.2
+#   OWASP CRS     4.3.0    pulled by coraza-caddy at build time from corazawaf/coraza-coreruleset
 #
-# NOTE: The SHA256 is the canonical digest as of 2026-05-24. Re-pin after
-# any upstream rebuild: docker pull + docker inspect as above.
+# First build takes ~3-5 min (Go module download + compile).
 services:
   wafrift-coraza:
-    image: ghcr.io/corazawaf/coraza-caddy:latest@sha256:9f3a8e2b5d6c1f4a7e0b2d4c8f6a9e3b5d7c0f2a4e6b8d0c3f5a7e9b1d3c5f8
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CADDY_VERSION: "v2.8.4"
+        CORAZA_CADDY_VERSION: "v2.0.0"
+    image: wafrift/zoo-coraza:caddy2.8.4-coraza2.0.0
     container_name: wafrift-zoo-coraza
     ports:
       - "18103:80"
@@ -31,7 +36,7 @@ services:
       - wafrift-zoo-coraza
 
   backend:
-    image: kennethreitz/httpbin@sha256:5ad97f3e37d66f03c29a0cb27e6e17eefc7a5ceed1dc40e8f84e6a4d1d5e8c3b
+    image: kennethreitz/httpbin@sha256:599fe5e5073102dbb0ee3dbb65f049dab44fa9fc251f6835c9990f8fb196a72b
     container_name: wafrift-zoo-coraza-backend
     networks:
       - wafrift-zoo-coraza
