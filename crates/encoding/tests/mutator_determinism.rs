@@ -17,12 +17,9 @@ fn encode_pure_strategies_twice_are_byte_identical() {
     let pollution_payload = b"k=v";
 
     for &strategy in all_strategies() {
-        // RandomCase uses rand::random — intentionally non-deterministic.
-        // SpaceToRandomBlank is now deterministic (FNV-1a hash, bench-safe).
-        if matches!(strategy, S::RandomCase) {
-            continue;
-        }
-
+        // All strategies are now deterministic (FNV-1a seeded where previously
+        // random). RandomCase was made deterministic in commit 14fd8fb.
+        // SpaceToRandomBlank was fixed earlier. Include all strategies.
         let bytes_in = if matches!(strategy, S::ParameterPollution) {
             pollution_payload
         } else {
@@ -42,14 +39,20 @@ fn encode_pure_strategies_twice_are_byte_identical() {
 }
 
 #[test]
-fn encode_random_case_negative_not_identical_across_calls() {
+fn encode_random_case_is_deterministic_post_fix() {
+    // Post-fix (commit 14fd8fb): RandomCase is now FNV-1a seeded, not
+    // rand::random — identical inputs produce byte-identical outputs so
+    // bench replays that discovered a bypass are reproducible.
     let payload = "AbCdEfGhIjKlMnOpQrStUvWxYz";
     let a = encode(payload.as_bytes(), S::RandomCase).unwrap();
     let b = encode(payload.as_bytes(), S::RandomCase).unwrap();
-    assert_ne!(
+    assert_eq!(
         a, b,
-        "negative twin: RandomCase injects entropy and must not be byte-stable"
+        "RandomCase must be deterministic: same input → same output (FNV-1a seeded)"
     );
+    // Distinct inputs must produce distinct outputs (not a constant encoder).
+    let c = encode(b"AbCdEfGhIjKlMnOpQrStUvWxY".as_ref(), S::RandomCase).unwrap();
+    assert_ne!(a, c, "RandomCase must vary with input — not a fixed-case encoder");
 }
 
 #[test]
@@ -91,12 +94,11 @@ fn mutate_url_deterministic_for_fixed_path() {
 }
 
 #[test]
-fn tamper_named_strategies_deterministic_except_random_case() {
+fn tamper_named_strategies_all_deterministic() {
+    // Post-fix (commit 14fd8fb): random_case is now FNV-1a seeded and
+    // deterministic. All tampers are now deterministic — no exclusions.
     let p = common::unicode_stress();
     for name in all_tamper_names() {
-        if *name == "random_case" {
-            continue;
-        }
         let a = tamper(name, p.as_str(), Some("sql")).unwrap();
         let b = tamper(name, p.as_str(), Some("sql")).unwrap();
         assert_eq!(a, b, "tamper({name}) must be deterministic");
@@ -104,10 +106,15 @@ fn tamper_named_strategies_deterministic_except_random_case() {
 }
 
 #[test]
-fn tamper_random_case_negative_unstable() {
+fn tamper_random_case_deterministic_and_varies_with_input() {
+    // Post-fix: random_case is deterministic — same input produces the same
+    // mixed-case output every run. Different inputs produce different output.
     let a = tamper("random_case", "PayloadText", Some("sql")).unwrap();
     let b = tamper("random_case", "PayloadText", Some("sql")).unwrap();
-    assert_ne!(a, b, "negative twin: random_case tamper must vary");
+    assert_eq!(a, b, "random_case tamper must be deterministic (FNV-1a seeded)");
+    // Distinct inputs must produce distinct patterns.
+    let c = tamper("random_case", "PayloadTexu", Some("sql")).unwrap();
+    assert_ne!(a, c, "random_case must vary with input — not a fixed-case encoder");
 }
 
 #[test]

@@ -144,11 +144,29 @@ pub(crate) fn class_config(class: &str) -> (Alphabet, Vec<&'static [u8]>) {
     match class {
         "sqli" => (
             // Distinguished bytes that SQL-injection WAF rules branch on.
+            // INVARIANT (same as XSS above): every byte that appears in ANY
+            // needle below MUST be in this set. kmp_sfa() uses the catch-all
+            // representative (b'A') for unlisted bytes, so a needle byte not
+            // here maps to the catch-all class and the KMP state machine can
+            // never advance past it — the needle becomes silently unmatchable.
+            //
+            // Pre-fix: only UPPERCASE u/n/i/o/s/e/l/t/r/c were listed (left
+            // over from a draft that used uppercase needles), but ALL needles
+            // are lowercase. Every character in "union select", "or 1=1",
+            // "sleep(", "; select" mapped to catch-all — zero bypasses were
+            // ever mined from the sqli class.
             Alphabet::new(
                 vec![
-                    b'\'', b'"', b' ', b'-', b'/', b'*', b'1', b'=', b'(',
-                    b')', b'U', b'N', b'I', b'O', b'S', b'E', b'L', b'T',
-                    b'R', b'C', b'0', b';',
+                    // Punctuation / operators that WAF rules branch on.
+                    b'\'', b'"', b' ', b'-', b'/', b'*', b'=', b'(', b')', b';',
+                    // Digits used in payloads (`1=1`, `0`).
+                    b'0', b'1',
+                    // Lowercase letters used in sqli needles:
+                    //   union select → u, n, i, o, s, e, l, c, t
+                    //   or / or 1=1  → o, r
+                    //   sleep(       → s, l, e, p
+                    //   ; select     → s, e, l, c, t
+                    b'u', b'n', b'i', b'o', b's', b'e', b'l', b't', b'r', b'c', b'p',
                 ],
                 b'A',
             ),
