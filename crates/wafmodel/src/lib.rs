@@ -36,6 +36,7 @@ pub fn default_crs_ruleset() -> &'static str {
 
 pub mod artifact;
 pub mod canon;
+pub mod ensemble_dilution;
 pub mod equiv_bridge;
 pub mod equiv_query;
 pub mod error;
