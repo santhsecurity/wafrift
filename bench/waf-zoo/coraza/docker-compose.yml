@@ -22,9 +22,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        CADDY_VERSION: "2.8.4"
-        CORAZA_CADDY_VERSION: "0.3.2"
-    image: wafrift/zoo-coraza:caddy2.8.4-coraza0.3.2
+        CADDY_VERSION: "v2.8.4"
+        CORAZA_CADDY_VERSION: "v2.0.0"
+    image: wafrift/zoo-coraza:caddy2.8.4-coraza2.0.0
     container_name: wafrift-zoo-coraza
     ports:
       - "18103:80"
