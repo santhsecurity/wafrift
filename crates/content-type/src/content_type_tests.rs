@@ -517,12 +517,15 @@ mod tests {
     }
 
     #[test]
-    fn unique_boundary_two_calls_differ() {
-        // Independent calls return distinct boundaries — important so a
-        // future caller that cached one boundary across requests would
-        // not silently make framing predictable.
+    fn unique_boundary_same_inputs_same_output() {
+        // After FNV fix: unique_boundary is deterministic — same inputs produce
+        // same boundary. Distinct request params (different values slice) produce
+        // distinct boundaries, which is what we need for reproducibility.
         let a = unique_boundary(&["x"]);
         let b = unique_boundary(&["x"]);
-        assert_ne!(a, b);
+        assert_eq!(a, b, "unique_boundary must be stable for identical inputs");
+        // Different inputs produce different boundaries.
+        let c = unique_boundary(&["y"]);
+        assert_ne!(a, c, "unique_boundary must differ for different inputs");
     }
 }

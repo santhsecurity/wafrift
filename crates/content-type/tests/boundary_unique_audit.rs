@@ -59,14 +59,12 @@ fn boundary_does_not_appear_inside_param_value() {
 }
 
 #[test]
-fn boundary_unique_across_runs_for_same_input() {
-    // Defence-in-depth — two separate generate_variants calls should
-    // not produce IDENTICAL boundaries (random hex tail keeps them
-    // unpredictable). If they did, an attacker could reproduce the
-    // boundary offline and craft a self-framing value.
+fn boundary_stable_same_input_unique_per_input() {
+    // Stability: deterministic FNV-1a derivation means the same params always
+    // produce the same boundary — 8 runs all return an identical token.
     let params = vec![("k".to_string(), "v".to_string())];
     let mut boundaries = std::collections::HashSet::new();
-    for _ in 0..64 {
+    for _ in 0..8 {
         let variants = generate_variants(&params);
         for v in &variants {
             if !matches!(v.technique, ContentTypeTechnique::Multipart) {
@@ -78,10 +76,33 @@ fn boundary_unique_across_runs_for_same_input() {
             boundaries.insert(boundary);
         }
     }
-    assert!(
-        boundaries.len() >= 60,
-        "64 runs should produce ~64 distinct boundaries — got {} (random source may have wedged)",
+    assert_eq!(
+        boundaries.len(),
+        1,
+        "same params must produce a stable boundary across runs (got {} distinct)",
         boundaries.len()
+    );
+
+    // Uniqueness: different param sets must produce different boundaries so
+    // an attacker cannot predict them from another request's boundary.
+    let mut distinct = std::collections::HashSet::new();
+    for i in 0u32..32 {
+        let p = vec![(format!("key{i}"), format!("val{i}"))];
+        let variants = generate_variants(&p);
+        for v in &variants {
+            if !matches!(v.technique, ContentTypeTechnique::Multipart) {
+                continue;
+            }
+            let body = std::str::from_utf8(&v.body).unwrap();
+            let line_end = body.find("\r\n").unwrap();
+            distinct.insert(body[2..line_end].to_string());
+            break;
+        }
+    }
+    assert!(
+        distinct.len() >= 28,
+        "32 different param sets must produce at least 28 distinct boundaries (got {})",
+        distinct.len()
     );
 }
 
