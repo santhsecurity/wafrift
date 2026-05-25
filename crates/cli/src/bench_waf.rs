@@ -390,7 +390,7 @@ const KNOWN_CLASSES: &[&str] = &[
     "graphql",
 ];
 
-fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
+fn validate_corpus_and_exit(cases: &[BenchCase], format: &str) -> Result<ExitCode, String> {
     use std::collections::{BTreeMap, HashSet};
     let mut seen: HashSet<&str> = HashSet::new();
     let mut by_class: BTreeMap<&str, usize> = BTreeMap::new();
@@ -410,19 +410,38 @@ fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
         }
         *by_class.entry(case.class.as_str()).or_insert(0) += 1;
     }
-    println!("corpus integrity:");
-    println!("  total cases: {}", cases.len());
-    for (cls, n) in &by_class {
-        println!("  {cls:>10}: {n}");
+    let ok = errors.is_empty();
+    if format == "json" {
+        let by_class_json: BTreeMap<&str, usize> = by_class.clone();
+        let payload = serde_json::json!({
+            "ok": ok,
+            "total_cases": cases.len(),
+            "by_class": by_class_json,
+            "errors": errors,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload)
+                .unwrap_or_else(|_| r#"{"ok":false,"error":"serialization failed"}"#.into())
+        );
+    } else {
+        println!("corpus integrity:");
+        println!("  total cases: {}", cases.len());
+        for (cls, n) in &by_class {
+            println!("  {cls:>10}: {n}");
+        }
+        if ok {
+            println!("OK ({} cases)", cases.len());
+        } else {
+            for e in &errors {
+                eprintln!("  ERROR: {e}");
+            }
+            eprintln!("{} corpus error(s)", errors.len());
+        }
     }
-    if errors.is_empty() {
-        println!("OK ({} cases)", cases.len());
+    if ok {
         Ok(ExitCode::SUCCESS)
     } else {
-        for e in &errors {
-            eprintln!("  ERROR: {e}");
-        }
-        eprintln!("{} corpus error(s)", errors.len());
         Ok(ExitCode::from(4))
     }
 }
@@ -682,7 +701,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // --validate-only: run corpus integrity checks then exit. Doesn't
     // need a live WAF target; intended for CI gating on corpus PRs.
     if args.validate_only {
-        return validate_corpus_and_exit(&cases);
+        return validate_corpus_and_exit(&cases, &args.format);
     }
 
     // Pick a real-browser User-Agent so the WAF doesn't have a free signal.
