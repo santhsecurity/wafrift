@@ -209,6 +209,12 @@ pub struct BenchWafArgs {
     /// Seconds a cooled egress entry stays out of rotation. Default: 300.
     #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
     pub egress_cooldown_secs: u64,
+
+    /// Pin the evolution-strategy mutator to a specific algorithm for ablation.
+    /// `default` uses the strategy name (hill-climb, sim-anneal, etc.).
+    /// `ast-mcts` forces AST Monte-Carlo Tree Search for every evolution case.
+    #[arg(long, default_value = "default", value_parser = ["default", "ast-mcts"])]
+    pub mutator: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1274,13 +1280,19 @@ async fn run_evolution_strategy(
     bypass_corpus: &mut Option<BypassCorpus>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
-    let algo_name = match strat {
-        "hill-climb" => "hill_climbing",
-        "sim-anneal" => "simulated_annealing",
-        "tabu" => "tabu_search",
-        "novelty" => "novelty_search",
-        "map-elites" => "map_elites",
-        _ => return stat,
+    // `--mutator ast-mcts` overrides the per-strategy algorithm selection so
+    // every evolution case runs through AST-MCTS for ablation comparison.
+    let algo_name = if args.mutator == "ast-mcts" {
+        "ast_mcts"
+    } else {
+        match strat {
+            "hill-climb" => "hill_climbing",
+            "sim-anneal" => "simulated_annealing",
+            "tabu" => "tabu_search",
+            "novelty" => "novelty_search",
+            "map-elites" => "map_elites",
+            _ => return stat,
+        }
     };
     let payload_type = class_to_payload_type(&case.class);
     let rng = StdRng::seed_from_u64(0xC0FFEE);
@@ -1297,6 +1309,16 @@ async fn run_evolution_strategy(
             return stat;
         }
     };
+
+    // When using AST-MCTS, seed the engine with a chromosome that carries the
+    // raw payload so the MCTS rollout starts from a meaningful rewrite context.
+    if algo_name == "ast_mcts" {
+        use wafrift_evolution::evolution::Chromosome;
+        let seed = Chromosome::new(vec![
+            ("ast_mcts_payload".into(), case.payload.clone()),
+        ]);
+        engine.seed_population(vec![seed]);
+    }
 
     for _ in 0..args.variants {
         if *total > 0 && args.delay_ms > 0 {

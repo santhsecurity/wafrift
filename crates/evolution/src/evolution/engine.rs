@@ -16,6 +16,7 @@ use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use wafrift_wafmodel::booster::WafBoosterScorer;
 
 /// The evolutionary engine that maintains a population and evolves it.
 #[derive(Debug)]
@@ -61,6 +62,12 @@ pub struct EvolutionEngine {
     /// observed during the run.  Populated by [`submit_batch`] when the oracle
     /// result carries a `rule_id` (via `OracleVerdict::rule_id`).
     pub rule_coverage: RuleCoverage,
+    /// WAFBooster importance scorer.  Updated on every oracle result and used
+    /// to re-rank mutation candidates so pass-likely payloads are tried first.
+    pub booster: WafBoosterScorer,
+    /// When `true`, the booster is disabled and candidate selection falls back
+    /// to the underlying algorithm's FIFO/UCB1 ordering.
+    pub no_booster: bool,
     /// Evaluations this generation.
     generation_evals: usize,
     /// Next candidate ID.
@@ -100,6 +107,8 @@ impl Clone for EvolutionEngine {
             stagnation_counter: self.stagnation_counter,
             corpus: self.corpus.clone(),
             rule_coverage: self.rule_coverage.clone(),
+            booster: self.booster.clone(),
+            no_booster: self.no_booster,
             generation_evals: self.generation_evals,
             next_id: self.next_id,
             pending_single: None,
@@ -194,9 +203,12 @@ impl EvolutionEngine {
             "tabu_search" => Box::new(crate::search::TabuSearch::new(20)),
             "novelty_search" => Box::new(crate::search::NoveltySearch::new(15, 0.3)),
             "map_elites" => Box::new(crate::search::MapElites::new()),
+            "ast_mcts" => Box::new(crate::search::AstMctsAlgorithm::new()),
             _ => {
                 return Err(EvolutionError::AlgorithmError(format!(
-                    "unknown algorithm: {algorithm_name}"
+                    "unknown algorithm '{algorithm_name}'; valid choices: \
+                     hill_climbing, simulated_annealing, tabu_search, \
+                     novelty_search, map_elites, ast_mcts"
                 )));
             }
         };
@@ -217,6 +229,8 @@ impl EvolutionEngine {
             stagnation_counter: 0,
             corpus: BypassCorpus::new(),
             rule_coverage: RuleCoverage::new(),
+            booster: WafBoosterScorer::no_decay(),
+            no_booster: false,
             generation_evals: 0,
             next_id: 0,
             pending_single: None,
@@ -271,6 +285,11 @@ impl EvolutionEngine {
     /// (the underlying algorithm is free to request whatever it likes
     /// internally; the engine bounds the request count it actually
     /// surfaces).
+    ///
+    /// When the booster is enabled (`no_booster == false`), the result
+    /// batch is re-ordered by ascending booster score so that pass-likely
+    /// candidates are tried first.  The in-flight map and cache logic are
+    /// unaffected by the reordering.
     pub fn batch_candidates(&mut self, n: usize) -> Vec<(usize, Chromosome)> {
         if self.should_terminate() || n == 0 {
             return Vec::new();
@@ -308,6 +327,27 @@ impl EvolutionEngine {
         }
 
         self.request_count = self.request_count.saturating_add(result.len());
+
+        // WAFBooster re-ranking: when the booster is active, sort candidates
+        // so the lowest-score (most pass-likely) ones come first.  The sort
+        // is stable so equal-score candidates preserve algorithm order.
+        if !self.no_booster && !result.is_empty() {
+            // Build a booster-score map keyed by eval_id.
+            let mut scored: Vec<(usize, Chromosome, f64)> = result
+                .into_iter()
+                .map(|(eval_id, chrom)| {
+                    let payload = Self::cache_key(&chrom); // deterministic string repr
+                    let score = self.booster.score_candidate(&payload);
+                    (eval_id, chrom, score)
+                })
+                .collect();
+            scored.sort_by(|a, b| {
+                a.2.partial_cmp(&b.2)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            result = scored.into_iter().map(|(id, chrom, _)| (id, chrom)).collect();
+        }
+
         result
     }
 
@@ -375,6 +415,18 @@ impl EvolutionEngine {
             // Extract scalar fields before the verdict is moved.
             let passed = verdict.passed;
             let status_delta = verdict.status_delta;
+
+            // WAFBooster online update: feed the observation so future
+            // candidate ranking benefits from accumulated signal.
+            if !self.no_booster {
+                let payload_str = Self::cache_key(&chromosome);
+                if passed {
+                    self.booster.observe_pass(&payload_str);
+                } else {
+                    self.booster
+                        .observe_block(&payload_str, verdict.rule_id.as_deref());
+                }
+            }
 
             self.cache.put(key, verdict.clone());
 
@@ -504,6 +556,12 @@ impl EvolutionEngine {
     #[must_use]
     pub fn best(&self) -> Option<&Chromosome> {
         self.algorithm.best()
+    }
+
+    /// Return the name of the active search algorithm (e.g. `"ast_mcts"`).
+    #[must_use]
+    pub fn algorithm_name(&self) -> &str {
+        self.algorithm.name()
     }
 
     /// Save engine state to disk.

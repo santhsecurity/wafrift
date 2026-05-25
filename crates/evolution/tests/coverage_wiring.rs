@@ -87,11 +87,12 @@ async fn coverage_records_sentinel_for_unblocked_verdict() {
     };
 
     let mut cov = RuleCoverage::new();
-    cov.record("sql_injection_payload", verdict.rule_id.as_deref());
+    // Use a payload that triggers the SQL heuristic in PayloadClass::from_payload.
+    cov.record("' OR 1=1--", verdict.rule_id.as_deref());
 
     // No real rule_id → rule_count stays at 0 (sentinel is excluded).
     assert_eq!(cov.rule_count(), 0);
-    // The class is still registered in by_class.
+    // The class is still registered in by_class (sentinel entry).
     let cls = PayloadClass::new("sql");
     assert!(cov.by_class.contains_key(&cls));
 
