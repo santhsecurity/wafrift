@@ -50,6 +50,15 @@ pub fn strategy_path(strategy: Strategy) -> &'static str {
         Strategy::Utf7Encode => "encoding/utf7",
         Strategy::GzipEncode => "encoding/compression/gzip",
         Strategy::DeflateEncode => "encoding/compression/deflate",
+        // Invisible / zero-width Unicode evasion family.
+        Strategy::TagCharEncode => "encoding/invisible/tag-char",
+        Strategy::VariationSelectorPad => "encoding/invisible/variation-selector",
+        Strategy::VariationSelectorSupplementaryPad => "encoding/invisible/variation-selector-supplementary",
+        Strategy::LigatureEncode => "encoding/invisible/ligature",
+        Strategy::CircledLetterEncode => "encoding/invisible/circled-letter",
+        Strategy::ParenthesizedLetterEncode => "encoding/invisible/parenthesized-letter",
+        Strategy::SoftHyphenInject => "encoding/invisible/soft-hyphen",
+        Strategy::WordJoinerWrap => "encoding/invisible/word-joiner",
         // `Strategy` is `#[non_exhaustive]`. New variants flag this sentinel
         // and the `every_strategy_is_mapped` test fails until a path is added.
         _ => "encoding/_unmapped",

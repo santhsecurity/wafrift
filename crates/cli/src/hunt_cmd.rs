@@ -408,7 +408,6 @@ struct RoundBypass {
 /// keeps the campaign in-process and avoids serialization overhead.
 async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<RoundBypass> {
     use crate::bench_waf::{BenchWafArgs, run_bench_waf};
-    use std::path::PathBuf;
 
     let bench_args = BenchWafArgs {
         base_url: Some(base_url.to_string()),
@@ -436,6 +435,7 @@ async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<Round
         egress_challenge_threshold: 3,
         egress_cooldown_secs: 300,
         mutator: "default".into(),
+        seed: None,
         dilution_weight: 0.0,
     };
 

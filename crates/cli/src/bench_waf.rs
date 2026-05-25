@@ -216,6 +216,14 @@ pub struct BenchWafArgs {
     #[arg(long, default_value = "default", value_parser = ["default", "ast-mcts"])]
     pub mutator: String,
 
+    /// Global RNG seed for reproducible runs. When set, User-Agent selection
+    /// and evolution-strategy RNGs are seeded deterministically so that
+    /// `bench-waf --seed <N> … > run1.json` and a second identical invocation
+    /// produce byte-identical JSON. Without this flag the bench is
+    /// non-deterministic (random UA, random evolution trajectories).
+    #[arg(long)]
+    pub seed: Option<u64>,
+
     /// Weight for ensemble-dilution score in evolutionary fitness (0.0–1.0).
     ///
     /// When targeting a multi-rule-group ensemble WAF (Cloudflare Managed
@@ -287,7 +295,6 @@ struct CaseResult {
     description: String,
     raw_blocked: bool,
     raw_status: u16,
-    raw_latency_ms: f64,
     evaded: Option<EvadeResult>,
 }
 
@@ -523,9 +530,15 @@ fn walk_corpus(path: &Path, out: &mut Vec<BenchCase>) -> Result<(), String> {
         return load_one(path, out);
     }
     let entries = fs::read_dir(path).map_err(|e| format!("read_dir {}: {e}", path.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let p = entry.path();
+    // Collect + sort so corpus order is deterministic across OS/FS.
+    // `fs::read_dir` returns entries in arbitrary filesystem order; two runs
+    // on the same seed would process cases in a different order → different
+    // JSON output even when nothing changed. Sort lexicographically by path.
+    let mut sorted: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    sorted.sort();
+    for p in sorted {
         if p.is_dir() {
             walk_corpus(&p, out)?;
         } else if p.extension().and_then(|s| s.to_str()) == Some("toml") {
@@ -672,10 +685,16 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
         return validate_corpus_and_exit(&cases);
     }
 
-    // Pick a randomized real-browser User-Agent (vs. the obvious
-    // wafrift-bench/0.1 marker) so the WAF doesn't have a free signal.
-    let ua = wafrift_fingerprint::fingerprint::random_profile()
-        .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string());
+    // Pick a real-browser User-Agent so the WAF doesn't have a free signal.
+    // With --seed the selection is deterministic (seeded_profile); without it
+    // we fall back to the global thread RNG (random_profile) so non-seeded
+    // runs still get UA variety.
+    let ua = match args.seed {
+        Some(s) => wafrift_fingerprint::fingerprint::seeded_profile(s)
+            .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string()),
+        None => wafrift_fingerprint::fingerprint::random_profile()
+            .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string()),
+    };
 
     let mut client_builder = Client::builder()
         .timeout(std::time::Duration::from_secs(args.timeout_secs))
@@ -739,7 +758,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
             }
         }
         let req = build_request(&base_url, case);
-        let (raw_status, raw_blocked, raw_latency_ms) = match send(&client, &req, args.timeout_secs)
+        let (raw_status, raw_blocked, _raw_latency_ms) = match send(&client, &req, args.timeout_secs)
             .await
         {
             Ok(t) => {
@@ -776,7 +795,6 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
             description: case.description.clone(),
             raw_blocked,
             raw_status,
-            raw_latency_ms,
             evaded,
         });
     }
@@ -1323,7 +1341,26 @@ async fn run_evolution_strategy(
         }
     };
     let payload_type = class_to_payload_type(&case.class);
-    let rng = StdRng::seed_from_u64(0xC0FFEE);
+    // Derive a per-(case, strategy) seed so different cases produce
+    // independent RNG streams while still being reproducible when a
+    // global --seed is provided. Without --seed, fall back to the
+    // historical hardcoded constant so existing (non-seeded) behaviour
+    // is unchanged.
+    let base_seed: u64 = args.seed.unwrap_or(0xC0FFEE);
+    // FNV-1a mix of the case id into the base seed gives each case its
+    // own stream; XOR with the strategy name hash ensures hill-climb and
+    // sim-anneal on the same case explore different trajectories.
+    let mut case_mix: u64 = base_seed ^ 0xcbf2_9ce4_8422_2325;
+    for byte in case.id.bytes() {
+        case_mix ^= u64::from(byte);
+        case_mix = case_mix.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let mut strat_mix: u64 = case_mix;
+    for byte in strat.bytes() {
+        strat_mix ^= u64::from(byte);
+        strat_mix = strat_mix.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let rng = StdRng::seed_from_u64(strat_mix);
     let gene_pool = GenePool::default_wafrift();
     let budget = Budget {
         max_requests: args.variants.saturating_mul(4),

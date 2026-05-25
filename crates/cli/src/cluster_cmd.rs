@@ -65,7 +65,9 @@ use std::process::ExitCode;
 
 use clap::Args;
 use colored::Colorize;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+#[cfg(test)]
+use serde::Deserialize;
 use serde_json::Value;
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────

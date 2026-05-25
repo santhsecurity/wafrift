@@ -86,13 +86,36 @@ pub const PROFILES: &[BrowserProfile] = &[
     },
 ];
 
-/// Select a random browser profile.
+/// Select a random browser profile using the global thread RNG.
+///
+/// Non-deterministic: two calls in the same process may return different
+/// profiles. Use [`seeded_profile`] when reproducibility is required.
 #[must_use]
 pub fn random_profile() -> Option<&'static BrowserProfile> {
     if PROFILES.is_empty() {
         return None;
     }
     let idx = rand::random::<usize>() % PROFILES.len();
+    Some(&PROFILES[idx])
+}
+
+/// Select a browser profile deterministically from `seed`.
+///
+/// Given the same `seed` this always returns the same profile, regardless
+/// of how many times the process has called `random_profile`. Used by
+/// `bench-waf --seed` to make two identical invocations produce the same
+/// User-Agent header and therefore byte-identical JSON output.
+#[must_use]
+pub fn seeded_profile(seed: u64) -> Option<&'static BrowserProfile> {
+    if PROFILES.is_empty() {
+        return None;
+    }
+    // Mix the seed through a cheap bijection (splitmix64 finalizer) so
+    // seeds 0, 1, 2 … don't all map to the same low-index profiles.
+    let mixed = seed
+        .wrapping_add(0x9e37_79b9_7f4a_7c15)
+        .wrapping_mul(0x6eed_0e9d_a4d9_4a4f);
+    let idx = (mixed as usize) % PROFILES.len();
     Some(&PROFILES[idx])
 }
 

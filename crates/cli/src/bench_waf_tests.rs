@@ -507,6 +507,7 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         egress_challenge_threshold: 3,
         egress_cooldown_secs: 300,
         mutator: "default".into(),
+        seed: None,
         dilution_weight: 0.0,
     }
 }

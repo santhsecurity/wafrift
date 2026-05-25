@@ -19,7 +19,7 @@
 
 use std::process::Command;
 use std::time::Duration;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 // ── Mock WAF implementations ───────────────────────────────────────────────
