@@ -45,6 +45,7 @@ wafrift-oracle = { workspace = true }
 wafrift-genome-registry = { workspace = true }
 wafrift-graphql = { workspace = true }
 wafrift-types = { workspace = true }
+pocgen = { workspace = true }
 wafrift-smuggling = { workspace = true, features = ["unsafe-probes"] }
 wafrift-content-type = { workspace = true }
 rand = { workspace = true }
