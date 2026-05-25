@@ -69,7 +69,7 @@ impl EvasionClient {
 
         #[cfg(feature = "proxy-pool")]
         if !config.proxies.is_empty()
-            && let Some(pool) = wafrift_pool::ProxyPool::new(&config.proxies)
+            && let Some(pool) = crate::pool::ProxyPool::new(&config.proxies)
                 .map_err(|e| EvasionError::InvalidUrl(e.to_string()))?
         {
             let custom_proxy = reqwest::Proxy::custom(move |_url| {

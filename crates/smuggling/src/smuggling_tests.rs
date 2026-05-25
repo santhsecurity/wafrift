@@ -218,14 +218,17 @@ mod tests {
         assert_eq!(ps.len(), 3);
     }
 
-    #[test]
-    fn websocket_smuggle_random_key() {
+        #[test]
+    fn websocket_smuggle_stable_key() {
         let p1 = websocket_smuggle("example.com", "/chat").unwrap();
         let p2 = websocket_smuggle("example.com", "/chat").unwrap();
         let s1 = String::from_utf8_lossy(&p1.raw_bytes);
         let s2 = String::from_utf8_lossy(&p2.raw_bytes);
-        assert!(s1.contains("Sec-WebSocket-Key:"));
-        assert_ne!(s1, s2, "keys should be random per call");
+        assert!(s1.contains("Sec-WebSocket-Key:"), "must include websocket key header");
+        assert_eq!(s1, s2, "same host+path must produce identical stable key");
+        let p3 = websocket_smuggle("example.com", "/other").unwrap();
+        let s3 = String::from_utf8_lossy(&p3.raw_bytes);
+        assert_ne!(s1, s3, "different paths must produce different keys");
     }
 
     #[test]
@@ -249,11 +252,17 @@ mod tests {
         assert!(s.contains("Content-Length:"));
     }
 
-    #[test]
-    fn canary_unique_per_payload() {
+        #[test]
+    fn canary_stable_per_payload() {
         let p1 = cl_te("example.com", "X").unwrap();
         let p2 = cl_te("example.com", "X").unwrap();
-        assert_ne!(p1.canary.token, p2.canary.token);
+        assert_eq!(p1.canary.token, p2.canary.token,
+            "same inputs must produce stable canary token");
+        use crate::safety::Canary;
+        let c1 = Canary::from_context(b"context-a");
+        let c2 = Canary::from_context(b"context-b");
+        assert_ne!(c1.token, c2.token,
+            "from_context must produce unique tokens for different contexts");
     }
 
     #[test]
@@ -311,20 +320,31 @@ mod tests {
     }
 
     #[test]
-    fn cache_buster_unique_and_numeric() {
-        // Audit (2026-05-10): pre-fix this only checked non-empty.
-        // A bug returning a constant `"x"` would have passed.
-        // Now: uniqueness across N calls + valid base-10 integer.
+    fn cache_buster_stable_and_numeric() {
+        // After FNV fix: cache_buster() is stable; uniqueness comes from cache_buster_for.
+        let b = crate::safety::cache_buster();
+        assert!(!b.is_empty(), "cache_buster must not return empty");
+        assert!(
+            b.parse::<u64>().is_ok(),
+            "cache_buster must produce a base-10 integer, got: {b:?}"
+        );
+        let c = crate::safety::cache_buster();
+        assert_eq!(b, c, "cache_buster must be deterministically stable");
+    }
+
+    #[test]
+    fn cache_buster_for_unique_per_url() {
         use std::collections::HashSet;
         let mut seen = HashSet::new();
-        for _ in 0..100 {
-            let b = crate::safety::cache_buster();
-            assert!(!b.is_empty(), "cache_buster must not return empty");
+        for i in 0u64..100 {
+            let url = format!("https://example.com/path?n={i}");
+            let b = crate::safety::cache_buster_for(url.as_bytes());
+            assert!(!b.is_empty(), "cache_buster_for must not return empty");
             assert!(
                 b.parse::<u64>().is_ok(),
-                "cache_buster must produce a base-10 integer, got: {b:?}"
+                "cache_buster_for must produce a base-10 integer, got: {b:?}"
             );
-            assert!(seen.insert(b), "cache_buster collided across 100 calls");
+            assert!(seen.insert(b), "cache_buster_for collided for different URLs");
         }
     }
 

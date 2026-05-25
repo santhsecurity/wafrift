@@ -41,6 +41,7 @@
 pub mod challenge;
 mod client;
 mod http_builder;
+pub mod pool;
 mod response;
 pub mod session_coherence;
 pub mod signal;
@@ -49,6 +50,7 @@ pub mod stealth;
 pub use client::EvasionClient;
 pub use client::EvasionError;
 pub use http_builder::base_client_builder;
+pub use pool::*;
 pub use response::EvasionResponse;
 pub use response::{is_waf_block, is_waf_block_status, scan_body_lowercase};
 pub use signal::{BlockClass, ResponseProfileDb, ResponseSignal};

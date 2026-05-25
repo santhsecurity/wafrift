@@ -388,8 +388,14 @@ fn dogfood_attack_subprobe_failures_are_isolated() {
             .and_then(serde_json::Value::as_u64)
             .map(|n| n > 0)
             .unwrap_or(false);
+        // h2 sub-probe uses h2_errors (its own naming); other probes use errors.
+        let has_h2_errors = body
+            .get("h2_errors")
+            .and_then(serde_json::Value::as_u64)
+            .map(|n| n > 0)
+            .unwrap_or(false);
         assert!(
-            has_err || has_errors,
+            has_err || has_errors || has_h2_errors,
             "family `{family}` must record failure: {body}"
         );
     }

@@ -1,7 +1,17 @@
 //! Safety controls to prevent collateral damage during smuggling scans.
 
-use rand::Rng;
 use std::time::{Duration, Instant};
+
+
+/// FNV-1a hash of context bytes for deterministic token generation.
+fn fnv1a_safety(context: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in context {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
 
 /// Per-request poison canary used to distinguish true smuggling responses
 /// from coincidental server variance.
@@ -11,15 +21,27 @@ pub struct Canary {
 }
 
 impl Canary {
-    /// Generate a random 16-byte alphanumeric canary.
+    /// Derive a 16-character alphanumeric canary deterministically from context bytes.
     #[must_use]
-    pub fn generate() -> Self {
+    pub fn from_context(context: &[u8]) -> Self {
         const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        let mut rng = rand::thread_rng();
-        let token: String = (0..16)
-            .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
+        let token: String = (0u64..16)
+            .map(|slot| {
+                let mut h = fnv1a_safety(context);
+                h ^= slot;
+                h = h.wrapping_mul(0x100000001b3);
+                CHARSET[(h as usize) % CHARSET.len()] as char
+            })
             .collect();
         Self { token }
+    }
+
+    /// Generate a canary with a stable deterministic token.
+    ///
+    /// For per-request uniqueness, use `from_context(raw_bytes)`.
+    #[must_use]
+    pub fn generate() -> Self {
+        Self::from_context(b"wafrift-canary-stable-seed")
     }
 }
 
@@ -60,7 +82,11 @@ impl ScanPolicy {
             .saturating_mul(exp)
             .min(self.max_delay_ms);
         let jitter_ms = if self.jitter {
-            rand::thread_rng().gen_range(0..=(ms / 4))
+            // Deterministic jitter from FNV-1a of (attempt, base_delay_ms).
+            let mut ctx = [0u8; 12];
+            ctx[..4].copy_from_slice(&attempt.to_le_bytes());
+            ctx[4..].copy_from_slice(&self.base_delay_ms.to_le_bytes());
+            (fnv1a_safety(&ctx) as u64) % (ms / 4 + 1)
         } else {
             0
         };
@@ -148,11 +174,19 @@ impl CircuitBreaker {
     }
 }
 
-/// Generate a cache-busting query parameter token.
+/// Generate a cache-busting token deterministically from context bytes.
+#[must_use]
+pub fn cache_buster_for(context: &[u8]) -> String {
+    let h = fnv1a_safety(context);
+    format!("{}", h & 0xFFFF_FFFF)
+}
+
+/// Generate a cache-busting token. Returns a stable, deterministic value.
+///
+/// For per-URL uniqueness, use `cache_buster_for(url.as_bytes())`.
 #[must_use]
 pub fn cache_buster() -> String {
-    let mut rng = rand::thread_rng();
-    format!("{}", rng.gen_range(0..=u32::MAX))
+    cache_buster_for(b"wafrift-cache-buster-stable")
 }
 
 /// Sanitize a user-supplied host/path/prefix to prevent accidental header injection.
@@ -205,12 +239,21 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn canary_unique() {
+    fn canary_generate_is_stable() {
+        let a = Canary::generate();
+        let b = Canary::generate();
+        assert_eq!(a.token, b.token, "Canary::generate must be stable");
+        assert_eq!(a.token.len(), 16);
+    }
+
+    #[test]
+    fn canary_from_context_unique_per_context() {
         let mut set = HashSet::new();
-        for _ in 0..100 {
-            let c = Canary::generate();
+        for i in 0u64..100 {
+            let ctx = i.to_le_bytes();
+            let c = Canary::from_context(&ctx);
             assert_eq!(c.token.len(), 16);
-            assert!(set.insert(c.token));
+            assert!(set.insert(c.token.clone()), "from_context must differ per unique context");
         }
     }
 
@@ -305,12 +348,23 @@ mod tests {
     }
 
     #[test]
-    fn cache_buster_changes() {
+    fn cache_buster_stable() {
         let a = cache_buster();
         let b = cache_buster();
         assert!(!a.is_empty());
-        assert!(!b.is_empty());
-        // Very unlikely to collide
-        assert_ne!(a, b);
+        assert_eq!(a, b, "cache_buster must be stable");
+    }
+
+    #[test]
+    fn cache_buster_for_unique_per_context() {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        for i in 0u64..100 {
+            let ctx = format!("url-{i}");
+            let v = cache_buster_for(ctx.as_bytes());
+            assert!(!v.is_empty());
+            assert!(v.parse::<u64>().is_ok(), "must be numeric: {v}");
+            assert!(seen.insert(v), "cache_buster_for collided for different contexts");
+        }
     }
 }

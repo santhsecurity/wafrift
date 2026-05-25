@@ -117,6 +117,21 @@ pub fn te_obfuscations() -> Vec<String> {
 }
 
 /// Backward-compatible CL.TE (hardcodes CL=0).
+
+/// FNV-1a 16-byte nonce for deterministic WebSocket Sec-WebSocket-Key derivation.
+fn fnv1a_ws_nonce(host: &str, path: &str) -> [u8; 16] {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in host.bytes().chain(path.bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    let h2 = h.wrapping_mul(0x517cc1b727220a95);
+    let mut nonce = [0u8; 16];
+    nonce[..8].copy_from_slice(&h.to_le_bytes());
+    nonce[8..].copy_from_slice(&h2.to_le_bytes());
+    nonce
+}
+
 pub fn cl_te(
     host: &str,
     smuggled_prefix: &str,
@@ -647,8 +662,8 @@ pub fn websocket_smuggle_custom(
     }
     let key = key.map_or_else(
         || {
-            let mut nonce = [0u8; 16];
-            rand::Rng::fill(&mut rand::thread_rng(), &mut nonce);
+            // Derive a deterministic nonce from FNV-1a of (host, path).
+            let nonce = fnv1a_ws_nonce(host.as_str(), path.as_str());
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, nonce)
         },
         std::string::ToString::to_string,

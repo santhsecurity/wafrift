@@ -147,8 +147,15 @@ fn attack_marks_subprobe_failures_without_taking_down_the_whole_run() {
             .and_then(serde_json::Value::as_u64)
             .map(|n| n > 0)
             .unwrap_or(false);
+        // h2 probe uses "h2_errors" (its own naming convention)
+        // rather than the generic "errors" key the other probes emit.
+        let has_h2_errors = body
+            .get("h2_errors")
+            .and_then(serde_json::Value::as_u64)
+            .map(|n| n > 0)
+            .unwrap_or(false);
         assert!(
-            has_err || has_errors,
+            has_err || has_errors || has_h2_errors,
             "sub-probe `{family}` should record failure: {body}"
         );
     }

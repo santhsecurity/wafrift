@@ -93,13 +93,16 @@ impl TechniqueFilter {
             ));
         }
         // Contradiction guard (dogfood B7): a selector appearing in
-        // BOTH --only and --exclude — or where a `--only` selector is
-        // a sub-path of an `--exclude` selector — produces zero
-        // techniques and previously failed silently with "(no
-        // techniques considered)". Fail loudly instead.
+        // Reject contradictory selectors: only an EXACT match in both --only
+        // and --exclude is contradictory (nothing selected). A sub-path pair
+        // like --only encoding/url + --exclude encoding/url/triple is valid —
+        // it means "allow url-encoding family except triple".
         let overlap: Vec<_> = only
             .iter()
-            .filter(|o| exclude.iter().any(|e| matches(e, o) || matches(o, e)))
+            // matches(e, o) = e is an ancestor of (covers) o; reject when
+            // exclude covers only (exclude is more general). When only covers exclude,
+            // that is the valid "allow family except leaf" case -- allow it.
+            .filter(|o| exclude.iter().any(|e| matches(e, o)))
             .cloned()
             .collect();
         if !overlap.is_empty() {

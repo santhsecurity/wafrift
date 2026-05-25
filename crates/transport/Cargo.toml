@@ -33,7 +33,7 @@ thiserror = { workspace = true }
 regex = { workspace = true }
 urlencoding = { workspace = true }
 psl = "2"
-wafrift-pool = { workspace = true, optional = true }
+url = "2"
 rquest = { workspace = true, optional = true }
 # Companion crate carrying the actual browser-emulation profiles
 # (Chrome131, Firefox133, etc.) split out of rquest in 5.x. Gated
@@ -46,7 +46,10 @@ futures-util = { workspace = true, optional = true }
 # gossan-origin = { path = "../../../gossan/crates/origin", optional = true }
 
 [features]
-proxy-pool = ["dep:wafrift-pool"]
+# proxy-pool enables the round-robin proxy rotation path in EvasionClient.
+# The pool module is always compiled in (it is pure logic); this feature
+# gates only the reqwest::Proxy wiring inside client.rs.
+proxy-pool = []
 # origin-bypass = ["dep:gossan-origin"]
 origin-bypass = []
 # Wire-identical browser TLS ClientHello via rquest + BoringSSL.
@@ -63,4 +66,3 @@ wiremock = { workspace = true }
 
 [lints]
 workspace = true
-
