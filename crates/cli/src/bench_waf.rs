@@ -1077,6 +1077,18 @@ async fn run_payload_strategy(
     .take(args.variants)
     .collect();
 
+    // B8: warn when the mutator produced fewer variants than requested so
+    // coverage gaps are visible instead of silently under-testing.
+    if variants.len() < args.variants {
+        tracing::warn!(
+            case_id = %case.id,
+            requested = args.variants,
+            produced = variants.len(),
+            strat = %strat,
+            "build_variants produced fewer variants than requested (B8)"
+        );
+    }
+
     for variant in &variants {
         if *total > 0 && args.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
