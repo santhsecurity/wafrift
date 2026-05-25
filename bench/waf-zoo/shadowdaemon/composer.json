@@ -1,0 +1,9 @@
+{
+    "require": {
+        "shadowd/php_connector": "^2.2"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "classmap-authoritative": true
+    }
+}

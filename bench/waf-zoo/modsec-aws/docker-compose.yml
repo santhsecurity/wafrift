@@ -11,13 +11,12 @@
 # Image digest pinned 2026-05-24:
 #   docker pull owasp/modsecurity-crs:4-apache-202604040104
 #   docker inspect --format='{{index .RepoDigests 0}}' owasp/modsecurity-crs:4-apache-202604040104
-#   sha256:4c2a6f83f2e9d5b7a8d1c3e4f2b9a0d6e5c8f1a7b4d2e9c3f6a0b5d8e2c4f7a1
+#   owasp/modsecurity-crs@sha256:8eb19c64d84d48dd8435c878fb9b6d3028e5da292752155fd1e697dccc51b495
 #
-# NOTE: The SHA256 below is the canonical digest for the 202604040104 tag as of
-# 2026-05-24. Re-pin with the command above after any upstream rebuild.
+# Re-pin with the commands above after any upstream rebuild.
 services:
   wafrift-modsec-aws:
-    image: owasp/modsecurity-crs:4-apache-202604040104@sha256:4c2a6f83f2e9d5b7a8d1c3e4f2b9a0d6e5c8f1a7b4d2e9c3f6a0b5d8e2c4f7a1
+    image: owasp/modsecurity-crs:4-apache-202604040104@sha256:8eb19c64d84d48dd8435c878fb9b6d3028e5da292752155fd1e697dccc51b495
     container_name: wafrift-modsec-aws
     environment:
       # Paranoia Level 2 matches AWSManagedRulesCommonRuleSet coverage breadth.
@@ -43,7 +42,7 @@ services:
   backend:
     # httpbin echoes the request; the bench reads the echo to determine if the
     # WAF forwarded the payload (200 + echo) or blocked it (403 / 406).
-    image: kennethreitz/httpbin@sha256:5ad97f3e37d66f03c29a0cb27e6e17eefc7a5ceed1dc40e8f84e6a4d1d5e8c3b
+    image: kennethreitz/httpbin@sha256:599fe5e5073102dbb0ee3dbb65f049dab44fa9fc251f6835c9990f8fb196a72b
     container_name: wafrift-modsec-aws-backend
     networks:
       - wafrift-modsec-aws

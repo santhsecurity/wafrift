@@ -13,9 +13,9 @@ so bypass-rate differences are attributable to the WAF, not the backend.
 |---|---|---|---|
 | `modsec-aws/` | 18101 | ModSecurity + AWS WAF CRS emulation | CRS PL2 + AWS exclusions |
 | `modsec-azure/` | 18102 | ModSecurity + Azure AppGW WAF v2 emulation | CRS PL2 + Azure exclusions |
-| `coraza/` | 18103 | Coraza (Go reimplementation of ModSec) | CRS PL1, RE2 regex |
+| `coraza/` | 18103 | Coraza (Go reimplementation of ModSec) | CRS PL1, RE2 regex — build from source (xcaddy) |
 | `naxsi/` | 18104 | Naxsi (nginx module, built from source) | Positive-security / score accumulation |
-| `shadowdaemon/` | 18105 | Shadow Daemon | Connector-model, token grammar |
+| `shadowdaemon/` | 18105 | Shadow Daemon | Connector-model, token grammar — build from source |
 
 Ports 18101–18105 do not conflict with `wafrift-bench/targets/` ports 18081–18087.
 
@@ -24,7 +24,10 @@ Ports 18101–18105 do not conflict with `wafrift-bench/targets/` ports 18081–
 ```bash
 # From the repo root:
 
-# Build + start all stacks (naxsi build takes ~5 min on first run)
+# Build + start all stacks
+# naxsi: ~5 min first run (nginx compile)
+# coraza: ~3-5 min first run (xcaddy + coraza_waf compile)
+# shadowdaemon: ~2 min first run (PHP connector Composer install)
 bench/waf-zoo/up.sh
 
 # Smoke test each stack
@@ -109,7 +112,7 @@ so they are easy to separate in CI.
 |---|---|---|
 | modsec-aws | Apache 2.0 (owasp/modsecurity-crs) | Yes |
 | modsec-azure | Apache 2.0 (owasp/modsecurity-crs) | Yes |
-| coraza | Apache 2.0 (corazawaf/coraza-caddy) | Yes |
+| coraza | Apache 2.0 (Coraza + Caddy + xcaddy) | Yes |
 | naxsi | GPLv3 (wargio/naxsi); nginx BSD-2 | Local research only — see naxsi/README.md |
 | shadowdaemon | GPLv2 (zecure/shadowd); LGPL connector | Local research only — see shadowdaemon/README.md |
 
