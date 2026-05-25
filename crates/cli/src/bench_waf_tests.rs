@@ -502,6 +502,7 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         lineage_output: None,
         payload_class: None,
         waf_name: None,
+        no_warm_start: false,
     }
 }
 
@@ -607,4 +608,36 @@ fn validate_corpus_flags_duplicate_ids() {
     ];
     let code = validate_corpus_and_exit(&cases).unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+}
+
+// ── B1: 5xx classification policy ────────────────────────────────
+
+#[test]
+fn request_reached_app_includes_501_and_505() {
+    // B1: 501 and 505 are origin-processed codes (not CDN/gateway).
+    assert!(
+        request_reached_app(501),
+        "501 Not Implemented: origin parsed request far enough to reject method"
+    );
+    assert!(
+        request_reached_app(505),
+        "505 HTTP Version Not Supported: origin-level protocol check"
+    );
+    // 503/504 are CDN/gateway layer -- NOT a reached app.
+    assert!(!request_reached_app(503), "503 must NOT count as reached");
+    assert!(!request_reached_app(504), "504 must NOT count as reached");
+}
+
+// ── B6: warm_state_hash in EquivOutcome ──────────────────────────
+
+#[test]
+fn equiv_outcome_warm_state_hash_defaults_to_none() {
+    // B6: new EquivOutcome must have warm_state_hash = None by default
+    // (no warm-start model loaded).
+    use crate::equiv_engine::EquivOutcome;
+    let out = EquivOutcome::default();
+    assert!(
+        out.warm_state_hash.is_none(),
+        "default EquivOutcome must have no warm_state_hash"
+    );
 }

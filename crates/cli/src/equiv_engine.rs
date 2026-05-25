@@ -34,15 +34,29 @@ use wafrift_types::{Method, Request};
 // anti-rig definition of "bypass" lives in exactly one place.
 
 /// A status that means the request actually reached and was processed
-/// by the origin app. A 400/413/502 is the evasion *breaking* the
-/// request — the attack never ran — so it is NOT a reached app. 5xx
-/// app errors (500) are kept: a SQL error page is frequently *positive*
-/// evidence of injection — our payload hit the query.
+/// by the origin app.
+///
+/// ## 5xx classification policy (B1)
+///
+/// Not all 5xx codes are equal:
+/// * Excluded (gateway/infra -- NOT a reached app): 502, 503, 504.
+/// * Included (origin processed the request, frequently positive injection
+///   evidence): 500 (SQL error page), 501 (Not Implemented), 505 (HTTP
+///   Version Not Supported).
+/// 400/413/414/421/431 are evasion BREAKING the request; not a reached app.
 #[must_use]
 pub fn request_reached_app(status: u16) -> bool {
     matches!(
         status,
-        200..=399 | 401 | 402 | 404 | 405 | 409 | 410 | 422 | 500
+        200..=399 | 401 | 402 | 404 | 405 | 409 | 410 | 422
+            // 500: SQL/app error page = injection reached the query.
+            | 500
+            // 501: origin rejected method but processed the request.
+            | 501
+            // 505: origin-level HTTP-version check = request reached origin.
+            | 505
+        // 503/504: CDN/gateway -- origin never saw the payload.
+        // 502: upstream down -- never forwarded.
     )
 }
 
@@ -373,9 +387,9 @@ pub async fn run_equiv_cegis<F>(
     delay_ms: u64,
     timeout_secs: u64,
     model_signature: &str,
-    /// B6: when true, skip loading the persisted WAF boundary model.
-    /// Benchmarks intended for reproducibility MUST pass `true` here;
-    /// `wafrift scan` always passes `false` (warm-start is the product).
+    // B6: when true, skip loading the persisted WAF boundary model.
+    // Benchmarks intended for reproducibility MUST pass true here;
+    // wafrift scan always passes false (warm-start is the product behaviour).
     no_warm_start: bool,
 ) -> EquivOutcome
 where

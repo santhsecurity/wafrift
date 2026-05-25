@@ -918,6 +918,7 @@ pub(crate) async fn run_scan(
                 args.delay_ms,
                 wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
                 &waf_name,
+                false, // B6: scan always uses warm-start (product behaviour)
             )
             .await;
 

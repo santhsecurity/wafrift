@@ -199,6 +199,13 @@ pub struct BenchWafArgs {
     /// are merged into the gene bank after the bench completes.
     #[arg(long)]
     pub waf_name: Option<String>,
+
+    /// B6: Skip loading the persisted WAF boundary model (warm-start).
+    /// Use for reproducible benchmarks. Default false (warm-start on)
+    /// preserves the product behaviour. When a model IS loaded, the
+    /// JSON output contains warm_state_hash for audit.
+    #[arg(long, default_value_t = false)]
+    pub no_warm_start: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1277,6 +1284,7 @@ async fn run_equiv_cegis_strategy(
         args.delay_ms,
         args.timeout_secs,
         base_url,
+        args.no_warm_start, // B6: pass through --no-warm-start flag
     )
     .await;
 
