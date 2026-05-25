@@ -206,6 +206,7 @@ fn evade_with_all_config_disabled() {
         origin_bypass: std::collections::HashMap::new(),
         body_padding_bytes: 0,
         allow_private_upstream: false,
+        dilution_weight: 0.0,
     };
     let result = strategy::evade(&req, &state, &config);
 
