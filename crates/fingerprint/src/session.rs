@@ -39,6 +39,7 @@
 //! + tests; the wire-up is a follow-on PR.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 
 use crate::fingerprint::BrowserProfile;
@@ -286,10 +287,11 @@ pub struct SessionPool {
     /// RwLock since contention is low (one lookup per outbound
     /// request) and a sharded map would buy nothing.
     bindings: RwLock<HashMap<String, (usize, u32)>>,
-    /// Round-robin cursor for new bindings. Wrapped in a separate
-    /// lock so a host lookup that promotes an existing binding
-    /// doesn't have to take the cursor write lock.
-    cursor: RwLock<usize>,
+    /// Round-robin cursor for new bindings. Atomic so we can bump it
+    /// while holding the `bindings` write lock without a second lock
+    /// acquisition (which would introduce a TOCTOU window between
+    /// dropping `bindings` and re-acquiring it after the cursor bump).
+    cursor: AtomicUsize,
 }
 
 impl SessionPool {
@@ -302,7 +304,7 @@ impl SessionPool {
             profiles,
             rotate_after_requests: rotate_after_requests.max(1),
             bindings: RwLock::new(HashMap::new()),
-            cursor: RwLock::new(0),
+            cursor: AtomicUsize::new(0),
         }
     }
 
@@ -331,15 +333,18 @@ impl SessionPool {
                 return self.profiles[idx];
             }
             // Counter would reach rotate_after_requests — fall through to
-            // eviction below (drop the mutable reference first).
+            // eviction below (keep bindings write lock held).
         }
         // Slow path: either no binding or count reached the rotation limit.
-        drop(bindings); // release before taking cursor write lock
-        let mut cursor = self.cursor.write().expect("cursor RwLock poisoned");
-        let idx = *cursor % self.profiles.len();
-        *cursor = cursor.wrapping_add(1);
-        drop(cursor);
-        let mut bindings = self.bindings.write().expect("bindings RwLock poisoned");
+        // We hold the bindings write lock for the entire operation so that
+        // two concurrent callers racing on the slow path cannot both read
+        // the same cursor value and assign it to the same host (TOCTOU).
+        // The cursor is an AtomicUsize so we can bump it without a second
+        // lock acquisition — no deadlock risk, no lock-release window.
+        let idx = self
+            .cursor
+            .fetch_add(1, Ordering::Relaxed)
+            % self.profiles.len();
         bindings.insert(host.to_string(), (idx, 1));
         self.profiles[idx]
     }
