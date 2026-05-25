@@ -23,7 +23,7 @@
 //!
 //! let mut cov = RuleCoverage::default();
 //! let desc = map_elites_descriptor("' OR 1=1--", Some("942100"));
-//! cov.record("' OR 1=1--", desc.1.as_deref());
+//! cov.record("' OR 1=1--", desc.1.as_ref().map(|r| r.0.as_str()));
 //!
 //! let report = cov.coverage_report();
 //! assert!(!report.is_empty());

@@ -420,6 +420,14 @@ delay_ms = 200
             callback_timeout_secs: 5,
             exploit_cap: 500,
             variants_cap: 0,
+            egress_socks5: Vec::new(),
+            egress_http_proxy: Vec::new(),
+            egress_tailscale_nodes: Vec::new(),
+            egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
+            egress_challenge_threshold: 3,
+            egress_cooldown_secs: 300,
+            i_have_permission: None,
+            graphql: false,
         }
     }
 
