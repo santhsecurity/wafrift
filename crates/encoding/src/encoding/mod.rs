@@ -138,6 +138,15 @@ pub mod ldap_inject;
 /// `count()` probes, `position()` filters, CDATA-XSS for XML-
 /// returning consumers.
 pub mod xpath_inject;
+/// OS command-injection comprehensive evasion library across bash /
+/// cmd.exe / PowerShell: brace expansion, ${IFS} whitespace bypass,
+/// tab IFS, backslash quoting, single-quote split, ANSI-C `$'...'`
+/// hex byte embed, variable indirection, backtick + `$()` subst,
+/// here-string, `/dev/tcp/` reverse shell, Windows `^` escape,
+/// `%PATH:~N,M%` substring extract, PowerShell `iex` download,
+/// `-EncodedCommand` UTF-16LE base64, `[char]` casting, perl/python
+/// reverse-shell one-liners.
+pub mod cmd_inject;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
