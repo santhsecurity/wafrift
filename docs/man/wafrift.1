@@ -10,11 +10,10 @@ WAF evasion toolkit — run without arguments for interactive mode.
 .PP
 Exit codes (CI\-friendly):
 0  success
-1  generic error (bad input, IO, etc.)
-2  bench\-waf: zero bypasses across ALL corpus cases in \-\-evade mode
-2  replay:    saved bypass got blocked (regression signal)
+1  generic error (IO failure, runtime error, etc.)
+2  argument / input error (unknown flag, contradictory selectors, malformed value, unknown technique selector, unrecognised algorithm, missing required field) — clap convention; ALSO used by bench\-waf for \*(Aqzero bypasses\*(Aq and by replay for \*(Aqsaved bypass blocked\*(Aq (legacy: per perf\-hunt N01 the dual usage is documented rather than split because the bench\-waf/replay overload is well\-established in CI scripts)
 3  bench\-diff: regression vs baseline (see \-\-bypass\-drop\-pp)
-4  bench\-waf \-\-validate\-only: corpus integrity errors
+4  bench\-waf \-\-validate\-only: corpus integrity errors (duplicate id, TOML parse failure, missing required field)
 5  scan: aborted — target rate\-limited the probes (inconclusive, not \*(Aqno bypass\*(Aq)
 .SH OPTIONS
 .TP
