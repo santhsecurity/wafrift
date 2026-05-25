@@ -1011,9 +1011,24 @@ fn main() -> ExitCode {
                         .iter()
                         .map(|s| technique_filter::strategy_path(*s).to_string())
                         .collect();
+                    // Attack-payload library classes (jwt, ssti,
+                    // saml-xsw, mongo-nosqli, …) registered via the
+                    // unified catalog in wafrift_encoding.
+                    let payload_libs: Vec<&'static str> =
+                        wafrift_encoding::payload_catalog::all_payload_families()
+                            .iter()
+                            .map(|f| f.class)
+                            .collect();
+                    // HTTP/3 + QUIC evasion technique names.
+                    let http3_techniques: Vec<&'static str> = wafrift_http3_evasion::EvasionTechnique::all()
+                        .iter()
+                        .map(|t| t.description())
+                        .collect();
                     let payload = serde_json::json!({
                         "tampers": names,
                         "encoding_strategies": strategies,
+                        "payload_libraries": payload_libs,
+                        "http3_techniques": http3_techniques,
                     });
                     println!("{}", serde_json::to_string(&payload).unwrap_or_default());
                     ExitCode::SUCCESS

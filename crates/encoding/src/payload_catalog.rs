@@ -289,6 +289,28 @@ pub fn all_payload_families() -> Vec<PayloadFamily> {
     ]
 }
 
+/// Returns the registry of HTTP/3 + QUIC evasion technique names
+/// exposed by [`wafrift_http3_evasion`]. The catalog records the
+/// technique class so consumers know HTTP/3 attacks exist, but the
+/// actual frame builders live in the http3-evasion crate (they
+/// produce bytes meant for a QUIC stack, not text payloads, so they
+/// don't fit the `Vec<(String, String)>` shape of [`PayloadFamily`]).
+///
+/// Use this when surfacing the full attack catalog to operators
+/// (`wafrift techniques list`) — http3 techniques appear alongside
+/// the encoding-crate libraries even though their wire format
+/// differs.
+#[must_use]
+pub fn http3_technique_names() -> &'static [&'static str] {
+    &[
+        "qpack-desync",
+        "quic-cid-rotation",
+        "zero-rtt-replay",
+        "stream-priority-topology",
+        "mtu-fragmentation",
+    ]
+}
+
 /// Demo SAML fixture for the catalog's `saml-xsw` family. Real
 /// callers pass their own captured assertion.
 fn saml_demo_fixture() -> &'static str {
@@ -419,6 +441,26 @@ mod tests {
             "csv-formula", "method-override", "cache-poison",
         ] {
             assert!(classes.contains(required), "missing class: {required}");
+        }
+    }
+
+    #[test]
+    fn http3_technique_names_listed() {
+        let names = http3_technique_names();
+        assert!(names.len() >= 5);
+        // Canary set — if a technique is renamed without updating
+        // the catalog, the scan engine's filter breaks silently.
+        for required in &[
+            "qpack-desync",
+            "quic-cid-rotation",
+            "zero-rtt-replay",
+            "stream-priority-topology",
+            "mtu-fragmentation",
+        ] {
+            assert!(
+                names.contains(required),
+                "http3 catalog missing technique: {required}"
+            );
         }
     }
 
