@@ -1,9 +1,23 @@
-//! Library surface for `wafrift-proxy`.
+//! wafrift-proxy — forward HTTP proxy with per-host adaptive WAF evasion.
+//!
+//! Slots between any intercepting proxy (Burp / Caido / mitmproxy) and the
+//! upstream target. On every forwarded request the proxy applies the full
+//! wafrift evasion pipeline (encoding + content-type switching + fingerprint
+//! rotation + body padding) and records bypasses to the per-WAF gene bank.
+//!
+//! Key modules:
+//! - [`intercept`]  — HTTP CONNECT tunnel handler (MITM TLS interception)
+//! - [`mitm`]       — TLS certificate minting + impersonation via BoringSSL (optional)
+//! - [`upstream`]   — Upstream forwarding with evasion pipeline applied
+//! - [`upstream_policy`] — Scope / skip rules (`--only-host`, `--skip-path`, …)
+//! - [`rate_limit`] — Token-bucket rate limiter (per upstream host)
+//! - [`tui`]        — ratatui live dashboard (Flow / Overview / Hosts tabs)
+//! - [`scope`]      — Glob-based scope evaluation
+//! - [`hop_by_hop`] — Hop-by-hop header stripping per RFC 7230 §6.1
 //!
 //! The binary entry point lives in `main.rs`; this lib module exposes
 //! the building blocks downstream consumers (the bench harness,
-//! integration tests, third-party Rust code that wants the
-//! evasion proxy as a library) need.
+//! integration tests, third-party Rust code that embeds the proxy) need.
 
 pub mod hop_by_hop;
 pub mod intercept;
