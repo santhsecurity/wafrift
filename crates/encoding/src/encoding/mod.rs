@@ -108,6 +108,13 @@ pub mod method_override;
 /// cache key normalization variants, Vary header confusion, status
 /// code poisoning, HTTP/2 :authority split.
 pub mod cache_poison;
+/// Mass-assignment + HTTP Parameter Pollution (HPP) payload library:
+/// flat (`is_admin=true`), Rails-nested (`user[admin]=true`), Spring
+/// dotted (`user.admin=true`), JSON-nested, arbitrary-depth nested,
+/// HPP first/last/comma-list disagreement, URL-encoded alias
+/// duplicates, CSRF-bundled mass-assign, CRLF-in-form-value
+/// sub-field smuggling.
+pub mod mass_assignment;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
