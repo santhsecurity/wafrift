@@ -1,32 +1,41 @@
 [workspace]
 resolver = "2"
 members = [
-    # ── Foundation ──
+    # ── Foundation ── shared types, bogon classifier, technique
+    # enum, verdict shapes. Every other crate depends on this.
     "crates/types",
-    # ── Evasion technique crates ──
-    "crates/encoding",
-    "crates/grammar",
-    "crates/content-type",
-    "crates/smuggling",
-    "crates/fingerprint",
-    # ── Intelligence crates ──
-    "crates/detect",
-    "crates/evolution",
-    "crates/wafmodel",
-    # ── Pipeline ──
-    "crates/strategy",
-    # ── Existing outer crates ──
-    "crates/core",
-    "crates/cli",
-    "crates/proxy",  # May require external dependencies
-    "crates/transport", "crates/oracle", "crates/pool",
-    "crates/recon",
-    "crates/genome-registry",
-    "crates/captchaforge-bridge",
-    "crates/graphql",
-    "crates/http3-evasion",
-    "crates/grpc-evasion",
-    "crates/plugin-api",
+
+    # ── Wire-level mutators ── byte / token / frame transforms.
+    "crates/encoding",          # encoders + 21 attack-payload libs
+    "crates/grammar",           # per-class payload grammars
+    "crates/content-type",      # multipart / charset / json variants
+    "crates/smuggling",         # CL.TE / TE.CL / H2 / Kettle / WS
+    "crates/fingerprint",       # TLS JA3/JA4, H2 SETTINGS
+    "crates/http3-evasion",     # QPACK desync, conn migration, 0-RTT
+    "crates/grpc-evasion",      # protobuf opaque-payload framing
+    "crates/graphql",           # introspection + alias-bomb + op-mismatch
+
+    # ── Intelligence ── learn the WAF / evolve / score / model.
+    "crates/detect",            # WAF fingerprint via headers + DNS
+    "crates/evolution",         # MAP-Elites, ast_mcts, coverage-feedback
+    "crates/wafmodel",          # L*, SFA, mine, solve, mlwaf, booster
+
+    # ── Pipeline ── orchestrate the techniques.
+    "crates/strategy",          # host_state, MCTS bridge, drift_window
+    "crates/oracle",            # per-payload-class semantic oracles
+
+    # ── Runtime ── send the bytes, observe the responses.
+    "crates/transport",         # client + tls-impersonate + egress pool
+    "crates/proxy",             # MITM forward proxy + intercept
+    "crates/pool",              # proxy-list rotation (separate from egress)
+    "crates/captchaforge-bridge", # optional captcha-solver bridge
+
+    # ── Frontend ── operator surface.
+    "crates/cli",               # 40+ subcommands
+    "crates/core",              # facade re-exports
+    "crates/recon",             # crt.sh + DNS origin discovery
+    "crates/genome-registry",   # community bypass exchange
+    "crates/plugin-api",        # external TOML + WASM tampers
 ]
 
 [workspace.package]

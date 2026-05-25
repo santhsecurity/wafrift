@@ -41,7 +41,9 @@ graph TD
   genome["wafrift-genome-registry"]
   graphql["wafrift-graphql"]
   h3["wafrift-http3-evasion"]
+  grpc["wafrift-grpc-evasion"]
   cf["wafrift-captchaforge-bridge"]
+  plugin["wafrift-plugin-api"]
   core["wafrift-core\n(Façade)"]
   proxy["wafrift-proxy"]
   cli["wafrift-cli"]
@@ -78,10 +80,46 @@ graph TD
   genome --> cli
   graphql --> cli
   h3 --> cli
+  grpc --> strategy
+  grpc --> cli
   cf --> transport
+  plugin --> strategy
+  plugin --> cli
   core --> cli
   proxy --> cli
 ```
+
+---
+
+## `wafrift-encoding` internal layout
+
+The encoding crate has two distinct sub-concepts, each a separate
+sub-tree under `crates/encoding/src/encoding/`:
+
+**Encoder transforms** — take an existing payload, output a re-shaped
+version of the SAME logical payload. The receiver decodes back. Pure
+byte / token transforms.
+
+- `url`, `unicode`, `keyword`, `structural`, `layered`, `strategy`,
+  `invisible` (Plan 9 tags / variation selectors / ligatures),
+  `path_norm` (RFC 3986 differential), `request_line` (method /
+  version / URI-form tricks)
+
+**Attack-payload libraries** — generate a NEW payload for a specific
+vuln class. Each one ships a per-class `all_<class>_attacks()`
+fan-out + per-shape `pub fn`s.
+
+- `jwt`, `oauth`, `saml_xsw` (auth/session)
+- `ssti_escape`, `cmd_inject`, `xxe_attacks` (server-side execution)
+- `mongo_nosqli`, `ldap_inject`, `xpath_inject` (datastore)
+- `mass_assignment`, `proto_pollution`, `dom_clobber` (parser/runtime)
+- `csv_formula`, `deserialization` (file-format / sink)
+- `cookie_attacks`, `method_override`, `cache_poison`,
+  `ssrf_schemes`, `race` (HTTP-layer)
+
+Total: 30+ modules, all sibling files under one directory — flat,
+greppable, zero hierarchy depth. Adding a new module is one file plus
+one line in `mod.rs`.
 
 ---
 
@@ -97,6 +135,7 @@ graph TD
 | | `wafrift-fingerprint` | Browser UA + TLS JA3/JA4 profile rotation (Chrome, Firefox, Safari, Edge, OkHttp) |
 | | `wafrift-graphql` | GraphQL-specific evasion: alias flood, op-name mismatch, introspection whitespace-split |
 | | `wafrift-http3-evasion` | QUIC/HTTP3 data-plane primitives: QPACK desync, 0-RTT replay, CID rotation, stream priority topology, MTU fragmentation |
+| | `wafrift-grpc-evasion` | gRPC opaque-payload bypass: protobuf framing, nested submessages, field-split fragmentation — bypasses WAFs that skip `application/grpc` bodies as binary |
 | **Intelligence** | `wafrift-detect` | WAF fingerprinting via HTTP headers + body (160+ vendor rules), DNS CNAME chain, reverse-DNS PTR, BGP ASN |
 | | `wafrift-evolution` | Genetic algorithm, MCTS, differential probing, body-padding (inspection-window evasion), WAF-aware advisor |
 | | `wafrift-wafmodel` | Active-learning WAF decompiler: L\* / SFA reconstruction, offline bypass mining, ML-WAF evasion, hole-closure synthesis |
@@ -107,6 +146,7 @@ graph TD
 | | `wafrift-recon` | Origin discovery: CT logs (crt.sh), DNS history, CDN/WAF IP filtering |
 | | `wafrift-genome-registry` | ed25519 genome signing, `TrustList` publisher allowlist, bundle wire format |
 | | `wafrift-captchaforge-bridge` | Headless Chromium adapter (chromiumoxide) for Cloudflare/Akamai/AWS managed challenge solving |
+| | `wafrift-plugin-api` | External tamper SDK: TOML regex-substitution rules + wasmtime-sandboxed `wasm32-wasip1` modules. No syscalls, no network, no filesystem, 1 M fuel + 512 KiB stack cap |
 | **Frontend** | `wafrift-core` | Façade crate — re-exports all crates under one namespace for `wafrift-core = "0.2"` consumers |
 | | `wafrift-proxy` | Forward HTTP proxy with per-host adaptive evasion, MITM/TLS interception, ratatui TUI |
 | | `wafrift-cli` | Binary entry point — all subcommands, `Commands` enum, scan / bench / parser-diff / smuggle / legendary |
@@ -117,15 +157,18 @@ graph TD
 
 | What | Where |
 |---|---|
-| New **encoding strategy** | `crates/encoding/src/encoding/` — add a function, register it in the `Strategy` enum in `strategy.rs`, and add a doctest |
-| New **payload grammar** | `crates/grammar/src/grammar/` — add a mutator, extend `PayloadType` + `mutate_as`, add an oracle in `crates/oracle/src/` |
-| New **smuggling primitive** | `crates/smuggling/src/smuggling.rs` — add a builder function following the `cl_te` / `te_cl` pattern |
+| New **encoder transform** (URL/Unicode/whitespace/case/…) | `crates/encoding/src/encoding/` — add a function, register in the `Strategy` enum in `strategy.rs`, add a doctest. Examples: `invisible.rs`, `path_norm.rs`, `request_line.rs` |
+| New **attack-payload library** (per vuln-class: SSTI, JWT, NoSQLi, LDAP, XPath, XXE, SSRF schemes, deserialization, …) | `crates/encoding/src/encoding/<class>.rs` — independent file with `all_<class>_attacks()` fan-out + per-shape `pub fn`s. Pattern: see `ssti_escape.rs`, `mongo_nosqli.rs`, `xxe_attacks.rs` |
+| New **payload grammar** (mutation engine for a class) | `crates/grammar/src/grammar/` — add a mutator, extend `PayloadType` + `mutate_as`, add a semantic oracle in `crates/oracle/src/` |
+| New **smuggling primitive** | `crates/smuggling/src/smuggling.rs` (CL.TE family) or sibling file (`rapid_reset.rs`, `ws_fragmentation.rs`, `sse_smuggle.rs`) — add a builder function |
+| New **plugin / tamper** (no Rust rebuild) | `~/.wafrift/tampers/*.toml` for regex-substitution, `~/.wafrift/tampers/*.wasm` for arbitrary logic. See `docs/PLUGIN_API.md` |
 | New **WAF detection rule** | `rules/detect/<vendor>.toml` — five lines of TOML, zero Rust knowledge required |
 | New **CLI subcommand** | `crates/cli/src/<name>_cmd.rs` (args struct + `run_<name>`) and add a variant to the `Commands` enum in `main.rs` |
 | New **oracle** | `crates/oracle/src/<type>.rs` implementing `PayloadOracle`; register in `oracle_for()` in `lib.rs` |
-| New **evolution algorithm** | `crates/evolution/src/evolution.rs` or a new sibling file; wire into the advisor |
+| New **evolution algorithm** | `crates/evolution/src/search/` — implement `SearchAlgorithm`; wire into `EvolutionEngine::with_algorithm` |
 | New **GraphQL evasion payload** | `crates/graphql/src/lib.rs` — add a `pub fn` and include it in `all_evasion_payloads()` |
 | New **HTTP/3 technique** | `crates/http3-evasion/src/` — add a module, export from `lib.rs`, add a variant to `EvasionTechnique` |
+| New **gRPC technique** | `crates/grpc-evasion/src/lib.rs` — add a `pub fn` following `wrap_in_grpc_frame` / `embed_attack_in_nested` |
 | New **bench scenario** | `wafrift-bench/corpus/` — TOML case file; format documented in `wafrift-bench/methodology.md` |
 
 ---
