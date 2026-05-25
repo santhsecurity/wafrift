@@ -5,6 +5,10 @@
 //! to escalate. Maintains a pool of proven winners and continuously
 //! re-evaluates as the WAF adapts.
 
+use lru::LruCache;
+use parking_lot::Mutex;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
 use wafrift_content_type as content_type;
 use wafrift_encoding::encoding;
 use wafrift_types::Technique;
@@ -38,7 +42,7 @@ const MAX_HINTS_PER_LIST: usize = 200;
 const MAX_TECHNIQUE_STATS: usize = 500;
 
 /// Per-host evasion state — tracks what works and what doesn't.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct HostState {
     /// Number of requests blocked.
     pub blocks: u32,
@@ -90,6 +94,47 @@ pub struct HostState {
     pub rate_limits: u32,
     /// Number of JS challenges (Cloudflare captcha pages, etc.) seen.
     pub challenges: u32,
+
+    // -- MCTS principal-variation cache (H2) -----------------------------------------
+    /// LRU cache keyed by FNV-1a hash of (HTTP-method | URL-path) to the
+    /// MCTS principal variation (technique Display-strings). Wrapped in
+    /// Arc<Mutex<...>> so all HostState clones share the same backing store.
+    /// Capacity 256. No serde -- rebuilt fresh on each proxy restart.
+    pub mcts_cache: Arc<Mutex<LruCache<u64, Vec<String>>>>,
+}
+
+/// Capacity of the per-host MCTS principal-variation LRU cache (H2).
+/// 256 entries covers a typical scan session while keeping per-host
+/// overhead negligible (each entry is a small Vec<String>).
+const MCTS_CACHE_CAPACITY: usize = 256;
+
+impl Default for HostState {
+    fn default() -> Self {
+        Self {
+            blocks: 0,
+            successes: 0,
+            tried_encodings: Vec::new(),
+            tried_content_types: Vec::new(),
+            last_success: None,
+            technique_stats: Vec::new(),
+            waf_confirmed: false,
+            waf_name: None,
+            proven_winners: Vec::new(),
+            blocklisted: Vec::new(),
+            rotation_index: 0,
+            winner_consecutive_blocks: Vec::new(),
+            discovery_complete: false,
+            prioritized_techniques: Vec::new(),
+            avoided_techniques: Vec::new(),
+            inspection_model: None,
+            rate_limits: 0,
+            challenges: 0,
+            mcts_cache: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(MCTS_CACHE_CAPACITY)
+                    .expect("MCTS_CACHE_CAPACITY is non-zero"),
+            ))),
+        }
+    }
 }
 
 impl HostState {

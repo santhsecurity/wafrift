@@ -381,10 +381,47 @@ pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig)
         return evade(request, state, config);
     }
     let depth = (state.blocks as usize / 2).clamp(2, 5);
+
+    // H2: MCTS principal-variation memoization.
+    //
+    // Key = FNV-1a hash of (HTTP-method || URL-path). Excludes query
+    // string and body so the same endpoint with different payloads hits
+    // the same cached MCTS action sequence (the sequence is an evasion
+    // structure, not payload-specific).
+    //
+    // The cache lives inside Arc<Mutex<...>> on HostState so clones of
+    // the state (taken by the proxy under the lock) share the same
+    // backing store -- updates propagate back to the live entry without
+    // an extra round-trip.
+    let cache_key = mcts_cache_key(request);
+    {
+        let mut cache = state.mcts_cache.lock();
+        if let Some(cached_pv) = cache.get(&cache_key) {
+            // Cache hit: replay the cached principal variation.
+            if let Some(result) = replay_principal_variation(request, cached_pv, config) {
+                return result;
+            }
+            // Replay failed (e.g., action sequence no longer applicable)
+            // -- evict the stale entry and fall through to a fresh MCTS run.
+            cache.pop(&cache_key);
+        }
+    }
+
+    // Cache miss: run full MCTS search.
     if let Some(mcts_result) = evade_mcts(request, config, depth) {
+        // Store the principal variation so the next identical request
+        // skips the 500-iteration MCTS search.
+        let pv: Vec<String> = mcts_result
+            .techniques
+            .iter()
+            .map(|t| t.to_string())
+            .collect();
+        if !pv.is_empty() {
+            state.mcts_cache.lock().put(cache_key, pv);
+        }
         return mcts_result;
     }
-    // MCTS bailed (e.g., empty action space) — fall back to classic evade.
+    // MCTS bailed (e.g., empty action space) -- fall back to classic evade.
     evade(request, state, config)
 }
 
@@ -395,6 +432,82 @@ pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig)
 /// proxy. Real injection payloads are KB-range — anything larger is a
 /// file upload / JSON blob where header & URL evasion is enough.
 pub const MCTS_BODY_BUDGET: usize = 16 * 1024;
+/// FNV-1a (64-bit) hash of the request method and URL path, used as the
+/// MCTS cache key (H2). Excludes query string and body so the same endpoint
+/// with different payloads maps to the same MCTS action sequence. Inline
+/// implementation -- no extra crate needed.
+fn mcts_cache_key(request: &Request) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    let method_str = request.method.to_string();
+    for byte in method_str.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash ^= u64::from(b'|');
+    hash = hash.wrapping_mul(FNV_PRIME);
+    // Strip scheme, host, and query string -- keep only the path segment.
+    let path = if let Some(path_start) = request.url.find("://") {
+        let after_scheme = &request.url[path_start + 3..];
+        let path_off = after_scheme.find('/').map_or(after_scheme.len(), |i| i);
+        let query_off = after_scheme.find('?').unwrap_or(after_scheme.len());
+        &after_scheme[path_off..query_off.min(after_scheme.len())]
+    } else {
+        request.url.as_str()
+    };
+    for byte in path.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+/// Replay a cached MCTS principal variation as a static evasion chain.
+///
+/// The PV is stored as technique Display-format strings (e.g.
+/// "encoding:UrlEncode"). Parsed back via `Technique::from_pool_key`;
+/// unknown names are skipped (forward-compat). Returns `None` when the
+/// resulting technique list is empty so the caller falls through to a
+/// fresh MCTS run.
+fn replay_principal_variation(
+    request: &Request,
+    pv: &[String],
+    config: &EvasionConfig,
+) -> Option<EvasionResult> {
+    if pv.is_empty() {
+        return None;
+    }
+    let techniques: Vec<Technique> = pv
+        .iter()
+        .filter_map(|name| Technique::from_pool_key(name))
+        .collect();
+    if techniques.is_empty() {
+        return None;
+    }
+    // Build a minimal EvasionPlan from the technique list. We use evade_adaptive
+    // so the plan-driven pipeline applies the same structural choices without
+    // re-running tree search.
+    let plan = EvasionPlan {
+        use_grammar: techniques.iter().any(|t| matches!(t, Technique::GrammarMutation(_))),
+        use_header_obfuscation: techniques.iter().any(|t| matches!(t, Technique::HeaderObfuscation(_))),
+        use_content_type_switch: config.content_type_switching
+            && techniques.iter().any(|t| matches!(t, Technique::ContentTypeSwitch(_))),
+        use_smuggling: config.smuggling_enabled
+            && techniques.iter().any(|t| matches!(t, Technique::RequestSmuggling(_))),
+        use_h2: config.h2_evasion_enabled
+            && techniques.iter().any(|t| matches!(t, Technique::H2Evasion(_))),
+        // encoding_strategies left empty -- evade_adaptive falls back to
+        // prioritized_techniques in HostState, which we leave default here.
+        // The structural choices (grammar, header, content-type) are the
+        // load-bearing cache hit; encoding is re-selected by the pipeline.
+        encoding_strategies: Vec::new(),
+        rationale: Vec::new(),
+    };
+    let state = HostState::default();
+    Some(evade_adaptive(request, config, &plan, &state))
+}
+
 
 #[must_use]
 pub fn evade_adaptive(
