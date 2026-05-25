@@ -97,7 +97,10 @@ struct DiscoverReport<'a> {
 
 const DISCOVER_SCHEMA_VERSION: u32 = 1;
 
-pub fn run_discover(args: DiscoverArgs) -> ExitCode {
+pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
+    if let Some(ref t) = args.target.clone() {
+        args.target = Some(crate::helpers::normalize_target_url(t));
+    }
     if args.spec.is_none() && !args.introspect && !args.mine_params {
         eprintln!(
             "error: discover requires at least one of --spec, --introspect, --mine-params\n\
