@@ -154,7 +154,22 @@ pub async fn run_scan_raw(
         match fire_one(&http, &mutated).await {
             Ok(FireOutcome::Bypass) => {
                 bypassed += 1;
-                let repro_curl = mutated.to_curl();
+                // Prefer the annotated PoC curl (metadata comment block
+                // names the technique chain and confidence) when pocgen
+                // renders cleanly; fall back to the plain `to_curl()`
+                // output so bypasses are never lost on render errors.
+                let repro_curl = crate::poc_emit::render_raw_curl(
+                    &mutated.url,
+                    &mutated.method,
+                    &mutated.headers,
+                    if mutated.body.is_empty() { None } else { Some(&mutated.body) },
+                    &v.techniques,
+                    v.confidence,
+                    &format!("raw-runner bypass (variant {idx})"),
+                    None,
+                    Some(&format!("variant.{idx}")),
+                )
+                .unwrap_or_else(|_| mutated.to_curl());
                 bypass_variants.push(BypassRecord {
                     idx,
                     payload: v.payload.clone(),

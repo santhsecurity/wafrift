@@ -13,6 +13,7 @@ pub(crate) mod baseline;
 pub(crate) mod callback_poll;
 pub(crate) mod detect_phase;
 pub(crate) mod differential_phase;
+pub(crate) mod graphql_phase;
 pub(crate) mod header_obf_phase;
 pub(crate) mod multi_vector;
 pub(crate) mod pentest_client;
@@ -69,13 +70,30 @@ pub(crate) fn build_bypass_variants_json(
         .enumerate()
         .map(|(i, (idx, payload, techniques, conf))| {
             let minimal = minimal_payloads.get(i).and_then(Option::as_ref);
+            let full_url = scan_url_with_param(target, param, payload);
+            // Use poc_emit for annotated repro_curl (metadata comment block
+            // names the technique chain and confidence); fall back to the
+            // plain url_query helper on render errors so bypasses are never
+            // silently dropped.
+            let repro_curl = crate::poc_emit::render_raw_curl(
+                &full_url,
+                "GET",
+                &[],
+                None,
+                techniques,
+                *conf,
+                &format!("scan bypass (variant {idx})"),
+                None,
+                Some(&format!("variant.{idx}")),
+            )
+            .unwrap_or_else(|_| crate::helpers::url_query_repro_curl(target, param, payload));
             serde_json::json!({
                 "variant": idx,
                 "payload": payload,
                 "techniques": techniques,
                 "confidence": conf,
                 "minimal_payload": minimal,
-                "repro_curl": crate::helpers::url_query_repro_curl(target, param, payload),
+                "repro_curl": repro_curl,
                 "minimal_repro_curl": minimal
                     .map(|m| crate::helpers::url_query_repro_curl(target, param, m)),
             })
@@ -353,6 +371,12 @@ pub(crate) async fn run_scan(
     // via the `target_positional` OR `--target` arms of `ScanArgs`.
     let target_owned = args.resolved_target().unwrap_or("").to_string();
     let target = target_owned.trim_end_matches('/');
+
+    // Permission gate: refuse to fire against any target the operator
+    // hasn't authorized. Local/RFC1918 targets and the built-in bounty
+    // allowlist are always permitted. All others require either
+    // `--i-have-permission <reason>` or `~/.wafrift/permission.toml`.
+    crate::permission::assert_permitted(target, args.i_have_permission.as_deref());
     if target.is_empty() {
         eprintln!(
             "{} target URL must be valid (e.g. https://example.com/search) — \
@@ -686,6 +710,21 @@ pub(crate) async fn run_scan(
         }
     };
     let scan_start = Instant::now();
+
+    // ── GraphQL detection + payload injection ─────────────────────────
+    // When --graphql is set OR the target auto-detects as a GraphQL
+    // endpoint, inject the full wafrift-graphql battery into a
+    // dedicated side-pool. These payloads are POST bodies (JSON), NOT
+    // URL-query values, so they live in their own vec and are fired
+    // separately (below) via POST to the detected GraphQL endpoint.
+    let graphql_probe_result =
+        graphql_phase::build_graphql_payloads(&http, target, args.graphql, scan_text).await;
+    let (graphql_payloads, graphql_endpoint) =
+        if let Some((payloads, endpoint)) = graphql_probe_result {
+            (payloads, Some(endpoint))
+        } else {
+            (Vec::new(), None)
+        };
 
     // Step 1: WAF detection + advisor planning — see `detect_phase`.
     let detect_outcome = match detect_phase::run(&http, target, scan_text).await {
@@ -1430,6 +1469,129 @@ pub(crate) async fn run_scan(
                 "\n  {} {}",
                 "Tamper results:".bold().cyan(),
                 format!("{tamper_bypassed}/{tamper_fired} bypassed ({rate:.0}%)").yellow()
+            );
+        }
+    }
+
+    // Step 3c: GraphQL evasion probe — fire the wafrift-graphql battery
+    // against the detected (or forced) GraphQL endpoint via POST with
+    // `Content-Type: application/json`. The technique label is
+    // `graphql::<class>` so the scan JSON is self-documenting and the
+    // gene-bank can accumulate per-class bypass history.
+    if let Some(ref gql_endpoint) = graphql_endpoint {
+        let gql_endpoint = gql_endpoint.clone();
+        let gql_count = graphql_payloads.len();
+        if scan_text {
+            println!(
+                "\n{}",
+                format!("[3c/7] GraphQL evasion probe — {gql_count} payloads → {gql_endpoint}")
+                    .bold()
+                    .cyan()
+            );
+        }
+        let mut gql_bypassed = 0_u32;
+        let mut gql_fired = 0_u32;
+        for (gql_idx, body) in graphql_payloads.iter().enumerate() {
+            if cancel.is_cancelled() {
+                break;
+            }
+            // Classify payload class from body content so the technique
+            // label is informative in the JSON/text output.
+            let class_label = if body.contains("AliasFlood") {
+                "alias-flood"
+            } else if body.contains("operationName") {
+                "op-name-mismatch"
+            } else if body.contains("__schema") || body.contains("__type") {
+                "introspection"
+            } else if body.contains("DeepTest") || body.contains("FragmentTest") {
+                "depth-bomb"
+            } else if body.starts_with('[') {
+                "batch"
+            } else {
+                "field-suggestion"
+            };
+            let verdict = match http
+                .post(&gql_endpoint)
+                .header("Content-Type", "application/json")
+                .body(body.clone())
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    let resp_body = crate::safe_body::read_bounded(
+                        resp,
+                        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                    )
+                    .await
+                    .unwrap_or_default();
+                    oracle.classify(&ResponseContext {
+                        status,
+                        body: resp_body.to_vec(),
+                        ..Default::default()
+                    })
+                }
+                Err(_) => {
+                    errors += 1;
+                    continue;
+                }
+            };
+
+            total_fired += 1;
+            gql_fired += 1;
+            let techniques = vec![
+                format!("graphql::{class_label}"),
+                format!("graphql::payload#{gql_idx}"),
+            ];
+            let is_blocked = verdict.is_blocked() || verdict.is_challenge();
+            variant_outcomes.push((techniques.clone(), is_blocked));
+
+            if is_blocked {
+                blocked += 1;
+                if args.format == "text" {
+                    print!("{}", ".".bright_black());
+                }
+            } else if matches!(verdict, wafrift_types::Verdict::RateLimited { .. }) {
+                _rate_limited += 1;
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay * 2).await;
+                }
+            } else {
+                bypassed += 1;
+                gql_bypassed += 1;
+                bypass_variants.push((
+                    total_fired,
+                    body.clone(),
+                    techniques.clone(),
+                    0.85, // GraphQL evasion payloads have high structural confidence
+                ));
+                info!(
+                    target: "wafrift::scan::graphql",
+                    class = class_label,
+                    endpoint = %gql_endpoint,
+                    probe = total_fired,
+                    "GraphQL bypass found"
+                );
+                if args.format == "text" {
+                    print!("{}", "!".bright_green().bold());
+                }
+            }
+
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+        }
+
+        if scan_text && gql_fired > 0 {
+            let rate = if gql_fired > 0 {
+                f64::from(gql_bypassed) / f64::from(gql_fired) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "\n  {} {}",
+                "GraphQL results:".bold().cyan(),
+                format!("{gql_bypassed}/{gql_fired} bypassed ({rate:.0}%)").yellow()
             );
         }
     }

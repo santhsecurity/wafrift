@@ -110,6 +110,11 @@ struct ReplayResult {
     blocked: bool,
     response_bytes: usize,
     elapsed_ms: u128,
+    /// Ready-to-paste curl reproducer with bypass metadata comment block.
+    /// Mirrors the `bypass_variants[i].repro_curl` field in `wafrift scan`
+    /// JSON output so tooling can treat both outputs uniformly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repro_curl: Option<String>,
 }
 
 const REPLAY_SCHEMA_VERSION: u32 = 1;
@@ -166,7 +171,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     let req = Request::with_method(method.clone(), target_url)
         .header(
             "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            guise::profile::ua::DEFAULT_CHROME_WINDOWS.ua_string,
         )
         .header("Accept", "*/*");
 
@@ -262,6 +267,8 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     let elapsed = started.elapsed();
     let blocked = is_waf_block(status, &body);
 
+    let repro_curl = crate::poc_emit::render_curl_for_bypass(&evasion, None, Some("wafrift-replay")).ok();
+
     let result = ReplayResult {
         schema_version: REPLAY_SCHEMA_VERSION,
         wafrift_version: env!("CARGO_PKG_VERSION"),
@@ -275,6 +282,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         blocked,
         response_bytes: body.len(),
         elapsed_ms: elapsed.as_millis(),
+        repro_curl,
     };
 
     if args.format == "json" {
@@ -311,6 +319,29 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
             result.response_bytes,
             result.elapsed_ms
         );
+        if !blocked {
+            // Show the annotated curl reproducer so operators can
+            // paste the bypass into a terminal or pentest report.
+            if let Some(ref curl) = result.repro_curl {
+                println!();
+                println!("{}  {}", "── curl reproducer ──".bold().cyan(), "(with bypass metadata comment block)".bright_black());
+                println!("{curl}");
+            }
+            // Also show a Python requests snippet for operators who
+            // prefer scripted replay — uses poc_emit's general-purpose
+            // render path.
+            use pocgen::PocFormat;
+            if let Ok(py_poc) = crate::poc_emit::render_poc_for_bypass(
+                &evasion,
+                PocFormat::PythonRequests,
+                None,
+                Some("wafrift-replay"),
+            ) {
+                println!();
+                println!("{}", "── python reproducer ──".bold().cyan());
+                println!("{}", py_poc.content);
+            }
+        }
         println!();
     }
 
