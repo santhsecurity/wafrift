@@ -242,26 +242,59 @@ impl EgressEntry {
     /// For Tailscale backends the proxy points at the local Tailscale SOCKS
     /// listener; the caller must also add the `Tailscale-Exit-Node` header
     /// (via [`EgressEntry::tailscale_exit_node_header`]).
+    ///
+    /// # Proxy construction failure
+    ///
+    /// URLs are validated at insertion time, so `reqwest::Proxy::all` should
+    /// never fail here. If it does (e.g. a reqwest version incompatibility),
+    /// a `tracing::error!` is emitted and the builder is returned WITHOUT the
+    /// proxy configured. This is a last-resort fallback; the caller will route
+    /// traffic direct rather than via the intended egress. The error log gives
+    /// operators a clear diagnostic.
     pub fn apply_to_builder(&self, builder: ClientBuilder) -> ClientBuilder {
         match &self.backend {
             EgressBackend::Socks5(url) => {
-                if let Ok(proxy) = reqwest::Proxy::all(url) {
-                    return builder.proxy(proxy);
+                match reqwest::Proxy::all(url) {
+                    Ok(proxy) => builder.proxy(proxy),
+                    Err(e) => {
+                        tracing::error!(
+                            url = url.as_str(),
+                            err = %e,
+                            "SOCKS5 proxy URL failed reqwest::Proxy::all after validation — \
+                             routing direct (BUG: report to wafrift maintainers)"
+                        );
+                        builder
+                    }
                 }
-                builder
             }
             EgressBackend::HttpProxy(url) => {
-                if let Ok(proxy) = reqwest::Proxy::all(url) {
-                    return builder.proxy(proxy);
+                match reqwest::Proxy::all(url) {
+                    Ok(proxy) => builder.proxy(proxy),
+                    Err(e) => {
+                        tracing::error!(
+                            url = url.as_str(),
+                            err = %e,
+                            "HTTP proxy URL failed reqwest::Proxy::all after validation — \
+                             routing direct (BUG: report to wafrift maintainers)"
+                        );
+                        builder
+                    }
                 }
-                builder
             }
             EgressBackend::TailscaleNode { socks_addr, .. } => {
                 let socks_url = format!("socks5://{socks_addr}");
-                if let Ok(proxy) = reqwest::Proxy::all(&socks_url) {
-                    return builder.proxy(proxy);
+                match reqwest::Proxy::all(&socks_url) {
+                    Ok(proxy) => builder.proxy(proxy),
+                    Err(e) => {
+                        tracing::error!(
+                            socks_addr = socks_addr.as_str(),
+                            err = %e,
+                            "Tailscale SOCKS proxy URL failed reqwest::Proxy::all — \
+                             routing direct (BUG: check socks_addr format)"
+                        );
+                        builder
+                    }
                 }
-                builder
             }
         }
     }
