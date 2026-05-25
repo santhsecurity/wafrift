@@ -528,12 +528,22 @@ impl TamperStrategy for PostgresDollarQuoteTamper {
         // Pick a deterministic per-payload tag so the same input
         // produces the same output (gene-bank replay needs
         // determinism).  Hash-based identifier; 4 lowercase letters.
+        //
+        // F138: pre-fix used `& 25` (bitmask 0b11001) thinking it
+        // collapsed to the range 0..26. It doesn't — `& 25` admits
+        // only the 8 values {0,1,8,9,16,17,24,25}, so the tag
+        // alphabet shrank to {a,b,i,j,q,r,y,z} and the tag space
+        // collapsed from 26^4 = 456,976 to 8^4 = 4,096 — a 111×
+        // reduction that makes operator-side tag enumeration easier
+        // (the whole point of a random tag is to defeat WAFs that
+        // pattern-match a small known set). Use `% 26` so every
+        // payload byte maps uniformly into [a-z].
         let mut tag = String::with_capacity(4);
         let h: u64 = payload
             .bytes()
             .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(u64::from(b)));
         for i in 0..4 {
-            let c = b'a' + u8::try_from((h >> (i * 8)) & 25).unwrap_or(0);
+            let c = b'a' + ((h >> (i * 8)) % 26) as u8;
             tag.push(c as char);
         }
 
@@ -1711,6 +1721,41 @@ mod tests {
         // Empty literal becomes $tag$$tag$.
         assert!(out.contains("$"));
         assert!(!out.contains("'"));
+    }
+
+    #[test]
+    fn postgres_dollar_quote_tag_uses_full_az_alphabet() {
+        // F138 regression: pre-fix `& 25` (mask 0b11001) admitted only
+        // {0,1,8,9,16,17,24,25} so the tag alphabet collapsed to
+        // {a,b,i,j,q,r,y,z} — 8 letters, 8^4 = 4,096 tag space.
+        // Post-fix `% 26` spans every letter a-z. Fire 200 distinct
+        // payloads at the strategy, collect every tag-letter actually
+        // emitted, prove the alphabet covers strictly more than the
+        // pre-fix 8 letters.
+        let strategy = PostgresDollarQuoteTamper;
+        let mut letters = std::collections::HashSet::new();
+        for i in 0..200 {
+            let payload = format!("'p{i}'");
+            let out = strategy.tamper(&payload, None);
+            // Tag lives between the first two `$` bytes.
+            let mut parts = out.split('$');
+            let _ = parts.next(); // before first $
+            if let Some(tag) = parts.next() {
+                for c in tag.chars() {
+                    letters.insert(c);
+                }
+            }
+        }
+        // Pre-fix this set had at most 8 letters; post-fix it should
+        // span far more. Use 14 as a comfortable floor: any tighter
+        // value risks flaking on hash distributions for small N, any
+        // looser misses regressions to similar single-bit masks.
+        assert!(
+            letters.len() > 8,
+            "tag alphabet collapsed: only {} distinct letters across 200 payloads — \
+             pre-fix `& 25` permitted exactly 8. Saw: {letters:?}",
+            letters.len()
+        );
     }
 
     #[test]
