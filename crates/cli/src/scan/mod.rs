@@ -998,7 +998,12 @@ pub(crate) async fn run_scan(
             // truthfully as blocked, never as bypass.
             let non_bypass = moat.variants.saturating_sub(moat.bypasses.len());
             total_fired += non_bypass;
-            blocked += u32::try_from(non_bypass).unwrap_or(u32::MAX);
+            // saturating_add: if `non_bypass` overflows u32 the conversion
+            // yields u32::MAX, then the plain `+=` would wrap. Two saturations
+            // keep the counter honest rather than wrapping to a wrong value.
+            blocked = blocked.saturating_add(
+                u32::try_from(non_bypass).unwrap_or(u32::MAX)
+            );
 
             if scan_text {
                 println!(
@@ -2311,7 +2316,14 @@ pub(crate) async fn run_scan(
     // that 80% rate-limited would inflate the apparent bypass rate
     // by 5× (50/100 instead of 50/500 = 10%), making a noisy run
     // look like a strong result on paper.
-    let requests_completed = bypassed + blocked + errors + _rate_limited;
+    // saturating_add: each counter is u32. A pathological scan (≫4 B probes)
+    // would otherwise wrap, producing a bypass_rate that is wildly wrong.
+    // Saturation to u32::MAX is the honest ceiling — the bypass % is still
+    // computable (it just shows the minimum bounded rate, not garbage).
+    let requests_completed = bypassed
+        .saturating_add(blocked)
+        .saturating_add(errors)
+        .saturating_add(_rate_limited);
     let bypass_rate = if requests_completed > 0 {
         f64::from(bypassed) / f64::from(requests_completed) * 100.0
     } else {

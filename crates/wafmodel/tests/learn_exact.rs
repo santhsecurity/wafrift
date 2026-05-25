@@ -77,7 +77,7 @@ fn lstar_recovers_the_exact_language() {
     // the exact complement of "contains <s".
     let alpha = Alphabet::new(vec![b'<', b's'], b'A');
     let mut waf = waf_with_pattern("<s");
-    let mut eq = BoundedExhaustiveEq { max_len: 7 };
+    let mut eq = BoundedExhaustiveEq { max_len: 7, max_queries: None };
     let rep = l_star(&mut waf, &json_body, &alpha, &mut eq).unwrap();
 
     // Exact recovery over a corpus far past the 3-state MN bound.
@@ -100,11 +100,11 @@ fn kv_and_lstar_agree_exactly_and_kv_is_no_costlier() {
     let pat = "<s[^>]*/"; // a slightly richer regular language
 
     let mut wa = waf_with_pattern(pat);
-    let mut eqa = BoundedExhaustiveEq { max_len: 7 };
+    let mut eqa = BoundedExhaustiveEq { max_len: 7, max_queries: None };
     let la = l_star(&mut wa, &json_body, &alpha, &mut eqa).unwrap();
 
     let mut wb = waf_with_pattern(pat);
-    let mut eqb = BoundedExhaustiveEq { max_len: 7 };
+    let mut eqb = BoundedExhaustiveEq { max_len: 7, max_queries: None };
     let kv = kv_learn(&mut wb, &json_body, &alpha, &mut eqb).unwrap();
 
     // Differential: identical recognised language (exact automaton
@@ -133,7 +133,7 @@ fn kv_and_lstar_agree_exactly_and_kv_is_no_costlier() {
 fn learned_model_is_not_equivalent_to_a_different_waf() {
     let alpha = Alphabet::new(vec![b'<', b's', b't'], b'A');
     let mut wa = waf_with_pattern("<s");
-    let mut eq = BoundedExhaustiveEq { max_len: 7 };
+    let mut eq = BoundedExhaustiveEq { max_len: 7, max_queries: None };
     let learned = l_star(&mut wa, &json_body, &alpha, &mut eq).unwrap().sfa;
 
     // WAF-B blocks `<t` instead of `<s`. There must exist an input the
@@ -184,8 +184,8 @@ fn lstar_kv_and_passive_learners_all_agree_with_the_waf() {
         // complete for every fault whose shortest witness ≤ max_len,
         // and max_len here covers the length-8 verification corpus
         // below — so all three learners are now genuinely exact.
-        let mut eq1 = BoundedExhaustiveEq { max_len: 8 };
-        let mut eq2 = BoundedExhaustiveEq { max_len: 8 };
+        let mut eq1 = BoundedExhaustiveEq { max_len: 8, max_queries: None };
+        let mut eq2 = BoundedExhaustiveEq { max_len: 8, max_queries: None };
         let a = l_star(&mut w1, &json_body, &alpha, &mut eq1).unwrap().sfa;
         let b = kv_learn(&mut w2, &json_body, &alpha, &mut eq2).unwrap().sfa;
         let c = passive_learn(&mut w3, &json_body, &alpha, 7).unwrap().sfa;
@@ -259,7 +259,7 @@ fn equivalence_rounds_is_truthful_provenance() {
     // `<s/s`: the first L*/KV hypothesis (1 state) is wrong; reaching
     // the exact 5-state DFA needs ≥1 equivalence/counterexample round.
     let mut w1 = waf_with_pattern("<s/s");
-    let mut e1 = BoundedExhaustiveEq { max_len: 8 };
+    let mut e1 = BoundedExhaustiveEq { max_len: 8, max_queries: None };
     let la = l_star(&mut w1, &json_body, &alpha, &mut e1).unwrap();
     assert!(
         la.equivalence_rounds >= 1,
@@ -268,7 +268,7 @@ fn equivalence_rounds_is_truthful_provenance() {
         la.equivalence_rounds
     );
     let mut w2 = waf_with_pattern("<s/s");
-    let mut e2 = BoundedExhaustiveEq { max_len: 8 };
+    let mut e2 = BoundedExhaustiveEq { max_len: 8, max_queries: None };
     let kv = kv_learn(&mut w2, &json_body, &alpha, &mut e2).unwrap();
     assert!(
         kv.equivalence_rounds >= 1,
@@ -283,7 +283,7 @@ fn equivalence_rounds_is_truthful_provenance() {
     // the assertions above are non-vacuous (0 is a legitimate value;
     // the counter is not merely "always ≥1").
     let mut w3 = waf_with_pattern("xyz");
-    let mut e3 = BoundedExhaustiveEq { max_len: 6 };
+    let mut e3 = BoundedExhaustiveEq { max_len: 6, max_queries: None };
     let triv = l_star(&mut w3, &json_body, &alpha, &mut e3).unwrap();
     assert_eq!(
         triv.equivalence_rounds, 0,

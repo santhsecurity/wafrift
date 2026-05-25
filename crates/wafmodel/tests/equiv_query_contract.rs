@@ -64,7 +64,7 @@ fn wmethod_recovers_exact_language_far_cheaper_than_exhaustive() {
     let viaw = l_star(&mut w1, &json_body, &alpha, &mut wm).unwrap();
 
     let mut w2 = waf(pat);
-    let mut ex = BoundedExhaustiveEq { max_len: 7 };
+    let mut ex = BoundedExhaustiveEq { max_len: 7, max_queries: None };
     let viax = l_star(&mut w2, &json_body, &alpha, &mut ex).unwrap();
 
     // Same exact language as the exhaustive baseline AND the WAF.
@@ -111,7 +111,7 @@ fn ucb_chain_recovers_exact_far_cheaper_than_exhaustive() {
     let vim = kv_learn(&mut wm, &json_body, &alpha, &mut wmonly).unwrap();
 
     let mut wx = waf(pat);
-    let mut ex = BoundedExhaustiveEq { max_len: 7 };
+    let mut ex = BoundedExhaustiveEq { max_len: 7, max_queries: None };
     let vix = kv_learn(&mut wx, &json_body, &alpha, &mut ex).unwrap();
 
     // (1) Exact recovery, and identical to the W-method-only result.

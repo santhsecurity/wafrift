@@ -179,10 +179,28 @@ pub trait EquivalenceOracle {
 /// equivalence oracle the exact-correctness truth-suite uses (no
 /// sampling, no PAC). The query-economical sampling/W-method oracles
 /// live in `equiv_query` (P1 #18).
+///
+/// # Query budget
+///
+/// `max_queries` bounds the total number of membership calls the EQ
+/// oracle issues across all depths.  When the limit is reached the
+/// oracle returns `None` ("no counterexample found within the
+/// budget") — the search is best-effort, not complete.  Set to
+/// `None` (or `u64::MAX`) for unbounded exhaustive search (the
+/// default for the offline truth-suite, where every call is a cheap
+/// in-memory operation).  Against a *live HTTP oracle* always set a
+/// small cap (e.g. `Some(500)`) so a 22-symbol alphabet at depth 6
+/// (22⁶ ≈ 51 M frontier entries, capped to 1 M by `FRONTIER_CAP`)
+/// cannot issue millions of HTTP round-trips before the learner
+/// raises its budget error.
 #[derive(Debug, Clone, Copy)]
 pub struct BoundedExhaustiveEq {
     /// Maximum word length to certify.
     pub max_len: usize,
+    /// Optional hard cap on total `mq` calls inside one EQ round.
+    /// `None` = unlimited (exact search).  `Some(n)` = stop after
+    /// `n` queries and return `None` (no counterexample found).
+    pub max_queries: Option<u64>,
 }
 
 impl EquivalenceOracle for BoundedExhaustiveEq {
@@ -193,10 +211,23 @@ impl EquivalenceOracle for BoundedExhaustiveEq {
         mq: &mut dyn FnMut(&[usize]) -> Result<bool>,
     ) -> Result<Option<Vec<usize>>> {
         let k = alpha.len();
+        let query_cap = self.max_queries.unwrap_or(u64::MAX);
+        let mut queries_used: u64 = 0;
         let mut frontier: Vec<Vec<usize>> = vec![Vec::new()];
         for _len in 0..=self.max_len {
             let mut next = Vec::new();
             for w in &frontier {
+                // Hard query cap: stop and declare "no counterexample"
+                // when the oracle has spent its EQ-round budget. This
+                // prevents a live HTTP oracle from issuing millions of
+                // round-trips when the alphabet is large (e.g. the
+                // 22-symbol sqli alphabet produces 22⁶ ≈ 51 M frontier
+                // entries at max_len=6, capped to 1 M by FRONTIER_CAP
+                // — still 1 M HTTP calls per EQ round without this gate).
+                if queries_used >= query_cap {
+                    return Ok(None);
+                }
+                queries_used += 1;
                 let truth = mq(w)?;
                 if hyp.accepts(&alpha.concretize(w)) != truth {
                     return Ok(Some(w.clone()));

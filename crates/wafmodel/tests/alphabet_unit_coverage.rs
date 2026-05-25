@@ -252,10 +252,10 @@ fn bounded_exhaustive_eq_returns_none_for_correct_hypothesis() {
         }],
         5,
     );
-    let mut eq = BoundedExhaustiveEq { max_len: 6 };
+    let mut eq = BoundedExhaustiveEq { max_len: 6, max_queries: None };
     let rep = l_star_budgeted(&mut waf, &body_req, &alpha, &mut eq, 10_000).unwrap();
     // After convergence, the EQ oracle must find no counterexample.
-    let mut eq2 = BoundedExhaustiveEq { max_len: 5 };
+    let mut eq2 = BoundedExhaustiveEq { max_len: 5, max_queries: None };
     let mut waf2 = SimRegexWaf::new(
         vec![Rule {
             id: "t2".into(),
@@ -301,7 +301,7 @@ fn l_star_budgeted_returns_err_when_budget_exceeded() {
         }],
         5,
     );
-    let mut eq = BoundedExhaustiveEq { max_len: 4 };
+    let mut eq = BoundedExhaustiveEq { max_len: 4, max_queries: None };
     let result = l_star_budgeted(&mut waf, &body_req, &alpha, &mut eq, 1);
     // With a budget of 1, a non-trivial language must exceed the budget.
     // We accept Ok (if the budget happened to be sufficient for a trivial

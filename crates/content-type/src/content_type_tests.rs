@@ -697,59 +697,142 @@ mod tests {
     /// When the key alone exhausts the remaining byte budget, the previous code
     /// emitted `(key, "")` via `saturating_sub → 0` — wasting the budget and
     /// misrepresenting the param. The fix breaks out of the loop instead.
+    ///
+    /// Budget math:
+    /// - `MAX_VARIANT_VALUE_BYTES` = 8 KiB (per-key / per-value cap applied first).
+    /// - `MAX_VARIANT_INPUT_BYTES` = 64 KiB (aggregate cap).
+    ///
+    /// 7 params each consuming 8192 bytes (1-byte key + 8191-byte value) use
+    /// 57344 bytes → remaining = 8192. Then a param with a 8192-byte key
+    /// (capped at MAX_VARIANT_VALUE_BYTES) has `k.len() (8192) >= remaining
+    /// (8192)` → fixed code breaks; pre-fix emitted `(key, "")`.
     #[test]
     fn bound_params_skips_entry_when_key_alone_overflows_remaining_budget() {
-        // Use MAX_VARIANT_INPUT_BYTES from the crate.
-        // We'll construct a scenario: one normal param that consumes almost
-        // all the budget, then a second param whose key alone would overflow
-        // the tiny remainder.
-        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, generate_variants};
+        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants};
 
-        // First param: use exactly MAX_VARIANT_INPUT_BYTES - 10 bytes of key+val.
-        // key = 1 byte, value = MAX_VARIANT_INPUT_BYTES - 11 bytes.
-        let v1 = "x".repeat(MAX_VARIANT_INPUT_BYTES - 11);
-        // Second param: key is 15 bytes, value 1 byte → key alone > remaining 10.
-        let params = vec![
-            ("a".to_string(), v1),
-            ("bigkeyname_xyz".to_string(), "v".to_string()),
-        ];
+        // 7 params, each 8192 bytes → 57344 used, remaining = 8192.
+        let chunk_value = "x".repeat(MAX_VARIANT_VALUE_BYTES - 1); // 8191 bytes
+        let mut params: Vec<(String, String)> = (0..7)
+            .map(|i| (format!("{i}"), chunk_value.clone()))
+            .collect();
+        // Key of exactly MAX_VARIANT_VALUE_BYTES = 8192 bytes: fills remaining exactly.
+        let big_key = "K".repeat(MAX_VARIANT_VALUE_BYTES);
+        params.push((big_key.clone(), "should_not_appear".to_string()));
+
+        // Sanity check.
+        assert!(7 * MAX_VARIANT_VALUE_BYTES < MAX_VARIANT_INPUT_BYTES);
+
         let variants = generate_variants(&params);
-        // The second param must NOT appear as (bigkeyname_xyz, "") in any variant.
+        assert!(!variants.is_empty(), "must generate at least one variant");
+
         for v in &variants {
             let body_str = String::from_utf8_lossy(&v.body);
+            // The big-key param must NOT appear — neither key prefix nor value.
             assert!(
-                !body_str.contains("bigkeyname_xyz"),
-                "param with key-only overflow must be silently dropped, found in {:?}: {}",
-                v.technique,
-                body_str
+                !body_str.contains("should_not_appear"),
+                "value of skipped param must not appear in {:?} body",
+                v.technique
+            );
+            // Check a short prefix of the key (it's 8192 Ks — unmistakable).
+            let key_prefix = &big_key[..20];
+            assert!(
+                !body_str.contains(key_prefix),
+                "key of skipped param must not appear in {:?} body",
+                v.technique
             );
         }
-        // The first param must be present (truncated value is fine).
-        // At minimum, some variants exist.
-        assert!(!variants.is_empty());
+    }
+
+    // ── JsonDuplicateKey key-escaping fix (2026-05-25) ──────────────────────
+
+    /// Pre-fix: keys with `"` or `\` were interpolated raw into the
+    /// hand-rolled JSON, breaking the structure. The JsonDuplicateKey
+    /// variant body must always be valid JSON regardless of the key content.
+    #[test]
+    fn json_duplicate_key_escapes_special_chars_in_key() {
+        use crate::content_type::ContentTypeTechnique;
+
+        // Key with a double-quote — raw interpolation would produce {"a"b":... which is invalid.
+        let params = vec![(r#"a"b"#.to_string(), "injection_payload".to_string())];
+        let variants = generate_variants(&params);
+        let dup = variants
+            .iter()
+            .find(|v| v.technique == ContentTypeTechnique::JsonDuplicateKey)
+            .expect("JsonDuplicateKey variant must be generated");
+        // Must parse as valid JSON.
+        let parsed: serde_json::Value = serde_json::from_slice(&dup.body)
+            .expect("JsonDuplicateKey body must be valid JSON when key contains double-quote");
+        assert!(parsed.is_object());
+    }
+
+    #[test]
+    fn json_duplicate_key_escapes_backslash_in_key() {
+        use crate::content_type::ContentTypeTechnique;
+
+        let params = vec![(r#"a\b"#.to_string(), "v".to_string())];
+        let variants = generate_variants(&params);
+        let dup = variants
+            .iter()
+            .find(|v| v.technique == ContentTypeTechnique::JsonDuplicateKey)
+            .expect("JsonDuplicateKey variant must be generated");
+        serde_json::from_slice::<serde_json::Value>(&dup.body)
+            .expect("JsonDuplicateKey body must be valid JSON when key contains backslash");
+    }
+
+    #[test]
+    fn json_duplicate_key_normal_key_still_works() {
+        use crate::content_type::ContentTypeTechnique;
+
+        let params = vec![("username".to_string(), "' OR 1=1--".to_string())];
+        let variants = generate_variants(&params);
+        let dup = variants
+            .iter()
+            .find(|v| v.technique == ContentTypeTechnique::JsonDuplicateKey)
+            .expect("JsonDuplicateKey variant must be generated");
+        let body_str = std::str::from_utf8(&dup.body).unwrap();
+        // Must contain both "safe" and the payload value.
+        assert!(body_str.contains("safe"), "first (safe) key must be present: {body_str}");
+        // Value should appear (possibly escaped).
+        assert!(
+            body_str.contains("username"),
+            "key must appear in body: {body_str}"
+        );
+        serde_json::from_slice::<serde_json::Value>(&dup.body)
+            .expect("body must be valid JSON");
     }
 
     /// The previous `remaining.saturating_sub(k.len())` would yield `0` when
     /// `k.len() == remaining`, producing an empty-string value. Confirm the
     /// fixed code drops the entry in that exact boundary case too.
+    ///
+    /// Same budget math as the test above: 7 × 8192 = 57344 used, remaining = 8192.
+    /// Key = 8192 bytes: `k.len() (8192) >= remaining (8192)` → break (post-fix).
     #[test]
     fn bound_params_skips_entry_when_key_len_equals_remaining() {
-        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, generate_variants};
+        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants};
 
-        // Consume all but exactly 5 bytes of the budget with the first param.
-        let v1 = "x".repeat(MAX_VARIANT_INPUT_BYTES - 6); // key 'a' (1) + value = budget-5
-        // Second param: key is exactly 5 bytes, value is anything → key == remaining.
-        let params = vec![
-            ("a".to_string(), v1),
-            ("abcde".to_string(), "val".to_string()),
-        ];
+        let chunk_value = "x".repeat(MAX_VARIANT_VALUE_BYTES - 1);
+        let mut params: Vec<(String, String)> = (0..7)
+            .map(|i| (format!("{i}"), chunk_value.clone()))
+            .collect();
+        // Key is exactly MAX_VARIANT_VALUE_BYTES bytes (= remaining after 7 params).
+        let exact_key = "E".repeat(MAX_VARIANT_VALUE_BYTES);
+        params.push((exact_key.clone(), "forbidden_val".to_string()));
+
+        assert!(7 * MAX_VARIANT_VALUE_BYTES < MAX_VARIANT_INPUT_BYTES);
+
         let variants = generate_variants(&params);
         for v in &variants {
             let body_str = String::from_utf8_lossy(&v.body);
-            // "abcde" with an empty value is the wrong outcome; it must be absent.
             assert!(
-                !body_str.contains("abcde"),
-                "key-equals-remaining entry must be dropped, found in {:?}",
+                !body_str.contains("forbidden_val"),
+                "value of exact-remaining-key param must not appear in {:?} body",
+                v.technique
+            );
+            let key_prefix = &exact_key[..20];
+            assert!(
+                !body_str.contains(key_prefix),
+                "exact-remaining-key must not appear in {:?} body",
                 v.technique
             );
         }

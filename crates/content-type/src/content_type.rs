@@ -647,9 +647,20 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
         let (k, v) = &params[0];
         // Construct hand-rolled JSON so the duplicate key survives —
         // serde_json::to_string collapses duplicates.
+        //
+        // Pre-fix: `k` was interpolated raw into `{"k":...,"k":...}`.
+        // A key containing `"` or `\` (e.g. from a form field named
+        // `a"b`) produced malformed JSON — the `"` escaped the key
+        // string early, and many JSON parsers would reject or
+        // misparse the body, defeating the WAF/origin split.
+        // Fix: use `serde_json::to_string(k)` which returns the
+        // properly double-quoted, escaped form (e.g. `"a\"b"`) and
+        // interpolate that directly.
+        let key_json = serde_json::to_string(k.as_str())
+            .unwrap_or_else(|_| format!("\"{}\"", k.replace('"', "\\\"")));
         let body = format!(
-            "{{\"{k}\":\"safe\",\"{k}\":{value}}}",
-            value = serde_json::to_string(v).unwrap_or_else(|_| format!("\"{v}\""))
+            "{{{key_json}:\"safe\",{key_json}:{value}}}",
+            value = serde_json::to_string(v).unwrap_or_else(|_| format!("\"{}\"", v.replace('"', "\\\"")))
         )
         .into_bytes();
         variants.push(ContentTypeVariant {

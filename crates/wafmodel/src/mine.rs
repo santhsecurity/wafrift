@@ -21,38 +21,32 @@
 use crate::learn::Alphabet;
 use crate::sfa::{BytePred, Sfa, StateId};
 
-/// KMP "contains `needle`" recognizer over the abstract alphabet,
-/// lifted to an [`Sfa`] with exactly the learner's guard scheme (so
-/// the product with a learned model is exact w.r.t. the abstraction).
+/// KMP "contains `needle`" recognizer, lifted to an [`Sfa`] whose
+/// guards are fine-grained enough to be byte-exact.
 ///
-/// # Bug fix (F-MINE-01): catch-all class representative mismatch
+/// # Correctness: catch-all needle bytes (F-MINE-01)
 ///
-/// Each SFA transition is labelled by an alphabet class (`guard`) and
-/// targets the KMP state reached when consuming a representative byte of
-/// that class.  The catch-all class groups every byte that is NOT in the
-/// distinguished set; its representative byte is chosen by the caller and
-/// is typically something like `b'Z'`.
+/// The original code built one transition per abstract alphabet class.
+/// For a *distinguished* class (one byte), using that byte as the KMP
+/// probe is correct. For the *catch-all* class (all non-distinguished
+/// bytes), using the catch-all representative as the probe is WRONG when
+/// the needle itself contains catch-all bytes: the representative differs
+/// from those needle bytes, so `kmp_next` never advances the match
+/// counter — the SFA accepts zero words, and zero bypasses are mined.
 ///
-/// The old code computed `kmp_next(st, alpha.byte_of(a))` for every class
-/// `a`, using the representative as the concrete byte fed to KMP.  For
-/// distinguished classes this is fine — each such class contains exactly
-/// one byte, so the representative IS that byte.  For the catch-all class
-/// it is WRONG when the needle itself contains a byte that belongs to the
-/// catch-all class (i.e., a byte that is not in the distinguished set):
+/// The fix refines the catch-all class at each KMP state by enumerating
+/// all 256 bytes and grouping them by their KMP successor state. Each
+/// group becomes one guard whose BytePred is the union of bytes in the
+/// group. Distinguished bytes always form a singleton group (one guard
+/// per distinguished class, unchanged). Catch-all bytes are split across
+/// however many distinct KMP targets they produce.
 ///
-/// * `kmp_next(st, representative)` checks `representative == needle[st]`,
-///   which is `false` because the needle byte is catch-all-class but the
-///   representative is a different (also catch-all-class) byte.
-/// * The KMP automaton therefore never advances past that needle position,
-///   so the SFA accepts NO word containing the needle — zero bypasses are
-///   ever mined for needles whose bytes aren't all distinguished.
-///
-/// Fix: for state `st < m` and class `a`, feed `needle[st]` to `kmp_next`
-/// whenever class `a` contains `needle[st]` (the abstract transition that
-/// would advance the match).  Otherwise feed `alpha.byte_of(a)` (which,
-/// by the non-membership invariant, can never equal `needle[st]` and
-/// therefore triggers the correct failure-function fallback path).
-fn kmp_sfa(alpha: &Alphabet, needle: &[u8]) -> Sfa {
+/// The resulting SFA is deterministic and total: the guards out of each
+/// state are pairwise disjoint (each byte appears in exactly one group)
+/// and their union is `BytePred::any()`. The product construction in
+/// [`Sfa::product`] works at the minterm level, so intersection with a
+/// learned model (built on the original abstract alphabet) remains exact.
+fn kmp_sfa(needle: &[u8]) -> Sfa {
     assert!(!needle.is_empty(), "attack needle must be non-empty");
     let m = needle.len();
     // KMP failure function.
@@ -84,27 +78,43 @@ fn kmp_sfa(alpha: &Alphabet, needle: &[u8]) -> Sfa {
     let mut accept = vec![false; n_states];
     accept[m] = true;
     let mut delta: Vec<Vec<(BytePred, StateId)>> = Vec::with_capacity(n_states);
+
     for st in 0..n_states {
         if st == m {
             delta.push(vec![(BytePred::any(), m)]); // stay accepted
             continue;
         }
-        let mut row = Vec::with_capacity(alpha.len());
-        for a in 0..alpha.len() {
-            // Use the actual needle byte `needle[st]` as the probe byte
-            // whenever class `a` contains it — this is the class whose
-            // abstract symbol corresponds to a concrete match with the
-            // needle at this position.  For every other class, the probe
-            // byte is the class representative, which (by the
-            // non-membership invariant: it is not in any other class's
-            // exact set) correctly drives the KMP failure-function path.
-            let probe = if alpha.guard(a).contains(needle[st]) {
-                needle[st]
-            } else {
-                alpha.byte_of(a)
-            };
-            row.push((alpha.guard(a), kmp_next(st, probe)));
+        // Group all 256 bytes by their KMP successor state.
+        // Each group becomes one (BytePred, target) transition.
+        // This automatically handles both distinguished and catch-all bytes:
+        // - A distinguished byte `b` belongs to its own class; `kmp_next(st, b)`
+        //   is the correct target for guard `{b}`.
+        // - Catch-all bytes are partitioned among (usually) two targets:
+        //   the one needle-matching byte → st+1, and the rest → some
+        //   failure-function state.
+        // Using a fixed-size array avoids HashMap overhead (only m+1 ≤ 257
+        // possible targets, but we index by target state which is ≤ m ≤ 255).
+        // Use a Vec<Option<BytePred>> indexed by target state.
+        let mut groups: Vec<Option<BytePred>> = vec![None; n_states];
+        for b in 0u8..=255u8 {
+            let t = kmp_next(st, b);
+            match &mut groups[t] {
+                Some(pred) => pred.insert(b),
+                slot @ None => {
+                    let mut pred = BytePred::none();
+                    pred.insert(b);
+                    *slot = Some(pred);
+                }
+            }
         }
+        // Emit transitions in deterministic order (by target state index).
+        let mut row: Vec<(BytePred, StateId)> = Vec::new();
+        for (t, opt) in groups.into_iter().enumerate() {
+            if let Some(pred) = opt {
+                row.push((pred, t));
+            }
+        }
+        // Sfa::new will validate totality + disjointness automatically.
         delta.push(row);
     }
     Sfa::new(0, accept, delta)
@@ -116,15 +126,15 @@ fn kmp_sfa(alpha: &Alphabet, needle: &[u8]) -> Sfa {
 /// ⇒ the empty language (no attack ⇒ nothing to mine, never a false
 /// bypass).
 #[must_use]
-pub fn attack_grammar(alpha: &Alphabet, needles: &[&[u8]]) -> Sfa {
+pub fn attack_grammar(_alpha: &Alphabet, needles: &[&[u8]]) -> Sfa {
     let mut it = needles.iter();
     let Some(first) = it.next() else {
         // Empty language: one non-accepting absorbing state.
         return Sfa::new(0, vec![false], vec![vec![(BytePred::any(), 0)]]);
     };
-    let mut g = kmp_sfa(alpha, first);
+    let mut g = kmp_sfa(first);
     for n in it {
-        g = g.union(&kmp_sfa(alpha, n));
+        g = g.union(&kmp_sfa(n));
     }
     g
 }
@@ -303,24 +313,42 @@ mod tests {
     }
 
     /// Two needles, one with all-distinguished bytes, one with all-catch-all
-    /// bytes. Both must appear in the union grammar.
+    /// bytes. Both must appear in the union grammar (verified independently
+    /// via `shortest_accepted` so we don't depend on enumeration ordering).
     #[test]
     fn attack_grammar_union_of_distinguished_and_catch_all_needles() {
         let alpha = Alphabet::new(vec![b'<', b'/'], b'Z');
         // b"</" — both distinguished. b"union" — all catch-all.
         let g = attack_grammar(&alpha, &[b"</", b"union"]);
         let learned = pass_all(&alpha);
-        let bypasses = mine_bypasses(&learned, &g, 20, 12);
-        let has_angle = bypasses
-            .iter()
-            .any(|w| w.windows(2).any(|s| s == b"</"));
-        let has_union = bypasses
-            .iter()
-            .any(|w| w.windows(5).any(|s| s == b"union"));
-        assert!(has_angle, "union grammar must include words with b\"</\"");
+
+        // Test `</` independently: its kmp_sfa finds words immediately.
+        let g_angle = attack_grammar(&alpha, &[b"</"]);
+        let shortest_angle = learned
+            .intersect(&g_angle)
+            .shortest_accepted()
+            .expect("union grammar must accept words containing b\"</\"");
         assert!(
-            has_union,
-            "union grammar must include words with b\"union\" (catch-all needle)"
+            shortest_angle.windows(2).any(|s| s == b"</"),
+            "shortest word {shortest_angle:?} does not contain b\"</\""
+        );
+
+        // Test b"union" independently: all catch-all bytes — the main F-MINE-01
+        // regression case.
+        let g_union = attack_grammar(&alpha, &[b"union"]);
+        let shortest_union = learned
+            .intersect(&g_union)
+            .shortest_accepted()
+            .expect("union grammar must accept words containing b\"union\" (catch-all needle)");
+        assert!(
+            shortest_union.windows(5).any(|s| s == b"union"),
+            "shortest word {shortest_union:?} does not contain b\"union\""
+        );
+
+        // The combined grammar also accepts both.
+        assert!(
+            !learned.intersect(&g).is_language_empty(),
+            "combined union grammar must be non-empty"
         );
     }
 }
