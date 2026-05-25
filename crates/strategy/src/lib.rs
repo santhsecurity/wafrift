@@ -40,6 +40,9 @@ pub mod host_state;
 pub mod learning_cache;
 /// MCTS bridge for intelligent evasion trajectory optimization.
 pub mod mcts_bridge;
+/// ML-WAF evasion routing (#129): decision-based boundary attack for learned
+/// classifiers (AWS Bot Control, Cloudflare Bot Management, Akamai Bot Manager).
+pub mod ml_evasion;
 pub mod pipeline;
 pub mod planner;
 pub mod strategy;
@@ -48,6 +51,7 @@ pub mod waf_presets;
 
 pub use host_state::HostState;
 pub use learning_cache::LearningCache;
+pub use ml_evasion::{DEFAULT_ML_BUDGET, apply_ml_evasion_if_applicable, evade_ml_backed};
 pub use pipeline::{EvasionPipeline, EvasionPlanOutput};
 pub use planner::plan_pipelines;
 pub use strategy::*;

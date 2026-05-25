@@ -985,6 +985,58 @@ fn build_description(techniques: &[Technique]) -> String {
     }
 }
 
+/// Returns `true` when `req` looks like a GraphQL request.
+///
+/// Two heuristics apply — either suffices:
+/// 1. `Content-Type: application/graphql` (raw SDL query).
+/// 2. Body begins with `{` AND contains `"query":` (JSON-envelope form).
+///
+/// This is intentionally a pure, synchronous, I/O-free check so the strategy
+/// crate remains trivially unit-testable.
+#[must_use]
+pub fn is_graphql_request(req: &Request) -> bool {
+    // Heuristic 1: explicit GraphQL Content-Type.
+    let content_type = req
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.as_str());
+
+    if let Some(ct) = content_type {
+        if ct.to_ascii_lowercase().contains("application/graphql") {
+            return true;
+        }
+    }
+
+    // Heuristic 2: JSON-envelope form  {"query":"..."}
+    if let Some(body) = &req.body {
+        if let Ok(s) = std::str::from_utf8(body) {
+            let trimmed = s.trim_start();
+            if trimmed.starts_with('{') && s.contains(r#""query":"#) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Return the full `wafrift-graphql` evasion battery for `req` when it
+/// looks like a GraphQL request, or an empty `Vec` otherwise.
+///
+/// The battery covers alias-flood (100/250/500/1000 aliases), introspection
+/// (full + simple + type + whitespace-split variants), op-name-mismatch (3
+/// variants), depth-bomb (6 depths × 2 shapes), batch (5 sizes), and
+/// field-suggestion typos (5 variants).
+#[must_use]
+pub fn graphql_payloads_for_request(req: &Request) -> Vec<String> {
+    if is_graphql_request(req) {
+        wafrift_graphql::all_evasion_payloads()
+    } else {
+        Vec::new()
+    }
+}
+
 /// Determine whether the payload body is textual (safe for utf-8 mutation).
 pub(crate) fn is_text_payload(req: &Request) -> bool {
     if req.body.is_none() {

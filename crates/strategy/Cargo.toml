@@ -20,7 +20,9 @@ wafrift-smuggling = { workspace = true }
 wafrift-fingerprint = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
+wafrift-graphql = { workspace = true }
 wafrift-oracle = { workspace = true }
+wafrift-wafmodel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 dirs = { workspace = true }
