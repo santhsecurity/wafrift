@@ -28,12 +28,39 @@ use crate::ProxyState;
 /// Subset of `HostState` worth persisting across proxy restarts.
 /// Block counts and pending discovery state re-accumulate naturally;
 /// what we don't want to lose is the painstakingly-discovered winners
-/// pool and the per-host blocklist.
+/// pool, the per-host blocklist, and the statistical state needed to
+/// resume rotation exactly where it left off.
+///
+/// All fields added after the initial schema use `#[serde(default)]`
+/// so existing gene-bank JSON files that predate the field load
+/// cleanly without errors — the new fields simply get their Default.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PersistedHostState {
     pub proven_winners: Vec<String>,
     pub blocklisted: Vec<String>,
     pub waf_name: Option<String>,
+    /// Per-technique stats: (name, successes, attempts). Persisting
+    /// these means the winner-pool evaluation on reload has real data
+    /// instead of starting from zero, so techniques promoted before a
+    /// restart keep their scores.
+    #[serde(default)]
+    pub technique_stats: Vec<(String, u32, u32)>,
+    /// Per-winner consecutive-block counter for drift detection:
+    /// (technique_name, consecutive_blocks_since_last_success). Allows
+    /// the proxy to evict a drifting winner immediately on restart rather
+    /// than after DRIFT_BLOCK_LIMIT additional blocks post-restart.
+    #[serde(default)]
+    pub winner_consecutive_blocks: Vec<(String, u32)>,
+    /// Round-robin rotation index into `proven_winners`. Stored as u64
+    /// for JSON compatibility (usize is platform-dependent; JSON round-
+    /// trip through u64 is lossless on all targets we support).
+    #[serde(default)]
+    pub rotation_index: u64,
+    /// Last successful technique name. Serialised as a human-readable
+    /// string (matches `Technique::to_string()`) for forward compat --
+    /// new Technique variants won't break old gene-bank files.
+    #[serde(default)]
+    pub last_success: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -157,6 +184,14 @@ pub fn save(state: &ProxyState, path: &Path) -> std::io::Result<()> {
                 proven_winners: hs.proven_winners.clone(),
                 blocklisted: hs.blocklisted.clone(),
                 waf_name: hs.waf_name.clone(),
+                // C2: persist the statistical state that survives restarts.
+                // technique_stats, winner_consecutive_blocks, and rotation_index
+                // allow the proxy to resume winner rotation without re-paying
+                // the full discovery cost. last_success gives immediate context.
+                technique_stats: hs.technique_stats.clone(),
+                winner_consecutive_blocks: hs.winner_consecutive_blocks.clone(),
+                rotation_index: hs.rotation_index as u64,
+                last_success: hs.last_success.as_ref().map(|t| t.to_string()),
             },
         );
     }
@@ -183,6 +218,15 @@ pub fn save(state: &ProxyState, path: &Path) -> std::io::Result<()> {
 /// under the lock matters.
 pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
     let mut restored = 0usize;
+    // Track FIFO membership in a HashSet — pre-fix this used
+    // `host_fifo.contains(&host)` which is O(n) on VecDeque, so a
+    // gene-bank with N hosts forced N² scans during restore. For
+    // a corrupted-or-large bank (millions of hosts) the proxy
+    // would take minutes to come up. The set is built once from
+    // the existing fifo (typically empty on cold start) and kept
+    // in lockstep with push_back.
+    let mut fifo_seen: std::collections::HashSet<String> =
+        state.host_fifo.iter().cloned().collect();
     for (host, persisted) in bank.hosts {
         let hs = state.hosts.entry(host.clone()).or_default();
         if !persisted.proven_winners.is_empty() {
@@ -197,7 +241,28 @@ pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
             hs.waf_name = persisted.waf_name;
             hs.waf_confirmed = true;
         }
-        if !state.host_fifo.contains(&host) {
+        // C2: restore statistical state so winner rotation and drift
+        // detection resume exactly where they left off.
+        if !persisted.technique_stats.is_empty() {
+            hs.technique_stats = persisted.technique_stats;
+        }
+        if !persisted.winner_consecutive_blocks.is_empty() {
+            hs.winner_consecutive_blocks = persisted.winner_consecutive_blocks;
+        }
+        // rotation_index is usize on HostState; clamp via saturating cast
+        // so a gene-bank written on a 64-bit host loads safely on a 32-bit
+        // target (theoretical: we only ship x86_64/aarch64, but be safe).
+        hs.rotation_index = usize::try_from(persisted.rotation_index)
+            .unwrap_or(usize::MAX);
+        if let Some(ref name) = persisted.last_success {
+            // Technique::from_pool_key parses the Display-format name
+            // (e.g. "encoding:UrlEncode"). Unknown future variants return
+            // None -- harmless, the proxy picks from the winner pool.
+            if let Some(t) = wafrift_types::Technique::from_pool_key(name) {
+                hs.last_success = Some(t);
+            }
+        }
+        if fifo_seen.insert(host.clone()) {
             state.host_fifo.push_back(host);
         }
     }
@@ -256,10 +321,8 @@ mod tests {
 
     #[test]
     fn load_v01_flat_format_migrates_to_schema_1() {
-        let path = std::env::temp_dir().join(format!(
-            "wafrift-genebank-load-v01-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("wafrift-genebank-load-v01-{}", std::process::id()));
         // Pre-schema flat HashMap format — no `schema` field, no
         // `hosts` wrapper. The auto-migration must recognise this
         // shape and convert without dropping any host.
@@ -289,5 +352,56 @@ mod tests {
         let bank = load(&path);
         assert!(bank.hosts.is_empty());
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// C2: old gene-bank files without the new fields must still load
+    /// cleanly (serde(default) provides zero values for missing keys).
+    #[test]
+    fn persisted_host_state_new_fields_are_backwards_compatible() {
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-genebank-compat-{}",
+            std::process::id()
+        ));
+        // Write a bank that only has the original three fields
+        let legacy = r#"{
+            "schema": 1,
+            "hosts": {
+                "example.com": {
+                    "proven_winners": ["encoding:UrlEncode"],
+                    "blocklisted": [],
+                    "waf_name": "Cloudflare"
+                }
+            }
+        }"#;
+        std::fs::write(&path, legacy).unwrap();
+        let bank = load(&path);
+        let host = bank.hosts.get("example.com").expect("host present");
+        // New fields must be their zero-value defaults.
+        assert!(host.technique_stats.is_empty(), "technique_stats should default empty");
+        assert!(host.winner_consecutive_blocks.is_empty(), "winner_consecutive_blocks should default empty");
+        assert_eq!(host.rotation_index, 0, "rotation_index should default to 0");
+        assert!(host.last_success.is_none(), "last_success should default None");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// C2: the four new fields survive a save+load round-trip.
+    #[test]
+    fn persisted_host_state_new_fields_round_trip_through_json() {
+        // Build a PersistedHostState with all new fields populated.
+        let phs = PersistedHostState {
+            proven_winners: vec!["encoding:UrlEncode".into()],
+            blocklisted: vec![],
+            waf_name: Some("Cloudflare".into()),
+            technique_stats: vec![("encoding:UrlEncode".into(), 7, 10)],
+            winner_consecutive_blocks: vec![("encoding:UrlEncode".into(), 1)],
+            rotation_index: 42,
+            last_success: Some("encoding:UrlEncode".into()),
+        };
+        let json = serde_json::to_string(&phs).expect("serialize");
+        let back: PersistedHostState = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.technique_stats, phs.technique_stats);
+        assert_eq!(back.winner_consecutive_blocks, phs.winner_consecutive_blocks);
+        assert_eq!(back.rotation_index, 42);
+        assert_eq!(back.last_success.as_deref(), Some("encoding:UrlEncode"));
     }
 }
