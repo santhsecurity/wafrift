@@ -1,0 +1,36 @@
+[package]
+name = "wafrift-telemetry"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Central observability layer for wafrift: events, counters, histograms, JSONL/Prometheus backends."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "telemetry", "metrics", "observability", "prometheus"]
+categories = ["network-programming", "development-tools::debugging"]
+
+[features]
+default = ["backend-stdout", "backend-jsonl"]
+backend-stdout = []
+backend-jsonl = []
+backend-prometheus = ["dep:tiny_http"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "net"] }
+dirs = { workspace = true }
+crossbeam-queue = "0.3"
+parking_lot = "0.12"
+tiny_http = { version = "0.12", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
+tempfile = "3"
+
+[lints]
+workspace = true
