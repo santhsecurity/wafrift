@@ -95,6 +95,19 @@ pub mod cookie_attacks;
 /// macro. Bypasses sanitizers that scan for XSS/SQLi but not formula
 /// triggers.
 pub mod csv_formula;
+/// HTTP method-override confusion: framework re-interprets the
+/// request method from `X-HTTP-Method-Override` header (3 name
+/// variants), `_method` form field / query / multipart, chunked
+/// trailer, or header+form disagreement. Wire method shown to WAF
+/// is POST; framework executes DELETE/PUT/PATCH/etc.
+pub mod method_override;
+/// HTTP cache poisoning payloads: X-Forwarded-Host/Scheme/Port,
+/// X-Original-URL, X-Host (Akamai), Forwarded (RFC 7239),
+/// X-Backend-Host, loopback-trust headers, web cache deception
+/// paths (5 extensions × null-byte / semicolon / traversal forms),
+/// cache key normalization variants, Vary header confusion, status
+/// code poisoning, HTTP/2 :authority split.
+pub mod cache_poison;
 /// Multi-strategy layering and aggressiveness scoring.
 pub mod layered;
 /// Strategy enum and encode() dispatcher.
