@@ -53,29 +53,16 @@ pub fn apply_all_plugins(payload: &str) -> Vec<(String, String)> {
 /// Returns `None` if the plugin is not registered.
 #[must_use]
 pub fn apply_plugin(name: &str, payload: &str) -> Option<String> {
-    registry().get(name).map(|t| t.apply(payload))
+    registry().get(name).map(|t: &dyn Tamper| t.apply(payload))
 }
 
 /// Return the names of all loaded external plugins.
 #[must_use]
-pub fn plugin_names() -> Vec<&'static str> {
+pub fn plugin_names() -> Vec<String> {
     registry()
         .all()
         .iter()
-        .map(|t| {
-            // SAFETY: the static OnceLock lives forever; the strings inside
-            // it do too. We transmute the lifetime from the borrow of the
-            // static registry to `'static`.
-            // Rationale: `registry()` returns `&'static TamperRegistry`;
-            // the Box<dyn Tamper> inside it lives for 'static.  The name()
-            // method returns a &str with the lifetime of `self`, i.e.
-            // effectively 'static.  Clippy can't see this through the dyn
-            // boundary, so we help it with an explicit cast.
-            let name: &str = t.name();
-            // SAFETY: name is backed by heap memory inside the 'static
-            // OnceLock, so it outlives any caller.
-            unsafe { std::mem::transmute::<&str, &'static str>(name) }
-        })
+        .map(|t| t.name().to_owned())
         .collect()
 }
 
