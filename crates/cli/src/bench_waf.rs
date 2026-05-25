@@ -1359,7 +1359,15 @@ async fn run_evolution_strategy(
         _ => return stat,
     };
     let payload_type = class_to_payload_type(&case.class);
-    let rng = StdRng::seed_from_u64(0xC0FFEE);
+    // B5: deterministic per-case seed via FNV-1a over case.id bytes.
+    // The old constant 0xC0FFEE made every run pick identical variants
+    // regardless of case identity, masking coverage gaps.
+    let mut case_seed: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+    for byte in case.id.bytes() {
+        case_seed ^= u64::from(byte);
+        case_seed = case_seed.wrapping_mul(0x0000_0100_0000_01b3); // FNV prime
+    }
+    let rng = StdRng::seed_from_u64(case_seed);
     let gene_pool = GenePool::default_wafrift();
     let budget = Budget {
         max_requests: args.variants.saturating_mul(4),
