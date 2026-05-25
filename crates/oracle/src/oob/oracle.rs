@@ -114,6 +114,11 @@ impl OobOracle {
     }
 }
 
+/// Maximum number of consecutive poll errors before treating the provider
+/// as permanently failed.  A single transient network blip should not abort
+/// the full confirmation window — DNS / HTTP hiccups in CI happen.
+const MAX_CONSECUTIVE_POLL_ERRORS: usize = 3;
+
 async fn poll_until(
     provider: &dyn OobProviderTrait,
     canary: &OobCanary,
@@ -122,16 +127,35 @@ async fn poll_until(
 ) -> OobConfirmation {
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
     let interval = Duration::from_secs(interval_secs.max(1));
+    let mut consecutive_errors: usize = 0;
     loop {
         match provider.poll(canary).await {
             Ok(ints) if !ints.is_empty() => return OobConfirmation::Confirmed,
-            Ok(_) => {}
+            Ok(_) => {
+                // Empty interaction list — keep polling.
+                consecutive_errors = 0;
+            }
             // F93 sibling: the background-poll path still has to
             // return an `OobConfirmation` (it owns its channel), so
             // it can't propagate `OobError` like `confirm()` does.
-            // Keep the `Error` variant here, but `confirm()` —
-            // which CAN signal failure to the caller — should.
-            Err(_) => return OobConfirmation::Error,
+            //
+            // Pre-fix: a single transient poll error immediately returned
+            // `OobConfirmation::Error`, terminating the entire confirmation
+            // window.  A flaky CI network or a momentary provider outage
+            // would cause every scan result to show as `Error` even when
+            // the canary actually fired later in the window.
+            //
+            // Post-fix: count consecutive errors and only give up after
+            // MAX_CONSECUTIVE_POLL_ERRORS.  This tolerates transient
+            // blips while still surfacing genuine provider death.
+            Err(_) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= MAX_CONSECUTIVE_POLL_ERRORS {
+                    return OobConfirmation::Error;
+                }
+                // Transient error — continue to the deadline check and
+                // sleep before retrying.
+            }
         }
         if std::time::Instant::now() >= deadline {
             return OobConfirmation::Timeout;
@@ -266,6 +290,148 @@ mod tests {
              took {elapsed:?} which suggests inline blocking"
         );
         // Don't await the receiver — we proved the return-fast contract.
+    }
+
+    /// Transient poll errors do not abort the confirmation window —
+    /// poll_until must retry up to MAX_CONSECUTIVE_POLL_ERRORS times
+    /// before giving up, allowing a later successful poll to confirm.
+    #[tokio::test]
+    async fn transient_poll_errors_are_retried_not_fatal() {
+        use std::sync::Mutex;
+
+        // Provider: returns errors for first 2 polls, then confirms.
+        // This must NOT produce OobConfirmation::Error — it must Confirm.
+        #[derive(Debug)]
+        struct ErrorThenConfirmProvider {
+            polls: AtomicUsize,
+            error_count: usize,
+        }
+        #[async_trait]
+        impl OobProviderTrait for ErrorThenConfirmProvider {
+            async fn register(&self) -> Result<OobCanary, OobError> {
+                Ok(OobCanary {
+                    id: uuid::Uuid::nil(),
+                    expected_dns: "test.oast".into(),
+                    expected_http_path: "/test".into(),
+                    created_at: None,
+                })
+            }
+            async fn poll(&self, _: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
+                let n = self.polls.fetch_add(1, Ordering::Relaxed);
+                if n < self.error_count {
+                    Err(OobError::PollFailed { reason: "transient".into() })
+                } else {
+                    Ok(vec![OobInteraction::DnsQuery {
+                        query: "test.oast".into(),
+                        source_ip: "1.2.3.4".into(),
+                    }])
+                }
+            }
+        }
+
+        let provider = Box::new(ErrorThenConfirmProvider {
+            polls: AtomicUsize::new(0),
+            error_count: 2, // fail first 2 polls (below MAX_CONSECUTIVE_POLL_ERRORS=3)
+        });
+        let oracle = OobOracle::new(
+            provider,
+            OobConfig {
+                provider: OobProvider::Interactsh { server: "test".into() },
+                poll_interval_secs: 1,
+                timeout_secs: 10,
+            },
+        );
+        let result = oracle.confirm("x", "Sql").await.unwrap();
+        assert_eq!(
+            result,
+            OobConfirmation::Confirmed,
+            "2 transient errors followed by success must Confirm, not Error"
+        );
+    }
+
+    #[tokio::test]
+    async fn persistent_poll_errors_produce_error_outcome() {
+        // Provider that always errors — after MAX_CONSECUTIVE_POLL_ERRORS
+        // consecutive failures the background poll should return Error.
+        #[derive(Debug)]
+        struct AlwaysErrorProvider;
+        #[async_trait]
+        impl OobProviderTrait for AlwaysErrorProvider {
+            async fn register(&self) -> Result<OobCanary, OobError> {
+                Ok(OobCanary {
+                    id: uuid::Uuid::nil(),
+                    expected_dns: "dead.oast".into(),
+                    expected_http_path: "/dead".into(),
+                    created_at: None,
+                })
+            }
+            async fn poll(&self, _: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
+                Err(OobError::PollFailed { reason: "provider dead".into() })
+            }
+        }
+
+        let oracle = OobOracle::new(
+            Box::new(AlwaysErrorProvider),
+            OobConfig {
+                provider: OobProvider::Interactsh { server: "test".into() },
+                poll_interval_secs: 1,
+                timeout_secs: 30,
+            },
+        );
+        // confirm() propagates the error from the provider.
+        let result = oracle.confirm("x", "Sql").await;
+        assert!(
+            result.is_err(),
+            "persistent provider errors must be propagated, not swallowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn background_transient_errors_recovered_before_timeout() {
+        // Background path: 2 transient errors → confirm on 3rd poll.
+        // Must return Confirmed through the channel, not Error.
+        #[derive(Debug)]
+        struct BgErrorThenConfirm {
+            polls: AtomicUsize,
+        }
+        #[async_trait]
+        impl OobProviderTrait for BgErrorThenConfirm {
+            async fn register(&self) -> Result<OobCanary, OobError> {
+                Ok(OobCanary {
+                    id: uuid::Uuid::nil(),
+                    expected_dns: "bg.oast".into(),
+                    expected_http_path: "/bg".into(),
+                    created_at: None,
+                })
+            }
+            async fn poll(&self, _: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
+                let n = self.polls.fetch_add(1, Ordering::Relaxed);
+                if n < 2 {
+                    Err(OobError::PollFailed { reason: "flaky".into() })
+                } else {
+                    Ok(vec![OobInteraction::DnsQuery {
+                        query: "bg.oast".into(),
+                        source_ip: "9.8.7.6".into(),
+                    }])
+                }
+            }
+        }
+
+        let oracle = OobOracle::new(
+            Box::new(BgErrorThenConfirm { polls: AtomicUsize::new(0) }),
+            OobConfig {
+                provider: OobProvider::Interactsh { server: "test".into() },
+                poll_interval_secs: 1,
+                timeout_secs: 10,
+            },
+        );
+        let (_canary, mut rx) = oracle.confirm_background().await.unwrap();
+        let outcome = rx.recv().await.unwrap();
+        assert_eq!(
+            outcome,
+            OobConfirmation::Confirmed,
+            "background poll must recover from transient errors and Confirm"
+        );
     }
 
     /// Atomic counters threaded through Arc keep the provider alive
