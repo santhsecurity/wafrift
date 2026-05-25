@@ -93,7 +93,7 @@ pub struct ClusterArgs {
 
 /// A single bypass record extracted from the bench result.
 #[derive(Debug, Clone)]
-struct BypassRecord {
+pub(crate) struct BypassRecord {
     rule_id: String,
     payload_class: String,
     /// Technique-list joined into a string — used as the edit-distance key.
@@ -408,22 +408,22 @@ fn print_output(out: &ClusterOutput, format: &str) {
     }
 }
 
-// ─── Deserialize helper ────────────────────────────────────────────────────────
+// ─── Deserialize helpers (test-only roundtrip types) ─────────────────────────
 
-/// Deserializable mirror of [`ClusterOutput`]. Used in tests and by callers
-/// that need to round-trip the JSON output programmatically. Declared in the
-/// production module (not cfg(test)) so external tooling can import it.
+/// Deserializable mirror of [`ClusterOutput`] for test roundtrips.
+#[cfg(test)]
 #[derive(Deserialize)]
-pub struct ClusterOutputDeser {
+pub(crate) struct ClusterOutputDeser {
     pub schema_version: u32,
     pub edit_threshold: f64,
     pub total_bypasses: usize,
     pub clusters: Vec<ClusterDeser>,
 }
 
-/// Deserializable mirror of [`Cluster`].
+/// Deserializable mirror of [`Cluster`] for test roundtrips.
+#[cfg(test)]
 #[derive(Deserialize)]
-pub struct ClusterDeser {
+pub(crate) struct ClusterDeser {
     pub rule_id: String,
     pub payload_class: String,
     pub representative: String,
