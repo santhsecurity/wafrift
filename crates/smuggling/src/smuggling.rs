@@ -1170,8 +1170,14 @@ pub fn malformed_host_split(host_value: &str) -> Vec<SmugglingPayload> {
     delimiters
         .iter()
         .map(|&delim| {
-            // Insert delimiter after first 3 chars (or at end if shorter).
-            let insert_pos = host_value.len().min(3);
+            // Insert delimiter after first 3 Unicode scalar values (or at end if
+            // shorter).  Using `len().min(3)` would be a byte-index and would
+            // panic on multi-byte UTF-8 strings whose character boundary does not
+            // fall on byte 3.
+            let insert_pos = host_value
+                .char_indices()
+                .nth(3)
+                .map_or(host_value.len(), |(i, _)| i);
             let mangled = format!(
                 "{}{}{}",
                 &host_value[..insert_pos],
