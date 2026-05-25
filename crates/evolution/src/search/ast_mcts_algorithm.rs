@@ -30,7 +30,7 @@ use crate::evolution::{Chromosome, GenePool, population::random_chromosome};
 use crate::lineage::Lineage;
 use crate::search::{EvalCandidate, SearchAlgorithm, fitness_cmp};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
-use rand::Rng;
+use rand::RngCore;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -166,7 +166,7 @@ impl AstMctsAlgorithm {
         }
 
         // Run MCTS using an inline oracle to enumerate candidate rewrites.
-        let jitter: u64 = rng.r#gen();
+        let jitter: u64 = rng.next_u64();
         let mut generated: Vec<String> = Vec::new();
         let mut inline = InlineOracle {
             candidates: &mut generated,

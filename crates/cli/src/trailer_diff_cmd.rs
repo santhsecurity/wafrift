@@ -126,7 +126,8 @@ pub struct TrailerDiffResult {
 /// run regardless of whether a divergence was found (divergence is
 /// informational, not a process error). Returns exit 1 on setup or
 /// transport failures.
-pub async fn run_trailer_diff(args: TrailerDiffArgs) -> ExitCode {
+pub async fn run_trailer_diff(mut args: TrailerDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     if args.format == "text" {
         eprintln!(
             "{} firing baseline + attack chunked-trailer probe against {}",

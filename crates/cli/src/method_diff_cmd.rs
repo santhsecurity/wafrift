@@ -187,7 +187,8 @@ pub fn generate_method_variants() -> Vec<MethodProbe> {
     ]
 }
 
-pub async fn run_method_diff(args: MethodDiffArgs) -> ExitCode {
+pub async fn run_method_diff(mut args: MethodDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
