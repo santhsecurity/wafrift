@@ -691,4 +691,67 @@ mod tests {
         assert!(techniques.contains(&&ContentTypeTechnique::JsonUnicodeEscape));
         assert!(techniques.contains(&&ContentTypeTechnique::XmlCdata));
     }
+
+    // ── bound_params key-overflow fix (2026-05-25) ───────────────────────────
+
+    /// When the key alone exhausts the remaining byte budget, the previous code
+    /// emitted `(key, "")` via `saturating_sub → 0` — wasting the budget and
+    /// misrepresenting the param. The fix breaks out of the loop instead.
+    #[test]
+    fn bound_params_skips_entry_when_key_alone_overflows_remaining_budget() {
+        // Use MAX_VARIANT_INPUT_BYTES from the crate.
+        // We'll construct a scenario: one normal param that consumes almost
+        // all the budget, then a second param whose key alone would overflow
+        // the tiny remainder.
+        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, generate_variants};
+
+        // First param: use exactly MAX_VARIANT_INPUT_BYTES - 10 bytes of key+val.
+        // key = 1 byte, value = MAX_VARIANT_INPUT_BYTES - 11 bytes.
+        let v1 = "x".repeat(MAX_VARIANT_INPUT_BYTES - 11);
+        // Second param: key is 15 bytes, value 1 byte → key alone > remaining 10.
+        let params = vec![
+            ("a".to_string(), v1),
+            ("bigkeyname_xyz".to_string(), "v".to_string()),
+        ];
+        let variants = generate_variants(&params);
+        // The second param must NOT appear as (bigkeyname_xyz, "") in any variant.
+        for v in &variants {
+            let body_str = String::from_utf8_lossy(&v.body);
+            assert!(
+                !body_str.contains("bigkeyname_xyz"),
+                "param with key-only overflow must be silently dropped, found in {:?}: {}",
+                v.technique,
+                body_str
+            );
+        }
+        // The first param must be present (truncated value is fine).
+        // At minimum, some variants exist.
+        assert!(!variants.is_empty());
+    }
+
+    /// The previous `remaining.saturating_sub(k.len())` would yield `0` when
+    /// `k.len() == remaining`, producing an empty-string value. Confirm the
+    /// fixed code drops the entry in that exact boundary case too.
+    #[test]
+    fn bound_params_skips_entry_when_key_len_equals_remaining() {
+        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, generate_variants};
+
+        // Consume all but exactly 5 bytes of the budget with the first param.
+        let v1 = "x".repeat(MAX_VARIANT_INPUT_BYTES - 6); // key 'a' (1) + value = budget-5
+        // Second param: key is exactly 5 bytes, value is anything → key == remaining.
+        let params = vec![
+            ("a".to_string(), v1),
+            ("abcde".to_string(), "val".to_string()),
+        ];
+        let variants = generate_variants(&params);
+        for v in &variants {
+            let body_str = String::from_utf8_lossy(&v.body);
+            // "abcde" with an empty value is the wrong outcome; it must be absent.
+            assert!(
+                !body_str.contains("abcde"),
+                "key-equals-remaining entry must be dropped, found in {:?}",
+                v.technique
+            );
+        }
+    }
 }

@@ -413,12 +413,17 @@ where
                         // novel row at every depth and would
                         // otherwise materialise Σ_{i=0}^{depth} k^i
                         // states (1.1B at depth=10, k=10). Past the
-                        // cap, fall back to the post-horizon "fold
-                        // to existing state" branch — bounded
-                        // memory at the cost of a less-precise
-                        // model. Caller can raise PASSIVE_LEARN_MAX_STATES.
+                        // cap, fold to the start state (0) — the same
+                        // conservative fallback used past the depth
+                        // horizon. The prior code called
+                        // `id_of.get(&r).unwrap_or(&0)` here, but we
+                        // are inside the Vacant branch so `id_of`
+                        // provably does NOT contain `r`; the get always
+                        // returned None and the result was always 0. The
+                        // dead lookup is removed; the fallback is now
+                        // explicit and documented.
                         if access.len() >= PASSIVE_LEARN_MAX_STATES {
-                            *id_of.get(&r).unwrap_or(&0)
+                            0
                         } else {
                             let id = access.len();
                             e.insert(id);
