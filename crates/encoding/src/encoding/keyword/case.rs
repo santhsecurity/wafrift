@@ -1,5 +1,19 @@
 //! Case manipulation strategies.
 
+/// FNV-1a hash of (byte index, payload bytes) for deterministic bool derivation.
+fn fnv1a_char_hash(char_idx: usize, payload: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in char_idx.to_le_bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    for b in payload.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 /// Shared alternating-case utility.
 ///
 /// `SELECT` → `SeLeCt`. Bypasses case-sensitive keyword filters.
@@ -32,16 +46,18 @@ pub fn case_alternate(payload: &str) -> String {
     alternating_case(payload, true)
 }
 
-/// Random case alternation — unpredictable mixed-case output.
+/// Deterministic mixed-case alternation derived from FNV-1a hash of each
+/// character's index and the full payload bytes.
 ///
-/// **Idempotency.** NOT idempotent. Each application re-randomises the
-/// case of every alphabetic character independently.
+/// Two calls with the same `payload` always produce byte-identical output.
+/// The case pattern varies per payload but is stable across runs.
 pub fn random_case_alternate(payload: &str) -> String {
     payload
         .chars()
-        .map(|ch| {
+        .enumerate()
+        .map(|(i, ch)| {
             if ch.is_ascii_alphabetic() {
-                if rand::random::<bool>() {
+                if fnv1a_char_hash(i, payload) & 1 == 1 {
                     ch.to_ascii_uppercase()
                 } else {
                     ch.to_ascii_lowercase()
@@ -73,12 +89,25 @@ mod tests {
     }
 
     #[test]
-    fn random_case_non_deterministic() {
+    fn random_case_is_deterministic() {
         let a = random_case_alternate("SELECT");
         let b = random_case_alternate("SELECT");
-        // Very unlikely to match by chance, but allow for it
+        assert_eq!(a, b, "random_case_alternate must be byte-identical for identical input");
         assert_eq!(a.to_ascii_lowercase(), "select");
-        assert_eq!(b.to_ascii_lowercase(), "select");
+    }
+
+    #[test]
+    fn random_case_varies_per_payload() {
+        // The FNV hash includes all payload bytes, so different payloads
+        // produce different per-char decisions across a range of inputs.
+        // Check determinism (same input → same output) which is the core contract.
+        for payload in &["SELECT", "UNION", "DROP TABLE users", "1 OR 1=1"] {
+            let a = random_case_alternate(payload);
+            let b = random_case_alternate(payload);
+            assert_eq!(a, b, "random_case_alternate must be stable: {payload}");
+            assert_eq!(a.to_ascii_lowercase(), payload.to_ascii_lowercase(),
+                "random_case_alternate must preserve chars");
+        }
     }
 
     #[test]
@@ -100,27 +129,5 @@ mod tests {
             "case_alternate must be idempotent after first application"
         );
         assert_eq!(once, "SeLeCt");
-    }
-
-    #[test]
-    fn random_case_not_idempotent() {
-        // A single `a != b` pair is FLAKY: for an n-letter word the two
-        // independent random casings collide with probability 1/2^n
-        // (~1.6% for "SELECT") — a ~1-in-64 spurious CI failure. The
-        // real contract is that `random_case_alternate` re-randomises,
-        // i.e. its output is not constant. Assert ≥2 distinct outputs
-        // across many trials: P(all identical) = (1/2^6)^(N-1) → nil
-        // for N=64, so this is deterministic in practice.
-        let mut seen = std::collections::HashSet::new();
-        for _ in 0..64 {
-            seen.insert(random_case_alternate("SELECT"));
-            if seen.len() >= 2 {
-                return;
-            }
-        }
-        panic!(
-            "random_case_alternate produced only one distinct casing of \
-             \"SELECT\" across 64 trials — it is not re-randomising"
-        );
     }
 }

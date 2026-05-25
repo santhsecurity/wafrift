@@ -1,4 +1,6 @@
 //! Determinism: pure mutators yield byte-identical output on repeated calls with fixed inputs.
+//!
+//! After the FNV-1a refactor (F140-F147), ALL strategies are deterministic.
 
 mod common;
 
@@ -17,10 +19,6 @@ fn encode_pure_strategies_twice_are_byte_identical() {
     let pollution_payload = b"k=v";
 
     for &strategy in all_strategies() {
-        if matches!(strategy, S::RandomCase | S::SpaceToRandomBlank) {
-            continue;
-        }
-
         let bytes_in = if matches!(strategy, S::ParameterPollution) {
             pollution_payload
         } else {
@@ -40,31 +38,29 @@ fn encode_pure_strategies_twice_are_byte_identical() {
 }
 
 #[test]
-fn encode_random_case_negative_not_identical_across_calls() {
+fn encode_random_case_is_now_deterministic() {
+    // After FNV-1a fix: RandomCase is byte-stable for identical input.
     let payload = "AbCdEfGhIjKlMnOpQrStUvWxYz";
     let a = encode(payload.as_bytes(), S::RandomCase).unwrap();
     let b = encode(payload.as_bytes(), S::RandomCase).unwrap();
-    assert_ne!(
+    assert_eq!(
         a, b,
-        "negative twin: RandomCase injects entropy and must not be byte-stable"
+        "RandomCase must be byte-identical for identical input after FNV fix"
     );
+    assert_ne!(a, payload, "RandomCase must still change some chars");
 }
 
 #[test]
-fn encode_space_to_random_blank_negative_not_stable() {
+fn encode_space_to_random_blank_is_now_deterministic() {
+    // After FNV-1a fix: SpaceToRandomBlank is byte-stable for identical input.
     let payload = "SELECT * FROM t WHERE a = 1 AND b = 2";
-    let mut diff = 0_u32;
-    for _ in 0..40 {
-        let u = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
-        let v = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
-        if u != v {
-            diff += 1;
-        }
-    }
-    assert!(
-        diff > 0,
-        "negative twin: SpaceToRandomBlank must vary across repeated calls"
+    let a = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
+    let b = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
+    assert_eq!(
+        a, b,
+        "SpaceToRandomBlank must be byte-identical for identical input after FNV fix"
     );
+    assert!(!a.contains(' '), "SpaceToRandomBlank must remove spaces");
 }
 
 #[test]
@@ -93,12 +89,10 @@ fn mutate_url_deterministic_for_fixed_path() {
 }
 
 #[test]
-fn tamper_named_strategies_deterministic_except_random_case() {
+fn tamper_named_strategies_all_deterministic() {
+    // After FNV-1a fix: ALL tampers including random_case are deterministic.
     let p = common::unicode_stress();
     for name in all_tamper_names() {
-        if *name == "random_case" {
-            continue;
-        }
         let a = tamper(name, p.as_str(), Some("sql")).unwrap();
         let b = tamper(name, p.as_str(), Some("sql")).unwrap();
         assert_eq!(a, b, "tamper({name}) must be deterministic");
@@ -106,14 +100,16 @@ fn tamper_named_strategies_deterministic_except_random_case() {
 }
 
 #[test]
-fn tamper_random_case_negative_unstable() {
+fn tamper_random_case_is_deterministic() {
+    // After FNV fix: tamper("random_case", ...) is byte-stable for identical inputs.
     let a = tamper("random_case", "PayloadText", Some("sql")).unwrap();
     let b = tamper("random_case", "PayloadText", Some("sql")).unwrap();
-    assert_ne!(a, b, "negative twin: random_case tamper must vary");
+    assert_eq!(a, b, "random_case tamper must be stable after FNV fix");
+    assert_ne!(a.to_ascii_lowercase(), a, "random_case tamper must still change case");
 }
 
 #[test]
-fn header_functions_deterministic_except_whitespace_pad_rng() {
+fn header_functions_all_deterministic() {
     let name = "Content-Type";
     let value = common::unicode_stress();
     assert_eq!(case_mix(name), case_mix(name));
@@ -122,17 +118,8 @@ fn header_functions_deterministic_except_whitespace_pad_rng() {
         tab_separator(name, value.as_str())
     );
 
-    let mut varied = false;
-    for _ in 0..40 {
-        let x = whitespace_pad(name, value.as_str());
-        let y = whitespace_pad(name, value.as_str());
-        if x != y {
-            varied = true;
-            break;
-        }
-    }
-    assert!(
-        varied,
-        "negative twin: whitespace_pad must eventually diverge (RNG padding)"
-    );
+    // After FNV fix: whitespace_pad is deterministic per (name, value).
+    let x = whitespace_pad(name, value.as_str());
+    let y = whitespace_pad(name, value.as_str());
+    assert_eq!(x, y, "whitespace_pad must be stable for identical inputs after FNV fix");
 }
