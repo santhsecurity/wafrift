@@ -510,21 +510,29 @@ WafRift is the evasion layer you add when sqlmap / Burp / ffuf are blocked by a 
 ```
 wafrift
 ├── crates/
-│   ├── types          # Core types: Request, Technique, EvasionResult
-│   ├── encoding       # 15+ encoding strategies (URL, Unicode, HTML entity, chunked, …)
-│   ├── grammar        # Grammar-aware mutations (SQLi, XSS, CMD, SSTI, SSRF, LDAPi, path)
-│   ├── content-type   # JSON / XML / multipart switching
-│   ├── smuggling      # CL.TE / TE.CL / H2 desync
-│   ├── fingerprint    # UA / TLS / header-order rotation
-│   ├── detect         # WAF fingerprinting (160+ WAFs via TOML rules)
-│   ├── evolution      # GA + MCTS + differential probing
-│   ├── oracle         # Multi-signal verdict classification
-│   ├── strategy       # Pipeline + gene bank + adaptive host state
-│   ├── transport      # Evasion-aware HTTP client with auto-retry
-│   ├── proxy          # Forward proxy with per-host adaptive evasion
-│   ├── pool           # Proxy pool rotation (HTTP/SOCKS5)
-│   ├── recon          # Origin discovery via OSINT (CT logs, DNS history)
-│   └── cli            # CLI + TUI (scan / evade / detect / probe / report / replay)
+│   ├── types               # Core types: Request, Technique, EvasionResult
+│   ├── encoding            # 15+ encoding strategies (URL, Unicode, HTML entity, chunked, …)
+│   ├── grammar             # Grammar-aware mutations (SQLi, XSS, CMD, SSTI, SSRF, LDAPi, path)
+│   ├── content-type        # JSON / XML / multipart switching (WAFFLED)
+│   ├── smuggling           # CL.TE / TE.CL / TE.TE / CL.0 / H2 desync
+│   ├── fingerprint         # UA / TLS JA3-JA4 / header-order rotation
+│   ├── detect              # WAF fingerprinting (160+ WAFs via TOML rules, DNS CNAME, BGP ASN)
+│   ├── evolution           # GA + MCTS + differential probing + body-padding
+│   ├── wafmodel            # Active-learning WAF decompiler (L* / SFA / bypass mining)
+│   ├── oracle              # Payload validity oracles (SQL, XSS, SSTI, CMDI, path, LDAP, SSRF)
+│   ├── strategy            # Pipeline + gene bank + adaptive host state + ML-WAF evasion
+│   ├── transport           # Evasion-aware HTTP client with auto-retry + stealth profiles
+│   ├── proxy               # Forward proxy with per-host adaptive evasion + TUI
+│   ├── pool                # Proxy pool rotation (HTTP/SOCKS5)
+│   ├── recon               # Origin discovery via OSINT (CT logs, DNS history)
+│   ├── genome-registry     # ed25519 genome signing + trust-list management
+│   ├── graphql             # GraphQL-specific evasion payloads (alias bomb, op-name mismatch)
+│   ├── http3-evasion       # HTTP/3 + QUIC protocol evasion (QPACK desync, 0-RTT, CID rotation)
+│   ├── grpc-evasion        # gRPC/protobuf opaque-payload bypass
+│   ├── plugin-api          # TOML + WASM external tamper plugin system
+│   ├── captchaforge-bridge # Headless Chromium adapter for managed challenge solving
+│   ├── core                # Façade re-exporting all crates under one namespace
+│   └── cli                 # CLI + TUI (scan / evade / detect / attack / bypass-probe / …)
 ```
 
 The proxy continuously learns: **discover → rotate (winners) → drift-detect → re-discover**. After ≥60% winners are found it stops rolling dice and round-robins the known-good chain; if a winner gets blocked 2× consecutively it's evicted; when all winners are evicted, full discovery restarts. Per-WAF state is persisted to `~/.wafrift/genomes/<waf>.json`:
