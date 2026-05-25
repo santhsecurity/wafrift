@@ -30,8 +30,8 @@ pub struct Variant {
 ///
 /// Returns a short error fragment ("missing ':' separator", "empty
 /// name") so callers can compose their own context — `"invalid
-/// header \`{raw}\`; <frag>"` for [`parse_headers`], `"-H/--header
-/// {raw:?} <frag>"` for [`crate::scan::pentest_client::parse_header`].
+/// header \`{raw}\`; {frag}"` for [`parse_headers`], `"-H/--header
+/// {raw:?} {frag}"` for [`crate::scan::pentest_client::parse_header`].
 pub fn parse_header_pair(raw: &str) -> Result<(String, String), String> {
     let (name, value) = raw
         .split_once(':')
@@ -93,10 +93,21 @@ pub fn shell_single_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
     for ch in s.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
+        match ch {
+            // `'` is the standard close-and-reopen escape.
+            '\'' => out.push_str("'\\''"),
+            // NUL inside a single-quoted shell token would
+            // terminate the C string in libc and silently
+            // truncate the argument. CR resets the terminal
+            // cursor and can hide preceding output (operator
+            // copies a curl from logs that looks shorter than
+            // it is). Bash's `$'\\x00'` / `$'\\r'` ANSI-C
+            // quoting is the safe form — fall out of the
+            // single-quote run, splice the ANSI-C literal,
+            // reopen the run.
+            '\0' => out.push_str("'$'\\x00''"),
+            '\r' => out.push_str("'$'\\r''"),
+            _ => out.push(ch),
         }
     }
     out.push('\'');
@@ -129,6 +140,28 @@ pub fn url_query_repro_curl(target: &str, param: &str, payload: &str) -> String 
         arg = shell_single_quote(&format!("{param}={payload}")),
         target = shell_single_quote(target),
     )
+}
+
+/// Normalise a user-supplied URL or hostname into a fully-qualified URL.
+///
+/// Rules (applied in order):
+/// 1. Strip leading/trailing whitespace.
+/// 2. If the result contains `://`, return it as-is (already has a scheme).
+/// 3. If the result starts with `//` (protocol-relative), promote to `https://`.
+/// 4. Otherwise, prepend `https://`.
+///
+/// This fixes the "relative URL without a base" error that occurs when a user
+/// passes `example.com` instead of `https://example.com` to any subcommand.
+#[must_use]
+pub fn normalize_target_url(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.contains("://") {
+        trimmed.to_string()
+    } else if let Some(rest) = trimmed.strip_prefix("//") {
+        format!("https://{rest}")
+    } else {
+        format!("https://{trimmed}")
+    }
 }
 
 pub fn strategies_for_level(level: Level) -> Vec<Strategy> {
@@ -545,7 +578,10 @@ mod tests {
         );
         assert_eq!(payload_type_label(PayloadType::Ldap), "LDAP Injection");
         assert_eq!(payload_type_label(PayloadType::Ssrf), "SSRF");
-        assert_eq!(payload_type_label(PayloadType::PathTraversal), "Path Traversal");
+        assert_eq!(
+            payload_type_label(PayloadType::PathTraversal),
+            "Path Traversal"
+        );
         assert_eq!(
             payload_type_label(PayloadType::TemplateInjection),
             "Template Injection"
@@ -643,10 +679,7 @@ mod tests {
             probe_target_label(&ProbeTarget::SqlComment("--".into())),
             "sql_comment:--"
         );
-        assert_eq!(
-            probe_target_label(&ProbeTarget::SqlQuote),
-            "sql_quote"
-        );
+        assert_eq!(probe_target_label(&ProbeTarget::SqlQuote), "sql_quote");
         assert_eq!(
             probe_target_label(&ProbeTarget::SqlTautology("1=1".into())),
             "sql_tautology:1=1"
@@ -771,6 +804,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shell_single_quote_escapes_nul_byte() {
+        // Regression for F72: NUL inside a single-quoted shell
+        // token silently truncates the argument at the libc layer.
+        // Use bash ANSI-C quoting to splice the NUL safely.
+        let out = shell_single_quote("a\0b");
+        // Output must not contain a raw NUL — every byte must be
+        // representable in a shell here-doc / copy-paste.
+        assert!(
+            !out.contains('\0'),
+            "raw NUL must be escaped, got: {out:?}"
+        );
+        // Bash form: `'a'$'\x00''b'` (close + ANSI-C + reopen).
+        assert!(out.contains("$'\\x00'"), "got: {out:?}");
+    }
+
+    #[test]
+    fn shell_single_quote_escapes_carriage_return() {
+        // Regression for F72: CR resets the terminal cursor and
+        // can hide preceding output when the operator copies a
+        // curl from logs. Escape via ANSI-C `\r`.
+        let out = shell_single_quote("a\rb");
+        assert!(!out.contains('\r'), "raw CR must be escaped: {out:?}");
+        assert!(out.contains("$'\\r'"), "got: {out:?}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn shell_single_quote_round_trips_through_bash() {
@@ -873,9 +932,7 @@ mod tests {
         // Round-trip: splitting on `'\''` and reassembling gives back the original.
         // Simplified check: the quoted form, when unescaped by the Bourne rules,
         // yields the original string. We implement that manually.
-        let reconstructed = quoted
-            .trim_matches('\'')
-            .replace("'\\''", "'");
+        let reconstructed = quoted.trim_matches('\'').replace("'\\''", "'");
         assert_eq!(
             reconstructed, header_val,
             "shell_single_quote must round-trip: input={header_val:?}, \
@@ -931,7 +988,10 @@ mod tests {
     fn walk_error_surfaces_single_level() {
         // PRE-FIX: `format!("{e}")` returns only the top-level message.
         // POST-FIX: the walker also surfaces it (no regression for 1-level chain).
-        let e = ChainedError { msg: "outer error", cause: None };
+        let e = ChainedError {
+            msg: "outer error",
+            cause: None,
+        };
         let walked = walk_std_error(&e);
         assert_eq!(walked, "outer error");
     }
@@ -959,8 +1019,10 @@ mod tests {
             "walk_std_error must join every level of the cause chain"
         );
         // Anti-regression: the result must NOT be just the top-level string.
-        assert_ne!(walked, "error sending request",
-            "bare top-level message means the cause chain was not walked");
+        assert_ne!(
+            walked, "error sending request",
+            "bare top-level message means the cause chain was not walked"
+        );
     }
 
     // ── url_query_repro_curl ──────────────────────────────────────
@@ -977,11 +1039,7 @@ mod tests {
     fn url_query_repro_curl_protects_metacharacters_in_payload() {
         // `$(rm -rf /)` is the classic shell-injection canary. After
         // single-quoting it must appear verbatim, no expansion.
-        let curl = url_query_repro_curl(
-            "https://target",
-            "q",
-            "$(rm -rf /); `whoami`",
-        );
+        let curl = url_query_repro_curl("https://target", "q", "$(rm -rf /); `whoami`");
         assert!(curl.contains("'q=$(rm -rf /); `whoami`'"));
     }
 
@@ -1015,6 +1073,145 @@ mod tests {
         assert!(
             curl.contains("'q=a&b=c'"),
             "ampersand split arg or was re-encoded: {curl}"
+        );
+    }
+
+    // ── normalize_target_url ──────────────────────────────────────────
+
+    #[test]
+    fn normalize_bare_hostname_prepends_https() {
+        assert_eq!(normalize_target_url("example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn normalize_http_scheme_passes_through() {
+        assert_eq!(
+            normalize_target_url("http://example.com"),
+            "http://example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_https_scheme_passes_through() {
+        assert_eq!(
+            normalize_target_url("https://example.com"),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_ws_scheme_passes_through() {
+        assert_eq!(
+            normalize_target_url("ws://example.com"),
+            "ws://example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_wss_scheme_passes_through() {
+        assert_eq!(
+            normalize_target_url("wss://example.com"),
+            "wss://example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_whitespace_stripped() {
+        assert_eq!(
+            normalize_target_url("  example.com  "),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_host_with_port_prepends_https() {
+        assert_eq!(
+            normalize_target_url("example.com:8080"),
+            "https://example.com:8080"
+        );
+    }
+
+    #[test]
+    fn normalize_host_with_path_prepends_https() {
+        assert_eq!(
+            normalize_target_url("example.com/path"),
+            "https://example.com/path"
+        );
+    }
+
+    #[test]
+    fn normalize_ipv4_literal_prepends_https() {
+        assert_eq!(
+            normalize_target_url("192.168.1.1"),
+            "https://192.168.1.1"
+        );
+    }
+
+    #[test]
+    fn normalize_ipv4_with_port_and_path() {
+        assert_eq!(
+            normalize_target_url("127.0.0.1:8080/admin"),
+            "https://127.0.0.1:8080/admin"
+        );
+    }
+
+    #[test]
+    fn normalize_localhost_prepends_https() {
+        assert_eq!(
+            normalize_target_url("localhost"),
+            "https://localhost"
+        );
+    }
+
+    #[test]
+    fn normalize_localhost_with_port() {
+        assert_eq!(
+            normalize_target_url("localhost:3000"),
+            "https://localhost:3000"
+        );
+    }
+
+    #[test]
+    fn normalize_protocol_relative_promotes_to_https() {
+        assert_eq!(
+            normalize_target_url("//example.com"),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_scheme_typo_passes_through_for_caller_error() {
+        // A misspelled scheme like "htps://example.com" still contains "://"
+        // so it passes through unchanged — reqwest will surface the parse error.
+        let out = normalize_target_url("htps://example.com");
+        assert_eq!(out, "htps://example.com");
+    }
+
+    #[test]
+    fn normalize_empty_input_prepends_https() {
+        // Empty string → "https://" — reqwest will error, which is correct.
+        assert_eq!(normalize_target_url(""), "https://");
+    }
+
+    #[test]
+    fn normalize_whitespace_only_becomes_https_empty() {
+        assert_eq!(normalize_target_url("   "), "https://");
+    }
+
+    #[test]
+    fn normalize_host_with_query_string() {
+        assert_eq!(
+            normalize_target_url("example.com/search?q=test"),
+            "https://example.com/search?q=test"
+        );
+    }
+
+    #[test]
+    fn normalize_ftp_scheme_passes_through() {
+        // Any declared scheme passes through — caller decides if it's valid.
+        assert_eq!(
+            normalize_target_url("ftp://files.example.com"),
+            "ftp://files.example.com"
         );
     }
 }

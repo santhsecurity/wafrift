@@ -108,8 +108,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Plain attacker.example reflection ──
     out.push(CorsProbe {
         kind: "origin-reflects-arbitrary",
-        description:
-            "Send Origin: https://attacker.example. If the server reflects \
+        description: "Send Origin: https://attacker.example. If the server reflects \
              it into Access-Control-Allow-Origin AND sets Allow-Credentials: \
              true, attacker can read response from a malicious page",
         method: "GET",
@@ -120,8 +119,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Origin: null ──
     out.push(CorsProbe {
         kind: "origin-null-accepted",
-        description:
-            "Send Origin: null — file://, sandboxed iframes, redirected \
+        description: "Send Origin: null — file://, sandboxed iframes, redirected \
              requests send this; servers that allowlist `null` open CORS \
              to attacker sandboxed iframes",
         method: "GET",
@@ -132,8 +130,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Subdomain suffix confusion ──
     out.push(CorsProbe {
         kind: "subdomain-suffix-confusion",
-        description:
-            "Origin: https://{target}.attacker.example — naive substring \
+        description: "Origin: https://{target}.attacker.example — naive substring \
              match (.endsWith(target_host)) lets the attacker's subdomain \
              through",
         method: "GET",
@@ -144,8 +141,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Subdomain prefix confusion ──
     out.push(CorsProbe {
         kind: "subdomain-prefix-confusion",
-        description:
-            "Origin: https://attacker.{target} — naive substring match \
+        description: "Origin: https://attacker.{target} — naive substring match \
              (.startsWith(target_host)) lets the attacker through",
         method: "GET",
         origin: Some(format!("https://attacker.{target_host}")),
@@ -155,8 +151,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Trailing-dot subdomain ──
     out.push(CorsProbe {
         kind: "trailing-dot-host",
-        description:
-            "Origin: https://{target}. (trailing dot) — DNS-equivalent but \
+        description: "Origin: https://{target}. (trailing dot) — DNS-equivalent but \
              string-different; some allowlists miss",
         method: "GET",
         origin: Some(format!("https://{target_host}.")),
@@ -166,8 +161,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── HTTP downgrade ──
     out.push(CorsProbe {
         kind: "http-downgrade-origin",
-        description:
-            "Origin: http://{target} (downgrade from HTTPS) — servers that \
+        description: "Origin: http://{target} (downgrade from HTTPS) — servers that \
              allowlist by host (ignoring scheme) leak cookies over plaintext",
         method: "GET",
         origin: Some(format!("http://{target_host}")),
@@ -177,8 +171,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Subdomain via @ trick ──
     out.push(CorsProbe {
         kind: "userinfo-injection",
-        description:
-            "Origin: https://attacker.example@{target} — URL parsers vary; \
+        description: "Origin: https://attacker.example@{target} — URL parsers vary; \
              some interpret the userinfo `attacker.example@` and treat host \
              as {target} (allowed), but the actual loading origin is \
              attacker.example",
@@ -190,8 +183,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Wildcard match check ──
     out.push(CorsProbe {
         kind: "wildcard-origin-reflection",
-        description:
-            "Origin: * — server should NOT reflect this verbatim; if it \
+        description: "Origin: * — server should NOT reflect this verbatim; if it \
              does AND credentials are allowed, browsers will reject — but \
              some servers do anyway, breaking SOP for non-credentialed \
              attackers",
@@ -203,8 +195,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Preflight: arbitrary header allowed? ──
     out.push(CorsProbe {
         kind: "preflight-arbitrary-header",
-        description:
-            "OPTIONS preflight asking permission for X-Wafrift-Probe header. \
+        description: "OPTIONS preflight asking permission for X-Wafrift-Probe header. \
              Server that allows ANY requested header (no whitelist) is \
              over-permissive",
         method: "OPTIONS",
@@ -221,23 +212,20 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Preflight: DELETE method ──
     out.push(CorsProbe {
         kind: "preflight-delete-method",
-        description:
-            "OPTIONS preflight asking permission for DELETE method. \
+        description: "OPTIONS preflight asking permission for DELETE method. \
              Server that allows DELETE from an attacker origin is a \
              destructive CORS hole",
         method: "OPTIONS",
         origin: Some("https://attacker.example".into()),
-        extra_headers: vec![(
-            "Access-Control-Request-Method".into(),
-            "DELETE".into(),
-        )],
+        extra_headers: vec![("Access-Control-Request-Method".into(), "DELETE".into())],
     });
 
     out
 }
 
-pub async fn run_cors_diff(args: CorsDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+pub async fn run_cors_diff(mut args: CorsDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -271,7 +259,8 @@ pub async fn run_cors_diff(args: CorsDiffArgs) -> ExitCode {
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
-            let result = fire_cors(&http, v.method, &url, v.origin.as_deref(), &v.extra_headers).await;
+            let result =
+                fire_cors(&http, v.method, &url, v.origin.as_deref(), &v.extra_headers).await;
             counter.fetch_add(1, Ordering::SeqCst);
             (v, result)
         }));
@@ -364,14 +353,23 @@ fn classify_cors(
     let creds_true = matches!(allow_credentials, Some(c) if c.eq_ignore_ascii_case("true"));
     if allow == sent {
         if creds_true {
-            ("high", "ACAO reflects Origin AND ACAC:true — credentials leak")
+            (
+                "high",
+                "ACAO reflects Origin AND ACAC:true — credentials leak",
+            )
         } else {
-            ("medium", "ACAO reflects Origin — non-credentialed data leak")
+            (
+                "medium",
+                "ACAO reflects Origin — non-credentialed data leak",
+            )
         }
     } else if allow == "*" && creds_true {
         // Browsers reject this combo, but the server emitting it is
         // misconfigured and informative.
-        ("medium", "ACAO:* AND ACAC:true — RFC violation (informative)")
+        (
+            "medium",
+            "ACAO:* AND ACAC:true — RFC violation (informative)",
+        )
     } else {
         ("none", "ACAO did not reflect attacker origin — safe")
     }
@@ -401,14 +399,7 @@ async fn fire_cors(
     Ok((status, headers))
 }
 
-fn build_http_client(args: &CorsDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(CorsDiffArgs);
 
 fn render_curl(
     method: &str,
@@ -437,15 +428,9 @@ fn render_curl(
 }
 
 fn extract_host(url: &str) -> Option<String> {
-    let after_scheme = url.split_once("://").map(|x| x.1).unwrap_or(url);
-    let host_port = after_scheme.split(['/', '?', '#']).next()?;
-    let host = host_port.rsplit_once('@').map_or(host_port, |(_, h)| h);
-    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
-    if host.is_empty() {
-        None
-    } else {
-        Some(host.to_string())
-    }
+    // Shared canonical impl in wafrift_transport — handles IPv6
+    // brackets + userinfo + lowercase + port strip + scheme-optional.
+    wafrift_transport::host_from_url(url)
 }
 
 fn emit_output(args: &CorsDiffArgs, results: &[CorsDiffResult], errors: u32) {
@@ -463,10 +448,7 @@ fn emit_output(args: &CorsDiffArgs, results: &[CorsDiffResult], errors: u32) {
             },
             "results": results,
         });
-        match serde_json::to_string_pretty(&out) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("JSON error: {e}"),
-        }
+        crate::parser_diff_common::print_pretty_json(&out);
         return;
     }
 
@@ -501,11 +483,7 @@ fn emit_output(args: &CorsDiffArgs, results: &[CorsDiffResult], errors: u32) {
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
         println!("  [{badge}] {} — {}", r.kind.bold(), r.description);
-        println!(
-            "    {} {}",
-            "↘".bright_black(),
-            r.finding.bright_white()
-        );
+        println!("    {} {}", "↘".bright_black(), r.finding.bright_white());
         if let Some(o) = &r.allow_origin {
             println!("    Access-Control-Allow-Origin: {o}");
         }
@@ -524,9 +502,18 @@ mod tests {
 
     #[test]
     fn extract_host_strips_scheme_path_userinfo_port() {
-        assert_eq!(extract_host("https://api.example.com/path"), Some("api.example.com".into()));
-        assert_eq!(extract_host("http://user:pw@api.example.com:8080/p"), Some("api.example.com".into()));
-        assert_eq!(extract_host("api.example.com/p"), Some("api.example.com".into()));
+        assert_eq!(
+            extract_host("https://api.example.com/path"),
+            Some("api.example.com".into())
+        );
+        assert_eq!(
+            extract_host("http://user:pw@api.example.com:8080/p"),
+            Some("api.example.com".into())
+        );
+        assert_eq!(
+            extract_host("api.example.com/p"),
+            Some("api.example.com".into())
+        );
     }
 
     #[test]
@@ -558,11 +545,7 @@ mod tests {
 
     #[test]
     fn classify_cors_medium_on_wildcard_plus_credentials() {
-        let (sev, _) = classify_cors(
-            Some("https://attacker.example"),
-            Some("*"),
-            Some("true"),
-        );
+        let (sev, _) = classify_cors(Some("https://attacker.example"), Some("*"), Some("true"));
         assert_eq!(sev, "medium");
     }
 
@@ -622,12 +605,24 @@ mod tests {
             .iter()
             .find(|p| p.kind == "subdomain-suffix-confusion")
             .expect("suffix probe");
-        assert!(suffix.origin.as_deref().unwrap().contains("api.example.com.attacker"));
+        assert!(
+            suffix
+                .origin
+                .as_deref()
+                .unwrap()
+                .contains("api.example.com.attacker")
+        );
         let prefix = v
             .iter()
             .find(|p| p.kind == "subdomain-prefix-confusion")
             .expect("prefix probe");
-        assert!(prefix.origin.as_deref().unwrap().contains("attacker.api.example.com"));
+        assert!(
+            prefix
+                .origin
+                .as_deref()
+                .unwrap()
+                .contains("attacker.api.example.com")
+        );
     }
 
     #[test]
@@ -645,7 +640,11 @@ mod tests {
         let v = generate_cors_variants("x");
         for p in &v {
             if p.kind.starts_with("preflight") {
-                assert_eq!(p.method, "OPTIONS", "preflight probe {} must use OPTIONS", p.kind);
+                assert_eq!(
+                    p.method, "OPTIONS",
+                    "preflight probe {} must use OPTIONS",
+                    p.kind
+                );
                 // Must include Access-Control-Request-* headers.
                 let has_acrm = p
                     .extra_headers
@@ -663,7 +662,13 @@ mod tests {
             .iter()
             .find(|p| p.kind == "userinfo-injection")
             .expect("userinfo probe");
-        assert!(probe.origin.as_deref().unwrap().contains("attacker.example@victim.com"));
+        assert!(
+            probe
+                .origin
+                .as_deref()
+                .unwrap()
+                .contains("attacker.example@victim.com")
+        );
     }
 
     // ── render_curl ───────────────────────────────────────────
@@ -677,9 +682,12 @@ mod tests {
 
     #[test]
     fn render_curl_emits_options_for_preflight() {
-        let out = render_curl("OPTIONS", "http://x/", None, &[
-            ("Access-Control-Request-Method".into(), "DELETE".into()),
-        ]);
+        let out = render_curl(
+            "OPTIONS",
+            "http://x/",
+            None,
+            &[("Access-Control-Request-Method".into(), "DELETE".into())],
+        );
         assert!(out.contains("-X OPTIONS"), "got: {out}");
         assert!(
             out.contains("'Access-Control-Request-Method: DELETE'"),
@@ -706,7 +714,13 @@ mod tests {
                     let origin_line = req
                         .lines()
                         .find(|l| l.to_ascii_lowercase().starts_with("origin:"))
-                        .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string())
+                        .map(|l| {
+                            l.split_once(':')
+                                .map(|x| x.1)
+                                .unwrap_or("")
+                                .trim()
+                                .to_string()
+                        })
                         .unwrap_or_default();
                     let body = "{}";
                     let extra_cors = if origin_line.is_empty() {

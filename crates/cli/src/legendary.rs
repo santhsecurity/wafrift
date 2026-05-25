@@ -270,7 +270,8 @@ struct BypassVariantSummary {
 /// surfaced in the report itself, not propagated as an exit code,
 /// because the demo's value is showing **what wafrift saw**, including
 /// "we tried this and the target threw a 503."
-pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
+pub fn run_legendary(mut args: LegendaryArgs) -> ExitCode {
+    args.target = crate::helpers::normalize_target_url(&args.target);
     let start = Instant::now();
     let started_at = unix_now_iso8601();
     let mut report = LegendaryReport {
@@ -281,23 +282,24 @@ pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
 
     // Phase 1: detect — baseline GET, fingerprint the WAF.
     eprintln!("{} GET {}", "[1/4] detect:".bright_black(), args.target);
-    let (status, headers, body) = match fetch_for_detect(&args.target, args.timeout_secs, args.insecure) {
-        Ok(v) => v,
-        Err(e) => {
-            report.detect.error = Some(e.clone());
-            eprintln!("       {} {}", "error:".red(), e);
-            // Mark downstream phases as not-reached so the renderer
-            // surfaces explicit "Not reached — detect phase failed"
-            // notes instead of emitting bare section headers with
-            // no body. Pre-fix the markdown was a parade of empty
-            // section 2/3/4 headers that read like rendering bugs.
-            let why = "detect phase failed — phases 2–4 not reached".to_string();
-            report.bypass_probe.skipped_reason = Some(why.clone());
-            report.scan.skipped_reason = Some(why);
-            report.elapsed_ms = start.elapsed().as_millis();
-            return emit(report, args).unwrap_or(ExitCode::from(1));
-        }
-    };
+    let (status, headers, body) =
+        match fetch_for_detect(&args.target, args.timeout_secs, args.insecure) {
+            Ok(v) => v,
+            Err(e) => {
+                report.detect.error = Some(e.clone());
+                eprintln!("       {} {}", "error:".red(), e);
+                // Mark downstream phases as not-reached so the renderer
+                // surfaces explicit "Not reached — detect phase failed"
+                // notes instead of emitting bare section headers with
+                // no body. Pre-fix the markdown was a parade of empty
+                // section 2/3/4 headers that read like rendering bugs.
+                let why = "detect phase failed — phases 2–4 not reached".to_string();
+                report.bypass_probe.skipped_reason = Some(why.clone());
+                report.scan.skipped_reason = Some(why);
+                report.elapsed_ms = start.elapsed().as_millis();
+                return emit(report, args).unwrap_or(ExitCode::from(1));
+            }
+        };
     report.detect.ran = true;
     report.detect.baseline_status = Some(status);
     report.detect.baseline_body_len = Some(body.len());
@@ -340,10 +342,7 @@ pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
                 );
             }
             Err(e) => {
-                eprintln!(
-                    "       {} differential probe error: {e}",
-                    "warn:".yellow()
-                );
+                eprintln!("       {} differential probe error: {e}", "warn:".yellow());
             }
         }
     } else {
@@ -359,7 +358,10 @@ pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
     }
 
     // Phase 2: fingerprint — surface infra markers (CDN, server, etc.)
-    eprintln!("{} reading infra markers", "[2/4] fingerprint:".bright_black());
+    eprintln!(
+        "{} reading infra markers",
+        "[2/4] fingerprint:".bright_black()
+    );
     report.fingerprint.ran = true;
     report.fingerprint.markers = infra_markers(&headers);
     if report.fingerprint.markers.is_empty() {
@@ -399,7 +401,7 @@ pub fn run_legendary(args: LegendaryArgs) -> ExitCode {
         use std::time::{SystemTime, UNIX_EPOCH};
         let bp_nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
+            .map(|d| d.subsec_nanos())
             .unwrap_or(0);
         let bp_tmp = std::env::temp_dir().join(format!(
             "wafrift-legendary-bp-{}-{bp_nanos}.json",
@@ -593,7 +595,7 @@ fn run_inline_scan(a: InlineScanArgs<'_>) -> Result<serde_json::Value, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
+        .map(|d| d.subsec_nanos())
         .unwrap_or(0);
     let tmp = std::env::temp_dir().join(format!(
         "wafrift-legendary-scan-{}-{nanos}.json",
@@ -662,14 +664,8 @@ fn run_inline_scan(a: InlineScanArgs<'_>) -> Result<serde_json::Value, String> {
 /// The unwrap mirrors `report::ingest_scan_json` so a single change
 /// to the scan shape doesn't have to be propagated to two readers.
 fn apply_scan_json(phase: &mut PhaseScan, root: &serde_json::Value) {
-    let v = root
-        .get("scan")
-        .filter(|s| s.is_object())
-        .unwrap_or(root);
-    phase.waf_name = v
-        .get("waf")
-        .and_then(|x| x.as_str())
-        .map(str::to_string);
+    let v = root.get("scan").filter(|s| s.is_object()).unwrap_or(root);
+    phase.waf_name = v.get("waf").and_then(|x| x.as_str()).map(str::to_string);
     phase.total_variants = v.get("total_variants").and_then(|x| x.as_u64());
     phase.explore_variants = v.get("explore_variants").and_then(|x| x.as_u64());
     phase.bypassed = v.get("bypassed").and_then(|x| x.as_u64());
@@ -702,9 +698,7 @@ fn apply_bypass_probe_json(phase: &mut PhaseBypassProbe, root: &serde_json::Valu
             }
             if let Some(divs) = r.get("divergences").and_then(|x| x.as_array()) {
                 for d in divs {
-                    if let Ok(summary) =
-                        serde_json::from_value::<DivergenceSummary>(d.clone())
-                    {
+                    if let Ok(summary) = serde_json::from_value::<DivergenceSummary>(d.clone()) {
                         all_divergences.push(summary);
                     }
                 }
@@ -774,15 +768,14 @@ fn render_verdict_paragraph(r: &LegendaryReport) -> String {
             .iter()
             .map(|d| format!("{} ({:.0}%)", d.name, d.confidence * 100.0))
             .collect();
-        let _ = write!(
-            out,
-            "**WAF detection:** {}\n\n",
-            names.join(", ")
-        );
+        let _ = write!(out, "**WAF detection:** {}\n\n", names.join(", "));
     } else if r.detect.error.is_some() {
         let _ = write!(out, "**WAF detection:** _phase errored_\n\n");
     } else if r.detect.ran {
-        let _ = write!(out, "**WAF detection:** no WAF identified (origin appears direct)\n\n");
+        let _ = write!(
+            out,
+            "**WAF detection:** no WAF identified (origin appears direct)\n\n"
+        );
     }
 
     // Bypass-probe axis.
@@ -821,7 +814,10 @@ fn render_verdict_paragraph(r: &LegendaryReport) -> String {
 
     // Scan axis.
     if r.scan.skipped_reason.is_some() {
-        let _ = write!(out, "**Payload mutation scan:** skipped (pass `--payload` to run)\n\n");
+        let _ = write!(
+            out,
+            "**Payload mutation scan:** skipped (pass `--payload` to run)\n\n"
+        );
     } else if r.scan.error.is_some() {
         let _ = write!(out, "**Payload mutation scan:** _phase errored_\n\n");
     } else if r.scan.ran {
@@ -996,8 +992,7 @@ fn render_markdown(r: &LegendaryReport) -> String {
             // Group HIGH severity first, then MEDIUM, then LOW —
             // pentest deliverable readers want the alarming findings
             // up top.
-            let mut ranked: Vec<&DivergenceSummary> =
-                r.bypass_probe.divergences.iter().collect();
+            let mut ranked: Vec<&DivergenceSummary> = r.bypass_probe.divergences.iter().collect();
             ranked.sort_by_key(|d| match d.severity.to_uppercase().as_str() {
                 "HIGH" => 0,
                 "MEDIUM" => 1,
@@ -1076,7 +1071,9 @@ fn render_markdown(r: &LegendaryReport) -> String {
             // saying "Variants fired" but showing the post-phase
             // total, contradicting `--scan-variants N`.
             if let Some(e) = r.scan.explore_variants {
-                out.push_str(&format!("| Explore pool (variants tried initially) | {e} |\n"));
+                out.push_str(&format!(
+                    "| Explore pool (variants tried initially) | {e} |\n"
+                ));
             }
             if let Some(t) = r.scan.total_variants {
                 out.push_str(&format!(
@@ -1207,7 +1204,11 @@ fn render_markdown(r: &LegendaryReport) -> String {
             .scan
             .payload
             .as_ref()
-            .map(|p| format!(" --payload {:?} --param {}", p, r.scan.param.as_deref().unwrap_or("q")))
+            .map(|p| format!(
+                " --payload {:?} --param {}",
+                p,
+                r.scan.param.as_deref().unwrap_or("q")
+            ))
             .unwrap_or_default(),
         paths_file = "", // paths_file isn't echoed; user has the file
     ));
@@ -1454,7 +1455,9 @@ mod tests {
             confidence: 0.92,
             indicators: vec!["cf-ray".into()],
         });
-        r.fingerprint.markers.push(("server".into(), "cloudflare".into()));
+        r.fingerprint
+            .markers
+            .push(("server".into(), "cloudflare".into()));
         r.scan.skipped_reason = Some("no --payload given".into());
         let json = serde_json::to_string(&r).expect("serialise");
         // Parse it back as a Value (struct can't be deserialised
@@ -1710,9 +1713,7 @@ mod tests {
         // The renderer must NOT also emit a synthesised
         // curl -G --data-urlencode line for this variant — would be
         // duplicated noise.
-        let repro_section_start = md
-            .find("**Reproduce:**")
-            .expect("repro header missing");
+        let repro_section_start = md.find("**Reproduce:**").expect("repro header missing");
         let after = &md[repro_section_start..];
         let next_section = after.find("###").unwrap_or(after.len());
         let repro_block = &after[..next_section];
@@ -1770,7 +1771,10 @@ mod tests {
         let md = render_markdown(&r);
         // First 25 must render.
         for i in 0..25 {
-            assert!(md.contains(&format!("Variant #{i} ")), "variant {i} not rendered (should be in top 25)");
+            assert!(
+                md.contains(&format!("Variant #{i} ")),
+                "variant {i} not rendered (should be in top 25)"
+            );
         }
         // The 26th-and-beyond must NOT render.
         for i in 25..50 {
@@ -1823,7 +1827,10 @@ mod tests {
             indicators: vec![],
         });
         let v = render_verdict_paragraph(&r);
-        assert!(v.contains("Cloudflare (92%)"), "verdict missing detected WAF:\n{v}");
+        assert!(
+            v.contains("Cloudflare (92%)"),
+            "verdict missing detected WAF:\n{v}"
+        );
     }
 
     #[test]
@@ -1833,8 +1840,7 @@ mod tests {
             ..Default::default()
         };
         r.detect.ran = true;
-        r.detect.differential =
-            Some("status flipped 200 → 403; server header changed".into());
+        r.detect.differential = Some("status flipped 200 → 403; server header changed".into());
         let v = render_verdict_paragraph(&r);
         assert!(
             v.contains("present (differential-probe verdict"),
@@ -2100,14 +2106,8 @@ mod tests {
         let high_pos = md.find("high-find").expect("HIGH find missing");
         let mid_pos = md.find("mid-find").expect("MEDIUM find missing");
         let low_pos = md.find("low-find").expect("LOW find missing");
-        assert!(
-            high_pos < mid_pos,
-            "HIGH must render before MEDIUM:\n{md}"
-        );
-        assert!(
-            mid_pos < low_pos,
-            "MEDIUM must render before LOW:\n{md}"
-        );
+        assert!(high_pos < mid_pos, "HIGH must render before MEDIUM:\n{md}");
+        assert!(mid_pos < low_pos, "MEDIUM must render before LOW:\n{md}");
         // The probe summary surfaces both counts.
         assert!(md.contains("| 191 |"), "probes_fired count missing:\n{md}");
         assert!(md.contains("**3**"), "divergences count missing:\n{md}");
@@ -2239,7 +2239,8 @@ mod tests {
         r.detect.error = Some("connection refused".into());
         // fingerprint.ran intentionally false.
         let md = render_markdown(&r);
-        let s2_pos = md.find("## 2. Infrastructure fingerprint")
+        let s2_pos = md
+            .find("## 2. Infrastructure fingerprint")
             .expect("section 2 header missing");
         let after = &md[s2_pos..];
         let next_section = after.find("\n## ").unwrap_or(after.len());
@@ -2368,10 +2369,7 @@ mod tests {
             ..Default::default()
         };
         let rendered = render_markdown(&r);
-        let path = temp_dir().join(format!(
-            "wafrift-legendary-out-{}.md",
-            std::process::id()
-        ));
+        let path = temp_dir().join(format!("wafrift-legendary-out-{}.md", std::process::id()));
         std::fs::write(&path, &rendered).expect("write");
         let read_back = std::fs::read_to_string(&path).expect("read");
         assert_eq!(read_back, rendered);

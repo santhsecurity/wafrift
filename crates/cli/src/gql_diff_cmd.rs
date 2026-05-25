@@ -202,8 +202,9 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
     ]
 }
 
-pub async fn run_gql_diff(args: GqlDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+pub async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -219,17 +220,16 @@ pub async fn run_gql_diff(args: GqlDiffArgs) -> ExitCode {
 
     // Baseline: benign __typename query.
     let baseline_body = r#"{"query":"{ __typename }"}"#;
-    let baseline =
-        match fire_gql(&http, &args.url, "application/json", baseline_body).await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!(
-                    "  {} baseline probe failed: {e}",
-                    "✗ Transport error:".red().bold()
-                );
-                return ExitCode::from(1);
-            }
-        };
+    let baseline = match fire_gql(&http, &args.url, "application/json", baseline_body).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "  {} baseline probe failed: {e}",
+                "✗ Transport error:".red().bold()
+            );
+            return ExitCode::from(1);
+        }
+    };
     let (baseline_status, baseline_body_len) = baseline;
     if !args.quiet && args.format == "text" {
         eprintln!(
@@ -327,14 +327,7 @@ async fn fire_gql(
     Ok((status, body.len()))
 }
 
-fn build_http_client(args: &GqlDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(GqlDiffArgs);
 
 fn render_curl(url: &str, content_type: &str, body: &str) -> String {
     format!(
@@ -368,10 +361,7 @@ fn emit_output(
             },
             "results": results,
         });
-        match serde_json::to_string_pretty(&out) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("JSON error: {e}"),
-        }
+        crate::parser_diff_common::print_pretty_json(&out);
         return;
     }
 
@@ -425,10 +415,7 @@ mod tests {
 
     #[test]
     fn generate_gql_variants_includes_introspection_family() {
-        let kinds: Vec<&str> = generate_gql_variants()
-            .iter()
-            .map(|p| p.kind)
-            .collect();
+        let kinds: Vec<&str> = generate_gql_variants().iter().map(|p| p.kind).collect();
         assert!(
             kinds.iter().any(|k| k.contains("introspection")),
             "must include introspection probes"
@@ -438,7 +425,10 @@ mod tests {
     #[test]
     fn generate_gql_variants_includes_alias_bombing() {
         let v = generate_gql_variants();
-        let alias = v.iter().find(|p| p.kind == "alias-bombing").expect("alias probe");
+        let alias = v
+            .iter()
+            .find(|p| p.kind == "alias-bombing")
+            .expect("alias probe");
         assert!(alias.body.contains("__typename"));
         // Multiple aliases in the body.
         assert!(alias.body.matches(":__typename").count() >= 3);
@@ -452,7 +442,11 @@ mod tests {
             .find(|p| p.kind == "batched-operations")
             .expect("batched probe");
         // Body must start with `[` — array of ops.
-        assert!(batched.body.trim_start().starts_with('['), "got: {}", batched.body);
+        assert!(
+            batched.body.trim_start().starts_with('['),
+            "got: {}",
+            batched.body
+        );
     }
 
     #[test]
@@ -476,7 +470,10 @@ mod tests {
     fn render_curl_emits_post_with_content_type_and_body() {
         let out = render_curl("http://x/graphql", "application/json", "{\"q\":1}");
         assert!(out.starts_with("curl -i -X POST "), "got: {out}");
-        assert!(out.contains("'Content-Type: application/json'"), "got: {out}");
+        assert!(
+            out.contains("'Content-Type: application/json'"),
+            "got: {out}"
+        );
         assert!(out.contains("--data '{\"q\":1}'"), "got: {out}");
     }
 

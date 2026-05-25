@@ -130,33 +130,26 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
     // policy (intentionally `none()` so detect sees redirects as
     // signals, not as transparent next-hops to follow).
     let ua = crate::config::shared_user_agent();
-    let client = wafrift_transport::base_client_builder(
-        timeout_secs.clamp(1, 120),
-        insecure,
-        Some(&ua),
-    )
-    .redirect(reqwest::redirect::Policy::none())
-    .build()
-    .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    let client =
+        wafrift_transport::base_client_builder(timeout_secs.clamp(1, 120), insecure, Some(&ua))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("failed to build HTTP client: {e}"))?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("failed to start tokio runtime: {e}"))?;
     rt.block_on(async move {
-        let resp = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| {
-                // reqwest::Error's Display often shows only "error
-                // sending request" without the underlying DNS / TCP cause.
-                // walk_reqwest_error (helpers.rs) surfaces the full chain
-                // (NXDOMAIN, connection refused, TLS, etc.).
-                format!(
-                    "request to {url} failed: {}",
-                    crate::helpers::walk_reqwest_error(&e)
-                )
-            })?;
+        let resp = client.get(url).send().await.map_err(|e| {
+            // reqwest::Error's Display often shows only "error
+            // sending request" without the underlying DNS / TCP cause.
+            // walk_reqwest_error (helpers.rs) surfaces the full chain
+            // (NXDOMAIN, connection refused, TLS, etc.).
+            format!(
+                "request to {url} failed: {}",
+                crate::helpers::walk_reqwest_error(&e)
+            )
+        })?;
         let status = resp.status().as_u16();
         let headers: Vec<(String, String)> = resp
             .headers()
@@ -189,20 +182,15 @@ pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> 
 }
 
 /// Extract the bare host (no scheme, port, path, fragment, or query)
-/// from a URL string.  Used by `fetch_cname_chain` — we don't pull
-/// in the `url` crate here because the parsing is trivial and the
-/// dep would propagate through every CLI consumer.
-pub(crate) fn host_from_url(url: &str) -> Option<&str> {
-    let after_scheme = url.split("://").nth(1).unwrap_or(url);
-    let host_with_port = after_scheme.split(['/', '?', '#']).next()?;
-    // IPv6 literal: `[::1]:8080` — keep the bracketed form.
-    let host = if let Some(stripped) = host_with_port.strip_prefix('[') {
-        let end = stripped.find(']')?;
-        &stripped[..end]
-    } else {
-        host_with_port.split(':').next()?
-    };
-    if host.is_empty() { None } else { Some(host) }
+/// from a URL string.  Used by `fetch_cname_chain`.
+///
+/// Thin wrapper around [`wafrift_transport::host_from_url`] — the
+/// shared canonical impl (4 sites collapsed). Returns an owned String
+/// because the upstream helper lowercases the host, so a borrowed
+/// `&str` into the input would carry the wrong case for callers that
+/// compare against DNS names.
+pub(crate) fn host_from_url(url: &str) -> Option<String> {
+    wafrift_transport::host_from_url(url)
 }
 
 /// Resolve a URL's CNAME chain to a `DnsProbe`.  Synchronous wrapper
@@ -228,7 +216,7 @@ pub(crate) fn fetch_cname_chain(url: &str) -> Option<DnsProbe> {
         .enable_all()
         .build()
         .ok()?;
-    match rt.block_on(wafrift_detect::probe_cname_chain(host)) {
+    match rt.block_on(wafrift_detect::probe_cname_chain(&host)) {
         Ok(probe) => Some(probe),
         Err(e) => {
             // Tracing-subscriber is initialised in main() with
@@ -350,6 +338,31 @@ pub fn classify_differential(
     }
 }
 
+/// Inject a canonical SQLi probe into the `q` query parameter of a
+/// URL, preserving fragment placement. Naive `?q=...` concatenation
+/// breaks for fragmented URLs (`https://t/p#sec`) because the `?`
+/// would land INSIDE the fragment, and the query never reaches the
+/// server. Splits the fragment first, mutates the URL portion, then
+/// re-attaches the fragment. Pure / testable.
+#[must_use]
+pub fn inject_sqli_probe(url: &str) -> String {
+    const PROBE: &str = "q=%27+OR+1%3D1--";
+    // Split off the fragment (only the first `#` counts per RFC 3986).
+    let (base, frag) = match url.split_once('#') {
+        Some((b, f)) => (b, Some(f)),
+        None => (url, None),
+    };
+    let mutated_base = if base.contains('?') {
+        format!("{base}&{PROBE}")
+    } else {
+        format!("{base}?{PROBE}")
+    };
+    match frag {
+        Some(f) => format!("{mutated_base}#{f}"),
+        None => mutated_base,
+    }
+}
+
 /// Fire two probes against `url`: a benign GET, then an attack
 /// GET with a canonical SQLi payload in the `q` parameter.
 /// Returns `Some(evidence)` when the responses differ enough to
@@ -360,11 +373,7 @@ pub(crate) fn fetch_differential(
     insecure: bool,
 ) -> Result<Option<DifferentialEvidence>, String> {
     let (b_status, b_headers, b_body) = fetch_for_detect(url, timeout_secs, insecure)?;
-    let attack_url = if url.contains('?') {
-        format!("{url}&q=%27+OR+1%3D1--")
-    } else {
-        format!("{url}?q=%27+OR+1%3D1--")
-    };
+    let attack_url = inject_sqli_probe(url);
     let (a_status, a_headers, a_body) = fetch_for_detect(&attack_url, timeout_secs, insecure)?;
     Ok(classify_differential(
         b_status,
@@ -430,7 +439,9 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // `--status`/`--headers`/`--body` triple. clap's
     // `required_unless_present`/`conflicts_with_all` guarantees exactly
     // one mode is selected.
-    let resolved_url = args.resolved_url().map(str::to_owned);
+    let resolved_url = args
+        .resolved_url()
+        .map(|u| crate::helpers::normalize_target_url(u));
     let (status, headers, body): (u16, Vec<(String, String)>, Vec<u8>) =
         if let Some(ref url) = resolved_url {
             match fetch_for_detect(url, args.timeout_secs, args.insecure) {
@@ -473,7 +484,9 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // (Apache stock 403, etc.).
     let differential_evidence: Option<DifferentialEvidence> =
         if args.differential && resolved_url.is_some() {
-            let url = resolved_url.as_deref().expect("differential gated on Some(url)");
+            let url = resolved_url
+                .as_deref()
+                .expect("differential gated on Some(url)");
             match fetch_differential(url, args.timeout_secs, args.insecure) {
                 Ok(ev) => ev,
                 Err(e) => {
@@ -543,9 +556,7 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
             // indicators tagged with `cname:` / `ptr:` / `asn:`.
             // Header-derived entries use `header N: V` form.
             detected_entry.indicators.iter().any(|ind| {
-                ind.starts_with("cname: ")
-                    || ind.starts_with("ptr: ")
-                    || ind.starts_with("asn: ")
+                ind.starts_with("cname: ") || ind.starts_with("ptr: ") || ind.starts_with("asn: ")
             })
         }
 
@@ -675,9 +686,10 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 .iter()
                 .map(|h| json!({ "query": h.query, "target": h.target }))
                 .collect();
-            let asn = p.asn.as_ref().map(|a| {
-                json!({ "number": a.number, "name": a.name })
-            });
+            let asn = p
+                .asn
+                .as_ref()
+                .map(|a| json!({ "number": a.number, "name": a.name }));
             json!({
                 "chain": hops,
                 "final_ip": p.first_a.map(|i| i.to_string()),
@@ -875,10 +887,7 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                 "  {}",
                 format!(
                     "(benign GET → HTTP {} from '{}'; attack GET → HTTP {} from '{}')",
-                    ev.baseline_status,
-                    ev.baseline_server,
-                    ev.attack_status,
-                    ev.attack_server
+                    ev.baseline_status, ev.baseline_server, ev.attack_status, ev.attack_server
                 )
                 .bright_black()
             );
@@ -890,6 +899,51 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // F127 regression: inject_sqli_probe must place the query before
+    // the fragment. Pre-fix code naively appended `?q=...` whenever the
+    // URL had no `?`, but `https://t/p#sec` has no `?` — the appended
+    // text landed INSIDE the fragment and the probe never reached the
+    // server. Silent false-negative for any fragmented URL.
+    #[test]
+    fn inject_sqli_probe_appends_query_when_no_query() {
+        let out = inject_sqli_probe("https://t/p");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--");
+    }
+
+    #[test]
+    fn inject_sqli_probe_uses_ampersand_when_query_present() {
+        let out = inject_sqli_probe("https://t/p?a=1");
+        assert_eq!(out, "https://t/p?a=1&q=%27+OR+1%3D1--");
+    }
+
+    #[test]
+    fn inject_sqli_probe_preserves_fragment_no_existing_query() {
+        // Pre-fix would produce "https://t/p#sec?q=..." — query inside
+        // the fragment, never reaches the server.
+        let out = inject_sqli_probe("https://t/p#sec");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--#sec");
+    }
+
+    #[test]
+    fn inject_sqli_probe_preserves_fragment_with_existing_query() {
+        let out = inject_sqli_probe("https://t/p?a=1#sec");
+        assert_eq!(out, "https://t/p?a=1&q=%27+OR+1%3D1--#sec");
+    }
+
+    #[test]
+    fn inject_sqli_probe_handles_url_with_multiple_hashes() {
+        // Only the FIRST `#` counts per RFC 3986; the rest are
+        // fragment characters.
+        let out = inject_sqli_probe("https://t/p#sec#more");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--#sec#more");
+    }
+
+    #[test]
+    fn inject_sqli_probe_handles_empty_fragment() {
+        let out = inject_sqli_probe("https://t/p#");
+        assert_eq!(out, "https://t/p?q=%27+OR+1%3D1--#");
+    }
 
     #[test]
     fn parse_http_status_accepts_canonical_codes() {
@@ -930,7 +984,10 @@ mod tests {
         assert!(m.iter().any(|(k, _)| k.eq_ignore_ascii_case("cf-ray")));
         // Content-Type is not in the infra allowlist (it's a general
         // response header, not a fingerprint anchor) — must be dropped.
-        assert!(!m.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")));
+        assert!(
+            !m.iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        );
     }
 
     // ── Live --url path against a mock server (added 2026-05-20).
@@ -1116,8 +1173,8 @@ mod tests {
     fn differential_status_flip_alone_is_evidence() {
         // The bare 200 → 403 case: server header may not even be
         // present, but the status flip is unambiguous WAF signal.
-        let ev = classify_differential(200, &[], 100, 403, &[], 200)
-            .expect("status flip must classify");
+        let ev =
+            classify_differential(200, &[], 100, 403, &[], 200).expect("status flip must classify");
         assert_eq!(ev.baseline_status, 200);
         assert_eq!(ev.attack_status, 403);
         assert!(
@@ -1132,17 +1189,12 @@ mod tests {
         // benign 200 from 'gunicorn/19.9.0', attack 403 from
         // 'Apache' (ModSec block page). The server-change reason
         // must surface.
-        let ev = classify_differential(
-            200,
-            &hdr("gunicorn/19.9.0"),
-            445,
-            403,
-            &hdr("Apache"),
-            239,
-        )
-        .expect("classify");
+        let ev = classify_differential(200, &hdr("gunicorn/19.9.0"), 445, 403, &hdr("Apache"), 239)
+            .expect("classify");
         assert!(
-            ev.reasons.iter().any(|r| r.contains("server header changed")),
+            ev.reasons
+                .iter()
+                .any(|r| r.contains("server header changed")),
             "expected server-change reason: {:?}",
             ev.reasons
         );
@@ -1181,10 +1233,7 @@ mod tests {
         // 10% difference (timestamps, request IDs, jitter in
         // body) must NOT classify. 50% is the threshold.
         let ev = classify_differential(200, &hdr("nginx"), 10_000, 200, &hdr("nginx"), 9_500);
-        assert!(
-            ev.is_none(),
-            "5% body change must not classify"
-        );
+        assert!(ev.is_none(), "5% body change must not classify");
     }
 
     #[test]
@@ -1192,15 +1241,8 @@ mod tests {
         // The strongest case: status flip + server change + body
         // swing all together. Every reason should appear in the
         // output so the operator sees the full picture.
-        let ev = classify_differential(
-            200,
-            &hdr("gunicorn"),
-            10_000,
-            403,
-            &hdr("Apache"),
-            200,
-        )
-        .expect("classify");
+        let ev = classify_differential(200, &hdr("gunicorn"), 10_000, 403, &hdr("Apache"), 200)
+            .expect("classify");
         let reasons: String = ev.reasons.join(" | ");
         assert!(reasons.contains("status flipped"));
         assert!(reasons.contains("server header changed"));
@@ -1213,8 +1255,7 @@ mod tests {
         // HEAD-style endpoint), attack returned a block page.
         // We can't compute pct_diff against zero, but the
         // non-zero attack body IS still signal.
-        let ev = classify_differential(200, &[], 0, 403, &[], 500)
-            .expect("classify");
+        let ev = classify_differential(200, &[], 0, 403, &[], 500).expect("classify");
         let reasons: String = ev.reasons.join(" | ");
         assert!(
             reasons.contains("attack response had 500 bytes") || reasons.contains("status flipped"),

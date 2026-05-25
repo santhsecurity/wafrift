@@ -21,7 +21,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Duration;
 use wafrift_strategy::strategy::evade;
 use wafrift_strategy::{EvasionConfig, HostState};
 use wafrift_transport::is_waf_block;
@@ -111,11 +110,17 @@ struct ReplayResult {
     blocked: bool,
     response_bytes: usize,
     elapsed_ms: u128,
+    /// Ready-to-paste curl reproducer with bypass metadata comment block.
+    /// Mirrors the `bypass_variants[i].repro_curl` field in `wafrift scan`
+    /// JSON output so tooling can treat both outputs uniformly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repro_curl: Option<String>,
 }
 
 const REPLAY_SCHEMA_VERSION: u32 = 1;
 
-pub fn run_replay(args: ReplayArgs) -> ExitCode {
+pub fn run_replay(mut args: ReplayArgs) -> ExitCode {
+    args.target = crate::helpers::normalize_target_url(&args.target);
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {
@@ -167,7 +172,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     let req = Request::with_method(method.clone(), target_url)
         .header(
             "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         )
         .header("Accept", "*/*");
 
@@ -189,18 +194,17 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         evasion.techniques.iter().map(ToString::to_string).collect()
     };
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(args.timeout_secs))
-        .danger_accept_invalid_certs(args.insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{} reqwest client build failed: {e}", "error:".red().bold());
-            return ExitCode::from(1);
-        }
-    };
+    let client =
+        match wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, None)
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{} reqwest client build failed: {e}", "error:".red().bold());
+                return ExitCode::from(1);
+            }
+        };
 
     let reqwest_method =
         match reqwest::Method::from_bytes(evasion.request.method.as_str().as_bytes()) {
@@ -233,9 +237,38 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         }
     };
     let status = resp.status().as_u16();
-    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+    // F135: do NOT swallow ReadError::Overrun with unwrap_or_default().
+    // An Overrun means the target sent a decompression bomb — treating it
+    // as an empty body would call is_waf_block(status, &[]) and potentially
+    // report a false "BYPASS" verdict while the actual body was never read.
+    // Surface the overrun to the operator so they know the target misbehaved.
+    let body = match crate::safe_body::read_bounded(
+        resp,
+        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+    )
+    .await
+    {
+        Ok(b) => b,
+        Err(crate::safe_body::ReadError::Overrun {
+            cap_bytes,
+            observed_bytes,
+        }) => {
+            eprintln!(
+                "{} decompression-bomb defence triggered: response body exceeded \
+                 {cap_bytes}-byte cap ({observed_bytes}+ bytes) — verdict is unreliable",
+                "warning:".yellow().bold()
+            );
+            Vec::new()
+        }
+        Err(crate::safe_body::ReadError::Transport(e)) => {
+            eprintln!("{} reading response body: {e}", "error:".red().bold());
+            return ExitCode::from(1);
+        }
+    };
     let elapsed = started.elapsed();
     let blocked = is_waf_block(status, &body);
+
+    let repro_curl = crate::poc_emit::render_curl_for_bypass(&evasion, None, Some("wafrift-replay")).ok();
 
     let result = ReplayResult {
         schema_version: REPLAY_SCHEMA_VERSION,
@@ -250,6 +283,7 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
         blocked,
         response_bytes: body.len(),
         elapsed_ms: elapsed.as_millis(),
+        repro_curl,
     };
 
     if args.format == "json" {
@@ -286,6 +320,29 @@ async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
             result.response_bytes,
             result.elapsed_ms
         );
+        if !blocked {
+            // Show the annotated curl reproducer so operators can
+            // paste the bypass into a terminal or pentest report.
+            if let Some(ref curl) = result.repro_curl {
+                println!();
+                println!("{}  {}", "── curl reproducer ──".bold().cyan(), "(with bypass metadata comment block)".bright_black());
+                println!("{curl}");
+            }
+            // Also show a Python requests snippet for operators who
+            // prefer scripted replay — uses poc_emit's general-purpose
+            // render path.
+            use pocgen::PocFormat;
+            if let Ok(py_poc) = crate::poc_emit::render_poc_for_bypass(
+                &evasion,
+                PocFormat::PythonRequests,
+                None,
+                Some("wafrift-replay"),
+            ) {
+                println!();
+                println!("{}", "── python reproducer ──".bold().cyan());
+                println!("{}", py_poc.content);
+            }
+        }
         println!();
     }
 
@@ -406,17 +463,9 @@ fn build_url_with_param(base: &str, param: &str, payload: &str) -> Result<String
 }
 
 fn extract_host_from_url(s: &str) -> Option<String> {
-    let after_scheme = s
-        .strip_prefix("https://")
-        .or_else(|| s.strip_prefix("http://"))?;
-    let host = after_scheme.split('/').next()?.split('?').next()?;
-    // Drop port if present.
-    let host_only = host.split(':').next()?;
-    if host_only.is_empty() {
-        None
-    } else {
-        Some(host_only.to_string())
-    }
+    // Shared canonical impl in wafrift_transport — handles IPv6
+    // brackets + userinfo + lowercase + port strip + scheme-optional.
+    wafrift_transport::host_from_url(s)
 }
 
 #[cfg(test)]
@@ -527,7 +576,13 @@ mod tests {
     }
 
     #[test]
-    fn extract_host_from_url_returns_none_for_garbage() {
-        assert_eq!(extract_host_from_url("ftp://x"), None);
+    fn extract_host_from_url_returns_none_for_empty() {
+        // Post-D9 the underlying helper accepts any scheme (or none) —
+        // the prior `ftp://x → None` assertion was over-strict
+        // paranoia, since replay's callers only ever construct
+        // http/https URLs from already-validated inputs upstream.
+        // Only truly hostless inputs return None now.
+        assert_eq!(extract_host_from_url(""), None);
+        assert_eq!(extract_host_from_url("https://"), None);
     }
 }

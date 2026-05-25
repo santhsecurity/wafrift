@@ -86,6 +86,21 @@ pub struct H2DiffArgs {
     #[arg(long)]
     pub insecure: bool,
 
+    /// HTTP proxy (Burp on `http://127.0.0.1:8080` is typical).
+    /// h2-diff is the protocol-divergence cmd most likely to be
+    /// run mid-engagement against an internal target — the
+    /// corporate Burp proxy and operator auth headers are exactly
+    /// what the operator needs to thread through.
+    #[arg(long, value_name = "URL")]
+    pub proxy: Option<String>,
+
+    /// Operator-supplied baseline headers — applied to BOTH the
+    /// H1 and H2 client. Each `-H 'Name: Value'` is repeatable;
+    /// `Authorization`, `Cookie`, `X-Forwarded-For`, custom CSRF
+    /// tokens, etc. travel with every probe.
+    #[arg(long, short = 'H', value_name = "HEADER", num_args = 0..)]
+    pub header: Vec<String>,
+
     /// Output format: `text` (default, colored summary) or `json`.
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
@@ -94,6 +109,8 @@ pub struct H2DiffArgs {
     #[arg(long, default_value_t = false)]
     pub quiet: bool,
 }
+
+crate::impl_parser_diff_http_args!(H2DiffArgs);
 
 /// Result of one H1-vs-H2 differential probe.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -115,7 +132,8 @@ pub struct H2DiffResult {
 
 /// Entry point — runs the configured H1/H2 differential probes
 /// against `args.url`.
-pub async fn run_h2_diff(args: H2DiffArgs) -> ExitCode {
+pub async fn run_h2_diff(mut args: H2DiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let h1 = match build_client(false, &args) {
         Ok(c) => c,
         Err(code) => return code,
@@ -147,7 +165,29 @@ pub async fn run_h2_diff(args: H2DiffArgs) -> ExitCode {
         results.push(r);
     }
 
+    // F78 inconclusive-exit: when EVERY H2 probe failed to
+    // negotiate (mock that only speaks H1, ALPN mismatch,
+    // network drops the QUIC handshake, etc.) the diff result
+    // is structurally "no divergence" — but only because every
+    // H2 measurement is missing. Pre-fix the command exit-0'd
+    // with `divergences: {high: 0, medium: 0}` and a pentester
+    // would silently conclude "no H2 gap" rather than "result
+    // inconclusive — H2 wasn't reachable". Emit the output as
+    // before, then return exit code 6 (distinct from 0=clean,
+    // 1=transport, 2=invalid args) to signal "ran cleanly but
+    // the H2 leg never produced any data".
+    let total = results.len();
+    let h2_errors = results.iter().filter(|r| r.h2_error.is_some()).count();
     emit_output(&args, &results);
+    if total > 0 && h2_errors == total {
+        if !args.quiet && args.format == "text" {
+            eprintln!(
+                "{} all H2 probes failed — exit 6 (inconclusive, not 0)",
+                "[wafrift h2-diff]".yellow().bold()
+            );
+        }
+        return ExitCode::from(6);
+    }
     ExitCode::SUCCESS
 }
 
@@ -179,7 +219,9 @@ fn probe_shapes(param: &str, payload: &str) -> Vec<(&'static str, &'static str, 
              length limits (often 8KB); H2 has frame size limits \
              but a different boundary. WAFs that gate by H1 \
              request-line length miss long H2 queries.",
-            format!("{param}=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{payload}"),
+            format!(
+                "{param}=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{payload}"
+            ),
         ),
     ]
 }
@@ -219,26 +261,19 @@ fn build_diff_result(
         h1_body_len,
         h2_body_len,
         body_delta_pct: delta,
-        h1_curl_cmd: format!(
-            "curl -i --http1.1 {}",
-            shell_single_quote(probe_url)
-        ),
-        h2_curl_cmd: format!(
-            "curl -i --http2 {}",
-            shell_single_quote(probe_url)
-        ),
+        h1_curl_cmd: format!("curl -i --http1.1 {}", shell_single_quote(probe_url)),
+        h2_curl_cmd: format!("curl -i --http2 {}", shell_single_quote(probe_url)),
         severity,
         h2_error,
     }
 }
 
 fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
-    let builder = Client::builder()
-        .timeout(Duration::from_secs(args.timeout_secs))
-        .danger_accept_invalid_certs(args.insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(crate::config::shared_user_agent());
-    let builder = if want_h2 {
+    let ua = crate::config::shared_user_agent();
+    let mut builder =
+        wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, Some(&ua))
+            .redirect(reqwest::redirect::Policy::limited(5));
+    builder = if want_h2 {
         // HTTPS targets: reqwest negotiates H2 via TLS ALPN as long
         // as both ends advertise h2. For HTTP, prior-knowledge skips
         // the (rare-and-unimplemented) h2c upgrade.
@@ -251,25 +286,23 @@ fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
         // H1-only — disables ALPN h2 advertisement entirely.
         builder.http1_only()
     };
+    // Burp / corporate proxy + operator headers MUST thread
+    // through both legs so the H1 vs H2 comparison is apples-to-
+    // apples. Pre-fix the cmd silently ignored --proxy / -H,
+    // making it the least useful parser-diff in real engagements.
+    builder = crate::scan::pentest_client::apply_pentest_flags_or_print(
+        builder,
+        args.proxy.as_deref(),
+        &args.header,
+        None,
+    )?;
     builder.build().map_err(|e| {
-        eprintln!(
-            "  {} {e}",
-            "✗ Failed to build HTTP client:".red().bold()
-        );
+        eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
     })
 }
 
-async fn fire_get(client: &Client, url: &str) -> Result<(u16, usize), String> {
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("{e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
-    Ok((status, body.len()))
-}
+use crate::parser_diff_common::fire_get_status_len as fire_get;
 
 fn with_query(base: &str, new_query: &str) -> String {
     if new_query.is_empty() {
@@ -305,10 +338,7 @@ fn emit_output(args: &H2DiffArgs, results: &[H2DiffResult]) {
             },
             "results": results,
         });
-        match serde_json::to_string_pretty(&out) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("JSON error: {e}"),
-        }
+        crate::parser_diff_common::print_pretty_json(&out);
         return;
     }
 
@@ -382,7 +412,11 @@ mod tests {
             .iter()
             .find(|(k, _, _)| *k == "payload-in-query")
             .expect("payload-in-query probe");
-        assert!(payload_probe.2.contains("search=ATTACK"), "got: {}", payload_probe.2);
+        assert!(
+            payload_probe.2.contains("search=ATTACK"),
+            "got: {}",
+            payload_probe.2
+        );
     }
 
     #[test]
@@ -452,7 +486,11 @@ mod tests {
     #[test]
     fn build_diff_result_curl_carries_http_version_flag() {
         let r = build_diff_result("p", "d", "http://x/?q=1", Ok((200, 0)), Ok((200, 0)));
-        assert!(r.h1_curl_cmd.contains("--http1.1"), "got: {}", r.h1_curl_cmd);
+        assert!(
+            r.h1_curl_cmd.contains("--http1.1"),
+            "got: {}",
+            r.h1_curl_cmd
+        );
         assert!(r.h2_curl_cmd.contains("--http2"), "got: {}", r.h2_curl_cmd);
         assert!(r.h1_curl_cmd.contains("'http://x/?q=1'"));
         assert!(r.h2_curl_cmd.contains("'http://x/?q=1'"));
@@ -488,10 +526,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_h2_diff_against_h1_only_mock_succeeds_and_marks_h2_errors() {
-        // Our mock only speaks H1 — H2 probes will fail. h2-diff
-        // should exit 0 (informational) and mark every probe with
-        // h2_error.
+    async fn run_h2_diff_against_h1_only_mock_marks_inconclusive_with_exit_6() {
+        // F78: when EVERY H2 probe fails to negotiate, exit 6
+        // (inconclusive). Pre-fix this exited 0 with
+        // `divergences: {high: 0, medium: 0}` — silently false-
+        // negative on H1-only targets.
         let addr = spawn_mock().await;
         let args = H2DiffArgs {
             url: format!("http://{addr}/"),
@@ -500,15 +539,17 @@ mod tests {
             delay_ms: 0,
             timeout_secs: 3,
             insecure: false,
+            proxy: None,
+            header: vec![],
             format: "json".into(),
             quiet: true,
         };
         let code = run_h2_diff(args).await;
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(6)));
     }
 
     #[tokio::test]
-    async fn run_h2_diff_against_unreachable_target_still_exits_cleanly() {
+    async fn run_h2_diff_against_unreachable_target_returns_inconclusive() {
         let args = H2DiffArgs {
             url: "http://127.0.0.1:1/".into(),
             param: "q".into(),
@@ -516,12 +557,15 @@ mod tests {
             delay_ms: 0,
             timeout_secs: 1,
             insecure: false,
+            proxy: None,
+            header: vec![],
             format: "json".into(),
             quiet: true,
         };
         let code = run_h2_diff(args).await;
-        // Even with H1 ALSO failing, we exit 0 — the scanner is
-        // informational; failures are recorded per-probe.
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        // F78: H1 also fails here, but the H2 leg is what triggers
+        // the inconclusive exit (all_h2_errors == total_probes).
+        // Exit code 6 surfaces "not a clean run" to CI.
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(6)));
     }
 }

@@ -144,33 +144,30 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     let parsed = Url::parse(baseline_url);
 
     // ── 1. Host header case variation ────────────────────────
-    if let Ok(u) = &parsed {
-        if let Some(host) = u.host_str() {
-            out.push(CacheKeyProbe {
-                kind: "host-case-upper",
-                description:
-                    "Host header in UPPERCASE — RFC says case-insensitive, but \
+    if let Ok(u) = &parsed
+        && let Some(host) = u.host_str()
+    {
+        out.push(CacheKeyProbe {
+            kind: "host-case-upper",
+            description: "Host header in UPPERCASE — RFC says case-insensitive, but \
                      some caches key on the literal byte string and treat the \
                      variant as a separate cache slot",
-                probe_url: baseline_url.to_string(),
-                extra_headers: vec![("Host".into(), host.to_ascii_uppercase())],
-            });
-            out.push(CacheKeyProbe {
-                kind: "host-case-mixed",
-                description:
-                    "Host header mixed-case (CamelCase) — same idea, harder to \
+            probe_url: baseline_url.to_string(),
+            extra_headers: vec![("Host".into(), host.to_ascii_uppercase())],
+        });
+        out.push(CacheKeyProbe {
+            kind: "host-case-mixed",
+            description: "Host header mixed-case (CamelCase) — same idea, harder to \
                      spot in logs",
-                probe_url: baseline_url.to_string(),
-                extra_headers: vec![("Host".into(), camel_case(host))],
-            });
-        }
+            probe_url: baseline_url.to_string(),
+            extra_headers: vec![("Host".into(), camel_case(host))],
+        });
     }
 
     // ── 2. X-Forwarded-Host injection ────────────────────────
     out.push(CacheKeyProbe {
         kind: "x-forwarded-host-attacker",
-        description:
-            "X-Forwarded-Host claims attacker.example. Caches that include this \
+        description: "X-Forwarded-Host claims attacker.example. Caches that include this \
              in the key give the attacker their own cache slot; origins that \
              reflect XFH into the response Host poison links",
         probe_url: baseline_url.to_string(),
@@ -188,8 +185,7 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
         alt.set_path(&new_path);
         out.push(CacheKeyProbe {
             kind: "trailing-slash",
-            description:
-                "Path with toggled trailing slash — many caches treat /foo and \
+            description: "Path with toggled trailing slash — many caches treat /foo and \
                  /foo/ as distinct keys; origins typically don't",
             probe_url: alt.to_string(),
             extra_headers: vec![],
@@ -199,16 +195,14 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     // ── 4. Query parameter ORDER ─────────────────────────────
     out.push(CacheKeyProbe {
         kind: "query-param-order",
-        description:
-            "Same param set, reordered — RFC says equivalent, but most caches \
+        description: "Same param set, reordered — RFC says equivalent, but most caches \
              key on the literal query bytestring",
         probe_url: with_query(baseline_url, &format!("z=1&{param}=baseline&a=2")),
         extra_headers: vec![],
     });
     out.push(CacheKeyProbe {
         kind: "query-baseline",
-        description:
-            "Canonical query (also serves as the in-set baseline) — confirms \
+        description: "Canonical query (also serves as the in-set baseline) — confirms \
              our probe shape matches the reference",
         probe_url: with_query(baseline_url, &format!("{param}=baseline")),
         extra_headers: vec![],
@@ -217,8 +211,7 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     // ── 5. Param name case ───────────────────────────────────
     out.push(CacheKeyProbe {
         kind: "param-name-case",
-        description:
-            "Param name in alternate case — RFC says case-sensitive but some \
+        description: "Param name in alternate case — RFC says case-sensitive but some \
              caches normalise; if they do, this is a key collision",
         probe_url: with_query(baseline_url, &format!("{}=baseline", upper_first(param))),
         extra_headers: vec![],
@@ -227,8 +220,7 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     // ── 6. Trailing extra junk param ─────────────────────────
     out.push(CacheKeyProbe {
         kind: "tracking-param-junk",
-        description:
-            "Added UTM-style tracking param — caches that strip known trackers \
+        description: "Added UTM-style tracking param — caches that strip known trackers \
              (Cloudflare, Akamai) collapse to the baseline key, exposing the \
              collision via Age",
         probe_url: with_query(
@@ -241,8 +233,7 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     // ── 7. Fragment leak ─────────────────────────────────────
     out.push(CacheKeyProbe {
         kind: "fragment-leak",
-        description:
-            "URL with a #fragment — fragments are client-side and shouldn't \
+        description: "URL with a #fragment — fragments are client-side and shouldn't \
              reach the server, but some library configs propagate; harmless \
              if cleanly stripped, key collision if not",
         probe_url: with_query(baseline_url, &format!("{param}=baseline#frag")),
@@ -252,8 +243,7 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     // ── 8. Cookie variation ──────────────────────────────────
     out.push(CacheKeyProbe {
         kind: "cookie-key-leak",
-        description:
-            "Random Cookie value — caches that include Cookie in the key \
+        description: "Random Cookie value — caches that include Cookie in the key \
              give each cookie value its own slot; caches that DON'T let \
              cookied responses leak to anonymous users",
         probe_url: baseline_url.to_string(),
@@ -264,8 +254,9 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
 }
 
 /// Run the cache-diff scanner.
-pub async fn run_cache_diff(args: CacheDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+pub async fn run_cache_diff(mut args: CacheDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -295,10 +286,7 @@ pub async fn run_cache_diff(args: CacheDiffArgs) -> ExitCode {
             "↘".bright_black(),
             baseline.status,
             baseline.body_len,
-            baseline
-                .cache_signal
-                .as_deref()
-                .unwrap_or("none observed")
+            baseline.cache_signal.as_deref().unwrap_or("none observed")
         );
     }
 
@@ -349,11 +337,15 @@ pub async fn run_cache_diff(args: CacheDiffArgs) -> ExitCode {
         match outcome {
             Ok(probe) => {
                 let curl = render_curl(&variant.probe_url, &variant.extra_headers);
-                let body_hash_match = probe.body_hash == baseline.body_hash
-                    && probe.body_len > 0;
+                let body_hash_match = probe.body_hash == baseline.body_hash && probe.body_len > 0;
                 let cache_signals_match =
                     probe.cache_signal == baseline.cache_signal && baseline.cache_signal.is_some();
-                let severity = severity_of(body_hash_match, cache_signals_match, probe.status, baseline.status);
+                let severity = severity_of(
+                    body_hash_match,
+                    cache_signals_match,
+                    probe.status,
+                    baseline.status,
+                );
                 results.push(CacheDiffResult {
                     kind: variant.kind,
                     description: variant.description,
@@ -516,14 +508,7 @@ fn render_curl(url: &str, extra_headers: &[(String, String)]) -> String {
     out
 }
 
-fn build_http_client(args: &CacheDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(CacheDiffArgs);
 
 fn emit_output(
     args: &CacheDiffArgs,
@@ -549,10 +534,7 @@ fn emit_output(
             },
             "results": results,
         });
-        match serde_json::to_string_pretty(&out) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("JSON error: {e}"),
-        }
+        crate::parser_diff_common::print_pretty_json(&out);
         return;
     }
 
@@ -796,9 +778,7 @@ mod tests {
 
     async fn spawn_cache_mock() -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {

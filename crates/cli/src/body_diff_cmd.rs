@@ -165,8 +165,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     // ── 1. JSON dup-key precedence ────────────────────────────
     out.push(BodyDisagreement {
         kind: "json-dup-key-last-wins",
-        description:
-            "JSON with duplicate `q` keys — RFC 8259 §4 leaves order undefined; \
+        description: "JSON with duplicate `q` keys — RFC 8259 §4 leaves order undefined; \
              most parsers (Jackson, GSON, Python json, Node) take the LAST value; \
              some WAFs short-circuit at first sighting and never see the attack",
         content_type: "application/json".into(),
@@ -174,8 +173,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     });
     out.push(BodyDisagreement {
         kind: "json-dup-key-first-wins",
-        description:
-            "Same dup-key idea, swapped order — covers the FIRST-WINS dispatch parser",
+        description: "Same dup-key idea, swapped order — covers the FIRST-WINS dispatch parser",
         content_type: "application/json".into(),
         body: format!(r#"{{"q":"{attack_token}","q":"safe"}}"#).into_bytes(),
     });
@@ -185,8 +183,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     bom_body.extend(format!(r#"{{"q":"{attack_token}"}}"#).as_bytes());
     out.push(BodyDisagreement {
         kind: "json-bom-prefix",
-        description:
-            "UTF-8 BOM prefix before `{` — RFC 8259 forbids; strict parsers reject \
+        description: "UTF-8 BOM prefix before `{` — RFC 8259 forbids; strict parsers reject \
              (WAF treats body as malformed → no parse → pass), lenient parsers \
              (text editors, JSON5) accept",
         content_type: "application/json".into(),
@@ -196,8 +193,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     // ── 3. UTF-7 charset smuggling ────────────────────────────
     out.push(BodyDisagreement {
         kind: "charset-utf7",
-        description:
-            "Content-Type advertises charset=utf-7. Origins that honour the charset \
+        description: "Content-Type advertises charset=utf-7. Origins that honour the charset \
              decode `+ADw-script+AD4-` into `<script>` AFTER the WAF has scanned \
              the raw UTF-8 bytes",
         content_type: "application/json; charset=utf-7".into(),
@@ -207,8 +203,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     // ── 4. Form-urlencoded HPP in body ────────────────────────
     out.push(BodyDisagreement {
         kind: "form-hpp-body",
-        description:
-            "Form body with two `q` parameters — PHP keeps the last, ASP.NET \
+        description: "Form body with two `q` parameters — PHP keeps the last, ASP.NET \
              concatenates with comma, Java keeps the first; WAFs that scan only \
              the first key miss the attack",
         content_type: "application/x-www-form-urlencoded".into(),
@@ -218,8 +213,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     // ── 5. JSON-as-form ───────────────────────────────────────
     out.push(BodyDisagreement {
         kind: "json-as-form",
-        description:
-            "Content-Type says form-urlencoded but body is JSON. WAF parsing by \
+        description: "Content-Type says form-urlencoded but body is JSON. WAF parsing by \
              content-type sees no `q=` key; origins that sniff-by-shape \
              (Hapi.js, some Spring configs) parse the JSON",
         content_type: "application/x-www-form-urlencoded".into(),
@@ -229,8 +223,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     // ── 6. Form-as-JSON (inverse) ─────────────────────────────
     out.push(BodyDisagreement {
         kind: "form-as-json",
-        description:
-            "Content-Type says JSON but body is form. WAF that JSON-parses bails \
+        description: "Content-Type says JSON but body is form. WAF that JSON-parses bails \
              (no recognised fields); origins with lenient body parsing may still \
              see the form key",
         content_type: "application/json".into(),
@@ -240,8 +233,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     // ── 7. JSON with JSONC comments ──────────────────────────
     out.push(BodyDisagreement {
         kind: "json-comments-jsonc",
-        description:
-            "JSON body with inline comment containing the attack. Strict JSON \
+        description: "JSON body with inline comment containing the attack. Strict JSON \
              parsers (WAF) reject or strip comments; JSONC parsers (VS Code \
              config, Hjson) read inside",
         content_type: "application/json".into(),
@@ -256,8 +248,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     );
     out.push(BodyDisagreement {
         kind: "multipart-boundary-collision",
-        description:
-            "Multipart header declares boundary=WAF_BOUNDARY but body uses \
+        description: "Multipart header declares boundary=WAF_BOUNDARY but body uses \
              REAL_BOUNDARY. WAFs that strictly honour the declared boundary see \
              no parts (= treat as malformed = pass); origins that scan-for-actual \
              boundary parse the form normally",
@@ -269,8 +260,9 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
 }
 
 /// Run the body-diff scanner.
-pub async fn run_body_diff(args: BodyDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+pub async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -357,8 +349,7 @@ pub async fn run_body_diff(args: BodyDiffArgs) -> ExitCode {
             Ok((probe_status, probe_body_len, _)) => {
                 let body_delta = body_delta_pct(baseline_body_len, probe_body_len);
                 let severity = severity_of(baseline_status, probe_status, body_delta);
-                let curl_cmd =
-                    render_curl(&args.url, &variant.content_type, &variant.body);
+                let curl_cmd = render_curl(&args.url, &variant.content_type, &variant.body);
                 results.push(BodyDiffResult {
                     kind: variant.kind,
                     description: variant.description,
@@ -381,14 +372,7 @@ pub async fn run_body_diff(args: BodyDiffArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn build_http_client(args: &BodyDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(BodyDiffArgs);
 
 async fn fire_body(
     http: &Client,
@@ -445,10 +429,7 @@ fn emit_output(
             },
             "results": results,
         });
-        match serde_json::to_string_pretty(&out) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("JSON error: {e}"),
-        }
+        crate::parser_diff_common::print_pretty_json(&out);
         return;
     }
 
@@ -529,9 +510,9 @@ mod tests {
     fn generate_body_variants_interpolates_attack_token_into_bodies() {
         let v = generate_body_variants("WAFRIFT_TOKEN_XYZ");
         // At least one probe body must contain the token verbatim.
-        let any_carries_token = v.iter().any(|p| {
-            String::from_utf8_lossy(&p.body).contains("WAFRIFT_TOKEN_XYZ")
-        });
+        let any_carries_token = v
+            .iter()
+            .any(|p| String::from_utf8_lossy(&p.body).contains("WAFRIFT_TOKEN_XYZ"));
         assert!(any_carries_token, "no probe body carries the attack token");
     }
 
@@ -587,7 +568,10 @@ mod tests {
     fn render_curl_emits_post_with_content_type_and_data_binary() {
         let out = render_curl("http://x/", "application/json", b"{\"q\":1}");
         assert!(out.starts_with("curl -i -X POST "), "got: {out}");
-        assert!(out.contains("'Content-Type: application/json'"), "got: {out}");
+        assert!(
+            out.contains("'Content-Type: application/json'"),
+            "got: {out}"
+        );
         assert!(out.contains("--data-binary '{\"q\":1}'"), "got: {out}");
         assert!(out.contains("'http://x/'"), "got: {out}");
     }
@@ -602,9 +586,7 @@ mod tests {
 
     async fn spawn_body_aware_mock() -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {

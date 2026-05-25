@@ -64,6 +64,17 @@ pub struct DiscoverArgs {
     #[arg(long, default_value_t = 5)]
     pub baseline_requests: usize,
 
+    /// Body-length divergence threshold for --mine-params (fraction;
+    /// default 0.10 = ±10%). Lower = more sensitive, more false positives.
+    #[arg(long, default_value_t = 0.10)]
+    pub body_length_threshold: f64,
+
+    /// Response-time divergence threshold for --mine-params (ms;
+    /// default 500). A candidate's median latency must exceed the
+    /// baseline median by this many ms to flag.
+    #[arg(long, default_value_t = 500)]
+    pub response_time_threshold_ms: u64,
+
     /// Output format. `text` (default) is human-friendly; `json` is a
     /// stable, machine-parseable surface piped into `wafrift scan
     /// --from-discovery`.
@@ -86,7 +97,10 @@ struct DiscoverReport<'a> {
 
 const DISCOVER_SCHEMA_VERSION: u32 = 1;
 
-pub fn run_discover(args: DiscoverArgs) -> ExitCode {
+pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
+    if let Some(ref t) = args.target.clone() {
+        args.target = Some(crate::helpers::normalize_target_url(t));
+    }
     if args.spec.is_none() && !args.introspect && !args.mine_params {
         eprintln!(
             "error: discover requires at least one of --spec, --introspect, --mine-params\n\
@@ -117,6 +131,13 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
     rt.block_on(async {
         let mut endpoints = Vec::new();
         let mut sources: Vec<&'static str> = Vec::new();
+        // Track per-source failures so a silent `warn:` from one
+        // source doesn't get hidden when its sibling produced 0
+        // endpoints either. If every requested source failed to
+        // produce anything actionable, return exit 1 — an empty
+        // result with SUCCESS exit code is indistinguishable from
+        // "ran fine, found nothing" and corrupts CI pipelines.
+        let mut warnings: usize = 0;
 
         if let Some(spec_path) = &args.spec {
             sources.push("openapi");
@@ -160,8 +181,13 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                     Ok(eps) => endpoints.extend(eps),
                     Err(e) => {
                         eprintln!("warn: graphql introspection failed: {e}");
-                        // Don't fail the whole command — introspection-disabled
-                        // is informative, not fatal.
+                        warnings += 1;
+                        // Don't fail the whole command yet — introspection-
+                        // disabled is informative, not immediately fatal.
+                        // The end-of-run check converts "all sources failed
+                        // and no endpoints" into a non-zero exit so CI can
+                        // see the difference between "found nothing" and
+                        // "every source errored."
                     }
                 }
             }
@@ -192,8 +218,8 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                     concurrency: args.concurrency,
                     delay_ms: args.delay_ms,
                     baseline_requests: args.baseline_requests,
-                    body_length_threshold: 0.10,
-                    response_time_threshold_ms: 500,
+                    body_length_threshold: args.body_length_threshold,
+                    response_time_threshold_ms: args.response_time_threshold_ms,
                 };
                 match mine_params(target, &client, &words, &cfg).await {
                     Ok(eps) => endpoints.extend(eps),
@@ -203,14 +229,58 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                     }
                     Err(e) => {
                         eprintln!("warn: param mining failed: {e}");
+                        warnings += 1;
                     }
                 }
             }
         }
 
-        // De-dup by (method, url). Order-preserving.
-        let mut seen = std::collections::HashSet::new();
-        endpoints.retain(|e| seen.insert((e.method.clone(), e.url.clone())));
+        // Merge by (method, url) — order-preserving, injection-point
+        // accumulating. Naive `retain(|e| seen.insert(key))` discards
+        // the second occurrence's `injection_points`, so if two
+        // sources (e.g. openapi spec + mine_params) hit the same URL,
+        // the second source's parameters silently disappear. Instead
+        // we merge: same key → extend the existing endpoint's
+        // injection_points, deduped on (name, location).
+        let merged = {
+            use std::collections::HashMap;
+            let mut order: Vec<(wafrift_types::Method, String)> = Vec::new();
+            let mut by_key: HashMap<
+                (wafrift_types::Method, String),
+                DiscoveredEndpoint,
+            > = HashMap::new();
+            for ep in endpoints.drain(..) {
+                let key = (ep.method.clone(), ep.url.clone());
+                if let Some(existing) = by_key.get_mut(&key) {
+                    for ip in ep.injection_points {
+                        let dup = existing
+                            .injection_points
+                            .iter()
+                            .any(|x| x.name == ip.name && x.location == ip.location);
+                        if !dup {
+                            existing.injection_points.push(ip);
+                        }
+                    }
+                } else {
+                    order.push(key.clone());
+                    by_key.insert(key, ep);
+                }
+            }
+            order.into_iter().filter_map(|k| by_key.remove(&k)).collect::<Vec<_>>()
+        };
+        endpoints = merged;
+
+        // F124: per-source warning + zero-output → non-zero exit.
+        // Applies BEFORE the format branch so the JSON path is also
+        // gated. The print order (still print JSON / text, then bump
+        // exit code) lets CI grep the actual output while the wrapper
+        // sees the non-zero status.
+        let abort_due_to_silent_failure = warnings > 0 && endpoints.is_empty();
+        if abort_due_to_silent_failure {
+            eprintln!(
+                "discover: {warnings} source(s) failed and 0 endpoints produced — exiting non-zero"
+            );
+        }
 
         match args.format.as_str() {
             "json" => {
@@ -220,6 +290,11 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                     target: args.target.as_deref(),
                     sources,
                     endpoints,
+                };
+                let ok_exit = if abort_due_to_silent_failure {
+                    ExitCode::from(1)
+                } else {
+                    ExitCode::SUCCESS
                 };
                 match serde_json::to_string_pretty(&report) {
                     Ok(s) => match args.output.as_ref() {
@@ -231,7 +306,7 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                                     report.endpoints.len(),
                                     p.display()
                                 );
-                                ExitCode::SUCCESS
+                                ok_exit
                             }
                             Err(e) => {
                                 eprintln!("error: write {}: {e}", p.display());
@@ -240,7 +315,7 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                         },
                         None => {
                             println!("{s}");
-                            ExitCode::SUCCESS
+                            ok_exit
                         }
                     },
                     Err(e) => {
@@ -283,7 +358,11 @@ pub fn run_discover(args: DiscoverArgs) -> ExitCode {
                          for --introspect check that the GraphQL server allows __schema queries"
                     );
                 }
-                ExitCode::SUCCESS
+                if abort_due_to_silent_failure {
+                    ExitCode::from(1)
+                } else {
+                    ExitCode::SUCCESS
+                }
             }
         }
     })

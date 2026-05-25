@@ -126,7 +126,8 @@ pub struct TrailerDiffResult {
 /// run regardless of whether a divergence was found (divergence is
 /// informational, not a process error). Returns exit 1 on setup or
 /// transport failures.
-pub async fn run_trailer_diff(args: TrailerDiffArgs) -> ExitCode {
+pub async fn run_trailer_diff(mut args: TrailerDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     if args.format == "text" {
         eprintln!(
             "{} firing baseline + attack chunked-trailer probe against {}",
@@ -166,14 +167,13 @@ pub async fn run_trailer_diff(args: TrailerDiffArgs) -> ExitCode {
 
     let dur = Duration::from_secs(args.timeout_secs);
 
-    let baseline_resp =
-        match send_raw_request(&parsed, &baseline_bytes, dur, args.insecure).await {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("{} baseline request failed: {e}", "error:".red().bold());
-                return ExitCode::from(1);
-            }
-        };
+    let baseline_resp = match send_raw_request(&parsed, &baseline_bytes, dur, args.insecure).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{} baseline request failed: {e}", "error:".red().bold());
+            return ExitCode::from(1);
+        }
+    };
 
     if args.format == "text" {
         eprintln!(
@@ -184,14 +184,13 @@ pub async fn run_trailer_diff(args: TrailerDiffArgs) -> ExitCode {
         );
     }
 
-    let attack_resp =
-        match send_raw_request(&parsed, &attack_bytes, dur, args.insecure).await {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("{} attack request failed: {e}", "error:".red().bold());
-                return ExitCode::from(1);
-            }
-        };
+    let attack_resp = match send_raw_request(&parsed, &attack_bytes, dur, args.insecure).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{} attack request failed: {e}", "error:".red().bold());
+            return ExitCode::from(1);
+        }
+    };
 
     if args.format == "text" {
         eprintln!(
@@ -280,7 +279,12 @@ fn parse_url(url: &str) -> Result<ParsedUrl, String> {
         }
     };
 
-    Ok(ParsedUrl { scheme, host, port, path_and_query })
+    Ok(ParsedUrl {
+        scheme,
+        host,
+        port,
+        path_and_query,
+    })
 }
 
 fn default_port(scheme: &Scheme) -> u16 {
@@ -408,10 +412,7 @@ async fn do_send(
     }
 }
 
-async fn exchange_http(
-    mut stream: TcpStream,
-    request_bytes: &[u8],
-) -> Result<Vec<u8>, String> {
+async fn exchange_http(mut stream: TcpStream, request_bytes: &[u8]) -> Result<Vec<u8>, String> {
     stream
         .write_all(request_bytes)
         .await
@@ -430,9 +431,9 @@ async fn exchange_https(
     request_bytes: &[u8],
     insecure: bool,
 ) -> Result<Vec<u8>, String> {
+    use std::sync::Arc;
     use tokio_rustls::TlsConnector;
     use tokio_rustls::rustls::ClientConfig;
-    use std::sync::Arc;
 
     let config: ClientConfig = if insecure {
         // Permissive verifier — accepts any cert chain (lab-only path).
@@ -476,9 +477,7 @@ async fn read_response(stream: TcpStream) -> Result<Vec<u8>, String> {
     read_response_split(reader).await
 }
 
-async fn read_response_split<R: AsyncReadExt + Unpin>(
-    mut reader: R,
-) -> Result<Vec<u8>, String> {
+async fn read_response_split<R: AsyncReadExt + Unpin>(mut reader: R) -> Result<Vec<u8>, String> {
     let mut buf = Vec::with_capacity(16 * 1024);
     let mut chunk = [0u8; 4096];
     loop {
@@ -515,9 +514,7 @@ fn parse_http_response(bytes: &[u8]) -> Result<ProbeResponse, String> {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| {
-            format!(
-                "could not parse HTTP status from response (first line: {first_line:?})"
-            )
+            format!("could not parse HTTP status from response (first line: {first_line:?})")
         })?;
 
     // Find the header/body split.
@@ -535,13 +532,20 @@ fn parse_http_response(bytes: &[u8]) -> Result<ProbeResponse, String> {
         .map(|l| l[7..].trim().to_string())
         .unwrap_or_default();
 
-    Ok(ProbeResponse { status, body_len, server })
+    Ok(ProbeResponse {
+        status,
+        body_len,
+        server,
+    })
 }
 
 /// Find the byte offset of the start of the HTTP body (i.e. the byte
 /// right after `\r\n\r\n`). Returns `None` if the separator is absent.
 fn find_header_end(bytes: &[u8]) -> Option<usize> {
-    bytes.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4)
+    bytes
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|i| i + 4)
 }
 
 // ── TLS permissive verifier ───────────────────────────────────────────────────
@@ -559,7 +563,8 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for PermissiveCert
         _server_name: &tokio_rustls::rustls::pki_types::ServerName<'_>,
         _ocsp_response: &[u8],
         _now: tokio_rustls::rustls::pki_types::UnixTime,
-    ) -> Result<tokio_rustls::rustls::client::danger::ServerCertVerified, tokio_rustls::rustls::Error> {
+    ) -> Result<tokio_rustls::rustls::client::danger::ServerCertVerified, tokio_rustls::rustls::Error>
+    {
         Ok(tokio_rustls::rustls::client::danger::ServerCertVerified::assertion())
     }
 
@@ -568,7 +573,10 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for PermissiveCert
         _message: &[u8],
         _cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
         _dsa: &tokio_rustls::rustls::DigitallySignedStruct,
-    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+    ) -> Result<
+        tokio_rustls::rustls::client::danger::HandshakeSignatureValid,
+        tokio_rustls::rustls::Error,
+    > {
         Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
@@ -577,7 +585,10 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for PermissiveCert
         _message: &[u8],
         _cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
         _dsa: &tokio_rustls::rustls::DigitallySignedStruct,
-    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+    ) -> Result<
+        tokio_rustls::rustls::client::danger::HandshakeSignatureValid,
+        tokio_rustls::rustls::Error,
+    > {
         Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
@@ -596,12 +607,7 @@ fn render_curl_repro(args: &TrailerDiffArgs) -> String {
     use crate::helpers::shell_single_quote;
     let parsed = match parse_url(&args.url) {
         Ok(p) => p,
-        Err(_) => {
-            return format!(
-                "# could not parse URL {:?} for curl reproducer",
-                args.url
-            )
-        }
+        Err(_) => return format!("# could not parse URL {:?} for curl reproducer", args.url),
     };
     let host = parsed.host.clone();
     let port = parsed.port;
@@ -711,7 +717,10 @@ mod tests {
         let parsed = parse_url("http://example.com/path?q=1").unwrap();
         let bytes = build_chunked_request(&parsed, "X-Foo", "ignored", RequestKind::Baseline);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.starts_with("POST /path?q=1 HTTP/1.1\r\n"), "got:\n{text}");
+        assert!(
+            text.starts_with("POST /path?q=1 HTTP/1.1\r\n"),
+            "got:\n{text}"
+        );
     }
 
     #[test]
@@ -719,7 +728,10 @@ mod tests {
         let parsed = parse_url("http://example.com/").unwrap();
         let bytes = build_chunked_request(&parsed, "X-Inject", "payload", RequestKind::Baseline);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("Trailer: X-Inject\r\n"), "trailer declared:\n{text}");
+        assert!(
+            text.contains("Trailer: X-Inject\r\n"),
+            "trailer declared:\n{text}"
+        );
         // The trailer field must NOT appear as a trailer value in the baseline.
         // After `0\r\n`, the baseline emits only `\r\n` (empty trailer section).
         let after_terminal = text.split("0\r\n").nth(1).unwrap_or("");
@@ -732,12 +744,8 @@ mod tests {
     #[test]
     fn attack_request_sends_trailer_after_terminal_chunk() {
         let parsed = parse_url("http://example.com/").unwrap();
-        let bytes = build_chunked_request(
-            &parsed,
-            "X-Original-URL",
-            "' OR 1=1--",
-            RequestKind::Attack,
-        );
+        let bytes =
+            build_chunked_request(&parsed, "X-Original-URL", "' OR 1=1--", RequestKind::Attack);
         let text = String::from_utf8(bytes).unwrap();
         // The attack payload must appear AFTER `0\r\n` (terminal chunk).
         let after_terminal = text.split("0\r\n").nth(1).unwrap_or("");
@@ -773,7 +781,10 @@ mod tests {
         let bytes = build_chunked_request(&parsed, "X-Foo", "v", RequestKind::Attack);
         let text = String::from_utf8(bytes).unwrap();
         // Chunk line: `1\r\nX\r\n` — exactly one byte.
-        assert!(text.contains("1\r\nX\r\n"), "first chunk must be 1-byte body X; got:\n{text}");
+        assert!(
+            text.contains("1\r\nX\r\n"),
+            "first chunk must be 1-byte body X; got:\n{text}"
+        );
     }
 
     #[test]
@@ -906,8 +917,16 @@ mod tests {
             target: "http://example.com/".into(),
             header_name: "X-Original-URL".into(),
             payload: "' OR 1=1--".into(),
-            baseline: ProbeResponse { status: 200, body_len: 100, server: "nginx".into() },
-            attack: ProbeResponse { status: 403, body_len: 200, server: "nginx".into() },
+            baseline: ProbeResponse {
+                status: 200,
+                body_len: 100,
+                server: "nginx".into(),
+            },
+            attack: ProbeResponse {
+                status: 403,
+                body_len: 200,
+                server: "nginx".into(),
+            },
             body_delta_pct: 100.0,
             severity: "high",
             curl_repro: "printf '...' | nc example.com 80".into(),

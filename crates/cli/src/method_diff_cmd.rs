@@ -187,8 +187,9 @@ pub fn generate_method_variants() -> Vec<MethodProbe> {
     ]
 }
 
-pub async fn run_method_diff(args: MethodDiffArgs) -> ExitCode {
-    let http = match build_http_client(&args) {
+pub async fn run_method_diff(mut args: MethodDiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
+    let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -302,14 +303,7 @@ async fn fire_with_method(
     Ok((status, body.len()))
 }
 
-fn build_http_client(args: &MethodDiffArgs) -> Result<Client, ExitCode> {
-    crate::parser_diff_common::build_diff_http_client(
-        args.timeout_secs,
-        args.insecure,
-        args.proxy.as_deref(),
-        &args.header,
-    )
-}
+crate::impl_parser_diff_http_args!(MethodDiffArgs);
 
 fn render_curl(method: &str, url: &str) -> String {
     format!("curl -i -X {method} {}", shell_single_quote(url))
@@ -338,10 +332,7 @@ fn emit_output(
             },
             "results": results,
         });
-        match serde_json::to_string_pretty(&out) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("JSON error: {e}"),
-        }
+        crate::parser_diff_common::print_pretty_json(&out);
         return;
     }
 
@@ -360,7 +351,12 @@ fn emit_output(
     for r in results.iter().filter(|r| r.severity != "none") {
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
-        println!("  [{badge}] {} ({}) — {}", r.kind.bold(), r.method, r.description);
+        println!(
+            "  [{badge}] {} ({}) — {}",
+            r.kind.bold(),
+            r.method,
+            r.description
+        );
         println!(
             "    {} baseline GET HTTP {} ({} bytes) → {} {} HTTP {} ({} bytes, Δ {:+.1}%)",
             "↘".bright_black(),
@@ -441,7 +437,10 @@ mod tests {
             .iter()
             .map(|p| p.method)
             .collect();
-        assert!(methods.contains(&"BANANA"), "should test custom verb tolerance");
+        assert!(
+            methods.contains(&"BANANA"),
+            "should test custom verb tolerance"
+        );
     }
 
     #[test]

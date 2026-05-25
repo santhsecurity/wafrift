@@ -106,11 +106,15 @@ struct ProbeOutcome {
 }
 
 /// Entry point for the `wafrift ja3-diff` subcommand.
-pub fn run_ja3_diff(args: Ja3DiffArgs) -> ExitCode {
+pub fn run_ja3_diff(mut args: Ja3DiffArgs) -> ExitCode {
+    args.url = crate::helpers::normalize_target_url(&args.url);
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{} failed to start tokio runtime: {e}", "ja3-diff error:".red().bold());
+            eprintln!(
+                "{} failed to start tokio runtime: {e}",
+                "ja3-diff error:".red().bold()
+            );
             return ExitCode::from(1);
         }
     };
@@ -187,7 +191,10 @@ async fn run_async(args: Ja3DiffArgs) -> ExitCode {
         match serde_json::to_string_pretty(&blob) {
             Ok(s) => println!("{s}"),
             Err(e) => {
-                eprintln!("{} failed to serialise output: {e}", "ja3-diff error:".red().bold());
+                eprintln!(
+                    "{} failed to serialise output: {e}",
+                    "ja3-diff error:".red().bold()
+                );
                 return ExitCode::from(1);
             }
         }
@@ -274,10 +281,7 @@ fn classify_severity(outcomes: &mut [ProbeOutcome]) {
     }
     // Largest bucket is the baseline. Smaller buckets are
     // candidates for divergence.
-    let baseline_key = buckets
-        .iter()
-        .max_by_key(|(_, v)| v.len())
-        .map(|(k, _)| *k);
+    let baseline_key = buckets.iter().max_by_key(|(_, v)| v.len()).map(|(k, _)| *k);
     let Some((baseline_status, baseline_body_len)) = baseline_key else {
         // No successful probes — all errored; leave severity as-is.
         return;
@@ -299,8 +303,7 @@ fn classify_severity(outcomes: &mut [ProbeOutcome]) {
             let delta = if baseline_body_len == 0 {
                 if body_len == 0 { 0.0 } else { 100.0 }
             } else {
-                ((body_len as f64 - baseline_body_len as f64).abs()
-                    / baseline_body_len as f64)
+                ((body_len as f64 - baseline_body_len as f64).abs() / baseline_body_len as f64)
                     * 100.0
             };
             o.severity = if delta > 20.0 { "medium" } else { "none" };
@@ -450,11 +453,7 @@ mod tests {
             error: None,
             severity: "none",
         };
-        let mut outcomes = vec![
-            mk("chrome131", 0),
-            mk("chrome120", 0),
-            mk("okhttp5", 1024),
-        ];
+        let mut outcomes = vec![mk("chrome131", 0), mk("chrome120", 0), mk("okhttp5", 1024)];
         classify_severity(&mut outcomes);
         // okhttp5 gets a different body length from the zero-baseline
         // cohort. Goes through the 100% delta branch and registers as
