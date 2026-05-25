@@ -79,9 +79,22 @@ export default {
             });
         }
 
-        if (path === '/echo') {
+        if (path === '/echo' || path === '/get') {
+            // `/get?q=…` is the canonical query-carrier the
+            // wafrift-bench corpus targets — every `*.toml` case
+            // with `delivery = "query"` lands here. Aliasing it to
+            // /echo lets the unmodified bench-waf binary point at
+            // this worker without any per-target adapter, which is
+            // what the CF Pro live-bench needs to mean anything.
             const q = url.searchParams.get('q') ?? '';
-            return json({ q: clamp(q) });
+            // Reflect every query parameter so the bench's
+            // multi-param probes also see their inputs round-tripped
+            // — needed for the Tsai-class param-pollution variants.
+            const args: Record<string, string> = {};
+            for (const [k, v] of url.searchParams.entries()) {
+                args[k] = clamp(v);
+            }
+            return json({ q: clamp(q), args });
         }
 
         if (path === '/headers') {
