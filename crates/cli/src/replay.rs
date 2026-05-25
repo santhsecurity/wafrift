@@ -119,7 +119,8 @@ struct ReplayResult {
 
 const REPLAY_SCHEMA_VERSION: u32 = 1;
 
-pub fn run_replay(args: ReplayArgs) -> ExitCode {
+pub fn run_replay(mut args: ReplayArgs) -> ExitCode {
+    args.target = crate::helpers::normalize_target_url(&args.target);
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {

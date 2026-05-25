@@ -179,6 +179,9 @@ pub struct BenchWafArgs {
     /// Only the search-loop strategies (hill-climb / sim-anneal / tabu /
     /// novelty / map-elites) populate lineage — the static strategies have
     /// no chromosome.
+    #[arg(long)]
+    pub lineage_output: Option<PathBuf>,
+
     // ─── Egress rotation (multi-IP evasion of bot-reputation engines) ────────
 
     /// SOCKS5 proxy URL for egress rotation (repeatable).
@@ -206,8 +209,6 @@ pub struct BenchWafArgs {
     /// Seconds a cooled egress entry stays out of rotation. Default: 300.
     #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
     pub egress_cooldown_secs: u64,
-    #[arg(long)]
-    pub lineage_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
