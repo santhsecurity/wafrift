@@ -40,12 +40,29 @@ fn parse_named_encoding(name: &str) -> Option<encoding::Strategy> {
         .find(|strategy| strategy.as_str() == raw)
 }
 
-fn current_winner(state: &HostState) -> Option<&str> {
+/// F146: Pick a winner from `proven_winners` using a per-request hash,
+/// NOT `state.rotation_index`. The transport client clones `HostState`
+/// before calling `evade(&request, &state, ...)` and the cloned state
+/// is dropped after each request — `rotation_index` is therefore never
+/// advanced from this path, and pre-fix every single request through
+/// the non-proxy entry points picked `proven_winners[0]`. The
+/// "round-robin to defeat per-pattern WAF detection" claim was a lie
+/// for transport, replay, and every CLI call site that wasn't the
+/// proxy (which alone calls `next_winner` and gets correct rotation).
+///
+/// Switch to a deterministic hash over (URL + method): different
+/// requests rotate across the winner pool naturally; the SAME request
+/// always picks the same winner (preserves retry/replay semantics).
+fn current_winner<'a>(state: &'a HostState, req: &Request) -> Option<&'a str> {
     if !state.has_winners() {
         return None;
     }
-
-    let idx = state.rotation_index % state.proven_winners.len();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in req.url.bytes().chain(req.method.as_str().bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let idx = (h as usize) % state.proven_winners.len();
     state.proven_winners.get(idx).map(String::as_str)
 }
 
@@ -112,7 +129,7 @@ pub fn evade(request: &Request, state: &HostState, config: &EvasionConfig) -> Ev
     let level = state.escalation_level();
 
     // ── Step 0: Re-use proven winners / last success if available ─────
-    if let Some(winner_name) = current_winner(state)
+    if let Some(winner_name) = current_winner(state, request)
         && apply_named_technique(&mut req, &mut techniques, config, state, winner_name)
     {
         let description = build_description(&techniques);
