@@ -380,7 +380,18 @@ pub async fn send_with_envelope(
                 }
             }
         }
-        _ => client.get(&req.url),
+        // The `Method` enum is `#[non_exhaustive]` so the compiler
+        // forces this arm. Pre-fix this was `_ => client.get(...)`
+        // which silently downgraded the unknown method to GET —
+        // adding a new variant (say `Connect`) without updating
+        // wafrift would have made that variant invisibly fire GETs.
+        // Now: error loudly so the operator sees the missing arm.
+        other => {
+            return Err(format!(
+                "internal: unhandled HTTP method variant {other:?} — \
+                 add an arm in equiv_engine::send_with_envelope"
+            ));
+        }
     };
     for (k, v) in &req.headers {
         builder = builder.header(k, v);
