@@ -379,4 +379,199 @@ mod tests {
             "raw-blocked + no-bypass must exit 4"
         );
     }
+
+    // ─── ADVERSARIAL: pathological attack inputs ──────────────────
+
+    #[test]
+    fn empty_attack_does_not_panic_and_yields_exit_3_or_4() {
+        // Empty body is a degenerate case — sink_view contains
+        // attack_len=0 bytes, which `windows(0)` will match every
+        // position, so reconstruction is trivially true. Whether
+        // exit is 3 or 4 depends on the oracle's classify of an
+        // empty body. The contract: no panic.
+        let oracle = FnOracle::new(|_req: &Request| Ok(Outcome::Block));
+        let code = run_solve_bypass_inner(args("url", ""), oracle);
+        let s = format!("{code:?}");
+        assert!(
+            s.contains("(0)") || s.contains("(3)") || s.contains("(4)"),
+            "empty attack must produce a defined exit code: {s}"
+        );
+    }
+
+    #[test]
+    fn attack_with_null_bytes_no_panic() {
+        let oracle = FnOracle::new(|_req: &Request| Ok(Outcome::Block));
+        let code = run_solve_bypass_inner(args("url", "\0\0attack\0"), oracle);
+        let s = format!("{code:?}");
+        assert!(s.contains("(3)") || s.contains("(4)"));
+    }
+
+    #[test]
+    fn attack_with_unicode_does_not_panic() {
+        let oracle = FnOracle::new(|_req: &Request| Ok(Outcome::Block));
+        let code = run_solve_bypass_inner(args("url", "alert('пëîçÿ')"), oracle);
+        // Cannot assert exact code (depends on URL-decode invertibility
+        // for the bytes). Cannot panic.
+        let _ = code;
+    }
+
+    #[test]
+    fn attack_one_megabyte_does_not_panic() {
+        let huge = "x".repeat(1_048_576);
+        let oracle = FnOracle::new(|_req: &Request| Ok(Outcome::Block));
+        let code = run_solve_bypass_inner(args("url", &huge), oracle);
+        let s = format!("{code:?}");
+        assert!(
+            s.contains("(3)") || s.contains("(4)"),
+            "1 MiB attack must produce a defined exit code: {s}"
+        );
+    }
+
+    // ─── ADVERSARIAL: oracle behaviors ─────────────────────────────
+
+    #[test]
+    fn solver_runs_at_most_a_bounded_number_of_oracle_calls_per_solve() {
+        // Pin: solve_bypass makes at most a small constant number
+        // of oracle calls (control + Danger candidate + All candidate).
+        // If the count balloons, something's wrong with the CEGIS
+        // escalation budget.
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count_clone = count.clone();
+        let oracle = FnOracle::new(move |_req: &Request| {
+            count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Outcome::Block)
+        });
+        let _ = run_solve_bypass_inner(args("url", "<script>"), oracle);
+        let n = count.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            (1..=10).contains(&n),
+            "expected 1..=10 oracle calls (1 raw + 0..2 candidates from inner + \
+             additional from solve_bypass), got {n}"
+        );
+    }
+
+    #[test]
+    fn oracle_error_propagates_to_exit_1() {
+        // An oracle that returns Err must surface a non-zero exit.
+        let oracle = FnOracle::new(|_req: &Request| {
+            Err(wafrift_wafmodel::WafModelError::Oracle("simulated".into()))
+        });
+        let code = run_solve_bypass_inner(args("url", "<script>"), oracle);
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(1)),
+            "oracle error must exit 1, not panic"
+        );
+    }
+
+    #[test]
+    fn flapping_oracle_does_not_hang() {
+        // Oracle that toggles Pass/Block per call — solver must
+        // make a consistent decision within bounded queries.
+        let toggle = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let toggle_clone = toggle.clone();
+        let oracle = FnOracle::new(move |_req: &Request| {
+            let prev = toggle_clone.fetch_xor(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(if prev { Outcome::Pass } else { Outcome::Block })
+        });
+        let start = std::time::Instant::now();
+        let _ = run_solve_bypass_inner(args("url", "<script>"), oracle);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "flapping oracle must converge within 1 s"
+        );
+    }
+
+    // ─── ADVERSARIAL: every sink-preset boundary ───────────────────
+
+    #[test]
+    fn every_sink_preset_handles_high_byte_payload() {
+        for sink in ["url", "double-url", "html-entity", "json"] {
+            let p = sink_preset(sink).expect("preset");
+            let out = p.apply(&[0xff, 0xfe, 0xfd]);
+            // Decoders must not panic; output may be partial.
+            assert!(out.len() <= 3 || out.len() < 1000); // bounded
+        }
+    }
+
+    #[test]
+    fn url_preset_does_not_decode_single_percent() {
+        let p = sink_preset("url").unwrap();
+        // `%` not followed by two hex digits should pass through
+        // — verifying our claim in the preset docstring.
+        let out = p.apply(b"a%");
+        assert_eq!(out, b"a%");
+    }
+
+    #[test]
+    fn url_preset_does_not_decode_percent_xy_invalid_hex() {
+        let p = sink_preset("url").unwrap();
+        let out = p.apply(b"a%ZZ");
+        assert_eq!(out, b"a%ZZ");
+    }
+
+    #[test]
+    fn url_preset_is_idempotent_on_already_decoded() {
+        let p = sink_preset("url").unwrap();
+        let once = p.apply(b"hello world");
+        let twice = p.apply(&once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn double_url_preset_decodes_what_url_does_not() {
+        let url = sink_preset("url").unwrap();
+        let double = sink_preset("double-url").unwrap();
+        // `%253C` — single decode: `%3C`. Double decode: `<`.
+        let one = url.apply(b"%253C");
+        let two = double.apply(b"%253C");
+        assert_eq!(one, b"%3C");
+        assert_eq!(two, b"<");
+        assert_ne!(one, two);
+    }
+
+    // ─── ADVERSARIAL: determinism + output schema ──────────────────
+
+    #[test]
+    fn inner_is_deterministic_for_same_oracle_and_args() {
+        // Same oracle, same args → same exit. solve_bypass is
+        // deterministic by construction (structural preimage is
+        // pure of attack bytes + sink); pin this.
+        let oracle1 = FnOracle::new(|_req: &Request| Ok(Outcome::Block));
+        let oracle2 = FnOracle::new(|_req: &Request| Ok(Outcome::Block));
+        let a = run_solve_bypass_inner(args("url", "<script>"), oracle1);
+        let b = run_solve_bypass_inner(args("url", "<script>"), oracle2);
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    }
+
+    #[test]
+    fn different_sinks_can_produce_different_outcomes() {
+        // For the same attack bytes, two sinks may have different
+        // invertibility. If they ALL match, the test below covers
+        // the symmetric case; this test only requires that the
+        // sinks are queried independently.
+        let oracle1 = FnOracle::new(|req: &Request| {
+            let body = req.body_bytes().unwrap_or(&[]);
+            if body.windows(8).any(|w| w == b"<script>") {
+                Ok(Outcome::Block)
+            } else {
+                Ok(Outcome::Pass)
+            }
+        });
+        let oracle2 = FnOracle::new(|req: &Request| {
+            let body = req.body_bytes().unwrap_or(&[]);
+            if body.windows(8).any(|w| w == b"<script>") {
+                Ok(Outcome::Block)
+            } else {
+                Ok(Outcome::Pass)
+            }
+        });
+        // URL sink invertibility should succeed.
+        let a = run_solve_bypass_inner(args("url", "<script>"), oracle1);
+        // JSON sink — sink view of `<script>` reconstructs.
+        let b = run_solve_bypass_inner(args("json", "<script>"), oracle2);
+        // Both should find bypasses (exit 0); pin this.
+        assert_eq!(format!("{a:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(format!("{b:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
 }

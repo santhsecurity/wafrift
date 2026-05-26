@@ -513,6 +513,7 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         corpus_fingerprint: String::new(),
         target_waf: String::new(),
         h1_archive: None,
+        lattice_max_chains: 256,
     }
 }
 
@@ -686,4 +687,177 @@ fn dilution_threshold_matches_evolution_default() {
     // default threshold rather than a local magic number. If the
     // crate-level default changes, this catches the drift.
     assert!((wafrift_evolution::dilution::DEFAULT_DILUTION_THRESHOLD - 25.0).abs() < 1e-9);
+}
+
+// ── polyglot strategy: build_polyglots ──────────────────────────
+
+#[test]
+fn polyglots_produce_at_least_four_distinct_skeletons() {
+    let polys = build_polyglots("' OR 1=1--");
+    let skeletons: std::collections::HashSet<&'static str> =
+        polys.iter().map(|(s, _, _)| *s).collect();
+    assert!(
+        skeletons.len() >= 4,
+        "polyglot strategy must produce ≥4 distinct skeletons \
+         (otherwise H1 dedup collapses them into one bypass): {:?}",
+        skeletons
+    );
+}
+
+#[test]
+fn polyglots_embed_the_attack_in_every_variant() {
+    // Every polyglot body MUST contain the attack — otherwise it's
+    // not delivering the payload, just confusing CT routing for no
+    // reason.
+    let attack = "' OR 1=1--";
+    for (skel, _ct, body) in build_polyglots(attack) {
+        let urlenc = urlencoding::encode(attack);
+        let json_esc = json_escape_value(attack);
+        let plain = attack;
+        assert!(
+            body.contains(plain) || body.contains(&*urlenc) || body.contains(&json_esc),
+            "polyglot skeleton {skel:?} did not embed attack: body={body:?}"
+        );
+    }
+}
+
+#[test]
+fn polyglots_declare_distinct_content_types() {
+    let polys = build_polyglots("x");
+    let cts: std::collections::HashSet<&'static str> =
+        polys.iter().map(|(_, ct, _)| *ct).collect();
+    assert!(
+        cts.contains("application/json"),
+        "missing JSON declaration: {cts:?}"
+    );
+    assert!(
+        cts.iter().any(|c| c.starts_with("application/x-www-form-urlencoded")),
+        "missing form-urlencoded declaration: {cts:?}"
+    );
+    assert!(
+        cts.iter().any(|c| c.starts_with("multipart/form-data")),
+        "missing multipart declaration: {cts:?}"
+    );
+}
+
+#[test]
+fn polyglots_empty_attack_does_not_panic() {
+    // Adversarial: empty attack must produce structurally-valid
+    // polyglots (the attack segment is empty, but the wrappers
+    // remain).
+    let polys = build_polyglots("");
+    assert!(!polys.is_empty(), "even empty attacks must produce polyglots");
+    for (_skel, _ct, body) in &polys {
+        assert!(!body.is_empty(), "polyglot body must not be empty");
+    }
+}
+
+#[test]
+fn polyglots_unicode_attack_passes_through() {
+    let polys = build_polyglots("alert('пëîçÿ')");
+    assert!(polys.len() >= 4);
+    for (_skel, _ct, body) in &polys {
+        // Either url-encoded or json-escaped form should appear.
+        assert!(body.contains("alert") || body.contains("%27") || body.contains("alert"));
+    }
+}
+
+#[test]
+fn polyglots_huge_attack_one_megabyte() {
+    // Adversarial: large attack must not panic and bodies grow
+    // bounded-by-input.
+    let huge = "x".repeat(1_048_576);
+    let polys = build_polyglots(&huge);
+    assert!(polys.len() >= 4);
+    for (_skel, _ct, body) in &polys {
+        assert!(body.len() >= huge.len(), "body must contain at least the attack");
+        assert!(body.len() < huge.len() * 10, "body must not balloon 10x");
+    }
+}
+
+#[test]
+fn polyglots_with_control_chars_are_json_safe() {
+    // Adversarial: attack contains a literal `"` that must NOT
+    // break out of the JSON-doc-as-form skeleton.
+    let polys = build_polyglots("\"break-out\"");
+    let json_skel = polys
+        .iter()
+        .find(|(s, _, _)| *s == "json_doc_as_form")
+        .expect("json_doc_as_form skeleton must exist");
+    // The JSON-doc-as-form body must be parseable as JSON.
+    let parsed: Result<serde_json::Value, _> = serde_json::from_str(&json_skel.2);
+    assert!(
+        parsed.is_ok(),
+        "json_doc_as_form body must be valid JSON even with attack containing `\"`: {}",
+        json_skel.2
+    );
+}
+
+#[test]
+fn polyglots_with_null_byte_attack_no_panic() {
+    let polys = build_polyglots("attack\0nul");
+    assert!(polys.len() >= 4);
+}
+
+// ── json_escape_value invariants ────────────────────────────────
+
+#[test]
+fn json_escape_value_escapes_quote_backslash_newline() {
+    assert_eq!(json_escape_value("a\"b"), "a\\\"b");
+    assert_eq!(json_escape_value("a\\b"), "a\\\\b");
+    assert_eq!(json_escape_value("a\nb"), "a\\nb");
+    assert_eq!(json_escape_value("a\rb"), "a\\rb");
+    assert_eq!(json_escape_value("a\tb"), "a\\tb");
+}
+
+#[test]
+fn json_escape_value_escapes_low_control_chars_as_unicode() {
+    // \x01..\x1f must be \uXXXX-escaped.
+    let s = "\x01\x07\x1b";
+    let esc = json_escape_value(s);
+    assert!(esc.contains("\\u0001"));
+    assert!(esc.contains("\\u0007"));
+    assert!(esc.contains("\\u001b"));
+}
+
+#[test]
+fn json_escape_value_idempotent_on_safe_input() {
+    let safe = "hello world";
+    assert_eq!(json_escape_value(safe), safe);
+}
+
+#[test]
+fn json_escape_value_output_is_valid_json_when_wrapped() {
+    // After wrapping the escaped value in `"..."`, the result must
+    // be a valid JSON string literal.
+    for raw in [
+        "simple",
+        "with \"quote\"",
+        "with\nnewline",
+        "with\\backslash",
+        "tab\there",
+        "\u{0007}bell",
+        "пëîçÿ",
+    ] {
+        let wrapped = format!("\"{}\"", json_escape_value(raw));
+        let parsed: Result<String, _> = serde_json::from_str(&wrapped);
+        assert!(
+            parsed.is_ok(),
+            "wrapped json_escape_value({raw:?}) = {wrapped:?} must parse as JSON string"
+        );
+        assert_eq!(parsed.unwrap(), raw, "round-trip must equal input");
+    }
+}
+
+#[test]
+fn json_escape_value_no_panic_on_empty() {
+    assert_eq!(json_escape_value(""), "");
+}
+
+#[test]
+fn json_escape_value_no_panic_on_lone_high_unicode() {
+    // High unicode passes through unchanged; pin behaviour.
+    let s = "\u{1F600}"; // 😀
+    let esc = json_escape_value(s);
+    assert_eq!(esc, s, "high unicode passes through unchanged");
 }

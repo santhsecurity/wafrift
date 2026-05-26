@@ -487,6 +487,7 @@ async fn run_one_round(
         corpus_fingerprint,
         target_waf,
         h1_archive: args.h1_archive.clone(),
+        lattice_max_chains: 256,
     };
 
     // Capture stdout temporarily to intercept the bench JSON output.

