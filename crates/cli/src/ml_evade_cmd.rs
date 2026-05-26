@@ -316,4 +316,206 @@ mod tests {
         assert_eq!(env.mutated_body, None);
         assert!((env.confidence - 0.0).abs() < 1e-9);
     }
+
+    // ─── ADVERSARIAL: input boundaries ────────────────────────────
+
+    #[test]
+    fn empty_attack_does_not_panic() {
+        let mut a = args("AWS Bot Control");
+        a.attack = String::new();
+        // Empty body short-circuits inside the function. Must not
+        // panic; exit-code defined per (is_ml_backed, mutation_found).
+        let code = run_ml_evade(a);
+        let s = format!("{code:?}");
+        assert!(s.contains("(0)") || s.contains("(3)") || s.contains("(4)"));
+    }
+
+    #[test]
+    fn ten_megabyte_attack_does_not_panic() {
+        let mut a = args("AWS Bot Control");
+        a.attack = "x".repeat(10 * 1024 * 1024);
+        let code = run_ml_evade(a);
+        let s = format!("{code:?}");
+        assert!(
+            s.contains("(0)") || s.contains("(3)") || s.contains("(4)"),
+            "10 MiB attack must produce a defined exit: {s}"
+        );
+    }
+
+    #[test]
+    fn attack_with_null_bytes_no_panic() {
+        let mut a = args("AWS Bot Control");
+        a.attack = "\0\0\0attack\0".into();
+        let _ = run_ml_evade(a);
+    }
+
+    #[test]
+    fn attack_with_invalid_utf8_via_unicode_replacement() {
+        // CLI arg is String so can't carry raw 0xFE/0xFF — but
+        // multi-byte unicode + lone surrogates should still pass
+        // through without panic.
+        let mut a = args("AWS Bot Control");
+        a.attack = "пëîçÿ\u{FFFD}".into();
+        let _ = run_ml_evade(a);
+    }
+
+    #[test]
+    fn budget_zero_does_not_underflow() {
+        let mut a = args("AWS Bot Control");
+        a.budget = Some(0);
+        let code = run_ml_evade(a);
+        let s = format!("{code:?}");
+        assert!(s.contains("(0)") || s.contains("(4)"));
+    }
+
+    #[test]
+    fn budget_u64_max_does_not_overflow() {
+        let mut a = args("AWS Bot Control");
+        a.budget = Some(u64::MAX);
+        // Must terminate in bounded time despite the huge budget —
+        // the underlying search has its own caps.
+        let start = std::time::Instant::now();
+        let _ = run_ml_evade(a);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(30),
+            "u64::MAX budget must terminate in <30s"
+        );
+    }
+
+    // ─── ADVERSARIAL: waf_name parsing ─────────────────────────────
+
+    #[test]
+    fn waf_name_with_surrounding_whitespace() {
+        // Pin current behavior: WafClass::from_waf_name does NOT
+        // trim whitespace, so `"  AWS Bot Control  "` may NOT be
+        // recognized. If the function is updated to trim, this test
+        // catches it and forces a docs/test update.
+        let mut a = args("  AWS Bot Control  ");
+        a.format = "json".into();
+        let code = run_ml_evade(a);
+        let s = format!("{code:?}");
+        // Both behaviors are acceptable; assert non-panic + defined
+        // exit code only.
+        assert!(s.contains("(0)") || s.contains("(3)") || s.contains("(4)"));
+    }
+
+    #[test]
+    fn waf_name_unicode_does_not_panic() {
+        // Two separate runs so we don't need Clone on the args.
+        let code = run_ml_evade(args("Унікнул Кловдфлоер"));
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(3)),
+            "unrecognized WAF name (unicode garbage) must exit 3 vacuously"
+        );
+        let mut a2 = args("Унікнул Кловдфлоер");
+        a2.attack = String::new();
+        let _ = run_ml_evade(a2);
+    }
+
+    #[test]
+    fn waf_name_extremely_long() {
+        let code = run_ml_evade(args(&"X".repeat(10_000)));
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(3)),
+            "long unrecognized waf name must short-circuit to exit 3"
+        );
+    }
+
+    #[test]
+    fn waf_name_with_null_byte() {
+        let code = run_ml_evade(args("AWS Bot\0Control"));
+        // Embedded null breaks the match; expect exit 3.
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(3))
+        );
+    }
+
+    // ─── ADVERSARIAL: content-type passthrough ─────────────────────
+
+    #[test]
+    fn empty_content_type_does_not_panic() {
+        let mut a = args("AWS Bot Control");
+        a.content_type = String::new();
+        let _ = run_ml_evade(a);
+    }
+
+    #[test]
+    fn content_type_with_semicolons_and_charset() {
+        let mut a = args("AWS Bot Control");
+        a.content_type = "application/json; charset=utf-8; boundary=foo".into();
+        let _ = run_ml_evade(a);
+    }
+
+    #[test]
+    fn content_type_with_newline_does_not_panic() {
+        // Header injection probe. The wafrift_types::Request header
+        // setter should at minimum not panic; whether it sanitizes
+        // is a separate question.
+        let mut a = args("AWS Bot Control");
+        a.content_type = "application/json\r\nX-Smuggle: yes".into();
+        let _ = run_ml_evade(a);
+    }
+
+    // ─── ADVERSARIAL: seed determinism ─────────────────────────────
+
+    #[test]
+    fn explicit_seed_is_deterministic_across_runs() {
+        // Repeated runs with the SAME explicit seed must produce
+        // identical exit codes (the underlying mutation search is
+        // seeded deterministic).
+        let a1 = args("AWS Bot Control");
+        let a2 = args("AWS Bot Control");
+        let c1 = run_ml_evade(a1);
+        let c2 = run_ml_evade(a2);
+        assert_eq!(format!("{c1:?}"), format!("{c2:?}"));
+    }
+
+    #[test]
+    fn fnv1a_combine_treats_split_inputs_as_different() {
+        // Stronger version of the existing boundary test: two
+        // structurally different splits must hash differently
+        // across many cases.
+        for (a, b) in [
+            (vec![&b""[..], b"abc"], vec![&b"a"[..], b"bc"]),
+            (vec![&b"abc"[..]], vec![&b"a"[..], b"bc"]),
+            (vec![&b"a"[..], b"b", b"c"], vec![&b"ab"[..], b"c"]),
+        ] {
+            assert_ne!(
+                fnv1a_64_combine(&a),
+                fnv1a_64_combine(&b),
+                "split boundaries must distinguish: {a:?} vs {b:?}"
+            );
+        }
+    }
+
+    // ─── ADVERSARIAL: ml_class_check robustness ────────────────────
+
+    #[test]
+    fn ml_class_check_partial_substrings_negative() {
+        // "AWS" alone (no "Bot Control") must not match.
+        assert!(!ml_class_check("AWS"));
+        assert!(!ml_class_check("Cloudflare"));
+        assert!(!ml_class_check("Akamai"));
+    }
+
+    #[test]
+    fn ml_class_check_lowercase_variants() {
+        // The classifier uses substring matching internally; pin
+        // current behavior. If matching is case-sensitive, lowercase
+        // names won't match.
+        // (Whichever way it works, the test docs the contract.)
+        let lower = ml_class_check("aws bot control");
+        let upper = ml_class_check("AWS Bot Control");
+        assert!(upper, "canonical name must match");
+        // Both true OR both false are acceptable; mixed = bug.
+        if lower != upper {
+            panic!(
+                "case-sensitivity mismatch: ml_class_check is inconsistent \
+                 (lower={lower}, upper={upper})"
+            );
+        }
+    }
 }

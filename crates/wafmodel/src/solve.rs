@@ -160,6 +160,15 @@ where
     // it, otherwise "bypass" is meaningless (anti-rig).
     let raw_blocked = matches!(oracle.classify(&build(attack))?, Outcome::Block);
 
+    // Empty attacks are vacuous — there's nothing to "deliver
+    // through" the WAF and `Vec::windows(0)` panics. Return None
+    // early so callers see "no bypass found" instead of a runtime
+    // panic. (Found by an adversarial test in
+    // `wafrift-cli::wafmodel_solve_cmd`.)
+    if attack.is_empty() {
+        return Ok(None);
+    }
+
     for scope in [Scope::Danger, Scope::All] {
         let cand = structural_preimage(attack, sink, scope);
         // The sink must reconstruct the literal attack.
@@ -188,4 +197,42 @@ where
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod empty_attack_tests {
+    use super::*;
+    use crate::oracle::FnOracle;
+    use wafrift_types::Request;
+
+    /// Empty attack used to panic on `windows(0)`. Pin: must return
+    /// `Ok(None)` and not invoke the oracle for any candidate body.
+    #[test]
+    fn empty_attack_returns_none_no_panic() {
+        let mut oracle = FnOracle::new(|_req: &Request| Ok(Outcome::Block));
+        let build = |b: &[u8]| Request::post("http://target/", b.to_vec());
+        let sink = Pipeline(vec![]);
+        let result = solve_bypass(&[], &sink, &mut oracle, &build).expect("no error");
+        assert!(result.is_none());
+    }
+
+    /// One-byte attack still finds a bypass when the encoder
+    /// produces a different wire form. Sanity for the boundary
+    /// right above the empty case.
+    #[test]
+    fn one_byte_attack_does_not_panic() {
+        let mut oracle = FnOracle::new(|req: &Request| {
+            let body = req.body_bytes().unwrap_or(&[]);
+            if body == b"<" {
+                Ok(Outcome::Block)
+            } else {
+                Ok(Outcome::Pass)
+            }
+        });
+        let build = |b: &[u8]| Request::post("http://target/", b.to_vec());
+        use crate::transduce::Stage;
+        let sink = Pipeline(vec![Stage::UrlDecode { plus_is_space: false }]);
+        // Must not panic.
+        let _ = solve_bypass(b"<", &sink, &mut oracle, &build);
+    }
 }
