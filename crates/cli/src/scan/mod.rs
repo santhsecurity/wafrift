@@ -1398,7 +1398,7 @@ pub(crate) async fn run_scan(
                  Aborting — the target is throttling us, so any \"bypass/blocked\" \
                  verdict would be noise, not signal.\n  Remedies:\n    \
                  • raise --delay-ms (e.g. --delay-ms 2000) to stay under the limit\n    \
-                 • spread requests across egress IPs (origin-bypass / proxy-pool / Tor)\n    \
+                 • spread requests across egress IPs (--egress-socks5 / --egress-http-proxy / --egress-tailscale-nodes)\n    \
                  • test an endpoint that is not behind the per-IP limiter",
                 "RATE-LIMITED:".yellow().bold(),
                 _rate_limited,

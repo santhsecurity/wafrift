@@ -43,15 +43,10 @@ rquest-util = { workspace = true, optional = true }
 # Also pulled in transitively by reqwest in default builds, so this
 # explicit declaration doesn't bloat anything.
 futures-util = { workspace = true, optional = true }
-# gossan-origin = { path = "../../../gossan/crates/origin", optional = true }
+rand = { workspace = true }
 
 [features]
-# proxy-pool enables the round-robin proxy rotation path in EvasionClient.
-# The pool module is always compiled in (it is pure logic); this feature
-# gates only the reqwest::Proxy wiring inside client.rs.
-proxy-pool = []
-# origin-bypass = ["dep:gossan-origin"]
-origin-bypass = []
+proxy-pool = ["dep:wafrift-pool"]
 # Wire-identical browser TLS ClientHello via rquest + BoringSSL.
 # When enabled, `transport::stealth::StealthClient` is available and
 # `--tls-impersonate chrome131` (et al.) on scan/proxy paths produces

@@ -29,6 +29,7 @@ mod equiv_engine;
 mod evade_cmd;
 mod explain;
 mod http3_frames_cmd;
+mod wafmodel_solve_cmd;
 mod gql_diff_cmd;
 mod h2_diff_cmd;
 mod header_diff_cmd;
@@ -387,6 +388,15 @@ enum Commands {
     /// external QUIC client (quinn, msquic).
     #[command(name = "http3-frames")]
     Http3Frames(http3_frames_cmd::Http3FramesArgs),
+
+    /// Solve for a structural-preimage bypass of a live WAF using
+    /// `wafrift_wafmodel::solve_bypass` (CEGIS). Given an attack and
+    /// a sink decoding pipeline, finds bytes that the live WAF
+    /// passes AND that the sink decodes back to the literal attack.
+    /// Anti-rig: if the raw attack is not blocked, exits 3 (vacuous);
+    /// if blocked but no bypass exists, exits 4.
+    #[command(name = "solve-bypass")]
+    SolveBypass(wafmodel_solve_cmd::SolveBypassArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -1157,6 +1167,7 @@ fn main() -> ExitCode {
         Some(Commands::Hunt(args)) => hunt_cmd::run_hunt(args),
         Some(Commands::Corpus(args)) => corpus_cmd::run_corpus(args),
         Some(Commands::Http3Frames(args)) => http3_frames_cmd::run_http3_frames(args),
+        Some(Commands::SolveBypass(args)) => wafmodel_solve_cmd::run_solve_bypass(args),
     }
 }
 

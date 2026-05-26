@@ -107,12 +107,9 @@ flate2 = "1"
 serial_test = "3"
 
 [features]
-# proxy-pool (HTTP/SOCKS proxy rotation via wafrift-pool) is on by default
-# now that the CLI ships full transport features. origin-bypass and
-# gossan-integration remain opt-in because they pull in larger deps.
+# proxy-pool (HTTP/SOCKS proxy rotation via wafrift-pool) is on by
+# default now that the CLI ships full transport features.
 default = ["proxy-pool"]
-gossan-integration = ["origin-bypass"]
-origin-bypass = ["wafrift-transport/origin-bypass"]
 proxy-pool = ["wafrift-transport/proxy-pool"]
 # `tls-impersonate` unlocks the `wafrift ja3-diff` subcommand (and any
 # future stealth-client CLI surface). It pulls in rquest + BoringSSL,
