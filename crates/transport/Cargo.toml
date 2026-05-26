@@ -46,7 +46,7 @@ futures-util = { workspace = true, optional = true }
 rand = { workspace = true }
 
 [features]
-proxy-pool = ["dep:wafrift-pool"]
+proxy-pool = []
 # Wire-identical browser TLS ClientHello via rquest + BoringSSL.
 # When enabled, `transport::stealth::StealthClient` is available and
 # `--tls-impersonate chrome131` (et al.) on scan/proxy paths produces
