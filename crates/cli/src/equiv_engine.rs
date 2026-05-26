@@ -348,12 +348,38 @@ pub async fn send_with_envelope(
     timeout_secs: u64,
 ) -> Result<(u16, bool, f64), String> {
     let start = std::time::Instant::now();
-    let mut builder = match req.method {
+    // Map our `Method` enum to reqwest's method. Pre-fix the match
+    // had an `_ => client.get(...)` catch-all that silently
+    // downgraded HEAD, OPTIONS, and Custom(_) methods to GET. Two
+    // real impacts:
+    //   1. A `wafrift scan` probing for cache poisoning via PURGE
+    //      (or WebDAV PROPFIND, or any Custom method) would fire
+    //      GETs instead — the actual cache control surface never
+    //      gets exercised and the bypass is silently missed.
+    //   2. A HEAD probe meant to check 404-vs-403 without pulling
+    //      the body would fetch the body anyway, blowing the
+    //      transport budget on every scan.
+    // Map all variants explicitly. `#[non_exhaustive]` on the enum
+    // means future-added variants must be added here too — caught
+    // by the compiler.
+    let mut builder = match &req.method {
         Method::Get => client.get(&req.url),
         Method::Post => client.post(&req.url),
         Method::Put => client.put(&req.url),
         Method::Delete => client.delete(&req.url),
         Method::Patch => client.patch(&req.url),
+        Method::Head => client.head(&req.url),
+        Method::Options => client.request(reqwest::Method::OPTIONS, &req.url),
+        Method::Custom(name) => {
+            match reqwest::Method::from_bytes(name.as_bytes()) {
+                Ok(m) => client.request(m, &req.url),
+                Err(e) => {
+                    return Err(format!(
+                        "invalid HTTP method {name:?}: {e}"
+                    ));
+                }
+            }
+        }
         _ => client.get(&req.url),
     };
     for (k, v) in &req.headers {
@@ -897,5 +923,140 @@ mod tests {
     fn is_valid_nosql_identity_holds() {
         let p = r#"{"$ne": null}"#;
         assert!(is_valid_nosql(p, p));
+    }
+
+    // ── method routing in send_with_envelope ──────────────────────
+    //
+    // PRE-FIX BUG: the method match arm had `_ => client.get(...)`
+    // as a catch-all, silently downgrading HEAD, OPTIONS, and
+    // Custom(_) methods to GET. A scan probing for PURGE cache
+    // poisoning, WebDAV PROPFIND bypasses, or HEAD-only 404-vs-403
+    // detection would fire GET instead — the entire vulnerability
+    // class would be invisible to wafrift.
+    //
+    // We can't test against a real network here, but we CAN verify
+    // the request builder picks the right method by spinning up a
+    // mock and observing the request line.
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn spawn_mock_capturing_method() -> (std::net::SocketAddr, std::sync::Arc<tokio::sync::Mutex<String>>) {
+        let observed = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let observed_clone = observed.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return; };
+                let observed = observed_clone.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let method = req
+                        .lines()
+                        .next()
+                        .and_then(|l| l.split_whitespace().next())
+                        .unwrap_or("")
+                        .to_string();
+                    *observed.lock().await = method;
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .await;
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        (addr, observed)
+    }
+
+    fn req_with_method(method: Method, url: String) -> Request {
+        // Request is `#[non_exhaustive]` so the only way to construct
+        // it from outside the types crate is via `Request::get` etc.
+        // Start with GET, then overwrite the public `method` field.
+        let mut r = Request::get(url);
+        r.method = method;
+        r
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_envelope_routes_head_method_not_silently_as_get() {
+        let (addr, observed) = spawn_mock_capturing_method().await;
+        let client = reqwest::Client::new();
+        let req = req_with_method(Method::Head, format!("http://{addr}/"));
+        let result = send_with_envelope(&client, &req, 5).await;
+        assert!(result.is_ok(), "send_with_envelope must succeed against mock");
+        assert_eq!(
+            *observed.lock().await,
+            "HEAD",
+            "HEAD must NOT be downgraded to GET"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_envelope_routes_options_method() {
+        let (addr, observed) = spawn_mock_capturing_method().await;
+        let client = reqwest::Client::new();
+        let req = req_with_method(Method::Options, format!("http://{addr}/"));
+        let result = send_with_envelope(&client, &req, 5).await;
+        assert!(result.is_ok(), "send_with_envelope must succeed against mock");
+        assert_eq!(*observed.lock().await, "OPTIONS");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_envelope_routes_custom_method_for_cache_poisoning() {
+        // PURGE is THE classic cache-poisoning method. Pre-fix it
+        // was silently sent as GET — the cache-control surface was
+        // never exercised; wafrift would never see a cache-poisoning
+        // bypass even when present.
+        let (addr, observed) = spawn_mock_capturing_method().await;
+        let client = reqwest::Client::new();
+        let req = req_with_method(Method::Custom("PURGE".into()), format!("http://{addr}/"));
+        let result = send_with_envelope(&client, &req, 5).await;
+        assert!(result.is_ok(), "send_with_envelope must succeed against mock");
+        assert_eq!(
+            *observed.lock().await,
+            "PURGE",
+            "Custom('PURGE') must go out as PURGE on the wire — \
+             the cache-poisoning surface depends on it"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_envelope_routes_custom_propfind_method_for_webdav() {
+        // PROPFIND is the WebDAV-enumeration method commonly used
+        // in WebDAV-aware bypasses (Sharepoint, ownCloud, IIS).
+        let (addr, observed) = spawn_mock_capturing_method().await;
+        let client = reqwest::Client::new();
+        let req = req_with_method(Method::Custom("PROPFIND".into()), format!("http://{addr}/"));
+        let result = send_with_envelope(&client, &req, 5).await;
+        assert!(result.is_ok(), "send_with_envelope must succeed against mock");
+        assert_eq!(*observed.lock().await, "PROPFIND");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_envelope_rejects_garbage_custom_method() {
+        // An obviously-invalid method name (containing CR/LF) MUST
+        // error rather than smuggle. reqwest::Method::from_bytes
+        // catches this.
+        let client = reqwest::Client::new();
+        let req = req_with_method(
+            Method::Custom("BAD\r\nSmuggled: yes".into()),
+            "http://127.0.0.1:1/".into(),
+        );
+        let result = send_with_envelope(&client, &req, 1).await;
+        assert!(
+            result.is_err(),
+            "CRLF-bearing custom method must reject"
+        );
+        let err = match result {
+            Ok(_) => unreachable!("checked is_err above"),
+            Err(e) => e,
+        };
+        assert!(
+            err.contains("invalid HTTP method") || err.contains("BAD"),
+            "error must name the rejection cause: {err}"
+        );
     }
 }
