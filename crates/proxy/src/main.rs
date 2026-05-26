@@ -538,15 +538,104 @@ fn default_gene_bank_path(supplied: &str) -> Option<std::path::PathBuf> {
     }
 }
 
-// Gene-bank persistence (PersistedHostState, PersistedGeneBank,
-// default_gene_bank_path, load_gene_bank, save_gene_bank,
-// restore_gene_bank) lives in `crate::gene_bank_io`. Re-export the
-// fn names callers use locally so the move doesn't touch every
-// call site in this binary.
-use crate::gene_bank_io::{
-    default_gene_bank_path, load as load_gene_bank, restore as restore_gene_bank,
-    save as save_gene_bank,
-};
+fn load_gene_bank(path: &std::path::Path) -> PersistedGeneBank {
+    match std::fs::read_to_string(path) {
+        Ok(s) => {
+            if s.trim().is_empty() {
+                info!(path = %path.display(), "gene bank file is empty; starting fresh");
+                return PersistedGeneBank::default();
+            }
+            match serde_json::from_str::<PersistedGeneBank>(&s) {
+                Ok(bank) => {
+                    if bank.schema > 1 {
+                        warn!(
+                            path = %path.display(),
+                            schema = bank.schema,
+                            "gene bank has newer schema than expected (1); data may be incomplete"
+                        );
+                    }
+                    bank
+                }
+                Err(e) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "gene bank malformed (invalid JSON); starting fresh. Fix: inspect the file and fix the JSON syntax, or delete it to start over."
+                    );
+                    PersistedGeneBank::default()
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            info!(path = %path.display(), "gene bank not found; starting fresh");
+            PersistedGeneBank::default()
+        }
+        Err(e) => {
+            warn!(
+                path = %path.display(),
+                error = %e,
+                "gene bank unreadable; starting fresh. Fix: check file permissions."
+            );
+            PersistedGeneBank::default()
+        }
+    }
+}
+
+fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut bank = PersistedGeneBank {
+        schema: 1,
+        hosts: HashMap::new(),
+    };
+    for (host, hs) in &state.hosts {
+        if hs.proven_winners.is_empty() && hs.blocklisted.is_empty() {
+            continue; // skip empty hosts to keep the file small
+        }
+        bank.hosts.insert(
+            host.clone(),
+            PersistedHostState {
+                proven_winners: hs.proven_winners.clone(),
+                blocklisted: hs.blocklisted.clone(),
+                waf_name: hs.waf_name.clone(),
+            },
+        );
+    }
+    let json = serde_json::to_string_pretty(&bank)?;
+    // Atomic, durable write via tempfile + fsync + rename + parent fsync.
+    // Without the fsyncs a system crash between write and rename can leave
+    // the renamed file zero-length or partially flushed.
+    let tmp = path.with_extension("json.tmp");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(json.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
+    let mut restored = 0usize;
+    for (host, persisted) in bank.hosts {
+        let hs = state.hosts.entry(host).or_default();
+        if !persisted.proven_winners.is_empty() {
+            hs.proven_winners = persisted.proven_winners;
+            hs.discovery_complete = true;
+            restored += 1;
+        }
+        if !persisted.blocklisted.is_empty() {
+            hs.blocklisted = persisted.blocklisted;
+        }
+        if persisted.waf_name.is_some() {
+            hs.waf_name = persisted.waf_name;
+            hs.waf_confirmed = true;
+        }
+    }
+    restored
+}
 
 use wafrift_proxy::extract_host_from_header;
 

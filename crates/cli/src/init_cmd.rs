@@ -92,10 +92,10 @@ const SCAFFOLD: &str = r#"# .wafrift.toml — wafrift configuration scaffold.
 # Every key below is commented out, so an unmodified file behaves
 # identically to the compiled defaults — uncomment what you need.
 #
-# `wafrift scan` AUTO-LOADS this file (./.wafrift.toml, then
-# ~/.config/wafrift/config.toml). Precedence is: CLI flag > this file >
-# compiled default — an explicit flag always wins, so the config only
-# fills in values you didn't pass on the command line.
+# NOTE: `wafrift scan` does not yet auto-load this file. The `[scan]`
+# section below documents the keys that match `ScanArgs` flags; they
+# must be passed as CLI flags until the config-integration pass wires
+# `WafRiftConfig::load()` into the scan command.
 #
 # wafrift-proxy is configured via CLI flags, not this file. The values
 # below mirror the proxy flag names so you can copy-paste them into a

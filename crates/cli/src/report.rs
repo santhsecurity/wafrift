@@ -659,6 +659,35 @@ mod tests {
     // truth — one fix, every caller benefits.
 
     #[test]
+    fn shell_escape_roundtrips_through_bash() {
+        // Every printable ASCII character plus some Unicode.
+        let inputs = [
+            "hello world",
+            "it's working",
+            "'\''",
+            "foo;bar|baz",
+            "$(danger)",
+            "`backtick`",
+            "emoji: 🚀",
+        ];
+        for raw in &inputs {
+            let escaped = shell_escape(raw);
+            let script = format!("echo '{}'", escaped);
+            let output = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&script)
+                .output()
+                .expect("bash must be available");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(
+                stdout.trim_end(),
+                *raw,
+                "shell_escape round-trip failed for {raw:?}: script={script:?}"
+            );
+        }
+    }
+
+    #[test]
     fn host_matches_glob_pattern() {
         assert!(host_matches("*.example.com", "api.example.com"));
         assert!(!host_matches("*.example.com", "elsewhere.tld"));

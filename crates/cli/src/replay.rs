@@ -506,10 +506,7 @@ mod tests {
     #[test]
     fn build_url_encodes_utf8_payload() {
         let u = build_url_with_param("https://x/y", "q", "パイロード").unwrap();
-        assert_eq!(
-            u,
-            "https://x/y?q=%E3%83%91%E3%82%A4%E3%83%AD%E3%83%BC%E3%83%89"
-        );
+        assert_eq!(u, "https://x/y?q=%E3%83%91%E3%82%A4%E3%83%AD%E3%83%BC%E3%83%89");
     }
 
     #[test]
