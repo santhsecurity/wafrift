@@ -742,9 +742,34 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     let ua = wafrift_fingerprint::fingerprint::random_profile()
         .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string());
 
-    let mut client_builder = Client::builder()
-        .timeout(std::time::Duration::from_secs(args.timeout_secs))
-        .user_agent(ua);
+    // Build the optional egress pool from --egress-* flags before
+    // the http client. Empty inputs short-circuit to None so the
+    // legacy single-client hot path is unchanged. When any backend
+    // is supplied, every bench request rotates through the pool
+    // with challenge-based cooldown — operators pinning ~thousands
+    // of probes a minute at one IP can now spread the load.
+    let egress_inputs = crate::egress_args::EgressArgs {
+        socks5: &args.egress_socks5,
+        http_proxy: &args.egress_http_proxy,
+        tailscale_nodes: &args.egress_tailscale_nodes,
+        tailscale_socks_addr: &args.egress_tailscale_socks_addr,
+        challenge_threshold: args.egress_challenge_threshold,
+        cooldown_secs: args.egress_cooldown_secs,
+    };
+    let egress_pool = crate::egress_args::build_egress_pool(&egress_inputs)
+        .map_err(|e| format!("egress pool config: {e}"))?;
+    let egress_host = egress_pool
+        .as_ref()
+        .and(crate::egress_args::target_host(&base_url))
+        .unwrap_or_default();
+    let mut client_builder = wafrift_transport::base_client_builder_with_egress(
+        args.timeout_secs,
+        args.insecure,
+        Some(&ua),
+        egress_pool.as_ref(),
+        &egress_host,
+    )
+    .map_err(|e| format!("egress-aware HTTP client: {e}"))?;
     if args.insecure {
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
