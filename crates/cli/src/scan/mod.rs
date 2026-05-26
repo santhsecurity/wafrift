@@ -1048,7 +1048,14 @@ pub(crate) async fn run_scan(
                 &args.param,
                 equiv_budget,
                 args.delay_ms,
-                wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+                // Pre-fix this was hardcoded `DEFAULT_REQUEST_TIMEOUT_SECS`,
+                // ignoring the operator's `--timeout-secs` setting. Every
+                // OTHER scan phase respected request_timeout (the
+                // computed Duration on line ~677), but the equiv moat
+                // hardcoded the default — so an operator who raised
+                // --timeout-secs to handle a slow target would still see
+                // the moat phase time out at the workspace default.
+                request_timeout.as_secs(),
                 &waf_name,
             )
             .await;

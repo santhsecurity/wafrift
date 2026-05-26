@@ -294,14 +294,25 @@ pub async fn run_scan_raw(
 /// captured request file ALREADY carries any cookies / auth headers
 /// they need; layering a second session would double-set them.
 fn build_http_client(args: &ScanArgs) -> Result<Client, ExitCode> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(
-            wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
-        ))
-        .danger_accept_invalid_certs(args.insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(crate::config::shared_user_agent());
-    builder = match pentest_client::apply_pentest_flags(
+    let ua = crate::config::shared_user_agent();
+    // Pre-fix this hardcoded `DEFAULT_REQUEST_TIMEOUT_SECS`, so the
+    // `-r` raw-runner path ignored the operator's `--timeout-secs`.
+    // The non-raw scan path (mod.rs::run_scan) correctly computes
+    // `request_timeout` from args.timeout_secs; raw_runner now
+    // mirrors that logic (0 = workspace default, else operator
+    // value).
+    let timeout_secs = if args.timeout_secs > 0 {
+        args.timeout_secs
+    } else {
+        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS
+    };
+    let mut builder = wafrift_transport::base_client_builder(
+        timeout_secs,
+        args.insecure,
+        Some(&ua),
+    )
+    .redirect(reqwest::redirect::Policy::limited(5));
+    builder = pentest_client::apply_pentest_flags_or_print(
         builder,
         args.proxy.as_deref(),
         &args.header,
