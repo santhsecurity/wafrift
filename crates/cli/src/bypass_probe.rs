@@ -275,7 +275,30 @@ fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
     let Some(ref pf) = args.paths_file else {
         return Ok(vec![args.url.clone()]);
     };
-    let body = std::fs::read_to_string(pf).map_err(|e| format!("read {pf}: {e}"))?;
+    // Pre-fix this was unbounded `std::fs::read_to_string` — an
+    // operator typo (`--paths-file /dev/zero`) or a hostile symlink
+    // would OOM. A 1M-path SecLists file at ~256 bytes/entry is ~256
+    // MiB; 512 MiB cap accommodates the largest legitimate path list.
+    const PATHS_FILE_MAX_BYTES: usize = 512 * 1024 * 1024;
+    let body = match crate::safe_body::read_bounded_text_file(
+        std::path::Path::new(pf),
+        PATHS_FILE_MAX_BYTES,
+    ) {
+        Ok(s) => s,
+        Err(crate::safe_body::ReadError::Transport(msg)) => {
+            return Err(format!("read {pf}: {msg}"));
+        }
+        Err(crate::safe_body::ReadError::Overrun {
+            cap_bytes,
+            observed_bytes,
+        }) => {
+            return Err(format!(
+                "paths file {pf} exceeds {} MiB cap ({} bytes observed)",
+                cap_bytes / (1024 * 1024),
+                observed_bytes
+            ));
+        }
+    };
     // Strip any path component on the base URL — `--paths-file`
     // entries are absolute paths or `scheme://host` overrides, and
     // the only meaningful "base" is the authority.

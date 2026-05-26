@@ -102,7 +102,29 @@ pub fn run_bench_diff(args: BenchDiffArgs) -> ExitCode {
 }
 
 fn load(path: &std::path::Path) -> Result<serde_json::Value, String> {
-    let s = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    // Pre-fix this was unbounded `std::fs::read_to_string` — an
+    // operator typo (`--baseline /dev/zero`) or a hostile symlink
+    // would OOM the bench-diff tool. A bench JSON is typically a few
+    // megabytes; 256 MiB is generous even for many-strategy heavy runs.
+    const BENCH_RESULT_MAX_BYTES: usize = 256 * 1024 * 1024;
+    let s = match crate::safe_body::read_bounded_text_file(
+        path,
+        BENCH_RESULT_MAX_BYTES,
+    ) {
+        Ok(s) => s,
+        Err(crate::safe_body::ReadError::Transport(msg)) => return Err(msg),
+        Err(crate::safe_body::ReadError::Overrun {
+            cap_bytes,
+            observed_bytes,
+        }) => {
+            return Err(format!(
+                "bench result {} exceeds {} MiB cap ({} bytes observed)",
+                path.display(),
+                cap_bytes / (1024 * 1024),
+                observed_bytes
+            ));
+        }
+    };
     serde_json::from_str(&s).map_err(|e| e.to_string())
 }
 
