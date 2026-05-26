@@ -257,6 +257,15 @@ pub enum InstallOutcome {
     AlreadyInstalled,
 }
 
+/// True when `install_global_solver` has completed at least once
+/// in this process. Lets call sites at the challenge-handling
+/// hot path gate on bridge availability without threading a flag
+/// from `main` through every async closure.
+#[must_use]
+pub fn is_installed() -> bool {
+    SOLVER_INSTALLED.get().is_some()
+}
+
 /// Marker function future wafrift binaries call from `main` to
 /// announce the bridge is active. The first caller performs the
 /// install and receives [`InstallOutcome::Installed`]; every
@@ -316,6 +325,19 @@ mod tests {
         // Smoke test — the function only logs, but signature lets
         // callers assume Result.
         install_global_solver().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn is_installed_reflects_install_state() {
+        // OnceLock is process-global so earlier tests may have flipped
+        // it. The contract under test: after `install_global_solver`
+        // succeeds, `is_installed` is true. We can't reset the
+        // OnceLock so we can only check the post-install invariant.
+        install_global_solver().await.unwrap();
+        assert!(
+            is_installed(),
+            "is_installed must be true once install_global_solver has completed"
+        );
     }
 
     #[tokio::test]

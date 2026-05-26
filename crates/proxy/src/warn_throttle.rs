@@ -45,6 +45,16 @@ impl WarnThrottle {
         map.insert(key.to_string(), now);
         true
     }
+
+    /// Cap exposed so the bounded-map test can assert the limit
+    /// without re-declaring the constant. No production caller —
+    /// gated to test builds so a real consumer must show up before
+    /// the function shape can drift.
+    #[cfg(test)]
+    #[must_use]
+    pub fn max_entries() -> usize {
+        MAX_THROTTLE_ENTRIES
+    }
 }
 
 #[cfg(test)]

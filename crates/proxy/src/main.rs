@@ -374,6 +374,70 @@ fn challenge_store() -> &'static wafrift_transport::challenge::ChallengeStore {
     CHALLENGE_STORE.get_or_init(wafrift_transport::challenge::ChallengeStore::new)
 }
 
+/// Attempt to clear a detected managed challenge automatically via
+/// the captchaforge bridge. Returns `true` when a clearance cookie
+/// was captured and recorded; `false` when the bridge is absent or
+/// the solve attempt failed (caller falls back to the operator
+/// prompt).
+///
+/// The wire keeps the bridge feature-gated: builds compiled without
+/// `--features captchaforge` get the constant-false fallback and pay
+/// nothing.  Builds compiled WITH the feature still no-op when the
+/// operator hasn't passed `--captchaforge` (governed by
+/// `is_installed()` on the bridge OnceLock).
+async fn try_auto_solve_challenge(
+    _store: &wafrift_transport::challenge::ChallengeStore,
+    _host: &str,
+    _body: &[u8],
+    _target_url: &str,
+    _kind: wafrift_transport::challenge::ChallengeKind,
+) -> bool {
+    #[cfg(feature = "captchaforge")]
+    {
+        if !wafrift_captchaforge_bridge::is_installed() {
+            return false;
+        }
+        let cfg = wafrift_captchaforge_bridge::current_config().await;
+        // Best-effort: lossy UTF-8 of the body is fine — challenge
+        // pages are HTML which is always at least mostly valid utf-8.
+        let body_str = String::from_utf8_lossy(_body);
+        match wafrift_captchaforge_bridge::solve_and_record(
+            _store,
+            _host,
+            &body_str,
+            _target_url,
+            &cfg,
+        )
+        .await
+        {
+            Ok(Some(outcome)) => {
+                info!(
+                    host = %_host,
+                    kind = %outcome.kind.label(),
+                    elapsed_ms = outcome.elapsed_ms,
+                    "captchaforge auto-solved managed challenge"
+                );
+                true
+            }
+            Ok(None) => {
+                info!(
+                    host = %_host,
+                    "captchaforge bridge ran but did not yield a clearance cookie"
+                );
+                false
+            }
+            Err(e) => {
+                warn!(host = %_host, error = %e, "captchaforge solve failed");
+                false
+            }
+        }
+    }
+    #[cfg(not(feature = "captchaforge"))]
+    {
+        false
+    }
+}
+
 /// Process-wide TUI event channel. `Some` when `--tui` is set; the
 /// dashboard task drains it. Bounded at 10 k events so a slow TTY can't
 /// produce unbounded memory growth on a heavy-traffic proxy (was
@@ -1890,12 +1954,32 @@ async fn forward_wafrift_request(
                 && store.get(&host).is_none()
                 && store.should_prompt_operator(&host)
             {
-                warn!(
-                    host = %host,
-                    kind = %kind.label(),
-                    "managed challenge detected and no clearance cookie on file — clear the \
-                     challenge in a browser; the cookie will be captured on the next response"
-                );
+                // Auto-solve path: when the captchaforge bridge was
+                // installed via `--captchaforge`, fire the headless-
+                // browser solver against this response body and
+                // record the resulting clearance cookie. Falls back
+                // to the operator-prompt warn! when the bridge is
+                // absent (build without the feature, or the flag
+                // wasn't set).  Pre-fix the proxy ONLY warned and
+                // never invoked the solver — every claim in the
+                // --captchaforge install banner ("responses will be
+                // auto-solved") was a lie.
+                let auto_solved = try_auto_solve_challenge(
+                    store,
+                    &host,
+                    &buf,
+                    &wafrift_req.url,
+                    kind,
+                )
+                .await;
+                if !auto_solved {
+                    warn!(
+                        host = %host,
+                        kind = %kind.label(),
+                        "managed challenge detected and no clearance cookie on file — clear the \
+                         challenge in a browser; the cookie will be captured on the next response"
+                    );
+                }
             }
         }
     }
