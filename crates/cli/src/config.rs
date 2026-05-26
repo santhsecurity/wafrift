@@ -6,6 +6,7 @@
 //!
 //! Any field left unset in the config file uses compiled defaults.
 
+use colored::Colorize;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -219,10 +220,28 @@ impl WafRiftConfig {
         if from_default("insecure") {
             args.insecure = self.http.insecure;
         }
-        if from_default("level")
-            && let Some(level) = parse_config_level(&self.scan.level)
-        {
-            args.level = level;
+        if from_default("level") {
+            // Empty = config didn't touch the field (serde default
+            // returns ""). Anything else gets parsed — when parsing
+            // fails (typo like "aggressive") we surface a warning so
+            // the operator notices that their config didn't take
+            // effect, instead of silently using the compiled default.
+            // The function's contract still returns ScanArgs (no
+            // Result threading) so callers don't all gain a new
+            // failure mode for one knob.
+            let raw = self.scan.level.trim();
+            if !raw.is_empty() {
+                match parse_config_level(raw) {
+                    Some(level) => args.level = level,
+                    None => {
+                        eprintln!(
+                            "{} .wafrift.toml: scan.level = {raw:?} is not one of \
+                             [light, medium, heavy] — falling back to the compiled default",
+                            "warn:".bright_yellow().bold()
+                        );
+                    }
+                }
+            }
         }
         if from_default("stealth_browser") && args.stealth_browser.is_none() {
             args.stealth_browser.clone_from(&self.http.stealth_browser);
@@ -471,5 +490,39 @@ delay_ms = 200
         cfg.output.quiet = true;
         let args = cfg.apply_to_scan(default_scan_args(), None);
         assert!(args.quiet, "output.quiet must flow to ScanArgs.quiet");
+    }
+
+    #[test]
+    fn apply_to_scan_valid_level_takes_effect() {
+        let mut cfg = WafRiftConfig::default();
+        cfg.scan.level = "medium".into();
+        let args = cfg.apply_to_scan(default_scan_args(), None);
+        assert!(matches!(args.level, crate::Level::Medium));
+    }
+
+    #[test]
+    fn apply_to_scan_empty_level_preserves_default() {
+        // serde's default is "" — preserve the operator's compiled
+        // default rather than dropping it on the floor.
+        let cfg = WafRiftConfig::default();
+        let pre = default_scan_args();
+        let pre_level = pre.level;
+        let args = cfg.apply_to_scan(default_scan_args(), None);
+        assert_eq!(format!("{:?}", args.level), format!("{:?}", pre_level));
+    }
+
+    #[test]
+    fn apply_to_scan_unknown_level_does_not_panic_and_keeps_default() {
+        // The new path emits a warn! and falls back to the compiled
+        // default — operator notices the misconfig but the scan still
+        // runs. Contract under test: no panic, no Result-typed
+        // signature surprise, and the level field stays at its
+        // pre-apply value (heavy by default).
+        let mut cfg = WafRiftConfig::default();
+        cfg.scan.level = "totally-not-a-real-level".into();
+        let pre = default_scan_args();
+        let pre_level_dbg = format!("{:?}", pre.level);
+        let args = cfg.apply_to_scan(default_scan_args(), None);
+        assert_eq!(format!("{:?}", args.level), pre_level_dbg);
     }
 }

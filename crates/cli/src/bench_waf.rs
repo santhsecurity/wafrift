@@ -106,16 +106,6 @@ pub struct BenchWafArgs {
     #[arg(long, value_delimiter = ',', default_value = "heavy,equiv-cegis")]
     pub strategies: Vec<String>,
 
-    /// DEPRECATED / NO-OP. Oracle gating is now ALWAYS on and cannot be
-    /// disabled — a "bypass" only counts if the per-class oracle agrees
-    /// the effective payload is still a working attack. The previous
-    /// opt-in default (off) meant the headline counted every non-blocked
-    /// response, including mutations that destroyed the payload into
-    /// harmless garbage. That was a rigged metric; honesty is no longer
-    /// optional. Flag retained so existing scripts don't error.
-    #[arg(long, default_value_t = false, hide = true)]
-    pub oracle_gate: bool,
-
     /// Delay between requests (ms) for rate-limit avoidance.
     #[arg(long, default_value_t = 25)]
     pub delay_ms: u64,
@@ -268,6 +258,16 @@ pub struct BenchWafArgs {
     /// implausible. Default empty = no gating (legacy behavior).
     #[arg(long, default_value = "")]
     pub target_waf: String,
+
+    /// Optional HackerOne archive (JSON) of already-submitted bypass
+    /// fingerprints. When supplied alongside `--corpus-out`, the
+    /// corpus recorder uses it to flag duplicate-of-published
+    /// bypasses so they're excluded from the `novel_bypass_count`.
+    /// Default: no archive — every confirmed bypass is treated as
+    /// novel. The file is `H1Archive`-serialized JSON; see
+    /// `wafrift_evolution::h1_dedup::H1Archive::save_atomic`.
+    #[arg(long, value_name = "PATH")]
+    pub h1_archive: Option<std::path::PathBuf>,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
@@ -818,6 +818,41 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // end of bench so a partial-run kill still loses only the in-flight case.
     let mut bypass_corpus: Option<BypassCorpus> =
         args.lineage_output.as_ref().map(|_| BypassCorpus::new());
+
+    // CorpusRecorder: collected when --corpus-out OR --coverage-out is set.
+    // Captures full response envelopes per probe so the per-rule bypass
+    // corpus + edge-POP coverage map can be populated end-to-end. Wrapped
+    // in Arc<Mutex<>> so it can cross await points without changing the
+    // strategy function signatures to async-bounded references.
+    let recorder: Option<std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>> =
+        if args.corpus_out.is_some() || args.coverage_out.is_some() {
+            let fingerprint = if args.corpus_fingerprint.is_empty() {
+                format!("bench:{}", base_url)
+            } else {
+                args.corpus_fingerprint.clone()
+            };
+            // Default to side-by-side paths if only one was set so we
+            // never write a half-state where corpus exists but coverage
+            // doesn't (or vice-versa).
+            let corpus_path = args
+                .corpus_out
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from("wafrift-corpus.json"));
+            let coverage_path = args
+                .coverage_out
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from("wafrift-coverage.json"));
+            Some(std::sync::Arc::new(std::sync::Mutex::new(
+                crate::corpus_recorder::CorpusRecorder::new(
+                    fingerprint,
+                    corpus_path,
+                    coverage_path,
+                    args.h1_archive.clone(),
+                ),
+            )))
+        } else {
+            None
+        };
 
     use std::sync::atomic::Ordering;
 

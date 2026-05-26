@@ -488,7 +488,6 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         evade: false,
         variants: 5,
         strategies: vec!["heavy".into()],
-        oracle_gate: false,
         delay_ms: 25,
         timeout_secs: 15,
         insecure: false,
@@ -513,6 +512,7 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         coverage_out: None,
         corpus_fingerprint: String::new(),
         target_waf: String::new(),
+        h1_archive: None,
     }
 }
 

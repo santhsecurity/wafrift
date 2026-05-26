@@ -309,10 +309,40 @@ pub fn build_live_request_for_delivery(
     d.to_request(target, payload)
 }
 
-/// Fire one `wafrift_types::Request` through the shared reqwest client.
-/// Returns `(status, blocked, latency_ms)`. `blocked` is the SAME
-/// `is_waf_block` signal the scan baseline uses.
-pub async fn send(
+/// Full response envelope returned by [`send_with_envelope`] — gives
+/// downstream consumers (corpus recorder, CF oracle, edge-POP coverage
+/// map) the headers and body they need to attribute the verdict.
+///
+/// `send` and `send_with_envelope` are the only places where the
+/// reqwest response is read. By centralising the read here, every
+/// consumer that wants more than `(status, blocked, latency)` opts
+/// into the same bounded-read + header-clone path.
+pub struct ProbeEnvelope {
+    /// HTTP status code.
+    pub status: u16,
+    /// Response headers as `(name, value)` pairs in the order returned
+    /// by reqwest. Name is lowercased on the wire; we preserve it
+    /// verbatim so callers can pattern-match on case as the WAF saw it.
+    /// Consumed by `CorpusRecorder::record` → `parse_cf_block`.
+    pub headers: Vec<(String, String)>,
+    /// Response body bytes (bounded by `safe_body::DEFAULT_MAX_RESPONSE_BYTES`).
+    /// Consumed by `CorpusRecorder::record` → `parse_cf_block` + `fnv1a_64`.
+    pub body: Vec<u8>,
+    /// Same `is_waf_block` signal `send()` returns.
+    pub blocked: bool,
+    /// Wall-clock for the probe in milliseconds.
+    pub latency_ms: f64,
+}
+
+/// Fire one `wafrift_types::Request` and return the full response
+/// envelope. Used by the corpus-recording wire-up to feed
+/// `wafrift_oracle::cloudflare::parse_cf_block` and the
+/// `EdgePopCoverage` map.
+///
+/// The thin [`send`] wrapper exists for the hot bench loop that only
+/// needs `(status, blocked, latency)` and doesn't pay the cost of
+/// cloning headers it won't read.
+pub async fn send_with_envelope(
     client: &reqwest::Client,
     req: &Request,
     timeout_secs: u64,

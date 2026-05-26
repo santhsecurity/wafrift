@@ -462,7 +462,6 @@ async fn run_one_round(
         evade: true, // hunt always evades
         variants: args.variants,
         strategies: rotate_strategies(&args.strategies, round),
-        oracle_gate: false, // no-op flag
         delay_ms: args.delay_ms,
         timeout_secs: 15,
         insecure: false,
@@ -487,6 +486,7 @@ async fn run_one_round(
         coverage_out,
         corpus_fingerprint,
         target_waf,
+        h1_archive: args.h1_archive.clone(),
     };
 
     // Capture stdout temporarily to intercept the bench JSON output.
