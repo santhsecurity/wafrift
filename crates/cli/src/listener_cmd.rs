@@ -387,9 +387,15 @@ async fn handle_conn(
     // an infinite read loop without ever sending the header
     // terminator. 64 KiB is more than enough for any header section.
     let mut total_read = 0_usize;
-    let mut header_end: Option<usize> = None;
     let header_cap = 64 * 1024;
-    while header_end.is_none() {
+    // Pre-fix this was a `while` loop with an `Option<(usize, usize)>`
+    // sentinel and a trailing `.expect("loop exited only when found")`
+    // — logically infallible because the only `break` was guarded by
+    // `Some(loc)`, but an `expect` in a long-running listener path is
+    // still a panic surface a future refactor could trip. Restructure
+    // as `loop { ... break loc; }` so the value is produced directly
+    // by the loop expression and no Option/expect remains.
+    let (header_end, header_terminator_len) = loop {
         let read_fut = sock.read(&mut buf[total_read..]);
         let n = tokio::time::timeout(read_timeout, read_fut)
             .await
@@ -399,9 +405,8 @@ async fn handle_conn(
             return Err("EOF before headers complete".into());
         }
         total_read += n;
-        if let Some(pos) = find_double_crlf(&buf[..total_read]) {
-            header_end = Some(pos);
-            break;
+        if let Some(loc) = find_double_crlf(&buf[..total_read]) {
+            break loc;
         }
         if total_read >= header_cap {
             return Err("header too large".into());
@@ -409,9 +414,9 @@ async fn handle_conn(
         if total_read == buf.len() {
             buf.resize(buf.len() * 2, 0);
         }
-    }
-    let header_end = header_end.expect("loop exited only when found");
-    let head = std::str::from_utf8(&buf[..header_end]).map_err(|e| format!("non-utf8 headers: {e}"))?;
+    };
+    let head =
+        std::str::from_utf8(&buf[..header_end]).map_err(|e| format!("non-utf8 headers: {e}"))?;
     let mut lines = head.split("\r\n");
     let request_line = lines
         .next()

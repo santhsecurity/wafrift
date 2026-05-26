@@ -482,22 +482,30 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // benign vs attack request differ significantly, we still know
     // a WAF is intercepting — even if its block page is generic
     // (Apache stock 403, etc.).
+    // Pre-fix this used `.expect("differential gated on Some(url)")`
+    // — logically infallible because the outer `&& resolved_url.is_some()`
+    // gates entry, but LAW 1 (no expects outside tests) plus the
+    // risk that a future refactor decouples the guard from the
+    // expectation make `if let Some` strictly safer. No behaviour
+    // change — both forms produce `None` for the `args.differential
+    // == false || resolved_url.is_none()` cases.
     let differential_evidence: Option<DifferentialEvidence> =
-        if args.differential && resolved_url.is_some() {
-            let url = resolved_url
-                .as_deref()
-                .expect("differential gated on Some(url)");
-            match fetch_differential(url, args.timeout_secs, args.insecure) {
-                Ok(ev) => ev,
-                Err(e) => {
-                    if !quiet {
-                        eprintln!(
-                            "{} differential probe error (continuing without): {e}",
-                            "warn:".yellow()
-                        );
+        if args.differential {
+            if let Some(url) = resolved_url.as_deref() {
+                match fetch_differential(url, args.timeout_secs, args.insecure) {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        if !quiet {
+                            eprintln!(
+                                "{} differential probe error (continuing without): {e}",
+                                "warn:".yellow()
+                            );
+                        }
+                        None
                     }
-                    None
                 }
+            } else {
+                None
             }
         } else {
             None
