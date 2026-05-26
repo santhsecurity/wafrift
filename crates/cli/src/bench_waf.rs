@@ -1776,11 +1776,19 @@ async fn run_lattice_strategy(
     use wafrift_evolution::encoding_lattice::LatticeSearch;
     let mut stat = StrategyStat::default();
 
-    // Build the lattice over the encoding palette. Default depth 1-3
-    // gives ~64+ chains per case which is the sweet spot for novelty
-    // density (deeper chains have diminishing yield per query).
-    let strategies = encoding::all_strategies();
-    let lattice = LatticeSearch::new(strategies.to_vec())
+    // Build the lattice over the encoding palette. If the operator
+    // declared a `--target-waf` AND `wafrift_strategy::waf_presets`
+    // has a matching preset, narrow the palette to the preset's
+    // `techniques` list — the WAF-specific encoders known to land
+    // bypasses against that vendor. Falls back to the full palette
+    // when no preset matches so unknown WAFs still get full coverage.
+    let preset = if args.target_waf.is_empty() {
+        None
+    } else {
+        wafrift_strategy::waf_presets::preset_for(&args.target_waf)
+    };
+    let strategies = preset_palette_or_default(preset);
+    let lattice = LatticeSearch::new(strategies.clone())
         .with_min_depth(1)
         .with_max_depth(3)
         .with_max_chains(args.lattice_max_chains.max(1));
@@ -1930,9 +1938,33 @@ async fn run_polyglot_strategy(
     recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
-    let polyglots = build_polyglots(&case.payload);
+    // Build polyglots for the base payload AND for every preset-
+    // suggested trick (when `--target-waf` matches a preset). Each
+    // trick yields its own 4 polyglot skeletons → multiplies the
+    // fingerprint count per case by `1 + preset_trick_count`.
+    let preset = if args.target_waf.is_empty() {
+        None
+    } else {
+        wafrift_strategy::waf_presets::preset_for(&args.target_waf)
+    };
+    let mut all_polyglots: Vec<(&'static str, &'static str, String, String)> = Vec::new();
+    for (s, ct, body) in build_polyglots(&case.payload) {
+        all_polyglots.push((s, ct, body, case.payload.clone()));
+    }
+    if let Some(p) = preset {
+        let extra = match case.class.as_str() {
+            "sql" => &p.sql_tricks[..],
+            "xss" => &p.xss_tricks[..],
+            _ => &[][..],
+        };
+        for trick in extra {
+            for (s, ct, body) in build_polyglots(trick) {
+                all_polyglots.push((s, ct, body, trick.clone()));
+            }
+        }
+    }
 
-    for (skeleton, declared_ct, body) in polyglots {
+    for (skeleton, declared_ct, body, payload_used) in all_polyglots {
         if *total > 0 && args.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
         }
@@ -1946,8 +1978,8 @@ async fn run_polyglot_strategy(
                 Ok(env) => {
                     let is_bypass = verified_bypass(
                         &case.class,
-                        &case.payload,
-                        &case.payload,
+                        &payload_used,
+                        &payload_used,
                         env.blocked,
                         env.status,
                     );
@@ -1973,7 +2005,7 @@ async fn run_polyglot_strategy(
                         if let Ok(mut guard) = rec.lock() {
                             let _ = guard.record(
                                 &env,
-                                &case.payload,
+                                &payload_used,
                                 class,
                                 chain,
                                 "direct",
@@ -1997,8 +2029,8 @@ async fn run_polyglot_strategy(
             Ok((status, blocked)) => {
                 if verified_bypass(
                     &case.class,
-                    &case.payload,
-                    &case.payload,
+                    &payload_used,
+                    &payload_used,
                     blocked,
                     status,
                 ) {
@@ -2015,7 +2047,7 @@ async fn run_polyglot_strategy(
                         &req,
                         base_url,
                         case,
-                        &case.payload,
+                        &payload_used,
                         &chain,
                         recorder,
                     )
@@ -2092,6 +2124,50 @@ fn build_polyglots(attack: &str) -> Vec<(&'static str, &'static str, String)> {
             format!(r#"q=benign&payload={urlenc}{{"sentinel":"trail"}}"#),
         ),
     ]
+}
+
+/// Resolve the encoding palette for the lattice strategy.
+///
+/// When a `WafPreset` is supplied, the palette is the intersection
+/// of the preset's `techniques` list and the encoders the
+/// `wafrift_encoding` crate actually ships. Preset techniques that
+/// don't map to a real encoder are dropped (and logged). Empty
+/// intersection or no preset → the full encoder palette.
+///
+/// This narrows the lattice search space by ~5-10× when the
+/// operator knows the target WAF, multiplying per-query yield
+/// against CumulusFire and similar named targets.
+fn preset_palette_or_default(
+    preset: Option<&'static wafrift_strategy::waf_presets::WafPreset>,
+) -> Vec<wafrift_encoding::encoding::Strategy> {
+    use wafrift_encoding::encoding;
+    let all = encoding::all_strategies();
+    let Some(p) = preset else {
+        return all.to_vec();
+    };
+    let mut palette: Vec<encoding::Strategy> = Vec::new();
+    for technique_name in &p.techniques {
+        if let Some(s) = all
+            .iter()
+            .find(|s| s.as_str().eq_ignore_ascii_case(technique_name))
+        {
+            palette.push(*s);
+        }
+    }
+    if palette.is_empty() {
+        // Preset listed techniques but none mapped to a real
+        // encoder — fall back to the full palette so we don't
+        // silently fire zero variants.
+        eprintln!(
+            "[wafrift bench-waf] preset {:?} listed {} techniques but none matched \
+             the wafrift_encoding palette — falling back to all encoders",
+            p.name,
+            p.techniques.len()
+        );
+        all.to_vec()
+    } else {
+        palette
+    }
 }
 
 /// Cross-region "shotgun" replay: fire the same request body N
