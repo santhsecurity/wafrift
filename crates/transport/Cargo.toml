@@ -39,7 +39,6 @@ psl = "2"
 # compile-time cost. RustCrypto's HMAC + SHA-256.
 hmac = "0.12"
 sha2 = "0.10"
-wafrift-pool = { workspace = true, optional = true }
 rquest = { workspace = true, optional = true }
 # Companion crate carrying the actual browser-emulation profiles
 # (Chrome131, Firefox133, etc.) split out of rquest in 5.x. Gated

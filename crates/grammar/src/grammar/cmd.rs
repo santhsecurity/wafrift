@@ -48,9 +48,9 @@ const CMD_PAYLOADS_TOML: &str = include_str!("../../rules/cmd/payloads.toml");
 #[serde(deny_unknown_fields)]
 struct Separator {
     pattern: String,
-    /// Human-readable label in TOML; not consumed at runtime.
-    #[serde(rename = "description", default)]
-    _description: String,
+    /// Human-readable label in TOML; logged on load for traceability.
+    #[serde(default)]
+    description: String,
 }
 
 /// Space alternative definition from TOML.
@@ -58,9 +58,9 @@ struct Separator {
 #[serde(deny_unknown_fields)]
 struct SpaceAlternative {
     pattern: String,
-    /// Human-readable label in TOML; not consumed at runtime.
-    #[serde(rename = "description", default)]
-    _description: String,
+    /// Human-readable label in TOML; logged on load for traceability.
+    #[serde(default)]
+    description: String,
 }
 
 /// Root structure for payloads.toml.

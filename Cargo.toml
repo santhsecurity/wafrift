@@ -25,9 +25,8 @@ members = [
     "crates/oracle",            # per-payload-class semantic oracles
 
     # ── Runtime ── send the bytes, observe the responses.
-    "crates/transport",         # client + tls-impersonate + egress pool
-    "crates/proxy",             # MITM forward proxy + intercept
-    "crates/pool",              # proxy-list rotation (separate from egress)
+    "crates/transport",         # client + tls-impersonate + egress pool + internal pool module
+    "crates/proxy",              # MITM forward proxy + intercept
     "crates/captchaforge-bridge", # optional captcha-solver bridge
 
     # ── Frontend ── operator surface.
@@ -95,7 +94,6 @@ wafrift-wafmodel = { path = "crates/wafmodel", version = "0.2.21" }
 wafrift-strategy = { path = "crates/strategy", version = "0.2.21" }
 wafrift-oracle = { path = "crates/oracle", version = "0.2.21" }
 wafrift-transport = { path = "crates/transport", version = "0.2.21" }
-wafrift-pool = { path = "crates/pool", version = "0.2.21" }
 wafrift-recon = { path = "crates/recon", version = "0.2.21" }
 wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.21" }
 wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.21" }
@@ -195,4 +193,3 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 # WASM sandbox engine for plugin-api external tampers.
 wasmtime = { version = "30", default-features = false, features = ["runtime", "cranelift"] }
 tempfile = "3"
-lru = "0.18"
