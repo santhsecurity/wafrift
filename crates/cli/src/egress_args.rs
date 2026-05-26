@@ -98,10 +98,28 @@ pub fn target_host(target_url: &str) -> Option<String> {
         host_port.rsplitn(2, ':').last().unwrap_or(host_port).to_string()
     };
     if host.is_empty() || host == "[]" {
-        None
-    } else {
-        Some(host)
+        return None;
     }
+    // Defense-in-depth: refuse a host that contains ANY control byte
+    // (CR/LF/NUL/etc., per ASCII <0x20 or 0x7f). Pre-fix the parser
+    // accepted `https://waf.example.com\r\nX-Smuggle: yes/` and
+    // returned `"waf.example.com\r\nX-Smuggle: yes"` (the newline
+    // landed in the authority section before the path slash). If any
+    // downstream callsite embedded this host in an outgoing HTTP
+    // header (e.g. a `Host:` line on a follow-up connection through
+    // the egress pool) it would have CRLF-injected the smuggled
+    // header into the wire. The test
+    // `target_host_with_embedded_newline_does_not_panic` previously
+    // documented this as "caller's job to reject" — never the right
+    // call for an authority-extraction helper. We reject here so
+    // every caller is automatically safe.
+    if host
+        .bytes()
+        .any(|b| b < 0x20 || b == 0x7f)
+    {
+        return None;
+    }
+    Some(host)
 }
 
 /// Strip `http://` or `https://` from the front of `s`,
@@ -580,17 +598,48 @@ mod tests {
     // ─── ADVERSARIAL: control-byte / injection in URL ─────────────
 
     #[test]
-    fn target_host_with_embedded_newline_does_not_panic() {
-        // Newline injection: should at minimum not panic; the host
-        // returned will contain the newline (caller's job to reject).
-        let h = target_host("https://waf.example.com\r\nX-Smuggle: yes/");
-        assert!(h.is_some());
+    fn target_host_with_embedded_newline_rejects_to_block_crlf_injection() {
+        // Pre-fix the parser returned `"waf.example.com\r\nX-Smuggle:
+        // yes"` — a CRLF-injection vector if the host was ever
+        // embedded in an outgoing HTTP header. Rejection at the
+        // authority extractor is the right defense.
+        assert_eq!(
+            target_host("https://waf.example.com\r\nX-Smuggle: yes/"),
+            None,
+            "CRLF in the authority must reject — downstream callers \
+             could embed this in a Host: header and smuggle"
+        );
+        // Lone CR and lone LF must also reject (RFC 3986 §3.2.2:
+        // authority is OWS-bounded ASCII).
+        assert_eq!(target_host("https://waf.example.com\rfoo/"), None);
+        assert_eq!(target_host("https://waf.example.com\nfoo/"), None);
     }
 
     #[test]
-    fn target_host_with_null_byte_does_not_panic() {
-        let h = target_host("https://waf.example.com\0/");
-        assert!(h.is_some());
+    fn target_host_with_null_byte_rejects() {
+        // NUL in a host is malformed; reject per defense-in-depth.
+        assert_eq!(target_host("https://waf.example.com\0/"), None);
+    }
+
+    #[test]
+    fn target_host_rejects_low_control_bytes_in_general() {
+        // Anti-rig: pin behaviour across the full control-byte range
+        // — not just CR/LF/NUL. RFC 3986 §3.2.2 limits authority to
+        // a specific char class; rejecting anything under 0x20 (and
+        // 0x7f DEL) is conservative-correct.
+        for b in [0x01u8, 0x07, 0x08, 0x0b, 0x0c, 0x1f, 0x7f] {
+            let url = format!(
+                "https://waf.example.com{}/",
+                std::str::from_utf8(&[b]).unwrap_or("")
+            );
+            if std::str::from_utf8(&[b]).is_ok() {
+                assert_eq!(
+                    target_host(&url),
+                    None,
+                    "control byte 0x{b:02x} must reject"
+                );
+            }
+        }
     }
 
     #[test]

@@ -500,7 +500,24 @@ async fn run_one_round(
     // Capture stdout temporarily to intercept the bench JSON output.
     // We run bench_waf on a thread (it has its own tokio runtime) and
     // collect the results via the JSON output path written to a temp file.
-    let tmp = std::env::temp_dir().join(format!("wafrift-hunt-round-{round}.json"));
+    //
+    // The temp filename embeds the sanitized campaign_id, the OS pid,
+    // and a nanosecond timestamp so concurrent hunt processes never
+    // collide. Pre-fix the filename was just
+    // `wafrift-hunt-round-{round}.json` — two operators running parallel
+    // campaigns on the same host at the same `round` number would
+    // race: one campaign would either overwrite the other's results
+    // mid-read (corrupting JSON) or, worse, silently read the OTHER
+    // campaign's bypasses and submit them under the wrong campaign_id.
+    let safe_id = sanitize_campaign_id(campaign_id);
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift-hunt-{safe_id}-round-{round}-{pid}-{nanos}.json"
+    ));
     let tmp_clone = tmp.clone();
 
     let bench_args_with_output = BenchWafArgs {
