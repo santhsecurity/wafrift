@@ -1474,9 +1474,95 @@ pub(crate) async fn run_scan(
         let mut tamper_bypassed = 0_u32;
         let mut tamper_fired = 0_u32;
 
+        // Operator-supplied plugin tampers loaded from
+        // `~/.wafrift/tampers/`. Loaded once-per-process via OnceLock
+        // inside plugin_bridge; we just consume them per mutation
+        // alongside the built-in novel_tamper_names. Plugin names are
+        // dynamic (driven by the operator's filesystem), so we cache
+        // them once outside the loop to avoid hammering the registry.
+        let plugin_names: Vec<String> = wafrift_strategy::plugin_bridge::plugin_names();
+        if scan_text && !plugin_names.is_empty() {
+            println!(
+                "  {} {} external plugin(s) loaded from ~/.wafrift/tampers/: {}",
+                "Plugins:".bold().cyan(),
+                plugin_names.len(),
+                plugin_names.join(", ").bright_black()
+            );
+        }
+
         for mutation in &grammar_mutations {
             if cancel.is_cancelled() {
                 break;
+            }
+            // Apply every operator-loaded plugin to this mutation.
+            // Each plugin produces (name, transformed_payload); we
+            // fire each transformed payload as its own variant,
+            // tagged `plugin::<name>` so winning strategies are
+            // attributable.  Skips de-dupes against the seen-set so
+            // a plugin that no-ops doesn't burn a request.
+            for (plugin_name, transformed) in
+                wafrift_strategy::plugin_bridge::apply_all_plugins(&mutation.payload)
+            {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                if !tamper_seen.insert(transformed.clone()) {
+                    continue;
+                }
+                let url =
+                    scan_url_with_param(target, &args.param, &urlencoding::encode(&transformed));
+                let verdict = match http.get(&url).send().await {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16();
+                        let body = crate::safe_body::read_bounded(
+                            resp,
+                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                        )
+                        .await
+                        .unwrap_or_default();
+                        oracle.classify(&ResponseContext {
+                            status,
+                            body: body.to_vec(),
+                            ..Default::default()
+                        })
+                    }
+                    Err(_) => {
+                        errors += 1;
+                        continue;
+                    }
+                };
+                total_fired += 1;
+                tamper_fired += 1;
+                let mut techniques: Vec<String> = mutation
+                    .rules_applied
+                    .iter()
+                    .map(|r| (*r).to_string())
+                    .collect();
+                techniques.push(format!("plugin::{plugin_name}"));
+                let is_blocked = verdict.is_blocked() || verdict.is_challenge();
+                variant_outcomes.push((techniques.clone(), is_blocked));
+                if is_blocked {
+                    blocked += 1;
+                } else if matches!(verdict, wafrift_types::Verdict::RateLimited { .. }) {
+                    _rate_limited += 1;
+                    tokio::select! {
+                        () = tokio::time::sleep(delay * 2) => {}
+                        () = cancel.cancelled() => { break; }
+                    }
+                } else {
+                    bypassed += 1;
+                    tamper_bypassed += 1;
+                    bypass_variants.push((
+                        total_fired,
+                        transformed,
+                        techniques.clone(),
+                        0.75,
+                    ));
+                    winning_strategies.insert(format!("plugin::{plugin_name}"));
+                }
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
             }
             for tamper_name in &novel_tamper_names {
                 let tampered = match tamper_registry.tamper_with(
