@@ -514,6 +514,7 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         target_waf: String::new(),
         h1_archive: None,
         lattice_max_chains: 256,
+        shotgun_replays: 0,
     }
 }
 

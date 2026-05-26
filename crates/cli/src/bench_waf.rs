@@ -279,6 +279,18 @@ pub struct BenchWafArgs {
     /// per-case yield and total HTTP volume.
     #[arg(long, default_value_t = 256)]
     pub lattice_max_chains: usize,
+
+    /// Number of cross-region "shotgun" replays per verified bypass.
+    /// When >0 AND `--egress-*` declares multiple backends, each
+    /// confirmed bypass is replayed N additional times through fresh
+    /// egress entries (round-robined from the pool). Same payload +
+    /// chain, different POP → potentially different CF rule attribution
+    /// and edge_pop_coverage entries per fingerprint. Default 0 to
+    /// keep traffic volume predictable; set to `egress_pool_size` to
+    /// fully fan out one bypass across every operator-supplied egress.
+    /// Only `lattice` and `polyglot` strategies honor this today.
+    #[arg(long, default_value_t = 0)]
+    pub shotgun_replays: usize,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
@@ -1859,6 +1871,20 @@ async fn run_lattice_strategy(
                     stat.oracle_valid += 1;
                     *bypassed += 1;
                     bypass_techs.push(format!("{strat}:{}", chain_labels.join("+")));
+                    // Cross-region shotgun: replay the same request
+                    // through N additional egress entries, each likely
+                    // hitting a different CF edge POP → distinct
+                    // fingerprint per replay.
+                    shotgun_replay(
+                        args,
+                        &req,
+                        base_url,
+                        case,
+                        &encoded,
+                        &chain_labels,
+                        recorder,
+                    )
+                    .await;
                 } else if !blocked {
                     stat.unverified_not_blocked += 1;
                 }
@@ -1980,6 +2006,20 @@ async fn run_polyglot_strategy(
                     stat.oracle_valid += 1;
                     *bypassed += 1;
                     bypass_techs.push(format!("{strat}:{skeleton}+ct={declared_ct}"));
+                    let chain = vec![
+                        format!("poly:{skeleton}"),
+                        format!("ct:{declared_ct}"),
+                    ];
+                    shotgun_replay(
+                        args,
+                        &req,
+                        base_url,
+                        case,
+                        &case.payload,
+                        &chain,
+                        recorder,
+                    )
+                    .await;
                 } else if !blocked {
                     stat.unverified_not_blocked += 1;
                 }
@@ -2052,6 +2092,117 @@ fn build_polyglots(attack: &str) -> Vec<(&'static str, &'static str, String)> {
             format!(r#"q=benign&payload={urlenc}{{"sentinel":"trail"}}"#),
         ),
     ]
+}
+
+/// Cross-region "shotgun" replay: fire the same request body N
+/// additional times through fresh egress entries (each backed with
+/// a different SOCKS5 / HTTP-proxy / Tailscale exit-node from the
+/// operator's `--egress-*` pool). Each replay independently records
+/// to the corpus so a single verified bypass produces multiple
+/// `(rule_id, encoding_chain, payload_skeleton, edge_pop)`
+/// fingerprints — multiplying CumulusFire bounty yield by the size
+/// of the operator's egress fleet.
+///
+/// No-ops when:
+/// - `args.shotgun_replays == 0` (default), or
+/// - no `--egress-*` backends supplied (pool would be empty), or
+/// - no `recorder` (nothing to record into).
+///
+/// Each replay builds a fresh `reqwest::Client` baked with the next
+/// pool entry; the pool's round-robin cursor advances between
+/// `next_for()` calls.
+#[allow(clippy::too_many_arguments)]
+async fn shotgun_replay(
+    args: &BenchWafArgs,
+    req: &Request,
+    base_url: &str,
+    case: &BenchCase,
+    rendered_payload: &str,
+    chain_labels: &[String],
+    recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
+) {
+    if args.shotgun_replays == 0 {
+        return;
+    }
+    let Some(rec) = recorder else {
+        return;
+    };
+    let egress_inputs = crate::egress_args::EgressArgs {
+        socks5: &args.egress_socks5,
+        http_proxy: &args.egress_http_proxy,
+        tailscale_nodes: &args.egress_tailscale_nodes,
+        tailscale_socks_addr: &args.egress_tailscale_socks_addr,
+        challenge_threshold: args.egress_challenge_threshold,
+        cooldown_secs: args.egress_cooldown_secs,
+    };
+    let pool = match crate::egress_args::build_egress_pool(&egress_inputs) {
+        Ok(Some(p)) => p,
+        _ => return, // empty pool or build error → no shotgun
+    };
+    let host = crate::egress_args::target_host(base_url).unwrap_or_default();
+    let ua = "wafrift-shotgun";
+    for i in 0..args.shotgun_replays {
+        let builder = match wafrift_transport::base_client_builder_with_egress(
+            args.timeout_secs,
+            args.insecure,
+            Some(ua),
+            Some(&pool),
+            &host,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("warn: shotgun replay {i}: egress build: {e}");
+                continue;
+            }
+        };
+        let client = match builder.build() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("warn: shotgun replay {i}: client build: {e}");
+                continue;
+            }
+        };
+        match crate::equiv_engine::send_with_envelope(&client, req, args.timeout_secs).await {
+            Ok(env) => {
+                let is_bypass = verified_bypass(
+                    &case.class,
+                    &case.payload,
+                    rendered_payload,
+                    env.blocked,
+                    env.status,
+                );
+                let outcome = if is_bypass {
+                    wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                } else if env.blocked {
+                    wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                } else {
+                    wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Ambiguous
+                };
+                if matches!(
+                    outcome,
+                    wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                        | wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                ) {
+                    let class =
+                        wafrift_evolution::coverage_feedback::PayloadClass::new(&case.class);
+                    if let Ok(mut guard) = rec.lock() {
+                        let _ = guard.record(
+                            &env,
+                            rendered_payload,
+                            class,
+                            chain_labels.to_vec(),
+                            &format!("shotgun-{i}"),
+                            base_url,
+                            outcome,
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("warn: shotgun replay {i} send: {e}");
+            }
+        }
+    }
 }
 
 /// JSON-escape a value for embedding in a JSON string literal.
