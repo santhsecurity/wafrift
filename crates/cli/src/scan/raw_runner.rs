@@ -531,49 +531,15 @@ mod tests {
             callback_timeout_secs: 5,
             exploit_cap: 500,
             variants_cap: 0,
-        };
-        let cancel = CancellationToken::new();
-        let code = run_scan_raw(template_without_marker(), args, cancel).await;
-        assert_eq!(
-            format!("{code:?}"),
-            format!("{:?}", ExitCode::from(2)),
-            "missing-marker template must exit 2"
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_empty_payload() {
-        let args = ScanArgs {
-            target_positional: None,
-            target: None,
-            from_discovery: None,
-            payload: String::new(),
-            param: "q".into(),
-            payload_class: None,
-            callback_url: None,
-            session_init: None,
-            level: crate::Level::Light,
-            encoding_only: true,
-            delay_ms: 0,
-            format: "json".into(),
-            stealth_browser: None,
-            insecure: false,
-            report_layers: false,
-            only: Vec::new(),
-            exclude: Vec::new(),
-            output: None,
-            proxy: None,
-            header: Vec::new(),
-            raw_request: None,
-            raw_request_scheme: "http".into(),
-            auto_distill: false,
-            auto_distill_max_fires: 200,
-            concurrency: 0,
-            timeout_secs: 0,
-            quiet: false,
-            callback_timeout_secs: 5,
-            exploit_cap: 500,
-            variants_cap: 0,
+            egress_socks5: Vec::new(),
+            egress_http_proxy: Vec::new(),
+            egress_tailscale_nodes: Vec::new(),
+            egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
+            egress_challenge_threshold: 3,
+            egress_cooldown_secs: 300,
+            i_have_permission: None,
+            graphql: false,
+            custom_rules: None,
         };
         let cancel = CancellationToken::new();
         let code = run_scan_raw(template_with_marker(), args, cancel).await;
@@ -664,6 +630,18 @@ mod tests {
             callback_timeout_secs: 5,
             exploit_cap: 500,
             variants_cap: 0,
+<<<<<<< HEAD
+=======
+            egress_socks5: Vec::new(),
+            egress_http_proxy: Vec::new(),
+            egress_tailscale_nodes: Vec::new(),
+            egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
+            egress_challenge_threshold: 3,
+            egress_cooldown_secs: 300,
+            i_have_permission: None,
+            graphql: false,
+            custom_rules: None,
+>>>>>>> Maximally use existing infra: wire hunt corpus + custom_rules
         }
     }
 

@@ -70,7 +70,7 @@ pub(crate) fn build_bypass_variants_json(
         .enumerate()
         .map(|(i, (idx, payload, techniques, conf))| {
             let minimal = minimal_payloads.get(i).and_then(Option::as_ref);
-            let full_url = scan_url_with_param(target, param, payload);
+            let full_url = scan_url_with_param(target, param, &urlencoding::encode(payload));
             // Use poc_emit for annotated repro_curl (metadata comment block
             // names the technique chain and confidence); fall back to the
             // plain url_query helper on render errors so bypasses are never
@@ -315,14 +315,37 @@ pub(crate) fn estimate_scan_seconds(variants: usize, delay_ms: u64) -> u64 {
     (total_ms / 1000).max(1)
 }
 
+/// Build a URL with `param=value_encoded` appended to the query string.
+///
+/// `value_encoded` MUST already be percent-encoded by the caller (e.g.
+/// via `urlencoding::encode`). This function does NOT re-encode — it
+/// concatenates the value verbatim so the wire payload is singly-encoded.
+///
+/// # Why not `append_pair`?
+/// `reqwest::Url::query_pairs_mut().append_pair(k, v)` interprets `v` as
+/// a raw (non-encoded) value and percent-encodes it again, producing
+/// double-encoded output (`%20` → `%2520`). All callers of this function
+/// pre-encode the payload, so using `append_pair` would corrupt every
+/// evasion payload on the wire — turning `<script>` into `%253Cscript%253E`
+/// instead of `%3Cscript%3E`, making the WAF see an obviously mangled token
+/// rather than the actual evasion candidate.
 pub(crate) fn scan_url_with_param(target: &str, param: &str, value_encoded: &str) -> String {
     let base = target.trim_end_matches('/');
-    match reqwest::Url::parse(base) {
-        Ok(mut url) => {
-            url.query_pairs_mut().append_pair(param, value_encoded);
-            url.to_string()
+    // Determine whether the base already has a query string so we use
+    // `&` vs `?` as the separator.  Parse is attempted first to handle
+    // complex URLs correctly; if the URL is not parseable we fall back
+    // to a simple string-match on `?`.
+    if let Ok(parsed) = reqwest::Url::parse(base) {
+        let sep = if parsed.query().is_some() { "&" } else { "?" };
+        format!("{base}{sep}{param}={value_encoded}")
+    } else {
+        // Unparseable target (e.g. typo'd scheme) — fall back to
+        // a simple string check so the param is never lost.
+        if base.contains('?') {
+            format!("{base}&{param}={value_encoded}")
+        } else {
+            format!("{base}?{param}={value_encoded}")
         }
-        Err(_) => format!("{base}/?{param}={value_encoded}"),
     }
 }
 
@@ -729,8 +752,38 @@ pub(crate) async fn run_scan(
             (Vec::new(), None)
         };
 
+    // Optional: load operator-supplied custom WAF detection signatures
+    // (`--custom-rules <PATH>`). Layered on top of the built-in 160+
+    // rule corpus inside `detect_phase::run`. A load error aborts the
+    // scan early with a clear message rather than silently falling
+    // back to built-ins, since the operator EXPLICITLY asked for the
+    // custom set.
+    let custom_rules = match args.custom_rules.as_ref() {
+        Some(path) => {
+            match wafrift_evolution::custom_rules::load_rules_from_file(path) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    eprintln!(
+                        "{} failed to load --custom-rules {}: {e}",
+                        "error:".red().bold(),
+                        path.display()
+                    );
+                    return ExitCode::from(1);
+                }
+            }
+        }
+        None => None,
+    };
+
     // Step 1: WAF detection + advisor planning — see `detect_phase`.
-    let detect_outcome = match detect_phase::run(&http, target, scan_text).await {
+    let detect_outcome = match detect_phase::run(
+        &http,
+        target,
+        scan_text,
+        custom_rules.as_ref(),
+    )
+    .await
+    {
         Ok(o) => o,
         Err(code) => return code,
     };
@@ -975,7 +1028,12 @@ pub(crate) async fn run_scan(
             // truthfully as blocked, never as bypass.
             let non_bypass = moat.variants.saturating_sub(moat.bypasses.len());
             total_fired += non_bypass;
-            blocked += u32::try_from(non_bypass).unwrap_or(u32::MAX);
+            // saturating_add: if `non_bypass` overflows u32 the conversion
+            // yields u32::MAX, then the plain `+=` would wrap. Two saturations
+            // keep the counter honest rather than wrapping to a wrong value.
+            blocked = blocked.saturating_add(
+                u32::try_from(non_bypass).unwrap_or(u32::MAX)
+            );
 
             if scan_text {
                 println!(
@@ -2288,7 +2346,14 @@ pub(crate) async fn run_scan(
     // that 80% rate-limited would inflate the apparent bypass rate
     // by 5× (50/100 instead of 50/500 = 10%), making a noisy run
     // look like a strong result on paper.
-    let requests_completed = bypassed + blocked + errors + _rate_limited;
+    // saturating_add: each counter is u32. A pathological scan (≫4 B probes)
+    // would otherwise wrap, producing a bypass_rate that is wildly wrong.
+    // Saturation to u32::MAX is the honest ceiling — the bypass % is still
+    // computable (it just shows the minimum bounded rate, not garbage).
+    let requests_completed = bypassed
+        .saturating_add(blocked)
+        .saturating_add(errors)
+        .saturating_add(_rate_limited);
     let bypass_rate = if requests_completed > 0 {
         f64::from(bypassed) / f64::from(requests_completed) * 100.0
     } else {
@@ -2768,6 +2833,95 @@ mod tests {
         // baked in — never throw the payload on the floor.
         let url = scan_url_with_param("not a url", "q", "abc");
         assert!(url.contains("q=abc"), "fallback dropped param: {url}");
+    }
+
+    /// Core anti-double-encoding contract.
+    ///
+    /// All firing paths pre-encode the payload with `urlencoding::encode`
+    /// then pass the result to `scan_url_with_param`. The function must
+    /// NOT re-encode — if it did, `%3C` (the pre-encoded `<`) would become
+    /// `%253C` on the wire and every evasion payload would arrive at the
+    /// WAF as visually mangled garbage, producing false "blocked" verdicts.
+    #[test]
+    fn scan_url_with_param_does_not_double_encode_pre_encoded_value() {
+        // `<script>` → urlencoding::encode → `%3Cscript%3E`
+        let pre_encoded = urlencoding::encode("<script>").to_string();
+        let url = scan_url_with_param("http://target/", "q", &pre_encoded);
+        // The pre-encoded form must survive verbatim.
+        assert!(
+            url.contains("%3Cscript%3E"),
+            "pre-encoded value must not be re-encoded; got: {url}"
+        );
+        // Double-encoding would produce %253C. If that's in the URL the
+        // WAF sees an escaped '%' instead of the payload — a guaranteed
+        // false-block for every variant.
+        assert!(
+            !url.contains("%253C"),
+            "double-encoding detected: %25 found, indicating % was re-encoded: {url}"
+        );
+    }
+
+    #[test]
+    fn scan_url_with_param_produces_valid_separator_without_existing_query() {
+        let url = scan_url_with_param("http://target/search", "q", "test");
+        assert!(url.contains('?'), "must use ? when no query exists: {url}");
+        assert!(url.contains("q=test"), "param missing: {url}");
+        // Must NOT have double ? or && which would produce malformed URLs.
+        assert_eq!(url.matches('?').count(), 1, "exactly one ? expected: {url}");
+    }
+
+    #[test]
+    fn scan_url_with_param_uses_ampersand_when_query_already_present() {
+        let url = scan_url_with_param("http://target/search?existing=1", "q", "abc");
+        // Should append with & not produce a second ?.
+        assert!(
+            url.contains("existing=1") && url.contains("q=abc"),
+            "both params must survive: {url}"
+        );
+        assert_eq!(url.matches('?').count(), 1, "must not add a second ?: {url}");
+        assert!(url.contains('&'), "must use & to append: {url}");
+    }
+
+    #[test]
+    fn scan_url_with_param_preserves_special_chars_in_pre_encoded_value() {
+        // A SQL tautology pre-encoded: "' OR '1'='1" → contains %27 etc.
+        let raw = "' OR '1'='1";
+        let pre = urlencoding::encode(raw).to_string();
+        let url = scan_url_with_param("http://t/", "q", &pre);
+        // The %27 (apostrophe) must arrive singly-encoded, not as %2527.
+        assert!(url.contains("%27"), "apostrophe must be %27, got: {url}");
+        assert!(
+            !url.contains("%2527"),
+            "double-encoded apostrophe detected: {url}"
+        );
+    }
+
+    #[test]
+    fn build_bypass_variants_json_single_encodes_payload_in_repro_url() {
+        // build_bypass_variants_json passes the raw payload to
+        // scan_url_with_param with a pre-encoding step. Verify no
+        // double-encoding in the resulting full_url used for repro_curl.
+        let variants = vec![(
+            0usize,
+            "<script>alert(1)</script>".to_string(),
+            vec!["xss::raw".to_string()],
+            0.9_f64,
+        )];
+        let minimal_payloads: Vec<Option<String>> = vec![None];
+        let results = build_bypass_variants_json(
+            "http://target/",
+            "q",
+            &variants,
+            &minimal_payloads,
+        );
+        assert_eq!(results.len(), 1);
+        let repro = results[0]["repro_curl"].as_str().unwrap_or("");
+        // The curl reproducer must contain the encoded tag, not a double-encoded form.
+        // %3Cscript%3E is the single-encoded form; %253Cscript%253E is double.
+        assert!(
+            !repro.contains("%253C"),
+            "repro_curl must not double-encode the payload: {repro}"
+        );
     }
 
     // ── --variants-cap honesty ───────────────────────────────
