@@ -28,6 +28,7 @@ mod egress_example;
 mod equiv_engine;
 mod evade_cmd;
 mod explain;
+mod http3_frames_cmd;
 mod gql_diff_cmd;
 mod h2_diff_cmd;
 mod header_diff_cmd;
@@ -341,6 +342,51 @@ enum Commands {
     #[cfg(feature = "tls-impersonate")]
     #[command(name = "ja3-diff")]
     Ja3Diff(ja3_diff_cmd::Ja3DiffArgs),
+    /// Corpus minimization via Zeller's ddmin — alias for `wafrift distill`.
+    /// Familiar to AFL/libFuzzer users as `afl-tmin` / `tmin`. Takes a
+    /// KNOWN-working bypass payload and finds the minimum-edit-distance
+    /// substring that STILL bypasses. Reads payload from `--payload <P>`
+    /// or stdin. Outputs: minimal payload + reduction stats (original
+    /// length, final length, probes spent).
+    Tmin(tmin_cmd::TminArgs),
+    /// Offline bypass clustering: group a `bench-waf --output` JSON by
+    /// rule_id, payload class, and edit-distance similarity. Outputs
+    /// clusters with a representative technique and member count per
+    /// cluster. Pure offline — no HTTP. Useful for triaging large bypass
+    /// corpora and identifying duplicate root causes.
+    Cluster(cluster_cmd::ClusterArgs),
+    /// Long-running autonomous bypass campaign. Repeatedly runs
+    /// `bench-waf --evade` rounds against a target with rotating
+    /// mutators/strategies, saves every confirmed bypass to a campaign
+    /// JSON at `~/.wafrift/hunt-<campaign-id>.json`, and exits cleanly
+    /// on Ctrl-C. Resumable: re-run with the same `--campaign-id`.
+    ///
+    /// With `--auto-submit`: every newly verified bypass is queued for
+    /// HackerOne submission (requires `H1_API_KEY` env var). The first
+    /// 24 h of any campaign is always dry-run (corpus builds but nothing
+    /// is filed). Use `--dry-run-submit` to keep dry-run permanently.
+    ///
+    /// With `--target cumulusfire`: pre-fills the CF testing endpoint and
+    /// authorization reason for the CumulusFire public bug-bounty scope.
+    Hunt(hunt_cmd::HuntArgs),
+    /// Inspect a `wafrift corpus` artifact (rule_corpus + edge-POP coverage
+    /// maps written by `wafrift bench-waf --corpus-out`). Subcommands:
+    ///
+    /// `stats` — print a structured summary of rules seen, total bypasses /
+    /// blocks, and edge POPs covered. Supports `--format json` for CI
+    /// gate integration (if rules_seen < N, fail the hunt).
+    #[command(name = "corpus")]
+    Corpus(corpus_cmd::CorpusArgs),
+
+    /// Generate wire-format HTTP/3 + QUIC evasion frames for a given
+    /// technique. Each instantiates a builder from
+    /// `wafrift_http3_evasion`, calls its frame-set producer, and
+    /// emits a JSON or text envelope describing the resulting
+    /// `EvasionFrameSet`. Optionally writes raw concatenated frame
+    /// bytes to `--out <PATH>` so operators can feed them into an
+    /// external QUIC client (quinn, msquic).
+    #[command(name = "http3-frames")]
+    Http3Frames(http3_frames_cmd::Http3FramesArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -597,6 +643,694 @@ pub struct ScanArgs {
     /// to see the cap took effect.
     #[arg(long, default_value_t = 0)]
     pub variants_cap: usize,
+
+    /// Explicit authorization statement for this scan target. Required
+    /// for any target that is NOT on wafrift's built-in allowlist
+    /// (localhost, 127.0.0.1, ::1, waf.cumulusfire.net, testing.santh.dev,
+    /// ginandjuice.shop) and NOT in the operator's
+    /// `~/.wafrift/permission.toml`. Supply any non-empty justification
+    /// string — e.g. `--i-have-permission "HackerOne #12345 pentest scope"`.
+    ///
+    /// This guard is wafrift's refuse-by-default posture: the tool is
+    /// a real attack engine and the operator must assert authorization
+    /// explicitly for each non-lab target. Private/RFC1918 targets are
+    /// always allowed (your own Docker bench, internal pentest target).
+    #[arg(long, value_name = "REASON")]
+    pub i_have_permission: Option<String>,
+
+    /// Force GraphQL evasion probing — inject the full
+    /// `wafrift-graphql` payload battery (alias-flood, introspection,
+    /// op-name-mismatch, depth-bomb, batch) into the scan regardless
+    /// of whether auto-detection identifies a GraphQL endpoint.
+    ///
+    /// Without this flag, wafrift probes `/graphql`, `/api/graphql`,
+    /// and `/v1/graphql` automatically; if a GraphQL response is
+    /// detected there the payload battery is injected for that path
+    /// automatically. Use `--graphql` to override when the endpoint
+    /// lives at a non-standard path or behind a redirect.
+    #[arg(long, default_value_t = false)]
+    pub graphql: bool,
+
+    // ─── Egress rotation ─────────────────────────────────────────────────────
+
+    /// SOCKS5 proxy URL for egress rotation (repeatable).
+    #[arg(long = "socks5", value_name = "URL", num_args = 0..)]
+    pub egress_socks5: Vec<String>,
+
+    /// HTTP proxy URL for egress rotation (repeatable).
+    #[arg(long = "http-proxy", value_name = "URL", num_args = 0..)]
+    pub egress_http_proxy: Vec<String>,
+
+    /// Tailscale exit-node name for egress rotation (repeatable).
+    #[arg(long = "tailscale-exit-node", value_name = "NODE", num_args = 0..)]
+    pub egress_tailscale_nodes: Vec<String>,
+
+    /// Tailscale SOCKS listener address. Default: `127.0.0.1:1055`.
+    #[arg(long = "tailscale-socks-addr", value_name = "ADDR", default_value = "127.0.0.1:1055")]
+    pub egress_tailscale_socks_addr: String,
+
+    /// Consecutive challenges before cooling an egress entry. Default: 3.
+    #[arg(long = "egress-challenge-threshold", default_value_t = 3u32)]
+    pub egress_challenge_threshold: u32,
+
+    /// Seconds a cooled egress entry stays out of rotation. Default: 300.
+    #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
+    pub egress_cooldown_secs: u64,
+
+    /// Operator-supplied WAF detection signatures (TOML). Loaded once
+    /// at scan start and layered on top of the built-in 160+ rule
+    /// corpus — every response is matched against the built-ins
+    /// AND the custom set, with the highest-confidence detection
+    /// winning. Schema: see
+    /// `wafrift_evolution::custom_rules::CustomRulesFile`. Use this
+    /// for in-house appliances or for raising the confidence on
+    /// hosts the built-in rules already partially match. Default:
+    /// no custom rules.
+    #[arg(long = "custom-rules", value_name = "PATH")]
+    pub custom_rules: Option<PathBuf>,
+}
+
+impl ScanArgs {
+    /// Resolved target URL — the positional form if supplied, else the
+    /// long-form `--target` flag, else `None` (only possible when
+    /// `--from-discovery` is in play; clap's
+    /// `required_unless_present_any` guarantees the user-facing
+    /// invariant).
+    #[must_use]
+    pub fn resolved_target(&self) -> Option<&str> {
+        self.target_positional.as_deref().or(self.target.as_deref())
+    }
+}
+
+#[derive(clap::Args, Debug)]
+struct TechniquesArgs {
+    #[command(subcommand)]
+    action: TechniquesAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum TechniquesAction {
+    /// Print the technique tree.
+    List(TechniquesListArgs),
+    /// Print the explanation for a single technique selector
+    /// (e.g. `wafrift techniques explain tamper/json_unicode_alnum`).
+    /// Dogfood B4 fix: previously the only way to see per-technique
+    /// docs was to scan with `--explain`.
+    Explain(TechniquesExplainArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct TechniquesListArgs {
+    /// Output format. `tree` (default) prints the ASCII tree;
+    /// `json` emits the list as a structured array for downstream
+    /// tooling. Dogfood B4 fix: previously no machine-readable form.
+    #[arg(long, default_value = "tree", value_parser = ["tree", "json"])]
+    format: String,
+}
+
+#[derive(clap::Args, Debug)]
+struct TechniquesExplainArgs {
+    /// Selector to explain (e.g. `tamper/json_unicode_alnum`,
+    /// `encoding/url/single`).
+    selector: String,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Light,
+    Medium,
+    Heavy,
+}
+/// Arguments for `wafrift completion <SHELL>`.
+#[derive(clap::Args, Debug)]
+struct CompletionArgs {
+    /// Shell to generate completions for.
+    #[arg(value_enum)]
+    shell: Shell,
+}
+fn main() -> ExitCode {
+    // Structured tracing — honours RUST_LOG (e.g. `RUST_LOG=wafrift=debug`).
+    // Compact single-line format on stderr; target field on; fallback to `warn`
+    // when RUST_LOG is unset.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .with_target(true)
+        .compact()
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    // Pentesters routinely pipe wafrift's output to `head`, `jq`, `grep
+    // -m 1`, etc. Rust's default behaviour is to ignore SIGPIPE and
+    // panic on EPIPE the next time stdout is written, which surfaces
+    // as `thread 'main' panicked at 'failed printing to stdout: Broken
+    // pipe'`. Reset the SIGPIPE handler to SIG_DFL so the process
+    // exits silently when the consumer closes the pipe — the canonical
+    // CLI idiom that `cat`, `ls`, `grep`, etc. all use.
+    #[cfg(unix)]
+    {
+        // SAFETY: signal(2) is async-signal-safe; we install SIG_DFL
+        // before any I/O so no concurrent writers race the handler
+        // change.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+
+    // Keep the raw `ArgMatches` (not just the derived struct) so the
+    // scan path can ask clap whether each field came from the command
+    // line vs a compiled default — required to layer `.wafrift.toml`
+    // underneath CLI flags with correct precedence.
+    let matches = Cli::command().get_matches();
+    let cli = match Cli::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => e.exit(),
+    };
+
+    // Store quiet flag for use in subcommands.
+    if cli.quiet {
+        // In quiet mode, disable colored output entirely.
+        colored::control::set_override(false);
+    }
+
+    // Load config file (--config flag overrides default search paths).
+    let cfg = if let Some(ref path) = cli.config {
+        match config::WafRiftConfig::load_from(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{} {e}", "Config error:".red().bold());
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        config::WafRiftConfig::load()
+    };
+
+    // Publish the operator's User-Agent override to the process-wide
+    // OnceLock that every command's HTTP-client builder reads. Prior
+    // to this wiring the `http.user_agent` field in `.wafrift.toml`
+    // was parsed-and-ignored — `.user_agent("Mozilla/5.0 …")` was
+    // hardcoded at every call site. Now setting the config field
+    // actually changes the wire bytes for detect / cors-diff /
+    // header-diff / body-diff / query-diff / cache-diff / h2-diff /
+    // gql-diff / distill / scan. `bench-waf` keeps its own
+    // fingerprint-rotation path (different concern: bypass impact).
+    config::install_user_agent(cfg.http.user_agent.clone());
+
+    let quiet = cli.quiet;
+    match cli.command {
+        None => interactive::run_interactive(),
+        Some(Commands::Evade(args)) => evade_cmd::run_evade(args, quiet),
+        Some(Commands::Detect(args)) => detect_cmd::run_detect(args, quiet),
+        Some(Commands::Probe(args)) => {
+            probe_cmd::run_probe(args);
+            ExitCode::SUCCESS
+        }
+        Some(Commands::Scan(args)) => {
+            // Layer .wafrift.toml under the CLI flags (CLI wins).
+            let args = cfg.apply_to_scan(args, matches.subcommand_matches("scan"));
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async {
+                // Install graceful Ctrl+C handler so gene bank can be saved on interrupt.
+                let cancel = tokio_util::sync::CancellationToken::new();
+                let cancel_clone = cancel.clone();
+                tokio::spawn(async move {
+                    if tokio::signal::ctrl_c().await.is_ok() {
+                        eprintln!(
+                            "\n{}",
+                            "⚠ Ctrl+C received — finishing current request and saving results..."
+                                .yellow()
+                                .bold()
+                        );
+                        cancel_clone.cancel();
+                    }
+                });
+                if args.from_discovery.is_some() {
+                    run_scan_from_discovery(args, cancel).await
+                } else {
+                    scan::run_scan(args, cancel).await
+                }
+            })
+        }
+        Some(Commands::Distill(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async {
+                let cancel = tokio_util::sync::CancellationToken::new();
+                let cancel_clone = cancel.clone();
+                tokio::spawn(async move {
+                    if tokio::signal::ctrl_c().await.is_ok() {
+                        eprintln!(
+                            "\n{}",
+                            "⚠ Ctrl+C received — finishing current request and exiting..."
+                                .yellow()
+                                .bold()
+                        );
+                        cancel_clone.cancel();
+                    }
+                });
+                distill_cmd::run_distill(args, cancel).await
+            })
+        }
+        Some(Commands::HeaderDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { header_diff_cmd::run_header_diff(args).await })
+        }
+        Some(Commands::BodyDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { body_diff_cmd::run_body_diff(args).await })
+        }
+        Some(Commands::QueryDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { query_diff_cmd::run_query_diff(args).await })
+        }
+        Some(Commands::Attack(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { attack_cmd::run_attack(args).await })
+        }
+        Some(Commands::CacheDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { cache_diff_cmd::run_cache_diff(args).await })
+        }
+        Some(Commands::H2Diff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { h2_diff_cmd::run_h2_diff(args).await })
+        }
+        Some(Commands::MethodDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { method_diff_cmd::run_method_diff(args).await })
+        }
+        Some(Commands::GqlDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { gql_diff_cmd::run_gql_diff(args).await })
+        }
+        Some(Commands::JwtDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { jwt_diff_cmd::run_jwt_diff(args).await })
+        }
+        Some(Commands::TrailerDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { trailer_diff_cmd::run_trailer_diff(args).await })
+        }
+        Some(Commands::CorsDiff(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async { cors_diff_cmd::run_cors_diff(args).await })
+        }
+        #[cfg(feature = "tls-impersonate")]
+        Some(Commands::Ja3Diff(args)) => ja3_diff_cmd::run_ja3_diff(args),
+        Some(Commands::BenchWaf(args)) => bench_waf::run_bench_waf(args),
+        Some(Commands::BenchDiff(args)) => bench_diff::run_bench_diff(args),
+        Some(Commands::OriginHints(args)) => origin_hints::run_origin_hints(args),
+        Some(Commands::EgressExample(args)) => egress_example::run_egress_example(args),
+        Some(Commands::Techniques(args)) => match args.action {
+            TechniquesAction::List(sub) => match sub.format.as_str() {
+                "json" => {
+                    let names = wafrift_encoding::all_tamper_names();
+                    let strategies: Vec<String> = wafrift_encoding::all_strategies()
+                        .iter()
+                        .map(|s| technique_filter::strategy_path(*s).to_string())
+                        .collect();
+                    // HTTP/3 + QUIC evasion technique names.
+                    let http3_techniques: Vec<&'static str> = wafrift_http3_evasion::EvasionTechnique::all()
+                        .iter()
+                        .map(|t| t.description())
+                        .collect();
+                    let payload = serde_json::json!({
+                        "tampers": names,
+                        "encoding_strategies": strategies,
+                        "http3_techniques": http3_techniques,
+                    });
+                    println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+                    ExitCode::SUCCESS
+                }
+                _ => {
+                    print!("{}", technique_filter::render_tree());
+                    ExitCode::SUCCESS
+                }
+            },
+            TechniquesAction::Explain(sub) => {
+                // Look up the selector and print its description. Tamper
+                // selectors hit the TamperRegistry; encoding selectors
+                // hit the Strategy enum.
+                let sel = sub.selector.trim_matches('/').to_string();
+                if let Some(name) = sel.strip_prefix("tamper/") {
+                    let reg = wafrift_encoding::TamperRegistry::with_defaults();
+                    if let Some(s) = reg.get(name) {
+                        println!("{}: {}", s.name(), s.description());
+                        println!("aggressiveness: {:.2}", s.aggressiveness());
+                        ExitCode::SUCCESS
+                    } else {
+                        eprintln!(
+                            "unknown tamper `{name}`. Tip: `wafrift techniques list` to enumerate."
+                        );
+                        ExitCode::from(2)
+                    }
+                } else if sel.starts_with("encoding/") {
+                    // Find any strategy whose path matches.
+                    let found = wafrift_encoding::all_strategies()
+                        .iter()
+                        .copied()
+                        .find(|s| technique_filter::strategy_path(*s) == sel);
+                    if let Some(s) = found {
+                        println!(
+                            "{}: encoding strategy (aggressiveness {:.2})",
+                            sel,
+                            wafrift_encoding::aggressiveness(s)
+                        );
+                        ExitCode::SUCCESS
+                    } else {
+                        eprintln!(
+                            "unknown encoding selector `{sel}`. Tip: `wafrift techniques list`."
+                        );
+                        ExitCode::from(2)
+                    }
+                } else {
+                    eprintln!(
+                        "selector must start with `tamper/` or `encoding/`; got `{sel}`. \
+                         Tip: `wafrift techniques list`."
+                    );
+                    ExitCode::from(2)
+                }
+            }
+        },
+        Some(Commands::Completion(args)) => {
+            let mut cmd = Cli::command();
+            generate(args.shell, &mut cmd, "wafrift", &mut io::stdout());
+            ExitCode::SUCCESS
+        }
+        Some(Commands::Recon(args)) => recon_cmd::run_recon(args),
+        Some(Commands::Discover(args)) => discover_cmd::run_discover(args),
+        Some(Commands::Replay(args)) => replay::run_replay(args),
+        Some(Commands::Report(args)) => report::run_report(args),
+        Some(Commands::Init(args)) => init_cmd::run_init(args),
+        Some(Commands::Seed(args)) => seed::run_seed(args),
+        Some(Commands::ImportCurl(args)) => import_curl::run_import_curl(args),
+        Some(Commands::Bank(args)) => bank::run_bank(args),
+        Some(Commands::BypassProbe(args)) => match bypass_probe::run_bypass_probe(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("bypass-probe failed: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Some(Commands::Man(args)) => man_cmd::run_man(args),
+        Some(Commands::ModelEvade(args)) => model_evade_cmd::run_model_evade(args),
+        Some(Commands::Audit(args)) => wafmodel_cmd::run_audit(args),
+        Some(Commands::Harden(args)) => wafmodel_cmd::run_harden(args),
+        Some(Commands::Legendary(args)) => legendary::run_legendary(args),
+        Some(Commands::Listener(args)) => listener_cmd::run_listener(args),
+        Some(Commands::ParserDiff(args)) => match parser_diff_cmd::run_parser_diff(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("parser-diff failed: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Some(Commands::Compress(args)) => compress_cmd::run_compress(args),
+        Some(Commands::Smuggle(args)) => smuggle_cmd::run_smuggle(args),
+        Some(Commands::Tmin(args)) => {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to start tokio runtime: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            rt.block_on(async {
+                let cancel = tokio_util::sync::CancellationToken::new();
+                let cancel_clone = cancel.clone();
+                tokio::spawn(async move {
+                    if tokio::signal::ctrl_c().await.is_ok() {
+                        eprintln!(
+                            "\n{}",
+                            "⚠ Ctrl+C received — finishing current probe and exiting..."
+                                .yellow()
+                                .bold()
+                        );
+                        cancel_clone.cancel();
+                    }
+                });
+                tmin_cmd::run_tmin(args, cancel).await
+            })
+        }
+        Some(Commands::Cluster(args)) => cluster_cmd::run_cluster(args),
+        Some(Commands::Hunt(args)) => hunt_cmd::run_hunt(args),
+        Some(Commands::Corpus(args)) => corpus_cmd::run_corpus(args),
+        Some(Commands::Http3Frames(args)) => http3_frames_cmd::run_http3_frames(args),
+    }
+}
+
+// (interactive TUI body lives in `crate::interactive::run_interactive`;
+//  `run_man` lives in `crate::man_cmd`.)
+
+// `run_evade` + `resolve_payload` live in `crate::evade_cmd`.
+
+// `DetectFetch`, `fetch_for_detect`, `infra_markers` live in
+// `crate::detect_cmd` and are re-exported pub(crate) for use by
+// `crate::legendary`.
+
+/// Expand a `wafrift discover` JSON report into one `run_scan` per
+/// (endpoint URL × injection-point name) and run them in sequence with
+/// the operator's `--payload`. This is the recon → wafrift pipe the
+/// help text advertised for releases but never actually implemented
+/// (`scan --from-discovery` was a documented flag that did not exist).
+async fn run_scan_from_discovery(
+    args: ScanArgs,
+    cancel: tokio_util::sync::CancellationToken,
+) -> ExitCode {
+    let Some(ref src) = args.from_discovery else {
+        unreachable!("caller checked from_discovery.is_some()");
+    };
+    let raw = if src.as_os_str() == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut buf) {
+            eprintln!("{} read discovery report from stdin: {e}", "error:".red());
+            return ExitCode::from(1);
+        }
+        buf
+    } else {
+        match std::fs::read_to_string(src) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{} read {}: {e}", "error:".red(), src.display());
+                return ExitCode::from(1);
+            }
+        }
+    };
+    let report: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{} parse discovery report: {e}", "error:".red());
+            return ExitCode::from(1);
+        }
+    };
+    let endpoints = report
+        .get("endpoints")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if endpoints.is_empty() {
+        eprintln!(
+            "{} discovery report has no `endpoints` — nothing to scan (is this `wafrift discover` JSON?)",
+            "error:".red()
+        );
+        return ExitCode::from(1);
+    }
+
+    // Flatten to concrete (url, param) jobs. An endpoint with no
+    // injection points still gets scanned on the default param so a
+    // bare URL list is usable.
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    for ep in &endpoints {
+        let Some(url) = ep.get("url").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let points: Vec<String> = ep
+            .get("injection_points")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| {
+                        p.get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if points.is_empty() {
+            jobs.push((url.to_string(), args.param.clone()));
+        } else {
+            for name in points {
+                jobs.push((url.to_string(), name));
+            }
+        }
+    }
+
+    eprintln!(
+        "[wafrift scan] --from-discovery: {} endpoint(s) → {} scan job(s)",
+        endpoints.len(),
+        jobs.len()
+    );
+
+    // When the operator asked for `--format json`, each underlying
+    // `scan::run_scan` would write its own JSON object to stdout.
+    // For N jobs that produces N back-to-back JSON objects — invalid
+    // JSON (multiple root values) so `wafrift scan --from-discovery
+    // X.json --format json | jq .` failed at the second object. Fix:
+    // when JSON mode + discovery mode, redirect every sub-job to a
+    // tmpfile, then read them all back and emit a single
+    // `{"discovery_scan": {"jobs": [...]}}` envelope. Text mode is
+    // unchanged — per-job streaming output is the right shape there.
+    let want_json = args.format == "json";
+    let mut per_job_envelopes: Vec<serde_json::Value> = Vec::new();
+    let mut last = ExitCode::SUCCESS;
+    for (i, (url, param)) in jobs.iter().enumerate() {
+        if cancel.is_cancelled() {
+            eprintln!(
+                "[wafrift scan] cancelled — {} job(s) not run",
+                jobs.len() - i
+            );
+            break;
+        }
+        eprintln!(
+            "\n[wafrift scan] ── job {}/{}: {url} (param={param}) ──",
+            i + 1,
+            jobs.len()
+        );
+        // Build a per-job tmpfile path when collecting JSON. Cleaned
+        // up unconditionally after the read attempt so a panic in
+        // run_scan can't leak a tmpfile, and we don't bother allocating
+        // the path in text mode (where each job streams to stdout).
+        let tmp_path: Option<PathBuf> = if want_json {
+            Some(std::env::temp_dir().join(format!(
+                "wafrift-discovery-job-{}-{i}.json",
+                std::process::id()
+            )))
+        } else {
+            None
+        };
+        let job_args = ScanArgs {
+            target_positional: None,
+            target: Some(url.clone()),
+            from_discovery: None,
+            payload: args.payload.clone(),
+            param: param.clone(),
+            payload_class: args.payload_class.clone(),
+            callback_url: args.callback_url.clone(),
+            session_init: args.session_init.clone(),
+            level: args.level,
+            encoding_only: args.encoding_only,
+            delay_ms: args.delay_ms,
+            format: args.format.clone(),
+            stealth_browser: args.stealth_browser.clone(),
+            insecure: args.insecure,
+            report_layers: args.report_layers,
+            only: args.only.clone(),
+            exclude: args.exclude.clone(),
+            // Per-job: in JSON mode, a tmpfile we drain into the array;
+            // in text mode, None so the existing per-job text streams
+            // straight to stdout.
+            output: tmp_path.clone(),
+            proxy: args.proxy.clone(),
+            header: args.header.clone(),
+            // --from-discovery jobs always come from URL discovery,
+            // never from a raw request template — those modes are
+            // alternative inputs, not stackable.
+            raw_request: None,
+            raw_request_scheme: args.raw_request_scheme.clone(),
+            // Forward the operator's auto-distill choice to every
+            // discovered-endpoint scan job — they almost certainly
+            // want consistent reporting across all hosts.
+            auto_distill: args.auto_distill,
+            auto_distill_max_fires: args.auto_distill_max_fires,
+            concurrency: args.concurrency,
+            timeout_secs: args.timeout_secs,
+            quiet: args.quiet,
+            callback_timeout_secs: args.callback_timeout_secs,
+            exploit_cap: args.exploit_cap,
+            variants_cap: args.variants_cap,
             // Forward the permission token to every per-discovery job.
             i_have_permission: args.i_have_permission.clone(),
             // Forward GraphQL probing flag to every per-discovery job.
