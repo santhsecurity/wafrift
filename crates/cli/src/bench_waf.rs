@@ -291,6 +291,19 @@ pub struct BenchWafArgs {
     /// Only `lattice` and `polyglot` strategies honor this today.
     #[arg(long, default_value_t = 0)]
     pub shotgun_replays: usize,
+
+    /// Calibrate the response-latency oracle with N benign probes
+    /// at bench start. The resulting `TimingOracle` (from
+    /// `wafrift_oracle::timing`) provides mean+3σ anomaly
+    /// detection — a third evidence channel for blind-class
+    /// bypasses (time-based SQL, command-injection sleep, blind
+    /// SSRF) beyond the status-code + body oracles. When a verified
+    /// bypass also clears the timing threshold, the corpus tags it
+    /// with `timing_confirmed:1` so H1 reports can cite triple-
+    /// channel evidence. Default 0 = disabled. Recommended: 8-16
+    /// probes for stable variance estimation.
+    #[arg(long, default_value_t = 0)]
+    pub timing_calibration: usize,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
@@ -371,6 +384,11 @@ struct EvadeResult {
     /// an ensemble WAF — surfaces so operators can audit how aggressive
     /// the gate was over the run.
     variants_dilution_pruned: usize,
+    /// Total bypasses that ALSO cleared the timing anomaly threshold
+    /// (third evidence channel). Always 0 unless `--timing-calibration
+    /// N > 0`. Operators citing H1 reports use this to claim triple-
+    /// channel evidence (status + body + timing) for blind classes.
+    variants_timing_confirmed: usize,
     /// Per-strategy breakdown.
     by_strategy: BTreeMap<String, StrategyStat>,
     /// Sample of techniques that produced bypasses (one per variant).
@@ -835,6 +853,54 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     let consecutive_errors = std::sync::atomic::AtomicU32::new(0);
     let extra_delay_ms = std::sync::atomic::AtomicU64::new(0);
 
+    // Calibration probes for the timing oracle (blind-attack
+    // confirmation channel). When `--timing-calibration N` is set,
+    // fire N benign GETs to build a statistical latency baseline.
+    // Each subsequent strategy run uses the resulting `TimingOracle`
+    // to additionally confirm blind-class bypasses (time-based SQL,
+    // command-injection sleep, blind SSRF) via mean+3σ anomaly
+    // detection — adding a third evidence channel beyond status +
+    // body oracles. Cheap (N×timeout secs at bench start).
+    let timing_oracle: Option<wafrift_oracle::timing::TimingOracle> = if args.timing_calibration > 0
+    {
+        let mut latencies: Vec<f64> = Vec::with_capacity(args.timing_calibration);
+        let probe_url = format!("{}/get", base_url.trim_end_matches('/'));
+        for i in 0..args.timing_calibration {
+            let start = std::time::Instant::now();
+            if let Ok(resp) = client.get(&probe_url).send().await {
+                let _ = resp.bytes().await;
+                latencies.push(start.elapsed().as_secs_f64() * 1000.0);
+            } else {
+                eprintln!(
+                    "warn: timing calibration probe {i} failed — skipping sample"
+                );
+            }
+        }
+        if latencies.is_empty() {
+            eprintln!(
+                "warn: 0/{} timing-calibration probes succeeded — timing oracle disabled",
+                args.timing_calibration
+            );
+            None
+        } else {
+            let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&latencies);
+            eprintln!(
+                "[bench-waf] timing oracle: baseline={:.0}ms stdev={:.0}ms threshold={:.0}ms ({} samples)",
+                oracle.baseline_ms,
+                oracle.stdev_ms,
+                oracle.threshold_ms(),
+                latencies.len()
+            );
+            Some(oracle)
+        }
+    } else {
+        None
+    };
+    // Install the oracle process-globally so strategies can query
+    // via `timing_confirms(class, latency_ms)` without changing
+    // every strategy function's signature.
+    set_timing_oracle(timing_oracle);
+
     let mut results: Vec<CaseResult> = Vec::with_capacity(cases.len());
 
     // Bypass corpus: collected when --lineage-output is set. Flushed once at
@@ -1182,6 +1248,7 @@ async fn run_evade(
         oracle_valid_rate,
         variants_unverified_not_blocked: unverified_total,
         variants_dilution_pruned: dilution_pruned_total,
+        variants_timing_confirmed: take_timing_confirmed_count(),
         by_strategy,
         bypass_techniques: bypass_techs,
     })
@@ -1849,12 +1916,25 @@ async fn run_lattice_strategy(
                         let class = wafrift_evolution::coverage_feedback::PayloadClass::new(
                             &case.class,
                         );
+                        // Tag chain with timing evidence — adds a
+                        // `timing_confirmed` segment to the fingerprint
+                        // for blind-class bypasses that exceed the
+                        // calibrated latency anomaly threshold. Adds a
+                        // third evidence channel beyond status + body.
+                        let mut chain_with_evidence = chain_labels.clone();
+                        if matches!(
+                            outcome,
+                            wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                        ) && timing_confirms(&case.class, env.latency_ms)
+                        {
+                            chain_with_evidence.push("evidence:timing".to_string());
+                        }
                         if let Ok(mut guard) = rec.lock() {
                             let _ = guard.record(
                                 &env,
                                 &encoded,
                                 class,
-                                chain_labels.clone(),
+                                chain_with_evidence,
                                 "direct",
                                 base_url,
                                 outcome,
@@ -2124,6 +2204,74 @@ fn build_polyglots(attack: &str) -> Vec<(&'static str, &'static str, String)> {
             format!(r#"q=benign&payload={urlenc}{{"sentinel":"trail"}}"#),
         ),
     ]
+}
+
+/// Process-global timing oracle. Set once at bench-waf start; read
+/// by every strategy that records latencies (lattice + polyglot
+/// today). `None` when calibration was skipped or all probes failed.
+/// Stored as `Mutex<Option>` rather than `OnceLock` because the
+/// oracle's `observe_calibration` is incremental — a future operator
+/// flag might mutate it mid-run.
+static TIMING_ORACLE: std::sync::OnceLock<
+    std::sync::Mutex<Option<wafrift_oracle::timing::TimingOracle>>,
+> = std::sync::OnceLock::new();
+
+/// Process-global counter of strategy bypasses that ALSO cleared
+/// the timing anomaly threshold — surfaces as
+/// `EvadeResult.variants_timing_confirmed` in the bench JSON.
+static TIMING_CONFIRMED_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Set or replace the process-global timing oracle. No-op when
+/// `oracle = None` and the slot is empty — preserves the prior
+/// calibration across re-entries.
+fn set_timing_oracle(oracle: Option<wafrift_oracle::timing::TimingOracle>) {
+    let cell = TIMING_ORACLE.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(mut guard) = cell.lock() {
+        *guard = oracle;
+    }
+}
+
+/// Snapshot the timing oracle for read-only use. Cheap clone (Copy).
+fn current_timing_oracle() -> Option<wafrift_oracle::timing::TimingOracle> {
+    TIMING_ORACLE
+        .get()?
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+}
+
+/// True when the case class is the kind that admits blind-attack
+/// timing confirmation: time-based SQLi (pg_sleep, WAITFOR),
+/// command-injection sleep, blind SSRF (URL fetch latency). For
+/// other classes (XSS, SSTI, path traversal) timing isn't a
+/// meaningful confirmation channel and we don't tag.
+fn class_admits_timing_confirm(class: &str) -> bool {
+    matches!(class, "sql" | "cmdi" | "cmd" | "ssrf")
+}
+
+/// Check `latency_ms` against the global timing oracle. Returns
+/// `true` AND bumps the global counter when the case class admits
+/// timing confirmation AND the oracle flags anomaly. Returns
+/// `false` otherwise (including when no oracle is installed).
+fn timing_confirms(class: &str, latency_ms: f64) -> bool {
+    if !class_admits_timing_confirm(class) {
+        return false;
+    }
+    let Some(oracle) = current_timing_oracle() else {
+        return false;
+    };
+    let anomalous = oracle.is_anomalous(latency_ms);
+    if anomalous {
+        TIMING_CONFIRMED_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    anomalous
+}
+
+/// Read + reset the timing-confirmed counter. Called once per
+/// `run_evade` so the EvadeResult reports a per-run count.
+fn take_timing_confirmed_count() -> usize {
+    TIMING_CONFIRMED_COUNT.swap(0, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Resolve the encoding palette for the lattice strategy.

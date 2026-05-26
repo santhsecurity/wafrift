@@ -515,6 +515,7 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         h1_archive: None,
         lattice_max_chains: 256,
         shotgun_replays: 0,
+        timing_calibration: 0,
     }
 }
 
@@ -951,4 +952,111 @@ fn preset_palette_each_preset_resolves_at_least_one_encoder() {
             "preset {waf_name:?} produced empty palette (no fallback)"
         );
     }
+}
+
+// ── timing oracle wiring ────────────────────────────────────────
+
+#[test]
+fn class_admits_timing_confirm_covers_blind_classes() {
+    // Blind-capable classes — timing IS a meaningful confirmation
+    // channel via pg_sleep / WAITFOR / ping -c / SSRF latency.
+    assert!(class_admits_timing_confirm("sql"));
+    assert!(class_admits_timing_confirm("cmdi"));
+    assert!(class_admits_timing_confirm("cmd"));
+    assert!(class_admits_timing_confirm("ssrf"));
+}
+
+#[test]
+fn class_admits_timing_confirm_rejects_non_blind() {
+    // XSS, SSTI, path traversal, LDAP, XXE: timing isn't a
+    // confirmation channel — pin so a future case-class addition
+    // forces an explicit decision.
+    for class in ["xss", "ssti", "path", "ldap", "xxe", "nosql", "log4shell"] {
+        assert!(
+            !class_admits_timing_confirm(class),
+            "class {class:?} must NOT admit timing confirm by default"
+        );
+    }
+}
+
+#[test]
+fn class_admits_timing_confirm_empty_class_is_false() {
+    assert!(!class_admits_timing_confirm(""));
+}
+
+#[test]
+#[serial_test::serial]
+fn timing_confirms_returns_false_when_no_oracle_installed() {
+    // No oracle set (or set to None) → never confirms, never
+    // increments the counter. Test relies on a fresh process or
+    // accepts a non-zero baseline.
+    set_timing_oracle(None);
+    let before = take_timing_confirmed_count();
+    let _ = before; // drain to known state
+    assert!(!timing_confirms("sql", 99_999.0));
+    assert_eq!(
+        take_timing_confirmed_count(),
+        0,
+        "counter must not bump when no oracle is installed"
+    );
+}
+
+#[test]
+#[serial_test::serial]
+fn timing_confirms_anomalous_increments_counter() {
+    // Install an oracle calibrated with low-jitter baseline.
+    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[
+        100.0, 110.0, 120.0, 105.0, 115.0,
+    ]);
+    set_timing_oracle(Some(oracle));
+    let _ = take_timing_confirmed_count(); // reset
+    // 9-second response: anomalous AND blind class → confirms.
+    assert!(timing_confirms("sql", 9_000.0));
+    assert_eq!(take_timing_confirmed_count(), 1);
+    // Clean up.
+    set_timing_oracle(None);
+}
+
+#[test]
+#[serial_test::serial]
+fn timing_confirms_non_blind_class_never_confirms() {
+    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[100.0, 110.0, 120.0]);
+    set_timing_oracle(Some(oracle));
+    let _ = take_timing_confirmed_count();
+    // 9s response on an XSS case — would be anomalous on time
+    // axis, but XSS doesn't admit timing confirm.
+    assert!(!timing_confirms("xss", 9_000.0));
+    assert_eq!(take_timing_confirmed_count(), 0);
+    set_timing_oracle(None);
+}
+
+#[test]
+#[serial_test::serial]
+fn timing_confirms_benign_latency_within_threshold() {
+    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[
+        100.0, 110.0, 120.0, 105.0, 115.0,
+    ]);
+    set_timing_oracle(Some(oracle));
+    let _ = take_timing_confirmed_count();
+    // Latency within ~3σ of baseline — not anomalous.
+    assert!(!timing_confirms("sql", 150.0));
+    assert_eq!(take_timing_confirmed_count(), 0);
+    set_timing_oracle(None);
+}
+
+#[test]
+#[serial_test::serial]
+fn take_timing_confirmed_count_is_destructive() {
+    // The counter is read-and-reset so each EvadeResult emits its
+    // own per-run count, never accumulating across runs.
+    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[100.0, 110.0]);
+    set_timing_oracle(Some(oracle));
+    let _ = take_timing_confirmed_count();
+    let _ = timing_confirms("sql", 9_000.0);
+    let _ = timing_confirms("cmd", 9_000.0);
+    let first = take_timing_confirmed_count();
+    let second = take_timing_confirmed_count();
+    assert_eq!(first, 2);
+    assert_eq!(second, 0, "second read must observe zero (drain)");
+    set_timing_oracle(None);
 }

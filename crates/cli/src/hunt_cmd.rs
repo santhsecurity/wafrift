@@ -489,6 +489,7 @@ async fn run_one_round(
         h1_archive: args.h1_archive.clone(),
         lattice_max_chains: 256,
         shotgun_replays: 0,
+        timing_calibration: 0,
     };
 
     // Capture stdout temporarily to intercept the bench JSON output.
