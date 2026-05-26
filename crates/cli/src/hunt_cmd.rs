@@ -824,19 +824,23 @@ fn base_url_in_cumulusfire_scope(base_url: &str) -> bool {
 /// This is the real implementation — no stubs. If the API key is absent we
 /// return an error rather than pretending we submitted.
 async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<(), String> {
-    let api_key = std::env::var("H1_API_KEY")
-        .map_err(|_| "H1_API_KEY not set — cannot submit to HackerOne".to_string())?;
-    let username = std::env::var("H1_USERNAME")
-        .unwrap_or_else(|_| "wafrift-hunt".to_string());
-
-    // SCOPE GUARD: the hardcoded `team_handle: "cumulusfire"` below
-    // means we MUST refuse to submit any bypass whose target is not
-    // in CumulusFire's scope. Pre-fix this gate was missing and a
-    // hunt against any other operator-supplied base URL with
-    // H1_API_KEY set would file a CumulusFire report on a totally
-    // unrelated target — wrong team, off-scope, likely ToS
-    // violation. The future-correct fix is a `--h1-team-handle`
-    // flag; for now we hardcode AND refuse mismatches at the gate.
+    // SCOPE GUARD FIRES FIRST. Pre-fix the H1_API_KEY env-var
+    // check ran before the scope guard, which meant:
+    //   1. An operator running --auto-submit against an off-scope
+    //      target WITHOUT H1_API_KEY set would see only
+    //      "H1_API_KEY not set" — they would never learn the scope
+    //      gate would also have refused. They'd then set
+    //      H1_API_KEY and accidentally trip the actual scope
+    //      defense at the second pass.
+    //   2. The most important security gate (refuse off-scope
+    //      submission) is the FIRST thing we want fired —
+    //      independent of credential state. Layered defenses
+    //      should sequence cheapest-and-most-important first.
+    // The hardcoded `team_handle: "cumulusfire"` below means we
+    // MUST refuse to submit any bypass whose target is not in
+    // CumulusFire's scope. Pre-fix this gate didn't exist; the
+    // current shape is "refuse mismatches at the gate". The
+    // future-correct fix is a `--h1-team-handle` flag.
     if !base_url_in_cumulusfire_scope(target_url) {
         return Err(format!(
             "refusing to auto-submit: target {target_url} is NOT in CumulusFire's \
@@ -846,6 +850,11 @@ async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<
              to accept a `--h1-team-handle` flag for other programs."
         ));
     }
+
+    let api_key = std::env::var("H1_API_KEY")
+        .map_err(|_| "H1_API_KEY not set — cannot submit to HackerOne".to_string())?;
+    let username = std::env::var("H1_USERNAME")
+        .unwrap_or_else(|_| "wafrift-hunt".to_string());
 
     let (weakness_id, severity_rating) = cwe_and_severity_for_class(class);
 
@@ -1643,35 +1652,30 @@ mod tests {
     // ── submit_to_h1: gate refuses off-scope before network call ─────────
 
     #[tokio::test(flavor = "current_thread")]
-    async fn submit_to_h1_refuses_off_scope_target_without_h1_env() {
-        // Even WITHOUT H1_API_KEY in env, the scope check must run
-        // first and produce an actionable error. Pre-fix the
-        // function would silently proceed to network. This also
-        // proves the gate fires before the credential check.
+    async fn submit_to_h1_refuses_off_scope_target_before_reading_h1_env() {
+        // Pre-fix: H1_API_KEY was read BEFORE the scope check, so an
+        // operator running --auto-submit against an off-scope target
+        // without H1_API_KEY set would see only "H1_API_KEY not set"
+        // — they'd set the env var, retry, and then trip the actual
+        // scope gate. The right ordering is scope-first so the most
+        // important refusal fires regardless of credential state.
         //
-        // We set H1_API_KEY in this test so the credential check
-        // doesn't preempt the scope check.
-        // SAFETY: env vars are process-global, but this test runs
-        // on the current_thread runtime in isolation.
-        // SAFETY: env var is intentionally set for the duration of
-        // this scope-check test; restored afterwards.
-        unsafe {
-            std::env::set_var("H1_API_KEY", "test-dummy-key");
-        }
+        // This test deliberately does NOT touch H1_API_KEY. If the
+        // scope check is correctly ordered first, we get the scope
+        // error. If it's NOT first, we'd get the H1_API_KEY error
+        // (or a phantom success when the env var happens to be set
+        // in CI).
         let result = submit_to_h1(
             "https://example.com/scope",
             "sqli",
             "url_double",
         )
         .await;
-        unsafe {
-            std::env::remove_var("H1_API_KEY");
-        }
         match result {
             Err(e) => {
                 assert!(
                     e.contains("not in CumulusFire") || e.contains("scope"),
-                    "expected scope-rejection error, got: {e}"
+                    "expected SCOPE-rejection error (not H1_API_KEY), got: {e}"
                 );
             }
             Ok(()) => panic!("off-scope target must NOT submit"),
