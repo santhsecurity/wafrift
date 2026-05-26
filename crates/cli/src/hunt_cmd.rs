@@ -600,35 +600,62 @@ fn corpus_paths_for(campaign_id: &str) -> (PathBuf, PathBuf) {
         .join(".wafrift")
         .join("corpus");
     let _ = std::fs::create_dir_all(&dir);
+    let safe = sanitize_campaign_id(campaign_id);
     (
-        dir.join(format!("{campaign_id}.corpus.json")),
-        dir.join(format!("{campaign_id}.coverage.json")),
+        dir.join(format!("{safe}.corpus.json")),
+        dir.join(format!("{safe}.coverage.json")),
     )
+}
+
+/// Sanitize a campaign-id for safe use as a filename stem.
+///
+/// Replaces every byte that isn't ASCII-alphanumeric / `-` / `_` with
+/// `_`. Defends against:
+///
+/// - Path traversal: `../etc/passwd` → `__etc_passwd`.
+/// - Windows reserved chars: `:`, `\`, `<`, `>`, `|`, `?`, `*` all
+///   become `_`.
+/// - Newline / null byte / control char smuggling into filenames.
+/// - Excessively long ids (>200 chars truncated; FS limits are
+///   typically 255 chars and we need room for the suffix).
+///
+/// Empty input falls back to `unknown` so the corpus file is
+/// always reachable.
+fn sanitize_campaign_id(raw: &str) -> String {
+    let mut out: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out.is_empty() {
+        return "unknown".to_string();
+    }
+    // FS limit: 255 chars on most systems, minus our `.coverage.json` (14).
+    if out.len() > 200 {
+        out.truncate(200);
+    }
+    out
 }
 
 /// Build a stable corpus fingerprint for a campaign so multiple
 /// runs against the same target accumulate into one corpus.
 ///
 /// Format: `hunt:<host>` where `<host>` is the URL host (no port,
-/// no scheme). The parser is intentionally minimal — operators
-/// pass well-formed http/https URLs and we strip scheme + port +
-/// path. Pathological inputs fall back to `hunt:<raw>` so the
-/// recorder still gets a non-empty, stable key.
+/// no scheme, no path, no query, no fragment, no userinfo).
+/// Delegates to [`crate::egress_args::target_host`] so all URL-
+/// parsing edge cases (IPv6 brackets, userinfo, case-insensitive
+/// scheme, etc.) are handled identically across the CLI.
+/// Pathological inputs fall back to `hunt:unknown` so the recorder
+/// still gets a non-empty, stable key.
 fn fingerprint_for(base_url: &str) -> String {
-    let without_scheme = base_url
-        .strip_prefix("https://")
-        .or_else(|| base_url.strip_prefix("http://"))
-        .unwrap_or(base_url);
-    let host_and_rest = without_scheme.split('/').next().unwrap_or(without_scheme);
-    let host = host_and_rest.split(':').next().unwrap_or(host_and_rest);
-    if host.is_empty() {
-        // Pathological input: both base_url AND every host candidate
-        // are empty. Use a sentinel so the corpus still gets a stable,
-        // non-empty key (and operators can spot "I never set a URL"
-        // by inspection).
-        "hunt:unknown".to_string()
-    } else {
-        format!("hunt:{host}")
+    match crate::egress_args::target_host(base_url) {
+        Some(host) => format!("hunt:{host}"),
+        None => "hunt:unknown".to_string(),
     }
 }
 
@@ -1120,11 +1147,168 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_empty_falls_back_to_raw() {
+    fn fingerprint_empty_falls_back_to_sentinel() {
         // Pathological input — must not produce "hunt:" with nothing after.
-        let fp = fingerprint_for("");
-        assert!(fp.starts_with("hunt:"));
-        assert!(fp.len() > "hunt:".len(), "fp = {fp:?}");
+        assert_eq!(fingerprint_for(""), "hunt:unknown");
+    }
+
+    #[test]
+    fn fingerprint_stable_across_userinfo_and_port_variations() {
+        // Same logical target, three operator-typed URL variants
+        // should produce the SAME fingerprint so the corpus
+        // accumulates instead of fragmenting.
+        let a = fingerprint_for("https://waf.example.com/");
+        let b = fingerprint_for("https://admin:secret@waf.example.com:8443/scope?x=1");
+        let c = fingerprint_for("HTTPS://WAF.example.COM");
+        assert_eq!(a, b, "userinfo + port + path must not change fingerprint");
+        // Host-case is preserved (DNS is case-insensitive but our
+        // identifier is byte-literal). Operators can normalize at
+        // call site if needed.
+        assert_ne!(
+            a, c,
+            "host-case currently NOT normalized — `.toLowerCase()` would \
+             collapse but breaks operators distinguishing case-aware proxies"
+        );
+    }
+
+    #[test]
+    fn fingerprint_ipv6_target() {
+        assert_eq!(
+            fingerprint_for("https://[::1]:8443/scope"),
+            "hunt:[::1]"
+        );
+    }
+
+    #[test]
+    fn fingerprint_does_not_leak_query_string_into_corpus_key() {
+        // A bug class: an operator passes `?token=secret` in the
+        // base URL. The token MUST NOT land in the on-disk corpus
+        // path, which would expose it via filesystem reads.
+        let fp = fingerprint_for("https://waf.example.com/api?token=SECRET-TOKEN");
+        assert!(
+            !fp.contains("SECRET-TOKEN"),
+            "corpus key must not leak secrets from query strings: {fp}"
+        );
+    }
+
+    #[test]
+    fn fingerprint_does_not_leak_userinfo_password() {
+        // Same class of bug: basic-auth password in URL must not
+        // land in the on-disk corpus key.
+        let fp = fingerprint_for("https://admin:secret-password@waf.example.com/");
+        assert!(
+            !fp.contains("secret-password"),
+            "corpus key must not leak password: {fp}"
+        );
+    }
+
+    #[test]
+    fn fingerprint_deterministic_for_same_input() {
+        let url = "https://waf.example.com:8443/";
+        let a = fingerprint_for(url);
+        let b = fingerprint_for(url);
+        let c = fingerprint_for(url);
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+    }
+
+    #[test]
+    fn fingerprint_distinguishes_different_hosts() {
+        // Even if hosts share a substring, fingerprints must differ.
+        let a = fingerprint_for("https://api.example.com/");
+        let b = fingerprint_for("https://api2.example.com/");
+        let c = fingerprint_for("https://example.com.attacker/");
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(b, c);
+    }
+
+    #[test]
+    fn fingerprint_handles_path_traversal_in_target_url() {
+        // Operator passes `../etc/passwd` in path — must not affect
+        // the fingerprint (which is derived from host only).
+        assert_eq!(
+            fingerprint_for("https://waf.example.com/../etc/passwd"),
+            "hunt:waf.example.com"
+        );
+    }
+
+    // ─── ADVERSARIAL: sanitize_campaign_id ────────────────────────
+
+    #[test]
+    fn sanitize_path_traversal_blocked() {
+        let s = sanitize_campaign_id("../../../etc/passwd");
+        assert!(!s.contains('.'), "dots must be replaced: {s}");
+        assert!(!s.contains('/'), "slashes must be replaced: {s}");
+        assert!(!s.contains('\\'), "backslashes must be replaced: {s}");
+        assert_eq!(s, "_________etc_passwd");
+    }
+
+    #[test]
+    fn sanitize_windows_reserved_chars() {
+        for bad in [':', '<', '>', '|', '?', '*', '"'] {
+            let s = sanitize_campaign_id(&format!("camp{bad}id"));
+            assert!(
+                !s.contains(bad),
+                "char {bad:?} must be replaced: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn sanitize_null_byte_blocked() {
+        let s = sanitize_campaign_id("camp\0id");
+        assert!(!s.contains('\0'), "null bytes must be replaced: {s:?}");
+    }
+
+    #[test]
+    fn sanitize_newline_blocked() {
+        let s = sanitize_campaign_id("camp\nid\r\n");
+        assert!(!s.contains('\n') && !s.contains('\r'));
+    }
+
+    #[test]
+    fn sanitize_empty_yields_unknown() {
+        assert_eq!(sanitize_campaign_id(""), "unknown");
+    }
+
+    #[test]
+    fn sanitize_preserves_safe_chars() {
+        let s = sanitize_campaign_id("hunt-2026-05-25_id-abc123");
+        assert_eq!(s, "hunt-2026-05-25_id-abc123");
+    }
+
+    #[test]
+    fn sanitize_truncates_long_ids() {
+        let huge = "x".repeat(1000);
+        let s = sanitize_campaign_id(&huge);
+        assert!(s.len() <= 200, "must truncate, got {} chars", s.len());
+    }
+
+    #[test]
+    fn sanitize_unicode_replaced_not_panic() {
+        // Multi-byte chars must not panic and must be replaced.
+        let s = sanitize_campaign_id("камп-русский");
+        for c in s.chars() {
+            assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        }
+    }
+
+    #[test]
+    fn corpus_paths_safe_even_when_campaign_id_is_traversal() {
+        // The corpus_paths_for helper must contain the file inside
+        // ~/.wafrift/corpus/ regardless of operator-supplied id.
+        let (cp, _) = corpus_paths_for("../../etc/passwd");
+        let dir = cp.parent().unwrap();
+        // The parent dir is always the corpus/ dir.
+        assert!(
+            dir.ends_with("corpus"),
+            "corpus path must stay inside corpus/: {cp:?}"
+        );
+        // The filename has the sanitized stem.
+        let name = cp.file_name().and_then(|s| s.to_str()).unwrap();
+        assert!(!name.contains(".."), "filename must not contain `..`: {name}");
+        assert!(!name.contains('/'), "filename must not contain `/`: {name}");
     }
 
     /// Two campaign ids under the same parent dir → distinct files.
