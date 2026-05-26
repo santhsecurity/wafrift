@@ -104,29 +104,32 @@ impl CertificateAuthority {
             // We now hard-error if either icacls invocation fails or
             // exits non-zero.
             use std::process::Command;
-            let user = std::env::var("USERNAME").unwrap_or_else(|_| "%USERNAME%".to_string());
-            let inherit = Command::new("icacls")
+            let user = std::env::var("USERNAME")
+                .with_context(|| "unable to determine current Windows username for icacls")?;
+            let out = Command::new("icacls")
                 .arg(&key_path)
                 .arg("/inheritance:r")
-                .status()
-                .with_context(|| format!("icacls /inheritance:r on {}", key_path.display()))?;
-            if !inherit.success() {
-                anyhow::bail!(
-                    "icacls /inheritance:r on {} failed with status {inherit:?}",
+                .output()
+                .with_context(|| format!("failed to spawn icacls for {}", key_path.display()))?;
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                return Err(anyhow::anyhow!(
+                    "icacls /inheritance:r failed for {}: {stderr}",
                     key_path.display()
-                );
+                ));
             }
-            let grant = Command::new("icacls")
+            let out = Command::new("icacls")
                 .arg(&key_path)
                 .arg("/grant:r")
                 .arg(format!("{user}:F"))
-                .status()
-                .with_context(|| format!("icacls /grant:r on {}", key_path.display()))?;
-            if !grant.success() {
-                anyhow::bail!(
-                    "icacls /grant:r {user}:F on {} failed with status {grant:?}",
+                .output()
+                .with_context(|| format!("failed to spawn icacls /grant:r for {}", key_path.display()))?;
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                return Err(anyhow::anyhow!(
+                    "icacls /grant:r failed for {}: {stderr}",
                     key_path.display()
-                );
+                ));
             }
         }
         Ok(())
@@ -304,7 +307,7 @@ pub fn generate_test_cert() -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
 ///
 /// Returns `~/.wafrift/mitm-ca/`.
 pub fn default_mitm_ca_dir() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| h.join(".wafrift").join("mitm-ca"))
+    dirs::config_dir().map(|d| d.join("wafrift").join("mitm-ca"))
 }
 
 /// Result of an OS trust store installation attempt.
@@ -344,49 +347,56 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
 
     #[cfg(target_os = "linux")]
     {
-        // sudo without cached creds prompts on stdin and would hang in a
-        // CI/headless context. Probe non-interactively first.
-        let sudo_available = std::process::Command::new("sudo")
-            .args(["-n", "true"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
-
-        // Try Debian/Ubuntu path first.
+        // Debian/Ubuntu
         let debian_dir = std::path::Path::new("/usr/local/share/ca-certificates");
         if sudo_available && debian_dir.is_dir() {
             let dest = debian_dir.join("wafrift-mitm-ca.crt");
             let cp = std::process::Command::new("sudo")
-                .args(["-n", "cp", &cert_display, &dest.display().to_string()])
-                .stdin(std::process::Stdio::null())
+                .arg("cp")
+                .arg(ca_cert_path)
+                .arg(&dest)
                 .status();
-            if let Ok(status) = cp
-                && status.success()
-            {
+            if let Ok(status) = cp && status.success() {
                 let update = std::process::Command::new("sudo")
-                    .args(["-n", "update-ca-certificates"])
-                    .stdin(std::process::Stdio::null())
+                    .arg("update-ca-certificates")
                     .status();
-                if let Ok(s) = update
-                    && s.success()
-                {
+                if let Ok(s) = update && s.success() {
                     return TrustResult::Installed {
                         method: "update-ca-certificates (Debian/Ubuntu)".into(),
                     };
                 }
             }
-            // Fall through to manual.
         }
 
-        // Try Fedora/RHEL trust(1) — does NOT need sudo, can run as user.
-        if let Ok(status) = std::process::Command::new("trust")
-            .args(["anchor", "--store", &cert_display])
-            .stdin(std::process::Stdio::null())
-            .status()
-            && status.success()
-        {
+        // Arch Linux
+        let arch_dir = std::path::Path::new("/etc/ca-certificates/trust-source/anchors");
+        if arch_dir.is_dir() {
+            let dest = arch_dir.join("wafrift-mitm-ca.crt");
+            let cp = std::process::Command::new("sudo")
+                .arg("cp")
+                .arg(ca_cert_path)
+                .arg(&dest)
+                .status();
+            if let Ok(status) = cp && status.success() {
+                let update = std::process::Command::new("sudo")
+                    .arg("update-ca-trust")
+                    .status();
+                if let Ok(s) = update && s.success() {
+                    return TrustResult::Installed {
+                        method: "update-ca-trust (Arch)".into(),
+                    };
+                }
+            }
+        }
+
+        // Fedora/RHEL
+        let trust = std::process::Command::new("sudo")
+            .arg("trust")
+            .arg("anchor")
+            .arg("--store")
+            .arg(ca_cert_path)
+            .status();
+        if let Ok(status) = trust && status.success() {
             return TrustResult::Installed {
                 method: "trust anchor (Fedora/RHEL)".into(),
             };
@@ -401,7 +411,8 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
                  Fedora/RHEL:\n\
                  \x20 sudo trust anchor --store {cert_display}\n\n\
                  Arch:\n\
-                 \x20 sudo trust anchor {cert_display}\n\n\
+                 \x20 sudo cp {cert_display} /etc/ca-certificates/trust-source/anchors/wafrift-mitm-ca.crt\n\
+                 \x20 sudo update-ca-trust\n\n\
                  Firefox (all platforms):\n\
                  \x20 Settings → Privacy & Security → Certificates → View Certificates → Import"
             ),
@@ -412,10 +423,16 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
     {
         TrustResult::ManualRequired {
             instructions: format!(
-                "Install the CA certificate in the macOS Keychain:\n\n\
+                "Install the CA certificate in the macOS System Keychain \
+                 (requires administrator privileges):\n\n\
                  \x20 sudo security add-trusted-cert -d -r trustRoot \\\n\
-                 \x20   -k /Library/Keychains/System.keychain {cert_display}\n\n\
-                 Or open Keychain Access → File → Import Items → select the .pem → Always Trust"
+                 \x20   -k /Library/Keychains/System.keychain \\\n\
+                 \x20   '{cert_display}'\n\n\
+                 Note: You must enter your macOS admin password. \
+                 If System Integrity Protection (SIP) prevents modification \
+                 of the System keychain, use Keychain Access instead:\n\
+                 \x20 Keychain Access → File → Import Items → select the .pem → \
+                 Always Trust for 'X.509 Basic Policy'."
             ),
         }
     }
@@ -424,10 +441,11 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
     {
         TrustResult::ManualRequired {
             instructions: format!(
-                "Install the CA certificate in the Windows trust store:\n\n\
-                 \x20 certutil -addstore -f \"ROOT\" \"{cert_display}\"\n\n\
-                 Or double-click the .pem file → Install Certificate → Local Machine → \
-                 Trusted Root Certification Authorities"
+                "Install the CA certificate in the Windows trust store \
+                 (requires Administrator privileges):\n\n\
+                 \x20 certutil -addstore -f ROOT \"{cert_display}\"\n\n\
+                 Or double-click the .pem file → Install Certificate → \
+                 Local Machine → Trusted Root Certification Authorities"
             ),
         }
     }
@@ -436,7 +454,9 @@ pub fn install_ca_trust(ca_cert_path: &std::path::Path) -> TrustResult {
     {
         TrustResult::ManualRequired {
             instructions: format!(
-                "Manually install {cert_display} in your OS certificate trust store."
+                "OS not supported for automatic CA installation. \
+                 Manually install {} in your OS certificate trust store.",
+                ca_cert_path.display()
             ),
         }
     }
@@ -631,11 +651,87 @@ mod tests {
     }
 
     #[test]
-    fn default_mitm_ca_dir_is_under_wafrift() {
+    fn default_mitm_ca_dir_is_under_config_wafrift() {
         if let Some(dir) = default_mitm_ca_dir() {
             assert!(dir.ends_with("mitm-ca"));
             let parent = dir.parent().unwrap();
-            assert!(parent.ends_with(".wafrift"));
+            assert!(parent.ends_with("wafrift"));
+            let config = dirs::config_dir().expect("config_dir should be available");
+            assert!(dir.starts_with(&config));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_trust_fallback_mentions_arch() {
+        let tmp = std::env::temp_dir().join("wafrift_test_ca.pem");
+        let result = install_ca_trust(&tmp);
+        match result {
+            TrustResult::ManualRequired { instructions } => {
+                assert!(instructions.contains("Arch"), "instructions must mention Arch");
+                assert!(
+                    instructions.contains("Debian/Ubuntu"),
+                    "instructions must mention Debian/Ubuntu"
+                );
+                assert!(
+                    instructions.contains("Fedora/RHEL"),
+                    "instructions must mention Fedora/RHEL"
+                );
+            }
+            _ => panic!("expected ManualRequired on Linux when auto-install fails"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_trust_instructions_mention_admin_and_sip() {
+        let tmp = std::env::temp_dir().join("wafrift_test_ca.pem");
+        let result = install_ca_trust(&tmp);
+        match result {
+            TrustResult::ManualRequired { instructions } => {
+                assert!(
+                    instructions.contains("administrator"),
+                    "must mention admin privileges"
+                );
+                assert!(
+                    instructions.contains("System Integrity Protection"),
+                    "must mention SIP"
+                );
+            }
+            _ => panic!("expected ManualRequired on macOS"),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_trust_instructions_mention_certutil() {
+        let tmp = std::env::temp_dir().join("wafrift_test_ca.pem");
+        let result = install_ca_trust(&tmp);
+        match result {
+            TrustResult::ManualRequired { instructions } => {
+                assert!(instructions.contains("certutil"), "must mention certutil");
+                assert!(
+                    instructions.contains("Administrator"),
+                    "must mention Administrator"
+                );
+            }
+            _ => panic!("expected ManualRequired on Windows"),
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[test]
+    fn unsupported_platform_trust_is_manual() {
+        let tmp = std::env::temp_dir().join("wafrift_test_ca.pem");
+        let result = install_ca_trust(&tmp);
+        match result {
+            TrustResult::ManualRequired { instructions } => {
+                assert!(
+                    instructions.contains("not supported"),
+                    "must document unsupported OS"
+                );
+            }
+            _ => panic!("expected ManualRequired on unsupported OS"),
         }
     }
 

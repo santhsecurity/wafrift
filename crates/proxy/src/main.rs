@@ -519,10 +519,22 @@ impl ProxyState {
         self.total_scanned
     }
 
-    /// Accessor for the live-findings renderer in `crate::findings`.
-    #[inline]
-    pub(crate) fn total_blocks(&self) -> u32 {
-        self.total_blocks
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct PersistedGeneBank {
+    /// Format version so future schema changes can be detected.
+    schema: u32,
+    hosts: HashMap<String, PersistedHostState>,
+}
+
+fn default_gene_bank_path(supplied: &str) -> Option<std::path::PathBuf> {
+    if supplied.is_empty() {
+        // Default: $XDG_CONFIG_HOME/wafrift/gene-bank.json (or platform equivalent).
+        // If config_dir cannot be determined, disable persistence.
+        dirs::config_dir().map(|d| d.join("wafrift").join("gene-bank.json"))
+    } else if supplied == "off" || supplied == "-" {
+        None
+    } else {
+        Some(std::path::PathBuf::from(supplied))
     }
 }
 
