@@ -446,4 +446,127 @@ mod tests {
             "block-page-match"
         );
     }
+
+    // ── technique_tag payload-bleed regression ────────────────────
+    //
+    // Pre-fix: the loop only stopped on ' ' (struct-variant delimiter).
+    // Tuple variants like HeaderObfuscation("x") would bleed their
+    // payload string into the tag, making tags non-stable and different
+    // for every unique argument string.
+
+    #[test]
+    fn technique_tag_tuple_variant_does_not_bleed_payload() {
+        // HeaderObfuscation holds a String; the tag must be
+        // "technique-header-obfuscation" regardless of the payload.
+        let t1 = Technique::HeaderObfuscation("case-mixing".to_string());
+        let t2 = Technique::HeaderObfuscation("tab-separator".to_string());
+        assert_eq!(
+            technique_tag(&t1),
+            technique_tag(&t2),
+            "technique tag must not vary with the payload string"
+        );
+        assert_eq!(technique_tag(&t1), "technique-header-obfuscation");
+    }
+
+    #[test]
+    fn technique_tag_grammar_mutation_stable() {
+        let t1 = Technique::GrammarMutation("sql_tautology".to_string());
+        let t2 = Technique::GrammarMutation("xss_polyglot".to_string());
+        assert_eq!(technique_tag(&t1), technique_tag(&t2));
+        assert_eq!(technique_tag(&t1), "technique-grammar-mutation");
+    }
+
+    #[test]
+    fn technique_tag_payload_encoding_stable() {
+        let t1 = Technique::PayloadEncoding("UrlEncode".to_string());
+        let t2 = Technique::PayloadEncoding("HexEncode".to_string());
+        assert_eq!(technique_tag(&t1), technique_tag(&t2));
+        assert_eq!(technique_tag(&t1), "technique-payload-encoding");
+    }
+
+    #[test]
+    fn technique_tag_content_type_switch_stable() {
+        let t = Technique::ContentTypeSwitch("form -> json".to_string());
+        assert_eq!(technique_tag(&t), "technique-content-type-switch");
+    }
+
+    #[test]
+    fn technique_tag_unit_variants() {
+        assert_eq!(
+            technique_tag(&Technique::BoundaryManipulation),
+            "technique-boundary-manipulation"
+        );
+        assert_eq!(
+            technique_tag(&Technique::JsonUnicodeEscape),
+            "technique-json-unicode-escape"
+        );
+        assert_eq!(
+            technique_tag(&Technique::UserAgentRotation),
+            "technique-user-agent-rotation"
+        );
+        assert_eq!(
+            technique_tag(&Technique::Http2Settings),
+            "technique-http2-settings"
+        );
+        assert_eq!(
+            technique_tag(&Technique::DifferentialProbe),
+            "technique-differential-probe"
+        );
+    }
+
+    #[test]
+    fn technique_tag_starts_with_technique_prefix_for_all_variants() {
+        let variants: Vec<Technique> = vec![
+            Technique::PayloadEncoding("x".into()),
+            Technique::ContentTypeSwitch("y".into()),
+            Technique::HeaderObfuscation("z".into()),
+            Technique::GrammarMutation("w".into()),
+            Technique::RequestSmuggling("cl-te".into()),
+            Technique::H2Evasion("frame".into()),
+            Technique::TlsFingerprint("chrome".into()),
+            Technique::BodyPadding(1024),
+            Technique::BoundaryManipulation,
+            Technique::JsonUnicodeEscape,
+            Technique::UserAgentRotation,
+            Technique::Http2Settings,
+            Technique::DifferentialProbe,
+            Technique::MlEvasion {
+                waf_class: "AwsBotControl".into(),
+                queries: 10,
+                off_manifold_rejected: 2,
+            },
+        ];
+        for t in &variants {
+            let tag = technique_tag(t);
+            assert!(
+                tag.starts_with("technique-"),
+                "tag `{tag}` must start with technique-"
+            );
+            // No spaces in tags — they must be valid kebab-case.
+            assert!(!tag.contains(' '), "tag `{tag}` must not contain spaces");
+            // Tag must not contain parentheses or braces — no payload bleed.
+            assert!(!tag.contains('('), "tag `{tag}` must not contain '('");
+            assert!(!tag.contains('{'), "tag `{tag}` must not contain '{{'");
+        }
+    }
+
+    #[test]
+    fn technique_tag_ml_evasion_stable_across_different_payloads() {
+        let t1 = Technique::MlEvasion {
+            waf_class: "AwsBotControl".into(),
+            queries: 100,
+            off_manifold_rejected: 5,
+        };
+        let t2 = Technique::MlEvasion {
+            waf_class: "CloudflareBot".into(),
+            queries: 1,
+            off_manifold_rejected: 0,
+        };
+        assert_eq!(
+            technique_tag(&t1),
+            technique_tag(&t2),
+            "MlEvasion tag must not vary with waf_class or query counts"
+        );
+        assert_eq!(technique_tag(&t1), "technique-ml-evasion");
+    }
 }

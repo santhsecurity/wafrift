@@ -23,8 +23,11 @@ members = [
     "crates/recon",
     "crates/genome-registry",
     "crates/captchaforge-bridge",
-    # Observability
-    "crates/telemetry",
+    "crates/graphql",
+    "crates/http3-evasion",
+    "crates/grpc-evasion",
+    # ── Plugin / Tamper API ──
+    "crates/plugin-api",
 ]
 
 [workspace.package]
@@ -52,22 +55,26 @@ unused_must_use = "deny"
 
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)
-wafrift-types = { path = "crates/types", version = "0.2.17" }
-wafrift-encoding = { path = "crates/encoding", version = "0.2.17" }
-wafrift-grammar = { path = "crates/grammar", version = "0.2.17" }
-wafrift-content-type = { path = "crates/content-type", version = "0.2.17" }
-wafrift-smuggling = { path = "crates/smuggling", version = "0.2.17" }
-wafrift-fingerprint = { path = "crates/fingerprint", version = "0.2.17" }
-wafrift-detect = { path = "crates/detect", version = "0.2.17" }
-wafrift-evolution = { path = "crates/evolution", version = "0.2.17" }
-wafrift-wafmodel = { path = "crates/wafmodel", version = "0.2.17" }
-wafrift-strategy = { path = "crates/strategy", version = "0.2.17" }
-wafrift-oracle = { path = "crates/oracle", version = "0.2.17" }
-wafrift-transport = { path = "crates/transport", version = "0.2.17" }
-wafrift-recon = { path = "crates/recon", version = "0.2.17" }
-wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.17" }
-wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.17" }
-wafrift-telemetry = { path = "crates/telemetry", version = "0.2.17" }
+wafrift-types = { path = "crates/types", version = "0.2.21" }
+wafrift-encoding = { path = "crates/encoding", version = "0.2.21" }
+wafrift-grammar = { path = "crates/grammar", version = "0.2.21" }
+wafrift-content-type = { path = "crates/content-type", version = "0.2.21" }
+wafrift-smuggling = { path = "crates/smuggling", version = "0.2.21" }
+wafrift-fingerprint = { path = "crates/fingerprint", version = "0.2.21" }
+wafrift-detect = { path = "crates/detect", version = "0.2.21" }
+wafrift-evolution = { path = "crates/evolution", version = "0.2.21" }
+wafrift-wafmodel = { path = "crates/wafmodel", version = "0.2.21" }
+wafrift-strategy = { path = "crates/strategy", version = "0.2.21" }
+wafrift-oracle = { path = "crates/oracle", version = "0.2.21" }
+wafrift-transport = { path = "crates/transport", version = "0.2.21" }
+wafrift-pool = { path = "crates/pool", version = "0.2.21" }
+wafrift-recon = { path = "crates/recon", version = "0.2.21" }
+wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.21" }
+wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.21" }
+wafrift-graphql = { path = "crates/graphql", version = "0.2.21" }
+wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.2.21" }
+wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.2.21" }
+wafrift-plugin-api = { path = "crates/plugin-api", version = "0.2.21" }
 mctrust = "=0.4.0"
 # External dependencies (unavailable in this environment)
 # attackstr = { path = "../../libs/offensive/attackstr" }
@@ -158,3 +165,7 @@ rustls-pki-types = "1.14.0"
 webpki-roots = "1.0.6"
 fs4 = "1.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
+# WASM sandbox engine for plugin-api external tampers.
+wasmtime = { version = "30", default-features = false, features = ["runtime", "cranelift", "component-model"] }
+# Temporary file helper used in plugin-api tests.
+tempfile = "3"

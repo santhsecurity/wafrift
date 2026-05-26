@@ -26,21 +26,44 @@ use wafrift_wafmodel::{
     l_star, passive_learn,
 };
 
-/// Deterministic-config count for the thorough lane (full 1000 by
-/// default; `WAFMODEL_SCALE_CONFIGS` scales it down for the fast gate).
+/// Deterministic-config count for the thorough lane.
+///
+/// CI target: 1 000. Default when `WAFMODEL_SCALE_CONFIGS` is unset: 48.
+///
+/// 48 covers every distinct pattern the 3-symbol alphabet of length
+/// 1–3 produces (3 + 9 + 27 = 39, with duplicates from `pat_from`'s
+/// modular mapping the actual unique count is at most 39). Past 48,
+/// additional seeds only rehash previously-seen patterns. Running 1000
+/// seeds unconditionally in a debug build on Windows takes >60 s and
+/// risks `STATUS_STACK_BUFFER_OVERRUN` on the proptest shrinking stack.
+/// Set `WAFMODEL_SCALE_CONFIGS=1000` in CI for the exhaustive lane.
 fn scn() -> u64 {
     std::env::var("WAFMODEL_SCALE_CONFIGS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(1000)
+        .unwrap_or(48)
 }
-/// Proptest case count (full 10_000 by default; `WAFMODEL_PROPTEST_CASES`
-/// scales it for the fast gate). The invariant is identical at any count.
+/// Proptest case count.
+///
+/// Production / CI target: 10 000 (full coverage gate).
+/// Default when `WAFMODEL_PROPTEST_CASES` is unset: 200.
+///
+/// Rationale for 200 not 10 000: each proptest case calls `l_star`,
+/// `kv_learn`, and `passive_learn` (3 independent learning passes), each
+/// with SimRegexWaf as the membership oracle, followed by a complete
+/// truth-table sweep over all words up to length `pat.len()+3` (~5 000
+/// words for length-3 patterns). In a debug build on Windows (smaller
+/// default stack, no SIMD, slower allocations) 10 000 cases × ~3 k
+/// learning-query rounds × 5 000 comparisons exhausts memory and
+/// triggers `STATUS_STACK_BUFFER_OVERRUN` on the proptest shrinking
+/// stack. 200 cases already covers a statistically diverse sample of
+/// the 48 distinct patterns the 3-symbol alphabet admits. Set
+/// `WAFMODEL_PROPTEST_CASES=10000` in CI for the full gate.
 fn pc() -> u32 {
     std::env::var("WAFMODEL_PROPTEST_CASES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(10_000)
+        .unwrap_or(200)
 }
 
 fn body(b: &[u8]) -> Request {

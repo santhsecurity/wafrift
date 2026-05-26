@@ -65,6 +65,9 @@ mod target_context;
 mod technique_filter;
 mod trailer_diff_cmd;
 mod wafmodel_cmd;
+mod tmin_cmd;
+mod cluster_cmd;
+mod hunt_cmd;
 
 // All per-command helpers are imported by their command modules now.
 // main.rs is reduced to dispatch + the top-level Cli/Commands surface.
@@ -371,42 +374,6 @@ enum Commands {
     /// With `--target cumulusfire`: pre-fills the CF testing endpoint and
     /// authorization reason for the CumulusFire public bug-bounty scope.
     Hunt(hunt_cmd::HuntArgs),
-    /// Inspect a `wafrift corpus` artifact (rule_corpus + edge-POP coverage
-    /// maps written by `wafrift bench-waf --corpus-out`). Subcommands:
-    ///
-    /// `stats` — print a structured summary of rules seen, total bypasses /
-    /// blocks, and edge POPs covered. Supports `--format json` for CI
-    /// gate integration (if rules_seen < N, fail the hunt).
-    #[command(name = "corpus")]
-    Corpus(corpus_cmd::CorpusArgs),
-
-    /// Generate wire-format HTTP/3 + QUIC evasion frames for a given
-    /// technique. Each instantiates a builder from
-    /// `wafrift_http3_evasion`, calls its frame-set producer, and
-    /// emits a JSON or text envelope describing the resulting
-    /// `EvasionFrameSet`. Optionally writes raw concatenated frame
-    /// bytes to `--out <PATH>` so operators can feed them into an
-    /// external QUIC client (quinn, msquic).
-    #[command(name = "http3-frames")]
-    Http3Frames(http3_frames_cmd::Http3FramesArgs),
-
-    /// Solve for a structural-preimage bypass of a live WAF using
-    /// `wafrift_wafmodel::solve_bypass` (CEGIS). Given an attack and
-    /// a sink decoding pipeline, finds bytes that the live WAF
-    /// passes AND that the sink decodes back to the literal attack.
-    /// Anti-rig: if the raw attack is not blocked, exits 3 (vacuous);
-    /// if blocked but no bypass exists, exits 4.
-    #[command(name = "solve-bypass")]
-    SolveBypass(wafmodel_solve_cmd::SolveBypassArgs),
-
-    /// Apply ML-aware evasion mutations to an attack body via
-    /// `wafrift_strategy::evade_ml_backed`. Operates offline: emits
-    /// the mutated request for inspection or replay through a
-    /// separate sender. Only ML-backed WAF classes (AWS Bot Control,
-    /// Cloudflare Bot Management, Akamai Bot Manager, Datadome)
-    /// produce mutations; other WAF names exit 3 (vacuous).
-    #[command(name = "ml-evade")]
-    MlEvade(ml_evade_cmd::MlEvadeArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -1186,10 +1153,6 @@ fn main() -> ExitCode {
         }
         Some(Commands::Cluster(args)) => cluster_cmd::run_cluster(args),
         Some(Commands::Hunt(args)) => hunt_cmd::run_hunt(args),
-        Some(Commands::Corpus(args)) => corpus_cmd::run_corpus(args),
-        Some(Commands::Http3Frames(args)) => http3_frames_cmd::run_http3_frames(args),
-        Some(Commands::SolveBypass(args)) => wafmodel_solve_cmd::run_solve_bypass(args),
-        Some(Commands::MlEvade(args)) => ml_evade_cmd::run_ml_evade(args),
     }
 }
 

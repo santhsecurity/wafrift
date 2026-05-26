@@ -1066,6 +1066,115 @@ fn build_description(techniques: &[Technique]) -> String {
     }
 }
 
+/// Returns `true` when `req` looks like a GraphQL request.
+///
+/// Two heuristics apply — either suffices:
+/// 1. `Content-Type: application/graphql` (raw SDL query).
+/// 2. Body begins with `{` AND contains `"query":` (JSON-envelope form).
+///
+/// This is intentionally a pure, synchronous, I/O-free check so the strategy
+/// crate remains trivially unit-testable.
+#[must_use]
+pub fn is_graphql_request(req: &Request) -> bool {
+    // Heuristic 1: explicit GraphQL Content-Type.
+    let content_type = req
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.as_str());
+
+    if let Some(ct) = content_type {
+        if ct.to_ascii_lowercase().contains("application/graphql") {
+            return true;
+        }
+    }
+
+    // Heuristic 2: JSON-envelope form  {"query":"..."}
+    if let Some(body) = &req.body {
+        if let Ok(s) = std::str::from_utf8(body) {
+            let trimmed = s.trim_start();
+            if trimmed.starts_with('{') && s.contains(r#""query":"#) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Return the full `wafrift-graphql` evasion battery for `req` when it
+/// looks like a GraphQL request, or an empty `Vec` otherwise.
+///
+/// The battery covers alias-flood (100/250/500/1000 aliases), introspection
+/// (full + simple + type + whitespace-split variants), op-name-mismatch (3
+/// variants), depth-bomb (6 depths × 2 shapes), batch (5 sizes), and
+/// field-suggestion typos (5 variants).
+#[must_use]
+pub fn graphql_payloads_for_request(req: &Request) -> Vec<String> {
+    if is_graphql_request(req) {
+        wafrift_graphql::all_evasion_payloads()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Returns `true` when `req` targets a gRPC endpoint.
+///
+/// Detection heuristic: the `Content-Type` header contains
+/// `application/grpc` (covers both the bare form and
+/// `application/grpc+proto`, `application/grpc+json`, etc.).
+#[must_use]
+pub fn is_grpc_request(req: &Request) -> bool {
+    req.headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.to_ascii_lowercase().contains("application/grpc"))
+        .unwrap_or(false)
+}
+
+/// Return the full gRPC-evasion payload battery for `req` when it targets
+/// a gRPC endpoint, or an empty `Vec` otherwise.
+///
+/// The battery covers:
+/// - Flat embedding (field 1, no nesting)
+/// - Nested submessage depths 1–10 (defeats depth-limited inspectors)
+/// - Split across 2, 5, and 10 fields (WAF sees only fragments)
+///
+/// Each `Vec<u8>` in the returned `Vec` is the raw bytes of a complete
+/// gRPC frame (5-byte header + protobuf body), ready to be sent as the
+/// HTTP/2 DATA frame body with `Content-Type: application/grpc`.
+#[must_use]
+pub fn grpc_payloads_for_request(req: &Request) -> Vec<Vec<u8>> {
+    if !is_grpc_request(req) {
+        return Vec::new();
+    }
+    let body_str = req
+        .body
+        .as_ref()
+        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .unwrap_or_default();
+
+    let mut payloads = Vec::new();
+
+    // Flat embedding.
+    payloads.push(wafrift_grpc_evasion::embed_attack_in_message(&body_str));
+
+    // Nested submessage depths 1–10.
+    for depth in 1u8..=10 {
+        payloads.push(wafrift_grpc_evasion::embed_attack_in_nested(&body_str, depth));
+    }
+
+    // Split across N fields.
+    for n_fields in [2u8, 5, 10] {
+        payloads.push(wafrift_grpc_evasion::split_attack_across_fields(
+            &body_str,
+            n_fields,
+        ));
+    }
+
+    payloads
+}
+
 /// Determine whether the payload body is textual (safe for utf-8 mutation).
 pub(crate) fn is_text_payload(req: &Request) -> bool {
     if req.body.is_none() {

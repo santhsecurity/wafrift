@@ -174,40 +174,6 @@ pub struct BenchWafArgs {
     #[arg(long)]
     pub lineage_output: Option<PathBuf>,
 
-    // ─── Egress rotation (multi-IP evasion of bot-reputation engines) ────────
-
-    /// SOCKS5 proxy URL for egress rotation (repeatable).
-    /// Example: `--socks5 socks5://user:pass@10.8.0.1:1080`
-    #[arg(long = "socks5", value_name = "URL", num_args = 0..)]
-    pub egress_socks5: Vec<String>,
-
-    /// HTTP proxy URL for egress rotation (repeatable).
-    /// Example: `--http-proxy http://burp.internal:8080`
-    #[arg(long = "http-proxy", value_name = "URL", num_args = 0..)]
-    pub egress_http_proxy: Vec<String>,
-
-    /// Tailscale exit-node name for egress rotation (repeatable).
-    #[arg(long = "tailscale-exit-node", value_name = "NODE", num_args = 0..)]
-    pub egress_tailscale_nodes: Vec<String>,
-
-    /// Tailscale SOCKS listener address. Default: `127.0.0.1:1055`.
-    #[arg(long = "tailscale-socks-addr", value_name = "ADDR", default_value = "127.0.0.1:1055")]
-    pub egress_tailscale_socks_addr: String,
-
-    /// Consecutive challenges before cooling an egress entry. Default: 3.
-    #[arg(long = "egress-challenge-threshold", default_value_t = 3u32)]
-    pub egress_challenge_threshold: u32,
-
-    /// Seconds a cooled egress entry stays out of rotation. Default: 300.
-    #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
-    pub egress_cooldown_secs: u64,
-
-    /// Pin the evolution-strategy mutator to a specific algorithm for ablation.
-    /// `default` uses the strategy name (hill-climb, sim-anneal, etc.).
-    /// `ast-mcts` forces AST Monte-Carlo Tree Search for every evolution case.
-    #[arg(long, default_value = "default", value_parser = ["default", "ast-mcts"])]
-    pub mutator: String,
-
     /// Weight for ensemble-dilution score in evolutionary fitness (0.0–1.0).
     ///
     /// When targeting a multi-rule-group ensemble WAF (Cloudflare Managed
@@ -223,87 +189,6 @@ pub struct BenchWafArgs {
     /// Has no effect when targeting rule-based or ML-backed WAFs.
     #[arg(long, default_value_t = 0.0, value_parser = parse_dilution_weight)]
     pub dilution_weight: f64,
-
-    /// Path to write the per-rule bypass corpus on completion.
-    /// When set, the bench captures full response envelopes for
-    /// confirmed bypasses (via `send_with_envelope`), routes them
-    /// through `parse_cf_block` to derive the CF rule attribution
-    /// + edge POP, and persists to this path. Combine with
-    /// `--coverage-out` for the cross-region POP coverage map.
-    /// Omitting both flags keeps the legacy hot-path send() that
-    /// drops headers/body for slightly lower per-probe latency.
-    #[arg(long)]
-    pub corpus_out: Option<std::path::PathBuf>,
-
-    /// Path to write the edge-POP coverage map on completion.
-    /// See `--corpus-out`.
-    #[arg(long)]
-    pub coverage_out: Option<std::path::PathBuf>,
-
-    /// Target fingerprint string the corpus is keyed under.
-    /// Defaults to `bench:<base_url>` so each target gets a stable
-    /// per-target corpus. Operators recording against CumulusFire
-    /// can pass an explicit `cf:cumulusfire:<host>` so multiple
-    /// runs accumulate into one file.
-    #[arg(long, default_value = "")]
-    pub corpus_fingerprint: String,
-
-    /// Declared WAF identity of the target. Activates the ensemble
-    /// sub-score dilution fitness gate in `run_evolution_strategy`:
-    /// when this names a known ensemble WAF (Cloudflare Managed
-    /// Rules, AWS Core Rule Set — per
-    /// `wafrift_evolution::dilution::is_ensemble_waf`) AND
-    /// `--dilution-weight > 0`, variants whose predicted total
-    /// anomaly score is below the operator's plausibility floor are
-    /// PRUNED before they hit the target. Saves wire round-trips on
-    /// payloads the dilution planner can already prove are
-    /// implausible. Default empty = no gating (legacy behavior).
-    #[arg(long, default_value = "")]
-    pub target_waf: String,
-
-    /// Optional HackerOne archive (JSON) of already-submitted bypass
-    /// fingerprints. When supplied alongside `--corpus-out`, the
-    /// corpus recorder uses it to flag duplicate-of-published
-    /// bypasses so they're excluded from the `novel_bypass_count`.
-    /// Default: no archive — every confirmed bypass is treated as
-    /// novel. The file is `H1Archive`-serialized JSON; see
-    /// `wafrift_evolution::h1_dedup::H1Archive::save_atomic`.
-    #[arg(long, value_name = "PATH")]
-    pub h1_archive: Option<std::path::PathBuf>,
-
-    /// Max number of encoding chains the `lattice` strategy
-    /// enumerates per case. Each chain produces one HTTP request +
-    /// one unique fingerprint (so for the CumulusFire bounty:
-    /// `cases × lattice_max_chains` = upper bound on novel
-    /// fingerprints per round). Default 256 — sweet spot between
-    /// per-case yield and total HTTP volume.
-    #[arg(long, default_value_t = 256)]
-    pub lattice_max_chains: usize,
-
-    /// Number of cross-region "shotgun" replays per verified bypass.
-    /// When >0 AND `--egress-*` declares multiple backends, each
-    /// confirmed bypass is replayed N additional times through fresh
-    /// egress entries (round-robined from the pool). Same payload +
-    /// chain, different POP → potentially different CF rule attribution
-    /// and edge_pop_coverage entries per fingerprint. Default 0 to
-    /// keep traffic volume predictable; set to `egress_pool_size` to
-    /// fully fan out one bypass across every operator-supplied egress.
-    /// Only `lattice` and `polyglot` strategies honor this today.
-    #[arg(long, default_value_t = 0)]
-    pub shotgun_replays: usize,
-
-    /// Calibrate the response-latency oracle with N benign probes
-    /// at bench start. The resulting `TimingOracle` (from
-    /// `wafrift_oracle::timing`) provides mean+3σ anomaly
-    /// detection — a third evidence channel for blind-class
-    /// bypasses (time-based SQL, command-injection sleep, blind
-    /// SSRF) beyond the status-code + body oracles. When a verified
-    /// bypass also clears the timing threshold, the corpus tags it
-    /// with `timing_confirmed:1` so H1 reports can cite triple-
-    /// channel evidence. Default 0 = disabled. Recommended: 8-16
-    /// probes for stable variance estimation.
-    #[arg(long, default_value_t = 0)]
-    pub timing_calibration: usize,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {

@@ -30,7 +30,7 @@ use crate::evolution::{Chromosome, GenePool, population::random_chromosome};
 use crate::lineage::Lineage;
 use crate::search::{EvalCandidate, SearchAlgorithm, fitness_cmp};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
-use rand::RngCore;
+use rand::Rng;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -166,7 +166,7 @@ impl AstMctsAlgorithm {
         }
 
         // Run MCTS using an inline oracle to enumerate candidate rewrites.
-        let jitter: u64 = rng.next_u64();
+        let jitter: u64 = rng.r#gen();
         let mut generated: Vec<String> = Vec::new();
         let mut inline = InlineOracle {
             candidates: &mut generated,
@@ -197,12 +197,7 @@ impl AstMctsAlgorithm {
                 set_gene(&mut c, "ast_mcts_payload", &payload);
                 c.lineage = Lineage::mutation(
                     &self.best,
-                    vec![crate::lineage::MutationOp {
-                        gene_name: "ast_mcts_payload".into(),
-                        from: self.best_payload.clone(),
-                        to: payload.clone(),
-                        operator: "ast_mcts:best_payload".into(),
-                    }],
+                    vec![format!("ast_mcts:best_payload")],
                     self.generation,
                 );
                 self.pending.push((self.eval_counter, c));
@@ -222,12 +217,7 @@ impl AstMctsAlgorithm {
             set_gene(&mut c, "ast_mcts_payload", &payload);
             c.lineage = Lineage::mutation(
                 &self.best,
-                vec![crate::lineage::MutationOp {
-                    gene_name: "ast_mcts_payload".into(),
-                    from: self.best_payload.clone(),
-                    to: payload.clone(),
-                    operator: "ast_mcts:inline_candidate".into(),
-                }],
+                vec![format!("ast_mcts:inline_candidate")],
                 self.generation,
             );
             self.pending.push((self.eval_counter, c));
@@ -496,7 +486,7 @@ mod tests {
         let seed = Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())]);
         alg.initialize(vec![seed], &pool, &mut rng);
 
-        let cloned = alg.clone_box();
+        let mut cloned = alg.clone_box();
         // Mutate clone — original must not change.
         alg.bypass_found = true;
         assert!(!cloned.best().unwrap().has_gene("non_existent"));

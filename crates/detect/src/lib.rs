@@ -1,7 +1,12 @@
-//! wafrift-detect — WAF detection and response fingerprint analysis.
+//! wafrift-detect — WAF detection across four independent fingerprint axes.
 //!
-//! Identifies WAFs from response headers and body content.
-//! Detects silent blocking via response fingerprint drift analysis.
+//! Identifies WAFs / CDNs / origin infrastructure from:
+//! - HTTP response headers + body (160+ vendor rules loaded from TOML)
+//! - DNS CNAME chain resolution (WAF/CDN providers leak identity in CNAME hops)
+//! - Reverse-DNS (PTR) on the leaf IP
+//! - BGP origin-ASN lookup via Cymru's DNS service
+//!
+//! Also detects silent blocking via response fingerprint drift analysis.
 //!
 //! # Examples
 //!
