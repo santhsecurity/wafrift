@@ -100,28 +100,19 @@ async fn resolve_ips(hostname: &str) -> Result<Vec<IpAddr>, String> {
     Ok(out)
 }
 
-pub fn run_origin_hints(args: OriginHintsArgs) -> ExitCode {
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!(
-                "{} failed to start tokio runtime: {e}",
-                "error:".red().bold()
-            );
-            return ExitCode::from(1);
-        }
-    };
-    match rt.block_on(run_async(&args)) {
+pub fn run_origin_hints(args: OriginHintsArgs, quiet: bool) -> ExitCode {
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match rt.block_on(run_async(&args, quiet)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{} {e}", "error:".red().bold());
+            eprintln!("{} {e}. Fix: verify the hostname is resolvable and try again.", "error:".red().bold());
             ExitCode::from(1)
         }
     }
 }
 
-async fn run_async(args: &OriginHintsArgs) -> Result<(), String> {
-    let host = normalize_host(args.resolved_host())?;
+async fn run_async(args: &OriginHintsArgs, quiet: bool) -> Result<(), String> {
+    let host = normalize_host(&args.host)?;
     let ips = resolve_ips(&host).await?;
 
     if ips.is_empty() {
@@ -131,10 +122,11 @@ async fn run_async(args: &OriginHintsArgs) -> Result<(), String> {
     let first_ip = ips[0];
     let origin_bypass_example = json!({ &host: first_ip.to_string() });
 
-    if args.format == "json" {
+    if quiet || args.format == "json" {
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
+                "schema_version": 1,
                 "host": host,
                 "ips": ips.iter().map(std::string::ToString::to_string).collect::<Vec<_>>(),
                 "origin_bypass_example": origin_bypass_example,

@@ -31,7 +31,7 @@ pub struct InitArgs {
     pub quiet: bool,
 }
 
-pub fn run_init(args: InitArgs) -> ExitCode {
+pub fn run_init(args: InitArgs, quiet: bool) -> ExitCode {
     let out_path = args
         .output
         .clone()
@@ -46,38 +46,19 @@ pub fn run_init(args: InitArgs) -> ExitCode {
     }
 
     if let Err(e) = fs::write(&out_path, SCAFFOLD) {
-        eprintln!("error: write {}: {e}", out_path.display());
+        eprintln!("error: write {}: {e}. Fix: verify the directory is writable.", out_path.display());
         return ExitCode::from(1);
     }
 
-    if !args.quiet {
+    if !quiet {
         eprintln!(
             "wrote scaffold ({} bytes) → {}",
             SCAFFOLD.len(),
             out_path.display()
         );
         eprintln!("Next steps:");
-        eprintln!(
-            "  1. Edit the file — uncomment the keys you want. `wafrift scan` \
-             auto-loads it (CLI flags still win)."
-        );
-        match locate_proxy() {
-            Some(p) => eprintln!(
-                "  2. Run `{} --listen 127.0.0.1:8080 --mitm` and point your client at it.",
-                p.display()
-            ),
-            None => {
-                eprintln!(
-                    "  2. `wafrift-proxy` is NOT on your PATH. It is a separate binary in the \
-                     same workspace — build/install it with:"
-                );
-                eprintln!("       cargo install --path crates/proxy   # from a wafrift checkout");
-                eprintln!(
-                    "       (or `cargo build -p wafrift-proxy` and run target/.../wafrift-proxy)"
-                );
-                eprintln!("     then: wafrift-proxy --listen 127.0.0.1:8080 --mitm");
-            }
-        }
+        eprintln!("  1. Edit the file — uncomment the keys you want to override.");
+        eprintln!("  2. Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and point your client at it.");
         eprintln!("  3. Run `wafrift report` after you have findings.");
     }
     ExitCode::SUCCESS

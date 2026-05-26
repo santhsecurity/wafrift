@@ -10,7 +10,8 @@
 //! shot — no manual transcription.
 
 use clap::Args;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -174,152 +175,26 @@ struct PersistedGeneBank {
     hosts: HashMap<String, PersistedHostState>,
 }
 
-/// Union two banks: `dst` is mutated in place with the host union from `src`.
-/// Per host: `proven_winners` and blocklisted are union-merged (preserving
-/// dst's order, then appending unseen entries from src). The first non-null
-/// `waf_name` wins. Schema becomes max(dst, src).
-fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
-    dst.schema = dst.schema.max(src.schema);
-    for (host, src_state) in src.hosts {
-        let entry = dst.hosts.entry(host).or_default();
-        for w in src_state.proven_winners {
-            if !entry.proven_winners.contains(&w) {
-                entry.proven_winners.push(w);
-            }
-        }
-        for b in src_state.blocklisted {
-            if !entry.blocklisted.contains(&b) {
-                entry.blocklisted.push(b);
-            }
-        }
-        if entry.waf_name.is_none() {
-            entry.waf_name = src_state.waf_name;
-        }
-        // Bypass findings are uniqued on (variant, payload) — same
-        // bypass surfaced by two scan runs against the same host
-        // shouldn't double in the report. Order preserves dst-first
-        // so the most-recently-ingested run wins display position
-        // for new findings.
-        for f in src_state.bypass_findings {
-            let already = entry
-                .bypass_findings
-                .iter()
-                .any(|e| e.variant == f.variant && e.payload == f.payload);
-            if !already {
-                entry.bypass_findings.push(f);
-            }
-        }
-    }
-}
-
-/// Reduce a target URL to a bare host (the gene-bank/report key).
-fn host_from_target(target: &str) -> String {
-    // Delegate to the shared transport extractor — it handles
-    // IPv6 brackets correctly. Pre-fix the local naive
-    // rsplit_once(':') split `[::1]` on the LAST `:` of the
-    // address itself, yielding `[:` instead of `[::1]`. Report
-    // aggregation against an IPv6-target scan was effectively
-    // broken (host-keyed buckets used the mangled string).
-    wafrift_transport::host_from_url(target).unwrap_or_else(|| "unknown-host".to_string())
-}
-
-/// Parse a `wafrift scan --format json` blob into the same host-keyed
-/// model the proxy gene bank uses, so both sources flow through the
-/// identical render path. Accepts the bare `scan` object or the
-/// `--report-layers` wrapper that nests it under `"scan"`.
-fn ingest_scan_json(raw: &str, src: &str) -> Result<PersistedGeneBank, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(raw).map_err(|e| format!("parse scan JSON from {src}: {e}"))?;
-    let scan = v.get("scan").filter(|s| s.is_object()).unwrap_or(&v);
-
-    let target = scan
-        .get("target")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            format!("{src}: not a wafrift scan JSON (no `target` field) — did you pipe `scan --format json`?")
-        })?;
-    let host = host_from_target(target);
-
-    let mut techniques: Vec<String> = Vec::new();
-    let mut bypass_findings: Vec<BypassFinding> = Vec::new();
-    if let Some(arr) = scan
-        .get("bypass_variants")
-        .and_then(serde_json::Value::as_array)
-    {
-        for bv in arr {
-            if let Some(ts) = bv.get("techniques").and_then(serde_json::Value::as_array) {
-                for t in ts {
-                    if let Some(s) = t.as_str()
-                        && !techniques.iter().any(|x| x == s)
-                    {
-                        techniques.push(s.to_string());
-                    }
-                }
-            }
-            // Preserve the concrete bypass payload + repro_curl —
-            // the previous cut threw these away and the rendered
-            // report only carried the technique class, which made
-            // the pentest deliverable answer "what bypassed?" with
-            // "url+case_swap" instead of the actual exploit string.
-            if let Ok(finding) = serde_json::from_value::<BypassFinding>(bv.clone()) {
-                bypass_findings.push(finding);
-            }
-        }
-    }
-
-    let waf_name = scan
-        .get("waf")
-        .and_then(serde_json::Value::as_str)
-        .filter(|w| !w.is_empty() && !w.eq_ignore_ascii_case("none"))
-        .map(str::to_string);
-
-    let mut hosts = HashMap::new();
-    hosts.insert(
-        host,
-        PersistedHostState {
-            proven_winners: techniques,
-            blocklisted: Vec::new(),
-            waf_name,
-            bypass_findings,
-        },
-    );
-    Ok(PersistedGeneBank { schema: 1, hosts })
-}
-
-pub fn run_report(args: ReportArgs) -> ExitCode {
-    let has_scan_src = !args.scan_json.is_empty() || args.scan_stdin;
-    let mut merged = PersistedGeneBank::default();
-
-    // ── scan JSON sources ──
-    if args.scan_stdin {
-        use std::io::Read;
-        let mut raw = String::new();
-        if let Err(e) = std::io::stdin().read_to_string(&mut raw) {
-            eprintln!("error: read scan JSON from stdin: {e}");
+pub fn run_report(args: ReportArgs, quiet: bool) -> ExitCode {
+    let path = match resolve_path(args.proxy_bank.clone()) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("error: {msg}. Fix: pass --proxy-bank with a valid path, or ensure ~/.wafrift/gene-bank.json exists.");
             return ExitCode::from(1);
         }
-        match ingest_scan_json(&raw, "stdin") {
-            Ok(b) => merge_banks(&mut merged, b),
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::from(1);
-            }
+    };
+    let raw = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: read {}: {e}. Fix: verify the file path and permissions.", path.display());
+            return ExitCode::from(1);
         }
-    }
-    for path in &args.scan_json {
-        let raw = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: read {}: {e}", path.display());
-                return ExitCode::from(1);
-            }
-        };
-        match ingest_scan_json(&raw, &path.display().to_string()) {
-            Ok(b) => merge_banks(&mut merged, b),
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::from(1);
-            }
+    };
+    let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: parse gene bank at {}: {e}. Fix: verify the file contains valid JSON.", path.display());
+            return ExitCode::from(1);
         }
     }
 
@@ -385,16 +260,23 @@ pub fn run_report(args: ReportArgs) -> ExitCode {
         .collect();
     hosts.sort_by(|a, b| a.0.cmp(b.0));
 
-    let body = match args.format.as_str() {
-        "json" => match render_json(&bank, &hosts, &args) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: serialize json: {e}");
-                return ExitCode::from(1);
-            }
-        },
-        _ => render_markdown(&bank, &hosts, &args),
-    };
+    if quiet {
+        let summary: Vec<_> = hosts
+            .iter()
+            .map(|(name, hs)| {
+                json!({
+                    "host": name,
+                    "waf": hs.waf_name,
+                    "proven_winners": hs.proven_winners,
+                    "blocklisted": hs.blocklisted,
+                })
+            })
+            .collect();
+        println!("{}", json!({ "schema_version": 1, "hosts": summary }));
+        return ExitCode::SUCCESS;
+    }
+
+    let md = render_markdown(&bank, &hosts, &args);
 
     match args.output.as_ref() {
         Some(p) => match fs::write(p, &body) {
