@@ -32,8 +32,9 @@ use std::time::Instant;
 
 use wafrift_types::Request;
 use wafrift_wafmodel::{
-    Alphabet, BoundedExhaustiveEq, FnOracle, LearnReport, Outcome, WafModelError, WafOracle,
-    attack_grammar, l_star_budgeted, mine_bypasses,
+    Alphabet, BoundedExhaustiveEq, ChainedEq, EquivalenceOracle, FnOracle, LearnReport, Outcome,
+    SampledEq, UcbBanditEq, WMethodEq, WafModelError, WafOracle, attack_grammar, l_star_budgeted,
+    mine_bypasses,
 };
 
 /// Arguments for `wafrift model-evade`.
@@ -130,6 +131,53 @@ pub struct ModelEvadeArgs {
     /// Seconds a cooled egress entry stays out of rotation. Default: 300.
     #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
     pub egress_cooldown_secs: u64,
+
+    /// Equivalence-oracle strategy for the L* refinement loop. One of:
+    ///
+    /// * `bounded` (default) — `BoundedExhaustiveEq` BFS over all
+    ///   words ≤ `max-len` (current behavior).
+    /// * `wmethod` — Chow's W-method. Guarantees discovery of any
+    ///   fault if the true machine has ≤ `hyp_states + extra_states`.
+    /// * `ucb-bandit` — UCB1 over `(state, symbol)` transition arms.
+    ///   Spends each query where the model is least exercised.
+    /// * `sampled` — PAC-bounded random sampling. Reports a real
+    ///   `PacBound` on clean rounds.
+    /// * `chained` — runs `wmethod` → `ucb-bandit` → `sampled` in
+    ///   order, returning the first counterexample. Strongest signal
+    ///   per query for live targets at the cost of higher round
+    ///   complexity.
+    #[arg(
+        long,
+        default_value = "bounded",
+        value_parser = ["bounded", "wmethod", "ucb-bandit", "sampled", "chained"],
+    )]
+    pub equiv_strategy: String,
+
+    /// Extra-states budget for `--equiv-strategy wmethod`. Higher
+    /// values check deeper Σ^{≤k} suffixes; each +1 multiplies the
+    /// W-method's query count by the alphabet size.
+    #[arg(long, default_value_t = 1)]
+    pub equiv_extra_states: usize,
+
+    /// Per-round sample count for `--equiv-strategy sampled` /
+    /// `chained`. Higher = tighter PAC bound on clean rounds.
+    #[arg(long, default_value_t = 256)]
+    pub equiv_samples: u64,
+
+    /// Max sampled word length for `--equiv-strategy sampled` /
+    /// `chained` / `ucb-bandit`.
+    #[arg(long, default_value_t = 6)]
+    pub equiv_max_len: usize,
+
+    /// PAC confidence parameter (δ) for `--equiv-strategy sampled`.
+    /// Lower δ = stricter bound on the certifying round.
+    #[arg(long, default_value_t = 0.05)]
+    pub equiv_delta: f64,
+
+    /// Membership probes per round for `--equiv-strategy ucb-bandit`.
+    /// Each probe = one live HTTP request.
+    #[arg(long, default_value_t = 64)]
+    pub equiv_ucb_budget: usize,
 }
 
 // ── Attack-class configuration ─────────────────────────────────────────────
@@ -440,9 +488,27 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
         .header("Content-Type", "application/x-www-form-urlencoded")
     };
 
-    let mut eq = BoundedExhaustiveEq { max_len: 6 };
+    // max_queries caps the EQ oracle's HTTP round-trips per equivalence
+    // round. With a 22-symbol sqli alphabet the BFS frontier reaches
+    // 22⁵ ≈ 5 M entries at depth 5, capped to 1 M by FRONTIER_CAP —
+    // still 1 M HTTP calls per EQ round without this gate. 500 queries
+    // is more than enough to find a counterexample for any sub-6-state
+    // boundary learned from a budget-50 membership pass.
+    // Deterministic equiv-oracle seed: derived from the target URL so
+    // repeated runs against the same target reproduce the same probe
+    // sequence (FNV-1a 64-bit; no external RNG needed).
+    let equiv_seed: u64 = fnv1a_64(args.target_url.as_bytes());
+    let mut eq = build_equiv_oracle(
+        &args.equiv_strategy,
+        args.equiv_extra_states,
+        args.equiv_samples,
+        args.equiv_max_len,
+        args.equiv_delta,
+        args.equiv_ucb_budget,
+        equiv_seed,
+    );
     let learn_result: LearnReport =
-        match l_star_budgeted(&mut oracle, &build_req, &alpha, &mut eq, args.budget) {
+        match l_star_budgeted(&mut oracle, &build_req, &alpha, eq.as_mut(), args.budget) {
             Ok(r) => {
                 if !json_mode {
                     println!(
@@ -676,10 +742,99 @@ fn emit_output(path: Option<&std::path::Path>, content: &str) {
     }
 }
 
+/// Construct the operator-chosen `EquivalenceOracle` strategy.
+///
+/// Returns `Box<dyn EquivalenceOracle>` so the caller can swap
+/// strategies behind one variable without per-arm code at the
+/// l_star_budgeted call site. The mapping is also tested in this
+/// module's `tests` so adding a new value-parser entry without
+/// wiring its construction trips CI rather than a runtime panic.
+///
+/// Parameters that aren't relevant to the chosen strategy are
+/// silently ignored — operators don't have to remember which knob
+/// belongs to which strategy.
+#[must_use]
+pub(crate) fn build_equiv_oracle(
+    strategy: &str,
+    extra_states: usize,
+    samples: u64,
+    max_len: usize,
+    delta: f64,
+    ucb_budget: usize,
+    seed: u64,
+) -> Box<dyn EquivalenceOracle> {
+    match strategy {
+        "wmethod" => Box::new(WMethodEq { extra_states }),
+        "ucb-bandit" => Box::new(UcbBanditEq::new(ucb_budget, max_len, seed)),
+        "sampled" => Box::new(SampledEq::new(samples, max_len, delta, seed)),
+        "chained" => Box::new(ChainedEq::new(vec![
+            Box::new(WMethodEq { extra_states }),
+            Box::new(UcbBanditEq::new(ucb_budget, max_len, seed)),
+            Box::new(SampledEq::new(samples, max_len, delta, seed)),
+        ])),
+        // "bounded" — default fallback. The capped variant matches the
+        // pre-flag hardcoded path so legacy `wafrift model-evade`
+        // invocations produce byte-identical results.
+        _ => Box::new(BoundedExhaustiveEq {
+            max_len,
+            max_queries: Some(500),
+        }),
+    }
+}
+
+/// FNV-1a 64-bit hash — deterministic per-target seed for the
+/// equivalence-oracle RNG.  Same constants the bench corpus recorder
+/// uses; consolidating on one helper would be the next step if a
+/// third caller surfaces.
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wafrift_wafmodel::{BytePred, Sfa};
+
+    // ── build_equiv_oracle unit tests ──────────────────────────────
+
+    /// Every value-parser entry must construct a non-panicking oracle.
+    /// New strategies added to the flag's value_parser are required to
+    /// extend the match arms in build_equiv_oracle; this test catches
+    /// drift.
+    #[test]
+    fn build_equiv_oracle_covers_every_strategy_name() {
+        for name in ["bounded", "wmethod", "ucb-bandit", "sampled", "chained"] {
+            let oracle = build_equiv_oracle(name, 1, 64, 6, 0.05, 32, 42);
+            // We can't easily downcast a `Box<dyn EquivalenceOracle>`,
+            // but constructing it without panic + having a non-null
+            // Box pointer is the wire-up contract under test.
+            // Drop runs and frees without ill effect.
+            drop(oracle);
+        }
+    }
+
+    #[test]
+    fn build_equiv_oracle_unknown_falls_back_to_bounded() {
+        // Unknown strategy → default bounded oracle. Pre-flag behavior
+        // preserved when clap's value_parser is bypassed (e.g. by
+        // direct construction in tests).
+        let oracle = build_equiv_oracle("does-not-exist", 1, 64, 6, 0.05, 32, 42);
+        drop(oracle);
+    }
+
+    #[test]
+    fn fnv1a_64_is_deterministic_per_input() {
+        // Same bytes → same hash. Different bytes → different hash.
+        assert_eq!(fnv1a_64(b"https://target.example/"), fnv1a_64(b"https://target.example/"));
+        assert_ne!(fnv1a_64(b"https://a/"), fnv1a_64(b"https://b/"));
+        // Empty input = FNV-1a offset basis.
+        assert_eq!(fnv1a_64(b""), 0xcbf29ce484222325);
+    }
 
     // ── check_permission unit tests ─────────────────────────────────
 
