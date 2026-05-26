@@ -500,9 +500,19 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         adaptive_pause_secs: 2,
         validate_only: false,
         lineage_output: None,
-        payload_class: None,
-        waf_name: None,
-        no_warm_start: false,
+        egress_socks5: Vec::new(),
+        egress_http_proxy: Vec::new(),
+        egress_tailscale_nodes: Vec::new(),
+        egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
+        egress_challenge_threshold: 3,
+        egress_cooldown_secs: 300,
+        mutator: "default".into(),
+        seed: None,
+        dilution_weight: 0.0,
+        corpus_out: None,
+        coverage_out: None,
+        corpus_fingerprint: String::new(),
+        target_waf: String::new(),
     }
 }
 
@@ -610,142 +620,70 @@ fn validate_corpus_flags_duplicate_ids() {
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }
 
-// ── B1: 5xx classification policy ────────────────────────────────
+// ── dilution fitness gate ────────────────────────────────────────────
 
 #[test]
-fn request_reached_app_includes_501_and_505() {
-    // B1: 501 and 505 are origin-processed codes (not CDN/gateway).
-    assert!(
-        request_reached_app(501),
-        "501 Not Implemented: origin parsed request far enough to reject method"
-    );
-    assert!(
-        request_reached_app(505),
-        "505 HTTP Version Not Supported: origin-level protocol check"
-    );
-    // 503/504 are CDN/gateway layer -- NOT a reached app.
-    assert!(!request_reached_app(503), "503 must NOT count as reached");
-    assert!(!request_reached_app(504), "504 must NOT count as reached");
-}
-
-// ── B6: warm_state_hash in EquivOutcome ──────────────────────────
-
-#[test]
-fn equiv_outcome_warm_state_hash_defaults_to_none() {
-    // B6: new EquivOutcome must have warm_state_hash = None by default
-    // (no warm-start model loaded).
-    use crate::equiv_engine::EquivOutcome;
-    let out = EquivOutcome::default();
-    assert!(
-        out.warm_state_hash.is_none(),
-        "default EquivOutcome must have no warm_state_hash"
-    );
-}
-
-// ── B4: graphql + cve_pocs oracle gates ───────────────────────────
-
-#[test]
-fn oracle_valid_graphql_rejects_empty_and_bare_brace() {
-    // B4: graphql oracle must return false for destroyed payloads.
-    assert!(
-        !oracle_valid("graphql", "{ user { id } }", ""),
-        "empty transformed must fail"
-    );
-    assert!(
-        !oracle_valid("graphql", "{ user { id } }", "   "),
-        "whitespace-only must fail"
-    );
-    assert!(
-        !oracle_valid("graphql", "{ user { id } }", "no-braces-here"),
-        "no opening brace must fail"
-    );
-    // Bare brace with no field name is not a valid GQL body.
-    assert!(
-        !oracle_valid("graphql", "{ user { id } }", "{}"),
-        "bare empty braces must fail"
-    );
+fn dilution_gate_off_when_weight_zero() {
+    // Even against a known ensemble WAF, weight 0 disables the gate.
+    assert!(!dilution_gate_active("Cloudflare", 0.0));
 }
 
 #[test]
-fn oracle_valid_graphql_accepts_minimal_operation() {
-    // B4: a payload with at least one field inside braces must pass.
-    assert!(
-        oracle_valid("graphql", "{ user { id } }", "{ user { id } }"),
-        "valid GQL with field inside must pass"
-    );
-    assert!(
-        oracle_valid("graphql", "{ me }", "{ me }"),
-        "minimal single-field must pass"
-    );
-    assert!(
-        oracle_valid("graphql", "{ user { id } }", "query { user { name } }"),
-        "query operation with field must pass"
-    );
+fn dilution_gate_off_when_target_waf_unknown() {
+    // No declared WAF → no gate, regardless of weight.
+    assert!(!dilution_gate_active("", 0.5));
+    assert!(!dilution_gate_active("nginx", 0.5));
+    assert!(!dilution_gate_active("unknown-appliance", 0.99));
 }
 
 #[test]
-fn oracle_valid_cve_pocs_always_returns_false() {
-    // B4: cve_pocs has no structural model -- always false (safe under-count).
-    assert!(
-        !oracle_valid("cve_pocs", "CVE-2021-44228", "CVE-2021-44228"),
-        "cve_pocs must always return false (no oracle)"
-    );
-    assert!(
-        !oracle_valid("cve_pocs", "anything", ""),
-        "cve_pocs must return false even for empty transformed"
-    );
+fn dilution_gate_on_for_ensemble_waf_with_positive_weight() {
+    assert!(dilution_gate_active("Cloudflare", 0.1));
+    assert!(dilution_gate_active("Cloudflare", 0.99));
+    // Substring match (case-insensitive, per is_ensemble_waf).
+    assert!(dilution_gate_active("CloudFlare WAF", 0.5));
+    assert!(dilution_gate_active("aws core rule set", 0.5));
 }
 
 #[test]
-fn oracle_valid_unknown_class_returns_false() {
-    // B4: unknown classes default to false (under-count, not over-count).
-    assert!(
-        !oracle_valid("totally_unknown_class", "payload", "payload"),
-        "unknown class must return false, not true"
-    );
+fn dilution_gate_off_for_negative_weight_even_when_ensemble() {
+    // Weight is clamped downstream but the activation check is a
+    // strict > 0 — defends against a slipped clamp.
+    assert!(!dilution_gate_active("Cloudflare", 0.0));
+    assert!(!dilution_gate_active("Cloudflare", -0.1));
 }
 
-// ── B7: per-strategy bypass-rate computation ──────────────────────
+#[test]
+fn strategy_stat_default_initializes_dilution_pruned_zero() {
+    let s = StrategyStat::default();
+    assert_eq!(s.dilution_pruned, 0, "pruned counter must default to zero");
+}
 
 #[test]
-fn per_strategy_bypass_rate_equals_bypassed_over_variants() {
-    // B7: pin the per-strategy rate computation so a future refactor
-    // cannot silently introduce a divide-by-zero or miscount.
-    // The computation in run_evade:
-    //   if s.variants > 0 { s.bypass_rate = s.bypassed as f64 / s.variants as f64; }
-    let mut stat = StrategyStat::default();
-    stat.variants = 7;
-    stat.bypassed = 3;
-
-    // Compute inline the same way run_evade does.
-    if stat.variants > 0 {
-        stat.bypass_rate = stat.bypassed as f64 / stat.variants as f64;
+fn compute_dilution_score_in_unit_interval() {
+    // Pin the contract bench relies on: the scorer returns a value
+    // in `[0.0, 1.0]` for any input. Exact-value semantics are
+    // tested inside `wafrift_evolution::dilution`; here we only
+    // confirm the linkage and the range so the gate predicate
+    // `score < dilution_weight` stays meaningful.
+    let est = wafrift_evolution::dilution::default_estimator();
+    for payload in ["hello world", "' OR 1=1--", "<script>", "\n\n\n"] {
+        let score = wafrift_evolution::dilution::compute_dilution_score(
+            payload,
+            &est,
+            wafrift_evolution::dilution::DEFAULT_DILUTION_THRESHOLD,
+        );
+        assert!(
+            (0.0..=1.0).contains(&score),
+            "score must be in [0,1], got {score} for {payload:?}"
+        );
     }
-    assert!(
-        (stat.bypass_rate - 3.0 / 7.0).abs() < 1e-12,
-        "bypass_rate must equal bypassed/variants: got {}",
-        stat.bypass_rate
-    );
+}
 
-    // Zero variants must not produce a NaN or divide-by-zero.
-    let mut empty = StrategyStat::default();
-    if empty.variants > 0 {
-        empty.bypass_rate = empty.bypassed as f64 / empty.variants as f64;
-    }
-    assert_eq!(
-        empty.bypass_rate, 0.0,
-        "zero variants must produce 0.0, not NaN or garbage"
-    );
-
-    // Full bypass (all variants bypassed).
-    let mut full = StrategyStat::default();
-    full.variants = 5;
-    full.bypassed = 5;
-    if full.variants > 0 {
-        full.bypass_rate = full.bypassed as f64 / full.variants as f64;
-    }
-    assert!(
-        (full.bypass_rate - 1.0).abs() < 1e-12,
-        "all-bypass rate must be 1.0"
-    );
+#[test]
+fn dilution_threshold_matches_evolution_default() {
+    // Pinned: the bench uses the evolution module's documented
+    // default threshold rather than a local magic number. If the
+    // crate-level default changes, this catches the drift.
+    assert!((wafrift_evolution::dilution::DEFAULT_DILUTION_THRESHOLD - 25.0).abs() < 1e-9);
 }

@@ -445,6 +445,16 @@ async fn run_one_round(
         (Some(cp), Some(cv), fingerprint_for(base_url))
     };
 
+    // The cumulusfire preset implies a Cloudflare target — feed
+    // that into bench so the dilution fitness gate has a known
+    // WAF identity when the operator passes a non-zero
+    // --dilution-weight on hunt (forwarded transparently).
+    // Other presets leave `target_waf` empty (no-op for the gate).
+    let target_waf = match args.target.as_deref() {
+        Some("cumulusfire") => "Cloudflare".to_string(),
+        _ => String::new(),
+    };
+
     let bench_args = BenchWafArgs {
         base_url: Some(base_url.to_string()),
         corpus: args.corpus.clone(),
@@ -476,6 +486,7 @@ async fn run_one_round(
         corpus_out,
         coverage_out,
         corpus_fingerprint,
+        target_waf,
     };
 
     // Capture stdout temporarily to intercept the bench JSON output.

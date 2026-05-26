@@ -411,8 +411,6 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         // want a bounded run can pass --level light or re-run with
         // `wafrift scan --variants-cap N`.
         variants_cap: 0,
-<<<<<<< HEAD
-=======
         // import-curl callers haven't historically asserted permission
         // explicitly; the permission gate treats localhost / RFC1918
         // targets as always-allowed, and the built-in bounty list covers
@@ -432,7 +430,6 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         egress_challenge_threshold: 3,
         egress_cooldown_secs: 300,
         custom_rules: None,
->>>>>>> Maximally use existing infra: wire hunt corpus + custom_rules
     };
 
     let cancel = tokio_util::sync::CancellationToken::new();

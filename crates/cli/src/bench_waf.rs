@@ -231,6 +231,43 @@ pub struct BenchWafArgs {
     /// Has no effect when targeting rule-based or ML-backed WAFs.
     #[arg(long, default_value_t = 0.0, value_parser = parse_dilution_weight)]
     pub dilution_weight: f64,
+
+    /// Path to write the per-rule bypass corpus on completion.
+    /// When set, the bench captures full response envelopes for
+    /// confirmed bypasses (via `send_with_envelope`), routes them
+    /// through `parse_cf_block` to derive the CF rule attribution
+    /// + edge POP, and persists to this path. Combine with
+    /// `--coverage-out` for the cross-region POP coverage map.
+    /// Omitting both flags keeps the legacy hot-path send() that
+    /// drops headers/body for slightly lower per-probe latency.
+    #[arg(long)]
+    pub corpus_out: Option<std::path::PathBuf>,
+
+    /// Path to write the edge-POP coverage map on completion.
+    /// See `--corpus-out`.
+    #[arg(long)]
+    pub coverage_out: Option<std::path::PathBuf>,
+
+    /// Target fingerprint string the corpus is keyed under.
+    /// Defaults to `bench:<base_url>` so each target gets a stable
+    /// per-target corpus. Operators recording against CumulusFire
+    /// can pass an explicit `cf:cumulusfire:<host>` so multiple
+    /// runs accumulate into one file.
+    #[arg(long, default_value = "")]
+    pub corpus_fingerprint: String,
+
+    /// Declared WAF identity of the target. Activates the ensemble
+    /// sub-score dilution fitness gate in `run_evolution_strategy`:
+    /// when this names a known ensemble WAF (Cloudflare Managed
+    /// Rules, AWS Core Rule Set — per
+    /// `wafrift_evolution::dilution::is_ensemble_waf`) AND
+    /// `--dilution-weight > 0`, variants whose predicted total
+    /// anomaly score is below the operator's plausibility floor are
+    /// PRUNED before they hit the target. Saves wire round-trips on
+    /// payloads the dilution planner can already prove are
+    /// implausible. Default empty = no gating (legacy behavior).
+    #[arg(long, default_value = "")]
+    pub target_waf: String,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
@@ -306,6 +343,11 @@ struct EvadeResult {
     /// bench reported THIS as the bypass rate. Surfaced so the inflation
     /// is visible, never folded into the headline.
     variants_unverified_not_blocked: usize,
+    /// Total variants the dilution fitness gate pruned before sending.
+    /// Always 0 unless `--dilution-weight > 0` AND `--target-waf` names
+    /// an ensemble WAF — surfaces so operators can audit how aggressive
+    /// the gate was over the run.
+    variants_dilution_pruned: usize,
     /// Per-strategy breakdown.
     by_strategy: BTreeMap<String, StrategyStat>,
     /// Sample of techniques that produced bypasses (one per variant).
@@ -328,6 +370,13 @@ struct StrategyStat {
     /// probe, not an exploit). The OLD code counted every one of these
     /// as a "bypass" — that was the rig. Surfaced, never hidden.
     unverified_not_blocked: usize,
+    /// Variants the dilution fitness gate dropped before sending —
+    /// only nonzero when `--dilution-weight > 0` AND `--target-waf`
+    /// names an ensemble-scoring WAF. Each pruned variant saved one
+    /// wire round-trip AND told the engine "treat this lineage as
+    /// blocked" so the genetic search doesn't keep producing
+    /// near-clones of the implausible payload.
+    dilution_pruned: usize,
 }
 
 // The verified-bypass oracle + per-class structural validators are
@@ -580,6 +629,22 @@ fn pick_level(name: &str) -> Option<Level> {
         "heavy" => Some(Level::Heavy),
         _ => None,
     }
+}
+
+/// Whether the dilution fitness gate should run for this bench
+/// invocation.  Pulled out as a free function so the activation
+/// rule (and its boundary cases) can be unit-tested without
+/// driving a full evolution loop.
+///
+/// Active when **both** conditions hold:
+///   * `dilution_weight > 0.0` (the operator wants the gate on)
+///   * `is_ensemble_waf(target_waf)` (the gate has a known WAF
+///     identity it can score against)
+///
+/// Either condition false → returns `false` (legacy hot path).
+fn dilution_gate_active(target_waf: &str, dilution_weight: f64) -> bool {
+    dilution_weight > 0.0
+        && wafrift_evolution::dilution::is_ensemble_waf(target_waf)
 }
 
 fn class_to_payload_type(class: &str) -> PayloadType {
@@ -987,6 +1052,8 @@ async fn run_evade(
         0.0
     };
     let unverified_total: usize = by_strategy.values().map(|s| s.unverified_not_blocked).sum();
+    let dilution_pruned_total: usize =
+        by_strategy.values().map(|s| s.dilution_pruned).sum();
     // Compute per-strategy bypass+oracle rates (was missing on stats produced
     // by some branches; redundant when already set, idempotent).
     for s in by_strategy.values_mut() {
@@ -1002,6 +1069,7 @@ async fn run_evade(
         variants_oracle_valid: oracle_valid_total,
         oracle_valid_rate,
         variants_unverified_not_blocked: unverified_total,
+        variants_dilution_pruned: dilution_pruned_total,
         by_strategy,
         bypass_techniques: bypass_techs,
     })
@@ -1348,6 +1416,21 @@ async fn run_evolution_strategy(
         engine.seed_population(vec![seed]);
     }
 
+    // Ensemble sub-score dilution fitness gate. See
+    // `dilution_gate_active` for the activation predicate. When
+    // active, each variant gets a dilution-plausibility score in
+    // `[0.0, 1.0]`; variants scoring below `dilution_weight` are
+    // pruned before the wire round-trip AND the engine receives a
+    // negative feedback so the genetic search doesn't keep producing
+    // near-clones of an implausible genome. Estimator is
+    // fresh-default per (case, strategy) — bench has no historical
+    // observations to seed from.
+    let dilution_estimator = if dilution_gate_active(&args.target_waf, args.dilution_weight) {
+        Some(wafrift_evolution::dilution::default_estimator())
+    } else {
+        None
+    };
+
     for _ in 0..args.variants {
         if *total > 0 && args.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(args.delay_ms)).await;
@@ -1364,6 +1447,33 @@ async fn run_evolution_strategy(
                 }
                 None => break,
             };
+
+        // Dilution gate (pre-send). Compute the plausibility score
+        // for the rendered payload; when it falls below the
+        // operator's floor, drop the variant and tell the engine
+        // this lineage is unpromising. Saves WAF round-trips on
+        // payloads the dilution planner already proves are likely
+        // to trip an ensemble anomaly score.
+        if let Some(est) = dilution_estimator.as_ref() {
+            let score = wafrift_evolution::dilution::compute_dilution_score(
+                &rendered_payload,
+                est,
+                wafrift_evolution::dilution::DEFAULT_DILUTION_THRESHOLD,
+            );
+            if score < args.dilution_weight {
+                stat.dilution_pruned += 1;
+                // Feed back as "did not pass" so the engine
+                // deprioritizes this genome's neighbourhood.
+                if let Err(fe) = engine.record_feedback(idx, false) {
+                    eprintln!(
+                        "warn: {} ({strat}) record_feedback (dilution-gate) idx={idx}: {fe:?}",
+                        case.id
+                    );
+                }
+                continue;
+            }
+        }
+
         let req = build_request_for_payload(base_url, &case.mode, &rendered_payload);
         stat.variants += 1;
         *total += 1;

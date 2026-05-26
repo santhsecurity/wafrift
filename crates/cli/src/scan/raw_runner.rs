@@ -630,8 +630,6 @@ mod tests {
             callback_timeout_secs: 5,
             exploit_cap: 500,
             variants_cap: 0,
-<<<<<<< HEAD
-=======
             egress_socks5: Vec::new(),
             egress_http_proxy: Vec::new(),
             egress_tailscale_nodes: Vec::new(),
@@ -641,7 +639,6 @@ mod tests {
             i_have_permission: None,
             graphql: false,
             custom_rules: None,
->>>>>>> Maximally use existing infra: wire hunt corpus + custom_rules
         }
     }
 
