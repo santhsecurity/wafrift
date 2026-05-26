@@ -224,8 +224,10 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// Stable mapping from CLI technique flag to `EvasionTechnique`. Pinned
 /// in a test below so renaming the enum variant without updating the
 /// flag value-parser surface trips CI rather than shipping silently.
+/// Gated to test builds — the runtime dispatch matches on the flag
+/// string directly inside `run_http3_frames` for clarity.
+#[cfg(test)]
 #[must_use]
-#[allow(dead_code)] // referenced by tests only
 fn technique_for(flag: &str) -> Option<EvasionTechnique> {
     match flag {
         "qpack-desync" => Some(EvasionTechnique::QpackDesync),

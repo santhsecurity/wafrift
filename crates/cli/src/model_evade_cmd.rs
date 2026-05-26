@@ -260,12 +260,30 @@ fn build_http_oracle(
     target_url: String,
     param: String,
     insecure: bool,
+    egress: &crate::egress_args::EgressArgs<'_>,
 ) -> Result<impl WafOracle, String> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(insecure)
-        .timeout(std::time::Duration::from_secs(10))
-        .user_agent("wafrift/model-evade (authorized security research)")
-        .redirect(reqwest::redirect::Policy::none())
+    // Build the optional egress pool from the operator's --socks5 /
+    // --http-proxy / --tailscale-exit-node flags. Pre-fix the
+    // model-evade builder ignored every egress flag — operators
+    // passing rotation got a bare reqwest client, same lie that
+    // bench-waf and scan had until last session. Mirrors the wire-up
+    // there.
+    let egress_pool = crate::egress_args::build_egress_pool(egress)
+        .map_err(|e| format!("egress pool config: {e}"))?;
+    let egress_host = egress_pool
+        .as_ref()
+        .and(crate::egress_args::target_host(&target_url))
+        .unwrap_or_default();
+    let mut client_builder = wafrift_transport::base_client_builder_with_egress(
+        10,
+        insecure,
+        Some("wafrift/model-evade (authorized security research)"),
+        egress_pool.as_ref(),
+        &egress_host,
+    )
+    .map_err(|e| format!("egress-aware HTTP client: {e}"))?;
+    client_builder = client_builder.redirect(reqwest::redirect::Policy::none());
+    let client = client_builder
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
@@ -461,11 +479,20 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
     let t_learn_start = Instant::now();
 
     // Build the oracle FIRST (validates HTTP client construction).
+    let egress = crate::egress_args::EgressArgs {
+        socks5: &args.egress_socks5,
+        http_proxy: &args.egress_http_proxy,
+        tailscale_nodes: &args.egress_tailscale_nodes,
+        tailscale_socks_addr: &args.egress_tailscale_socks_addr,
+        challenge_threshold: args.egress_challenge_threshold,
+        cooldown_secs: args.egress_cooldown_secs,
+    };
     let mut oracle = match build_http_oracle(
         rt.clone(),
         args.target_url.clone(),
         args.param.clone(),
         args.insecure,
+        &egress,
     ) {
         Ok(o) => o,
         Err(e) => {

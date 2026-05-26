@@ -435,13 +435,8 @@ pub(crate) struct ClusterOutputDeser {
 pub(crate) struct ClusterDeser {
     pub rule_id: String,
     pub payload_class: String,
-    /// Present in the JSON output; read by the Deserialize derive for
-    /// schema coverage even though individual tests don't assert on it.
-    #[allow(dead_code)]
     pub representative: String,
     pub member_count: usize,
-    /// Same as `representative` — captured for schema coverage.
-    #[allow(dead_code)]
     pub members: Vec<String>,
 }
 
@@ -563,6 +558,10 @@ mod tests {
         assert!(!first.rule_id.is_empty());
         assert!(!first.payload_class.is_empty());
         assert!(first.member_count > 0);
+        // representative and members are part of the cluster contract;
+        // pin them so a silent schema rename trips this test.
+        assert!(!first.representative.is_empty());
+        assert_eq!(first.members.len(), first.member_count);
     }
 
     // ── Test 7: result with zero bypasses is not counted ─────────────────
