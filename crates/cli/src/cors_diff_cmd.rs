@@ -249,11 +249,13 @@ pub async fn run_cors_diff(mut args: CorsDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = sem
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("cors_diff semaphore must not be closed mid-acquire");
+        let permit = match crate::helpers::acquire_diff_permit(&sem, "cors-diff").await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{} {e}", "error:".red());
+                return ExitCode::from(1);
+            }
+        };
         let http = http_arc.clone();
         let url = url_arc.clone();
         let counter = counter.clone();

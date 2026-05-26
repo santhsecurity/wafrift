@@ -263,7 +263,18 @@ fn run_list(args: BankListArgs) -> ExitCode {
             "waf_genome_count": waf_genomes.len(),
             "hosts": host_array,
         });
-        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+        // Pre-fix this used `unwrap_or_default()` which would emit
+        // an EMPTY STRING on serialization failure — operator gets
+        // `wafrift bank list --json` exit 0 with empty stdout,
+        // downstream automation parses nothing as "no entries"
+        // instead of "serialization failed." Surface the error.
+        match serde_json::to_string_pretty(&out) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("error: serialize bank list JSON: {e}");
+                return ExitCode::from(1);
+            }
+        }
         return ExitCode::SUCCESS;
     }
 

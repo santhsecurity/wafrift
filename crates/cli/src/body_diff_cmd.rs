@@ -315,15 +315,13 @@ pub async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        // Semaphore is owned by this function and never closed
-        // before all permits are acquired — the only condition under
-        // which acquire_owned errors. `expect` documents the
-        // invariant explicitly instead of `unwrap`.
-        let permit = sem
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("body_diff semaphore must not be closed mid-acquire");
+        let permit = match crate::helpers::acquire_diff_permit(&sem, "body-diff").await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{} {e}", "error:".red());
+                return ExitCode::from(1);
+            }
+        };
         let http = http_arc.clone();
         let url = url_arc.clone();
         let counter = counter.clone();

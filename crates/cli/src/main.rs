@@ -1060,7 +1060,18 @@ fn main() -> ExitCode {
                         "encoding_strategies": strategies,
                         "http3_techniques": http3_techniques,
                     });
-                    println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+                    // Pre-fix unwrap_or_default() would emit an empty
+                    // string on serde failure — `wafrift techniques
+                    // list --json` would silently appear "successful"
+                    // with no payload, breaking downstream tooling
+                    // that parses the array.
+                    match serde_json::to_string(&payload) {
+                        Ok(s) => println!("{s}"),
+                        Err(e) => {
+                            eprintln!("error: serialize techniques JSON: {e}");
+                            return ExitCode::from(1);
+                        }
+                    }
                     ExitCode::SUCCESS
                 }
                 _ => {

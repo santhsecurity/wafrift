@@ -298,11 +298,13 @@ pub async fn run_cache_diff(mut args: CacheDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = sem
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("cache_diff semaphore must not be closed mid-acquire");
+        let permit = match crate::helpers::acquire_diff_permit(&sem, "cache-diff").await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{} {e}", "error:".red());
+                return ExitCode::from(1);
+            }
+        };
         let http = http_arc.clone();
         let counter = counter.clone();
         let delay = Duration::from_millis(args.delay_ms);

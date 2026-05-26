@@ -189,7 +189,14 @@ async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
 
     if args.format == "json" {
         let out = serde_json::json!({ "results": all_results });
-        let rendered = serde_json::to_string_pretty(&out).unwrap_or_default();
+        // Pre-fix this used `unwrap_or_default()` which would have
+        // silently written an EMPTY STRING to the output file on a
+        // serde failure — the operator would see a 0-byte JSON file
+        // labelled as a success and downstream automation parsing
+        // `results[]` would crash on empty input. Propagate the
+        // error so the failure mode is loud.
+        let rendered = serde_json::to_string_pretty(&out)
+            .map_err(|e| format!("serialize bypass-probe JSON: {e}"))?;
         if let Some(ref path) = args.output {
             if let Err(e) = std::fs::write(path, &rendered) {
                 return Err(format!(
