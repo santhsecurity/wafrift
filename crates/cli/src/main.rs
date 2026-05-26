@@ -29,6 +29,7 @@ mod equiv_engine;
 mod evade_cmd;
 mod explain;
 mod http3_frames_cmd;
+mod ml_evade_cmd;
 mod wafmodel_solve_cmd;
 mod gql_diff_cmd;
 mod h2_diff_cmd;
@@ -397,6 +398,15 @@ enum Commands {
     /// if blocked but no bypass exists, exits 4.
     #[command(name = "solve-bypass")]
     SolveBypass(wafmodel_solve_cmd::SolveBypassArgs),
+
+    /// Apply ML-aware evasion mutations to an attack body via
+    /// `wafrift_strategy::evade_ml_backed`. Operates offline: emits
+    /// the mutated request for inspection or replay through a
+    /// separate sender. Only ML-backed WAF classes (AWS Bot Control,
+    /// Cloudflare Bot Management, Akamai Bot Manager, Datadome)
+    /// produce mutations; other WAF names exit 3 (vacuous).
+    #[command(name = "ml-evade")]
+    MlEvade(ml_evade_cmd::MlEvadeArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -1168,6 +1178,7 @@ fn main() -> ExitCode {
         Some(Commands::Corpus(args)) => corpus_cmd::run_corpus(args),
         Some(Commands::Http3Frames(args)) => http3_frames_cmd::run_http3_frames(args),
         Some(Commands::SolveBypass(args)) => wafmodel_solve_cmd::run_solve_bypass(args),
+        Some(Commands::MlEvade(args)) => ml_evade_cmd::run_ml_evade(args),
     }
 }
 
