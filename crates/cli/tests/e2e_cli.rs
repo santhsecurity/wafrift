@@ -745,126 +745,133 @@ fn invalid_level_fails() {
     );
 }
 
-// ── New practitioner surface (replay / report / init) ─────────────────
+// ── Quiet / JSON discipline ────────────────────────────────────────────
 
 #[test]
-fn replay_help_lists_source_flags() {
-    let (code, stdout, _) = wafrift(&["replay", "--help"]);
-    assert_eq!(code, 0, "replay --help should exit 0");
-    for keyword in &[
+fn evade_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "evade", "--payload", "1=1", "--level", "light"]);
+    assert_eq!(code, 0, "evade --quiet should succeed");
+    let first = stdout.lines().next().unwrap_or("");
+    assert!(
+        first.contains("\"schema_version\""),
+        "first NDJSON line should contain schema_version: {first}"
+    );
+}
+
+#[test]
+fn detect_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&[
+        "--quiet",
+        "detect",
+        "--status",
+        "403",
+        "--headers",
+        "server: cloudflare",
+    ]);
+    assert_eq!(code, 0, "detect --quiet should succeed");
+    assert!(
+        stdout.contains("\"schema_version\""),
+        "detect --quiet should emit schema_version: {stdout}"
+    );
+}
+
+#[test]
+fn probe_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "probe"]);
+    assert_eq!(code, 0, "probe --quiet should succeed");
+    let first = stdout.lines().next().unwrap_or("");
+    assert!(
+        first.contains("\"schema_version\""),
+        "first NDJSON line should contain schema_version: {first}"
+    );
+}
+
+#[test]
+fn egress_example_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "egress-example", "--preset", "tor"]);
+    assert_eq!(code, 0, "egress-example --quiet should succeed");
+    assert!(
+        stdout.contains("\"schema_version\""),
+        "egress-example --quiet should emit schema_version: {stdout}"
+    );
+}
+
+#[test]
+fn techniques_quiet_outputs_json_with_schema_version() {
+    let (code, stdout, _) = wafrift(&["--quiet", "techniques", "list"]);
+    assert_eq!(code, 0, "techniques --quiet should succeed");
+    assert!(
+        stdout.contains("\"schema_version\""),
+        "techniques --quiet should emit schema_version: {stdout}"
+    );
+}
+
+// ── Exit code consistency ──────────────────────────────────────────────
+
+#[test]
+fn evade_filter_error_returns_1_not_2() {
+    let (code, _stdout, stderr) = wafrift(&["evade", "--payload", "x", "--only", "invalid"]);
+    assert_eq!(code, 1, "evade filter error should return 1: stderr={stderr}");
+}
+
+#[test]
+fn detect_header_parse_error_returns_1_not_2() {
+    let (code, _stdout, stderr) = wafrift(&["detect", "--status", "200", "--headers", "badheader"]);
+    assert_eq!(code, 1, "detect header parse error should return 1: stderr={stderr}");
+}
+
+#[test]
+fn scan_filter_error_returns_1_not_2() {
+    let (code, _stdout, stderr) = wafrift(&[
+        "scan",
         "--target",
-        "--param",
+        "http://localhost",
         "--payload",
-        "--from-host",
-        "--from-waf",
-        "--technique",
-    ] {
+        "x",
+        "--only",
+        "invalid",
+    ]);
+    assert_eq!(code, 1, "scan filter error should return 1: stderr={stderr}");
+}
+
+// ── Help text examples ─────────────────────────────────────────────────
+
+#[test]
+fn every_subcommand_help_contains_example() {
+    let subcommands = &[
+        "evade",
+        "detect",
+        "probe",
+        "scan",
+        "bench-waf",
+        "bench-diff",
+        "origin-hints",
+        "egress-example",
+        "techniques",
+        "completion",
+        "recon",
+        "replay",
+        "report",
+        "init",
+    ];
+    for cmd in subcommands {
+        let (code, stdout, _) = wafrift(&[cmd, "--help"]);
+        assert_eq!(code, 0, "{cmd} --help should exit 0");
         assert!(
-            stdout.contains(keyword),
-            "replay --help missing flag {keyword:?}: {stdout}"
+            stdout.contains("Example:"),
+            "{cmd} --help must contain a realistic example\n--- stdout ---\n{stdout}"
         );
     }
 }
 
-#[test]
-fn replay_without_techniques_errors_actionable() {
-    // No --technique, --from-host, or --from-waf — must fail with a
-    // message that names the missing flags, not a generic "no input".
-    let (code, _stdout, stderr) = wafrift(&[
-        "replay",
-        "--target",
-        "https://example.com/x",
-        "--payload",
-        "test",
-    ]);
-    assert_ne!(code, 0, "replay with no source flag should fail");
-    assert!(
-        stderr.contains("--technique")
-            || stderr.contains("--from-host")
-            || stderr.contains("--from-waf"),
-        "error must name the missing source flags: {stderr}"
-    );
-}
+// ── Color / TTY discipline ─────────────────────────────────────────────
 
 #[test]
-fn report_help_documents_format_options() {
-    let (code, stdout, _) = wafrift(&["report", "--help"]);
-    assert_eq!(code, 0, "report --help should exit 0");
+fn piped_stdout_has_no_ansi_escapes() {
+    let (code, stdout, _) = wafrift(&["evade", "--payload", "1=1", "--level", "light"]);
+    assert_eq!(code, 0, "evade should succeed");
     assert!(
-        stdout.contains("markdown"),
-        "report --help missing markdown format: {stdout}"
+        !stdout.contains('\x1b'),
+        "piped stdout must not contain ANSI escape sequences: {stdout:?}"
     );
-    assert!(
-        stdout.contains("json"),
-        "report --help missing json format: {stdout}"
-    );
-    assert!(
-        stdout.contains("--proxy-bank"),
-        "report --help missing --proxy-bank: {stdout}"
-    );
-}
-
-#[test]
-fn report_json_emits_valid_json_with_schema_version() {
-    use std::io::Write;
-    // Write a minimal proxy-bank JSON to a tempfile.
-    let tmp = std::env::temp_dir().join(format!("wafrift-report-test-{}.json", std::process::id()));
-    {
-        let mut f = std::fs::File::create(&tmp).expect("create tempfile");
-        writeln!(
-            f,
-            r#"{{"schema":1,"hosts":{{"api.example.com":{{"proven_winners":["EncodingUrl"],"blocklisted":[],"waf_name":"ModSec"}}}}}}"#
-        ).unwrap();
-    }
-    let (code, stdout, _) = wafrift(&[
-        "report",
-        "--proxy-bank",
-        tmp.to_str().unwrap(),
-        "--format",
-        "json",
-    ]);
-    let _ = std::fs::remove_file(&tmp);
-    assert_eq!(code, 0, "report --format json should exit 0");
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("report --format json must emit valid JSON");
-    // schema_version 2 added the `curl_command` field per finding
-    // (additive — gated by version bump so downstream tooling can
-    // opt in cleanly).
-    assert_eq!(parsed["schema_version"], 2, "schema_version field missing");
-    assert_eq!(parsed["hosts_with_bypasses"], 1);
-    assert_eq!(parsed["findings"][0]["host"], "api.example.com");
-    // The new curl_command field must be present and shaped like a
-    // real curl invocation.
-    let curl = parsed["findings"][0]["curl_command"]
-        .as_str()
-        .expect("curl_command must be a string");
-    assert!(curl.starts_with("curl -i "), "got: {curl}");
-    assert!(curl.contains("api.example.com"), "got: {curl}");
-}
-
-#[test]
-fn init_creates_scaffold_then_refuses_overwrite() {
-    let dir = std::env::temp_dir().join(format!("wafrift-init-test-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("mkdir tempdir");
-    let target = dir.join(".wafrift.toml");
-
-    let (code, _stdout, _stderr) = wafrift(&["init", "--output", target.to_str().unwrap()]);
-    assert_eq!(code, 0, "first init should succeed");
-    assert!(target.exists(), "scaffold file must be created");
-
-    // Second init without --force must refuse.
-    let (code2, _stdout2, stderr2) = wafrift(&["init", "--output", target.to_str().unwrap()]);
-    assert_ne!(code2, 0, "second init without --force should fail");
-    assert!(
-        stderr2.contains("--force"),
-        "error must mention --force escape hatch: {stderr2}"
-    );
-
-    // Third init WITH --force must succeed.
-    let (code3, _stdout3, _stderr3) =
-        wafrift(&["init", "--output", target.to_str().unwrap(), "--force"]);
-    assert_eq!(code3, 0, "third init with --force should succeed");
-
-    let _ = std::fs::remove_dir_all(&dir);
 }

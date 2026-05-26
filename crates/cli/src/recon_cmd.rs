@@ -1,5 +1,5 @@
 use clap::Args;
-use serde::Serialize;
+use serde_json::json;
 use std::process::ExitCode;
 use wafrift_recon::active::{
     ActiveProbeConfig, HttpHeaderProbeSnapshot, probe_http_headers,
@@ -36,121 +36,58 @@ pub struct ReconArgs {
     pub active_probe_timeout_secs: u64,
 }
 
-/// Per-subdomain active-probe outcome surfaced in the JSON envelope.
-/// Lives here rather than reusing `HttpHeaderProbeSnapshot` directly
-/// because the report wraps the subdomain name + reachability flag
-/// the snapshot itself doesn't carry.
-#[derive(Serialize)]
-struct ActiveProbeRow {
-    subdomain: String,
-    reachable: bool,
-    snapshot: Option<HttpHeaderProbeSnapshot>,
-    error: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ReconReport<'a> {
-    schema_version: u32,
-    wafrift_version: &'static str,
-    domain: &'a str,
-    subdomains: Vec<String>,
-    origin_ips: Vec<String>,
-    /// Empty when `--active-probe` is off; one entry per subdomain
-    /// otherwise. The same vector ordering as `subdomains` so JSON
-    /// consumers can zip the two by index.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    active_probes: Vec<ActiveProbeRow>,
-}
-
-const RECON_SCHEMA_VERSION: u32 = 1;
-
-pub fn run_recon(args: ReconArgs) -> ExitCode {
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("✗ Failed to start tokio runtime: {e}");
-            return ExitCode::from(1);
-        }
-    };
+pub fn run_recon(args: ReconArgs, quiet: bool) -> ExitCode {
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
-        let json_mode = args.format == "json";
-        if !json_mode {
-            println!("🔍 Starting discovery for domain: {}", args.domain);
+        if !quiet {
+            println!("Starting discovery for domain: {}", args.domain);
         }
 
-        let subdomains = match discover_subdomains_ct(&args.domain).await {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("✗ CT log discovery failed: {e}");
-                return ExitCode::from(1);
-            }
-        };
+        match discover_subdomains_ct(&args.domain).await {
+            Ok(subdomains) => {
+                if !quiet {
+                    println!("Found {} potential subdomains.", subdomains.len());
+                    for sub in &subdomains {
+                        println!("  - {}", sub);
+                    }
+                }
 
-        if !json_mode {
-            println!("✓ Found {} potential subdomains.", subdomains.len());
-            for sub in &subdomains {
-                println!("  - {sub}");
-            }
-        }
-
-        let ips = if subdomains.is_empty() {
-            Vec::new()
-        } else {
-            if !json_mode {
-                println!("\n🔍 Resolving subdomains to identify potential origin IPs...");
-            }
-            match resolve_origins(&subdomains).await {
-                Ok(ips) => {
-                    if !json_mode {
-                        if ips.is_empty() {
-                            println!("⚠ No IPs resolved.");
-                        } else {
-                            println!("✓ Found {} origin IPs:", ips.len());
-                            for ip in &ips {
-                                println!("  - {ip}");
-                            }
+                let ips = if !subdomains.is_empty() {
+                    if !quiet {
+                        println!("\nResolving subdomains to identify potential origin IPs...");
+                    }
+                    match resolve_origins(&subdomains).await {
+                        Ok(ips) => ips,
+                        Err(e) => {
+                            eprintln!("Resolution failed: {e}. Fix: verify network connectivity and DNS resolution.");
+                            return ExitCode::from(1);
                         }
                     }
-                    ips
-                }
-                Err(e) => {
-                    eprintln!("✗ Resolution failed: {e}");
-                    return ExitCode::from(1);
+                } else {
+                    Vec::new()
+                };
+
+                if quiet {
+                    println!("{}", json!({
+                        "schema_version": 1,
+                        "domain": args.domain,
+                        "subdomains": subdomains,
+                        "ips": ips,
+                    }));
+                } else {
+                    if ips.is_empty() {
+                        println!("No IPs resolved.");
+                    } else {
+                        println!("Found {} origin IPs:", ips.len());
+                        for ip in ips {
+                            println!("  - {}", ip);
+                        }
+                    }
                 }
             }
-        };
-
-        // Optional active probing — runs ONE HTTPS GET per
-        // subdomain to capture response status + headers and
-        // classify the resulting stack via embedded HeaderRules.
-        // Off by default; adds a per-host network footprint.
-        let active_probes = if args.active_probe && !subdomains.is_empty() {
-            if !json_mode {
-                println!(
-                    "\n🔍 Active probing {} subdomain(s) (HTTP headers + fingerprint)...",
-                    subdomains.len()
-                );
-            }
-            run_active_probes(&subdomains, args.active_probe_timeout_secs, json_mode).await
-        } else {
-            Vec::new()
-        };
-
-        if json_mode {
-            let report = ReconReport {
-                schema_version: RECON_SCHEMA_VERSION,
-                wafrift_version: env!("CARGO_PKG_VERSION"),
-                domain: &args.domain,
-                subdomains,
-                origin_ips: ips,
-                active_probes,
-            };
-            match serde_json::to_string_pretty(&report) {
-                Ok(s) => println!("{s}"),
-                Err(e) => {
-                    eprintln!("✗ Failed to serialize JSON: {e}");
-                    return ExitCode::from(1);
-                }
+            Err(e) => {
+                eprintln!("CT log discovery failed: {e}. Fix: verify the domain is public and has CT records.");
+                return ExitCode::from(1);
             }
         }
         ExitCode::SUCCESS

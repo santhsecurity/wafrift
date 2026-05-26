@@ -353,6 +353,7 @@ pub(crate) fn scan_url_with_param(target: &str, param: &str, value_encoded: &str
 pub(crate) async fn run_scan(
     mut args: ScanArgs,
     cancel: tokio_util::sync::CancellationToken,
+    quiet: bool,
 ) -> ExitCode {
     // `-r/--raw-request` mode: short-circuit to the raw-template
     // runner. The default scan loop assumes URL-query shape
@@ -464,7 +465,7 @@ pub(crate) async fn run_scan(
         Ok(f) => f,
         Err(msg) => {
             eprintln!("{} {msg}", "Filter error:".red().bold());
-            return ExitCode::from(2);
+            return ExitCode::from(1);
         }
     };
     let encoding_only = args.encoding_only || !filter.grammar_enabled();
@@ -475,7 +476,7 @@ pub(crate) async fn run_scan(
             "{} no encoding strategies remain after --only/--exclude",
             "Filter error:".red().bold()
         );
-        return ExitCode::from(2);
+        return ExitCode::from(1);
     }
     let max_mutations = max_mutations_for_level(args.level);
 
@@ -567,22 +568,7 @@ pub(crate) async fn run_scan(
         return ExitCode::from(1);
     }
 
-    // TRACING: variant build outcome — visible at RUST_LOG=wafrift=debug.
-    debug!(
-        target: "wafrift::scan",
-        variant_count = variants.len(),
-        strategies = strategies.len(),
-        payload_type = ?payload_type,
-        encoding_only,
-        level = ?args.level,
-        "variant set built"
-    );
-
-    // `--quiet` AND `--format json` both suppress the human-readable
-    // banner/progress lines. `--quiet` is the explicit "shut up" flag
-    // a CI script reaches for when piping the output blob to disk;
-    // `--format json` is the implicit one. Either is sufficient.
-    let scan_text = !args.quiet && args.format != "json";
+    let scan_text = !quiet && args.format != "json";
     if scan_text {
         println!(
             "{}\n",
@@ -726,43 +712,21 @@ pub(crate) async fn run_scan(
     let http = match http_builder.build() {
         Ok(client) => client,
         Err(e) => {
-            eprintln!(
-                "  {} reqwest builder error ({})\n    {}",
-                "✗ Failed to create HTTP client:".red().bold(),
-                e,
-                "hint: this usually means a TLS backend (rustls / native-tls) failed to initialise — check OS root certs are present".bright_black()
-            );
+            eprintln!("  {} Failed to build HTTP client for scan (check --insecure and TLS config). Fix: verify network connectivity and target URL. {} ", "error:".red().bold(), e);
             return ExitCode::from(1);
         }
     };
     let scan_start = Instant::now();
 
-    // ── GraphQL detection + payload injection ─────────────────────────
-    // When --graphql is set OR the target auto-detects as a GraphQL
-    // endpoint, inject the full wafrift-graphql battery into a
-    // dedicated side-pool. These payloads are POST bodies (JSON), NOT
-    // URL-query values, so they live in their own vec and are fired
-    // separately (below) via POST to the detected GraphQL endpoint.
-    let graphql_probe_result =
-        graphql_phase::build_graphql_payloads(&http, target, args.graphql, scan_text).await;
-    let (graphql_payloads, graphql_endpoint) =
-        if let Some((payloads, endpoint)) = graphql_probe_result {
-            (payloads, Some(endpoint))
-        } else {
-            (Vec::new(), None)
-        };
-
-    // Step 1: WAF detection + advisor planning — see `detect_phase`.
-    let detect_outcome = match detect_phase::run(
-        &http,
-        target,
-        scan_text,
-        custom_rules.as_ref(),
-    )
-    .await
-    {
-        Ok(o) => o,
-        Err(code) => return code,
+    if scan_text {
+        println!("{}", "[1/3] Detecting WAF...".bold().cyan());
+    }
+    let baseline_response = match http.get(target).send().await {
+        Ok(resp) => resp,
+        Err(err) => {
+            eprintln!("  {} Cannot reach target {target}: {err}. Fix: verify the target is up and the URL is correct.", "error:".red().bold());
+            return ExitCode::from(1);
+        }
     };
     let baseline_status = detect_outcome.baseline_status;
     let _headers_vec = detect_outcome.headers_vec;
@@ -2430,79 +2394,9 @@ pub(crate) async fn run_scan(
         0.0
     };
 
-    // ── Auto-distill pass (--auto-distill) ─────────────────────
-    //
-    // For each bypass found, run Zeller's ddmin to find the
-    // minimum-edit-distance payload that STILL bypasses via the
-    // URL-query shape. Off by default; opt-in via `--auto-distill`.
-    // Distillation always fires via `scan_url_with_param`
-    // regardless of which phase originally produced the bypass —
-    // for multi-vector / header-obf bypasses the distilled form
-    // tells the operator what the minimum URL-query equivalent is
-    // (a useful artefact even when the original used a different
-    // shape; operator interprets accordingly).
-    let mut minimal_payloads: Vec<Option<String>> = vec![None; bypass_variants.len()];
-    let mut auto_distill_fires_total: u64 = 0;
-    if args.auto_distill && !bypass_variants.is_empty() && !cancel.is_cancelled() {
-        if scan_text {
-            println!(
-                "  {} auto-distilling {} bypass(es) via URL-query shape (cap {} fires each)…",
-                "[wafrift scan distill]".bright_cyan().bold(),
-                bypass_variants.len().to_string().bold().yellow(),
-                args.auto_distill_max_fires
-            );
-        }
-        let http_arc = std::sync::Arc::new(http.clone());
-        let target_owned = target.to_string();
-        let param = args.param.clone();
-        for (i, (_, original_payload, _, _)) in bypass_variants.iter().enumerate() {
-            if cancel.is_cancelled() {
-                break;
-            }
-            let fires = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-            let cap = args.auto_distill_max_fires;
-            let predicate = {
-                let http = http_arc.clone();
-                let t = target_owned.clone();
-                let p = param.clone();
-                let fires = fires.clone();
-                let cancel = cancel.clone();
-                move |candidate: String| {
-                    let http = http.clone();
-                    let t = t.clone();
-                    let p = p.clone();
-                    let fires = fires.clone();
-                    let cancel = cancel.clone();
-                    async move {
-                        if cancel.is_cancelled() {
-                            return false;
-                        }
-                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= cap {
-                            return false;
-                        }
-                        let url = scan_url_with_param(&t, &p, &urlencoding::encode(&candidate));
-                        match http.get(&url).send().await {
-                            Ok(resp) => {
-                                let status = resp.status().as_u16();
-                                match resp.bytes().await {
-                                    Ok(body) => !is_waf_block(status, &body),
-                                    Err(_) => false,
-                                }
-                            }
-                            Err(_) => false,
-                        }
-                    }
-                }
-            };
-            let minimum = crate::distill_cmd::ddmin(original_payload, predicate).await;
-            auto_distill_fires_total += u64::from(fires.load(std::sync::atomic::Ordering::SeqCst));
-            minimal_payloads[i] = Some(minimum);
-        }
-    }
-
-    if args.format == "json" {
+    if quiet || args.format == "json" {
         let scan = json!({
-            "scan_schema_version": 1,
+            "schema_version": 1,
             "target": target,
             "waf": waf_name,
             "payload_type": payload_type_label(payload_type),
@@ -2541,22 +2435,39 @@ pub(crate) async fn run_scan(
             "bypass_variants": build_bypass_variants_json(target, &args.param, &bypass_variants, &minimal_payloads),
         });
         let json_output = if args.report_layers {
-            build_layered_json(
-                scan,
-                target,
-                baseline_status,
-                &waf_name,
-                &detected,
-                raw_status,
-                raw_blocked,
-                baseline_outcome.transport_ok,
-                total_fired,
-                requests_completed,
-                bypassed,
-                blocked,
-                errors,
-                bypass_rate,
-            )
+            json!({
+                "schema_version": 1,
+                "layer_report": {
+                    "network": {
+                        "target": target,
+                        "baseline_get_status": baseline_status,
+                    },
+                    "detection": {
+                        "chosen_waf": waf_name,
+                        "candidates": detected.iter().map(|d| {
+                            json!({
+                                "name": d.name,
+                                "confidence": d.confidence,
+                                "indicators": d.indicators,
+                            })
+                        }).collect::<Vec<_>>(),
+                    },
+                    "baseline_probe": {
+                        "raw_get_status": raw_status,
+                        "treated_as_blocked": raw_blocked,
+                        "transport_ok": raw_transport_ok,
+                    },
+                    "evasion_campaign": {
+                        "variants_generated": total_fired,
+                        "requests_completed": requests_completed,
+                        "bypassed": bypassed,
+                        "blocked": blocked,
+                        "errors": errors,
+                        "bypass_rate_pct": bypass_rate,
+                    },
+                },
+                "scan": scan,
+            })
         } else {
             scan
         };

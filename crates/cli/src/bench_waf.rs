@@ -377,18 +377,9 @@ struct StrategyStat {
 // here so existing call sites and the pinned anti-rig tests resolve.
 use crate::equiv_engine::{build_request_for_delivery, run_equiv_cegis, send, verified_bypass};
 
-pub fn run_bench_waf(args: BenchWafArgs) -> ExitCode {
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!(
-                "{} failed to start tokio runtime: {e}",
-                "error:".red().bold()
-            );
-            return ExitCode::from(1);
-        }
-    };
-    match rt.block_on(run_bench_waf_async(args)) {
+pub fn run_bench_waf(args: BenchWafArgs, quiet: bool) -> ExitCode {
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match rt.block_on(run_bench_waf_async(args, quiet)) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("{} {e}", "error:".red().bold());
@@ -423,7 +414,7 @@ const KNOWN_CLASSES: &[&str] = &[
     "graphql",
 ];
 
-fn validate_corpus_and_exit(cases: &[BenchCase], format: &str) -> Result<ExitCode, String> {
+fn validate_corpus_and_exit(cases: &[BenchCase], quiet: bool) -> Result<ExitCode, String> {
     use std::collections::{BTreeMap, HashSet};
     let mut seen: HashSet<&str> = HashSet::new();
     let mut by_class: BTreeMap<&str, usize> = BTreeMap::new();
@@ -443,38 +434,25 @@ fn validate_corpus_and_exit(cases: &[BenchCase], format: &str) -> Result<ExitCod
         }
         *by_class.entry(case.class.as_str()).or_insert(0) += 1;
     }
-    let ok = errors.is_empty();
-    if format == "json" {
-        let by_class_json: BTreeMap<&str, usize> = by_class.clone();
-        let payload = serde_json::json!({
-            "ok": ok,
-            "total_cases": cases.len(),
-            "by_class": by_class_json,
-            "errors": errors,
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&payload)
-                .unwrap_or_else(|_| r#"{"ok":false,"error":"serialization failed"}"#.into())
-        );
-    } else {
+    if !quiet {
         println!("corpus integrity:");
         println!("  total cases: {}", cases.len());
         for (cls, n) in &by_class {
-            println!("  {cls:>10}: {n}");
-        }
-        if ok {
-            println!("OK ({} cases)", cases.len());
-        } else {
-            for e in &errors {
-                eprintln!("  ERROR: {e}");
-            }
-            eprintln!("{} corpus error(s)", errors.len());
+            println!("  {:>10}: {n}", cls);
         }
     }
-    if ok {
+    if errors.is_empty() {
+        if !quiet {
+            println!("OK ({} cases)", cases.len());
+        }
         Ok(ExitCode::SUCCESS)
     } else {
+        for e in &errors {
+            eprintln!("  ERROR: {e}");
+        }
+        if !quiet {
+            eprintln!("{} corpus error(s)", errors.len());
+        }
         Ok(ExitCode::from(4))
     }
 }
@@ -705,7 +683,7 @@ fn build_request_for_payload(base_url: &str, mode: &str, payload: &str) -> Reque
     }
 }
 
-async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String> {
+async fn run_bench_waf_async(mut args: BenchWafArgs, quiet: bool) -> Result<ExitCode, String> {
     // `--strategies all` expands to every selectable strategy. Lets a user
     // type one keyword instead of remembering the 11-element list. Keeps
     // user-supplied order otherwise (output ordering matters for diffs).
@@ -750,7 +728,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // --validate-only: run corpus integrity checks then exit. Doesn't
     // need a live WAF target; intended for CI gating on corpus PRs.
     if args.validate_only {
-        return validate_corpus_and_exit(&cases, &args.format);
+        return validate_corpus_and_exit(&cases, quiet);
     }
 
     // Pick a real-browser User-Agent so the WAF doesn't have a free signal.
@@ -797,7 +775,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     }
     let client = client_builder
         .build()
-        .map_err(|e| format!("HTTP client: {e}"))?;
+        .map_err(|e| format!("Failed to build HTTP client for bench (check --insecure and TLS). Fix: verify the WAF target is reachable. {e}"))?;
 
     // Healthcheck: make sure the target is even reachable before we
     // queue 30k probes that would all "fail" with connection errors.
@@ -1002,27 +980,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
         }
     }
 
-    // Persist the per-rule bypass corpus + edge-POP coverage map if the
-    // operator asked for them via --corpus-out / --coverage-out. Same
-    // single-atomic-write pattern as the lineage corpus above.
-    if let Some(rec) = recorder.as_ref() {
-        match rec.lock() {
-            Ok(guard) => {
-                if let Err(e) = guard.flush() {
-                    eprintln!("warn: corpus flush failed: {e}");
-                } else {
-                    eprintln!(
-                        "wrote {} probes ({} novel bypasses) to corpus + coverage files",
-                        guard.probe_count(),
-                        guard.novel_bypass_count(),
-                    );
-                }
-            }
-            Err(e) => eprintln!("warn: corpus recorder poisoned: {e}"),
-        }
-    }
-
-    emit_report(&base_url, &args, &results)?;
+    emit_report(&base_url, &args, &results, quiet)?;
 
     // Exit code:
     //   0 — clean run
@@ -2796,7 +2754,7 @@ async fn run_differential_strategy(
     stat
 }
 
-fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> Result<(), String> {
+fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult], quiet: bool) -> Result<(), String> {
     // Aggregate by class.
     let mut by_class: BTreeMap<String, Vec<&CaseResult>> = BTreeMap::new();
     for r in results {
@@ -2833,11 +2791,7 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         .collect();
 
     let aggregate = serde_json::json!({
-        // Schema version for downstream consumers (bench-diff, dashboards,
-        // CI parsers). Bump when the JSON shape changes incompatibly so
-        // tooling can detect drift instead of silently mis-reading.
-        "schema_version": 1u32,
-        "wafrift_version": env!("CARGO_PKG_VERSION"),
+        "schema_version": 1,
         "base_url": base_url,
         "evade_mode": args.evade,
         "strategies": args.strategies,
@@ -2891,7 +2845,7 @@ fn emit_report(base_url: &str, args: &BenchWafArgs, results: &[CaseResult]) -> R
         .map_err(|e| format!("write {}: {e}", path.display()))?;
     }
 
-    if args.format == "json" {
+    if quiet || args.format == "json" {
         println!(
             "{}",
             serde_json::to_string_pretty(&aggregate).map_err(|e| e.to_string())?
@@ -3020,5 +2974,134 @@ fn truncate(s: &str, n: usize) -> String {
 }
 
 #[cfg(test)]
-#[path = "bench_waf_tests.rs"]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn class_probes_sql_has_keywords_and_baseline() {
+        let probes = class_probes("sql");
+        assert!(!probes.is_empty(), "sql class must have probes");
+        assert!(
+            probes
+                .iter()
+                .any(|p| matches!(p.tests, ProbeTarget::SqlKeyword(_))),
+            "sql probes must include keyword family"
+        );
+        assert!(
+            probes
+                .iter()
+                .any(|p| matches!(p.tests, ProbeTarget::Baseline)),
+            "every class probe set must include a baseline so unblock=baseline-passes is recorded"
+        );
+        // Negative — sql probe set must NOT contain xss or cmd probes.
+        assert!(
+            !probes
+                .iter()
+                .any(|p| matches!(p.tests, ProbeTarget::XssTag(_) | ProbeTarget::CmdSeparator(_))),
+            "sql probe set must not bleed xss/cmd families"
+        );
+    }
+
+    #[test]
+    fn class_probes_xss_only_returns_xss_family() {
+        let probes = class_probes("xss");
+        assert!(!probes.is_empty());
+        for p in &probes {
+            assert!(
+                matches!(
+                    p.tests,
+                    ProbeTarget::XssTag(_)
+                        | ProbeTarget::XssEvent(_)
+                        | ProbeTarget::XssExecFunction(_)
+                        | ProbeTarget::Baseline
+                ),
+                "xss probes must be xss-family + baseline only, got {:?}",
+                p.tests
+            );
+        }
+    }
+
+    #[test]
+    fn all_strategies_constant_includes_every_dispatched_arm() {
+        // If a new strategy is added to the dispatch match in `run_evade`
+        // but not to `ALL_STRATEGIES`, `--strategies all` would silently
+        // omit it. This guards that.
+        for required in &[
+            "heavy",
+            "mcts",
+            "smuggling",
+            "content-type",
+            "redos",
+            "hill-climb",
+            "sim-anneal",
+            "tabu",
+            "novelty",
+            "map-elites",
+            "differential",
+        ] {
+            assert!(
+                ALL_STRATEGIES.contains(required),
+                "ALL_STRATEGIES is missing {required:?} — `--strategies all` would skip it"
+            );
+        }
+    }
+
+    fn case(id: &str, class: &str, payload: &str) -> BenchCase {
+        BenchCase {
+            id: id.into(),
+            class: class.into(),
+            payload: payload.into(),
+            mode: "body_form_q".into(),
+            description: String::new(),
+        }
+    }
+
+    #[test]
+    fn validate_corpus_flags_duplicate_id() {
+        let cases = vec![
+            case("a", "sql", "1=1"),
+            case("a", "xss", "<script>"),
+        ];
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+    }
+
+    #[test]
+    fn validate_corpus_flags_unknown_class() {
+        let cases = vec![case("a", "definitelynot", "x")];
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+    }
+
+    #[test]
+    fn validate_corpus_flags_empty_payload() {
+        let cases = vec![case("a", "sql", "")];
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+    }
+
+    #[test]
+    fn validate_corpus_passes_clean_set() {
+        let cases = vec![
+            case("a", "sql", "1=1"),
+            case("b", "xss", "<script>"),
+            case("c", "log4shell", "${jndi:ldap://x}"),
+        ];
+        let code = validate_corpus_and_exit(&cases, false).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn class_probes_unknown_class_yields_only_baseline() {
+        // Classes with no rule-fingerprint family (xxe / log4shell / ssrf)
+        // should fall through to baseline-only — never zero, so the
+        // strategy doesn't divide-by-zero downstream.
+        let probes = class_probes("log4shell");
+        assert!(
+            probes
+                .iter()
+                .all(|p| matches!(p.tests, ProbeTarget::Baseline)),
+            "unknown classes must yield only baseline probes"
+        );
+    }
+}

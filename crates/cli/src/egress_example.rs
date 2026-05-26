@@ -18,20 +18,22 @@ pub struct EgressExampleArgs {
     pub format: String,
 }
 
-pub fn run_egress_example(args: EgressExampleArgs) -> ExitCode {
-    let (snippet, comment) = match args.preset.as_str() {
-        "tor" => (
+pub fn run_egress_example(args: EgressExampleArgs, quiet: bool) -> ExitCode {
+    let snippet = match args.preset.as_str() {
+        "tor" => {
+            if !quiet {
+                eprintln!(
+                    "# Tor: start a local Tor SOCKS listener (default 9050). `socks5h` resolves DNS via Tor."
+                );
+            }
             json!({
+                "schema_version": 1,
                 "proxies": ["socks5h://127.0.0.1:9050"],
-            }),
-            "# Tor: start a local Tor SOCKS listener (default 9050). `socks5h` resolves DNS via Tor.",
-        ),
-        other => {
-            eprintln!(
-                "unknown egress preset {other:?}. Available: tor. \
-                 (Run `wafrift egress-example --help` for the canonical list.)"
-            );
-            return ExitCode::from(2);
+            })
+        }
+        _ => {
+            eprintln!("unknown preset '{}'. Fix: use --preset tor.", args.preset);
+            return ExitCode::from(1);
         }
     };
     if args.format == "human" {
@@ -43,7 +45,7 @@ pub fn run_egress_example(args: EgressExampleArgs) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("JSON serialization failed: {e}");
             ExitCode::from(1)
         }
     }
