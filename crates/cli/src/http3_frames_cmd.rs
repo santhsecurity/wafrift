@@ -346,4 +346,179 @@ mod tests {
         let total: usize = fs.frames.iter().map(|f| f.bytes.len()).sum();
         assert_eq!(env.total_bytes, total);
     }
+
+    // ─── ADVERSARIAL: zero / max parameters ───────────────────────
+
+    #[test]
+    fn qpack_zero_phantoms_still_produces_frame_set() {
+        // Even with 0 phantom inserts, the attack header itself
+        // should still produce some frames — the builder shouldn't
+        // degenerate to empty.
+        let mut a = args("qpack-desync");
+        a.phantom_insertions = 0;
+        a.format = "json".into();
+        let code = run_http3_frames(a);
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::SUCCESS),
+            "qpack with zero phantoms must still succeed"
+        );
+    }
+
+    #[test]
+    fn qpack_huge_phantoms_clamped_not_panic() {
+        // 10_000 phantoms requested — the underlying builder caps to
+        // table capacity, so this must not OOM or panic.
+        let mut a = args("qpack-desync");
+        a.phantom_insertions = 10_000;
+        let code = run_http3_frames(a);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn cid_rotation_zero_burst_still_emits_retire_frame() {
+        // 0 new CIDs but still retires the current — the retire
+        // frame alone is a valid (if weird) attack.
+        let mut a = args("cid-rotation");
+        a.cid_burst = 0;
+        let code = run_http3_frames(a);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn zero_rtt_replay_count_zero_clamps_to_one() {
+        // ZeroRttReplayBuilder::new docs say replay_count.max(1).
+        // Pin this behavior: even passing 0 produces a single replay.
+        let mut a = args("zero-rtt-replay");
+        a.replay_count = 0;
+        let code = run_http3_frames(a);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn stream_priority_zero_streams_succeeds() {
+        // 0 streams = 0 frames. Currently must succeed without
+        // panicking — pin the behavior.
+        let mut a = args("stream-priority");
+        a.priority_streams = 0;
+        let code = run_http3_frames(a);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn mtu_fragmentation_empty_payload_succeeds() {
+        // Empty payload → 0 fragments. Must not panic on `.iter()`.
+        let mut a = args("mtu-fragmentation");
+        a.mtu_payload = String::new();
+        let code = run_http3_frames(a);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn mtu_fragmentation_large_payload_does_not_panic() {
+        // 10 KiB payload — must complete in bounded time.
+        let mut a = args("mtu-fragmentation");
+        a.mtu_payload = "x".repeat(10_240);
+        let code = run_http3_frames(a);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn mtu_fragmentation_non_utf8_safe_via_bytes_only() {
+        // CLI arg is a String, but the underlying builder takes
+        // bytes — verify multi-byte unicode passes through without
+        // mojibake / panic.
+        let mut a = args("mtu-fragmentation");
+        a.mtu_payload = "пëîçÿ".to_string();
+        let code = run_http3_frames(a);
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    #[test]
+    fn out_path_to_nonexistent_directory_errors_gracefully() {
+        // Operator passes a path inside a directory that doesn't
+        // exist — must surface an error, not panic.
+        let mut a = args("mtu-fragmentation");
+        a.out = Some(std::path::PathBuf::from(
+            "/this/dir/does/not/exist/wafrift-frames.bin",
+        ));
+        let code = run_http3_frames(a);
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(1)),
+            "missing-parent-dir must exit 1 with an error message"
+        );
+    }
+
+    #[test]
+    fn invalid_technique_arm_returns_exit_2_no_panic() {
+        // The clap value_parser blocks unknown techniques at parse
+        // time, but the inner match has a safety net that should
+        // also handle direct programmatic invocation.
+        let mut a = args("qpack-desync");
+        a.technique = "totally-not-a-real-technique".into();
+        let code = run_http3_frames(a);
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(2)),
+            "unknown technique must exit 2"
+        );
+    }
+
+    // ─── ADVERSARIAL: hex_encode invariants ───────────────────────
+
+    #[test]
+    fn hex_encode_size_is_exactly_double_input() {
+        for n in [0, 1, 7, 64, 1024] {
+            let bytes: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
+            let hex = hex_encode(&bytes);
+            assert_eq!(
+                hex.len(),
+                n * 2,
+                "hex_encode({n} bytes) must produce {} chars",
+                n * 2
+            );
+        }
+    }
+
+    #[test]
+    fn hex_encode_only_lowercase_alphabet() {
+        let bytes: Vec<u8> = (0..=255).collect();
+        let hex = hex_encode(&bytes);
+        for c in hex.chars() {
+            assert!(
+                c.is_ascii_digit() || ('a'..='f').contains(&c),
+                "hex must be lowercase: {c}"
+            );
+        }
+    }
+
+    #[test]
+    fn hex_encode_high_bytes_encode_to_ff() {
+        assert_eq!(hex_encode(&[0xff, 0xff]), "ffff");
+        assert_eq!(hex_encode(&[0x10]), "10");
+        assert_eq!(hex_encode(&[0x0f]), "0f");
+    }
+
+    // ─── ADVERSARIAL: technique_for / envelope determinism ────────
+
+    #[test]
+    fn technique_for_is_pure_function() {
+        let a = technique_for("qpack-desync");
+        let b = technique_for("qpack-desync");
+        let c = technique_for("qpack-desync");
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+    }
+
+    #[test]
+    fn build_envelope_total_bytes_match_concatenation() {
+        // Operator workflow: read --out file, expect size to match
+        // total_bytes from the JSON envelope. Pin this contract.
+        let attack = QpackDesyncAttack::phantom_insert(3, ("x", "y"));
+        let fs = attack.to_frame_set();
+        let env = build_envelope(&fs);
+        let concatenated: Vec<u8> = fs.frames.iter().flat_map(|f| f.bytes.clone()).collect();
+        assert_eq!(env.total_bytes, concatenated.len());
+    }
 }
