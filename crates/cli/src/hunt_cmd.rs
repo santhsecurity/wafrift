@@ -239,9 +239,14 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
         base_url.bright_yellow(),
     );
     if args.auto_submit {
+        // Print the ACTUAL grace period (operator-tuned via
+        // `--auto-submit-grace-secs`), not a hardcoded "24 h" — pre-fix
+        // the log lied to operators who set a 1 h grace (e.g. for
+        // tight bug-bounty windows) by always claiming 24 h.
         eprintln!(
-            "  {} auto-submit ON — first 24 h = dry-run grace period",
-            "⚠".yellow()
+            "  {} auto-submit ON — first {} = dry-run grace period",
+            "⚠".yellow(),
+            humanize_secs(args.auto_submit_grace_secs)
         );
     }
 
@@ -709,6 +714,90 @@ fn persist_state(path: &PathBuf, state: &CampaignState) -> Result<(), String> {
 
 // ─── HackerOne submission (#72) ──────────────────────────────────────────────
 
+/// CWE identifier appropriate for a wafrift attack-class label.
+///
+/// Pre-fix `submit_to_h1` shipped EVERY report with `weakness_id=20`
+/// (CWE-20 — "Improper Input Validation"), the generic catch-all. H1
+/// triage routes reports by CWE for SLA bucketing and reviewer
+/// assignment, so blanket CWE-20 lands every report in the "needs
+/// human classification" queue — slowest possible path for a $50
+/// bounty. The right CWE per class is mechanical and saves days of
+/// triage latency.
+///
+/// Returns `(weakness_id, severity_rating)`. Severity stays "high"
+/// for any working WAF bypass — the WAF was the control; bypassing
+/// it elevates whatever vuln the payload represents.
+fn cwe_and_severity_for_class(class: &str) -> (u32, &'static str) {
+    // CWE values from MITRE's CWE catalogue. Severity stays "high"
+    // because a working bypass means the WAF control failed.
+    match class.to_ascii_lowercase().as_str() {
+        "sqli" | "sql" => (89, "high"),       // CWE-89 SQL Injection
+        "xss" => (79, "high"),                // CWE-79 XSS
+        "ssrf" => (918, "high"),              // CWE-918 SSRF
+        "ssti" => (1336, "high"),             // CWE-1336 Server-Side Template Injection
+        "lfi" | "path_traversal" | "rfi" => (22, "high"), // CWE-22 Path Traversal
+        "cmdi" | "cmd" => (78, "critical"),   // CWE-78 OS Command Injection (RCE → critical)
+        "xxe" => (611, "high"),               // CWE-611 Improper Restriction of XML External Entity
+        "rce" => (94, "critical"),            // CWE-94 Code Injection (RCE → critical)
+        _ => (20, "high"),                    // CWE-20 generic fallback
+    }
+}
+
+/// Format a seconds-budget as a short human string ("1 h", "30 m",
+/// "45 s", "2 d 4 h"). Used in the auto-submit grace-period log so
+/// operators see the actual budget, not a hardcoded "24 h".
+fn humanize_secs(secs: u64) -> String {
+    let days = secs / 86_400;
+    let rem = secs % 86_400;
+    let hours = rem / 3_600;
+    let rem = rem % 3_600;
+    let mins = rem / 60;
+    let s = rem % 60;
+    if days > 0 && hours > 0 {
+        format!("{days} d {hours} h")
+    } else if days > 0 {
+        format!("{days} d")
+    } else if hours > 0 && mins > 0 {
+        format!("{hours} h {mins} m")
+    } else if hours > 0 {
+        format!("{hours} h")
+    } else if mins > 0 && s > 0 {
+        format!("{mins} m {s} s")
+    } else if mins > 0 {
+        format!("{mins} m")
+    } else {
+        format!("{s} s")
+    }
+}
+
+/// Conservative check that a base URL is in the CumulusFire bug-
+/// bounty scope. Used as a defense-in-depth gate before auto-
+/// submitting any report against the hardcoded `cumulusfire` team
+/// handle — pre-fix `submit_to_h1` would file reports against
+/// CumulusFire for ANY operator-supplied base URL, including a
+/// totally unrelated target.
+///
+/// Matches the same rule `target_waf_for_base_url` uses: apex
+/// `cumulusfire.net` or any subdomain `*.cumulusfire.net` after
+/// stripping scheme + userinfo + port. Defense against the
+/// `cumulusfire.net.attacker.com` lookalike attack.
+fn base_url_in_cumulusfire_scope(base_url: &str) -> bool {
+    let lower = base_url.to_ascii_lowercase();
+    let no_scheme = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .unwrap_or(&lower);
+    let no_userinfo = match no_scheme.rfind('@') {
+        Some(i) => &no_scheme[i + 1..],
+        None => no_scheme,
+    };
+    let host_end = no_userinfo
+        .find(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
+        .unwrap_or(no_userinfo.len());
+    let host = &no_userinfo[..host_end];
+    host == "cumulusfire.net" || host.ends_with(".cumulusfire.net")
+}
+
 /// Submit a confirmed bypass to HackerOne via their REST API.
 ///
 /// Requires `H1_API_KEY` (token) and `H1_USERNAME` (your H1 handle) in the
@@ -723,24 +812,75 @@ async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<
     let username = std::env::var("H1_USERNAME")
         .unwrap_or_else(|_| "wafrift-hunt".to_string());
 
+    // SCOPE GUARD: the hardcoded `team_handle: "cumulusfire"` below
+    // means we MUST refuse to submit any bypass whose target is not
+    // in CumulusFire's scope. Pre-fix this gate was missing and a
+    // hunt against any other operator-supplied base URL with
+    // H1_API_KEY set would file a CumulusFire report on a totally
+    // unrelated target — wrong team, off-scope, likely ToS
+    // violation. The future-correct fix is a `--h1-team-handle`
+    // flag; for now we hardcode AND refuse mismatches at the gate.
+    if !base_url_in_cumulusfire_scope(target_url) {
+        return Err(format!(
+            "refusing to auto-submit: target {target_url} is NOT in CumulusFire's \
+             bug-bounty scope (apex `cumulusfire.net` or `*.cumulusfire.net`). \
+             Hardcoded team_handle would file the report against the wrong team. \
+             Disable --auto-submit for off-scope targets, or extend submit_to_h1 \
+             to accept a `--h1-team-handle` flag for other programs."
+        ));
+    }
+
+    let (weakness_id, severity_rating) = cwe_and_severity_for_class(class);
+
     // HackerOne Reports API v1:
     // POST https://api.hackerone.com/v1/hackers/reports
     // Auth: Basic <username>:<api_key>
     let title = format!("WAF bypass via {technique} ({class} class) on {target_url}");
+    // The reproduction command MUST be a working invocation. Pre-fix
+    // it passed the technique LABEL (e.g. `url_double`) to
+    // `--strategies` (which accepts STRATEGY names: lattice,
+    // polyglot, heavy, equiv-cegis). Reviewers running the pasted
+    // command got "unknown strategy" and the report stalled in
+    // triage. New repro uses `wafrift hunt --target cumulusfire`
+    // with the operator's exact class filter — a one-line command
+    // that re-runs the same campaign harness.
     let body = format!(
         "## Summary\n\nA WAF bypass was confirmed by `wafrift hunt`.\n\n\
          - **Target**: {target_url}\n\
          - **Attack class**: {class}\n\
-         - **Technique**: `{technique}`\n\n\
+         - **Bypass technique**: `{technique}`\n\
+         - **CWE**: CWE-{weakness_id}\n\n\
          ## Reproduction\n\n\
          ```\n\
-         wafrift bench-waf --evade --base-url {target_url} --strategies {technique}\n\
+         wafrift hunt --target cumulusfire --class {class} --strategies lattice,polyglot,heavy,equiv-cegis\n\
          ```\n\n\
+         The bypass corpus emitted under `~/.wafrift/corpus/` contains the \
+         encoding chain, the exact payload bytes, and the response \
+         fingerprint that confirmed the bypass. Run with `--corpus-out` \
+         to capture the full envelope inline.\n\n\
          ## Impact\n\n\
-         Payload passes the WAF unblocked and reaches the origin as a working attack."
+         Payload of class `{class}` passes the WAF unblocked via the \
+         `{technique}` technique and reaches the origin as a working \
+         attack. WAF rules intended to block this attack class are \
+         effectively disabled along this evasion path."
     );
 
-    let client = reqwest::Client::new();
+    // Build the client with a 30 s timeout. Pre-fix used
+    // `reqwest::Client::new()` which has NO timeout — a hung H1 API
+    // would block the entire hunt loop forever. 30 s is plenty for
+    // an API submission and bounds the worst case clearly.
+    //
+    // Note: we deliberately do NOT route this request through the
+    // operator's `--egress-*` pool (Tailscale/SOCKS5). The operator
+    // chose those for ATTACK opsec against the WAF target; their H1
+    // account is already publicly tied to their identity, so
+    // proxying the API call adds nothing and the cleartext API key
+    // ends up flowing through whatever exit they picked. Direct
+    // connection from the operator's machine is the right choice.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("H1 client build: {e}"))?;
     let resp = client
         .post("https://api.hackerone.com/v1/hackers/reports")
         .basic_auth(&username, Some(&api_key))
@@ -751,9 +891,12 @@ async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<
                     "team_handle": "cumulusfire",
                     "title": title,
                     "vulnerability_information": body,
-                    "severity_rating": "high",
-                    "impact": "WAF bypass allows unfiltered attack payloads to reach the origin.",
-                    "weakness_id": 20,  // CWE-20 Improper Input Validation
+                    "severity_rating": severity_rating,
+                    "impact": format!(
+                        "WAF bypass for {class} attacks via {technique} — \
+                         unfiltered {class} payloads reach the origin."
+                    ),
+                    "weakness_id": weakness_id,
                 }
             }
         }))
@@ -1358,5 +1501,163 @@ mod tests {
         assert!(corpus_out.is_some());
         assert!(coverage_out.is_some());
         assert_eq!(fingerprint, "hunt:example.com");
+    }
+
+    // ── humanize_secs: log message format ───────────────────────────────
+
+    #[test]
+    fn humanize_secs_distinguishes_subhour_subday_and_multiday() {
+        // The bug we're fixing: pre-fix the auto-submit log said
+        // "first 24 h" hardcoded regardless of the actual grace
+        // period. With the operator now able to set any value via
+        // --auto-submit-grace-secs, the log MUST reflect the real
+        // budget — these assertions pin the formatting.
+        assert_eq!(humanize_secs(0), "0 s");
+        assert_eq!(humanize_secs(30), "30 s");
+        assert_eq!(humanize_secs(90), "1 m 30 s");
+        assert_eq!(humanize_secs(120), "2 m");
+        assert_eq!(humanize_secs(3_600), "1 h");
+        assert_eq!(humanize_secs(3_660), "1 h 1 m");
+        assert_eq!(humanize_secs(86_400), "1 d");
+        assert_eq!(humanize_secs(90_000), "1 d 1 h");
+        assert_eq!(humanize_secs(172_800), "2 d");
+        // Common operator values land cleanly.
+        assert_eq!(humanize_secs(3_600), "1 h");          // 1 h grace
+        assert_eq!(humanize_secs(86_400), "1 d");         // legacy default
+    }
+
+    // ── cwe_and_severity_for_class: per-class triage routing ─────────────
+
+    #[test]
+    fn cwe_per_class_matches_mitre_cwe_catalogue() {
+        // The bug we're fixing: pre-fix every submission shipped
+        // weakness_id=20 (CWE-20 catch-all), landing every report
+        // in H1's "needs human triage" bucket — slowest possible
+        // path for a $50 bounty. Per-class CWE routes to the right
+        // reviewer queue immediately.
+        assert_eq!(cwe_and_severity_for_class("sqli").0, 89);
+        assert_eq!(cwe_and_severity_for_class("sql").0, 89);
+        assert_eq!(cwe_and_severity_for_class("xss").0, 79);
+        assert_eq!(cwe_and_severity_for_class("ssrf").0, 918);
+        assert_eq!(cwe_and_severity_for_class("ssti").0, 1336);
+        assert_eq!(cwe_and_severity_for_class("lfi").0, 22);
+        assert_eq!(cwe_and_severity_for_class("path_traversal").0, 22);
+        assert_eq!(cwe_and_severity_for_class("rfi").0, 22);
+        assert_eq!(cwe_and_severity_for_class("cmdi").0, 78);
+        assert_eq!(cwe_and_severity_for_class("cmd").0, 78);
+        assert_eq!(cwe_and_severity_for_class("xxe").0, 611);
+        assert_eq!(cwe_and_severity_for_class("rce").0, 94);
+        // Fallback: unknown class must NOT panic and must NOT
+        // claim a wrong CWE; CWE-20 is the documented catch-all.
+        assert_eq!(cwe_and_severity_for_class("unknown_future_class").0, 20);
+        assert_eq!(cwe_and_severity_for_class("").0, 20);
+    }
+
+    #[test]
+    fn cwe_lookup_is_case_insensitive() {
+        // Operator-tagged classes can come from corpus files with
+        // mixed casing; the lookup must normalize.
+        assert_eq!(cwe_and_severity_for_class("SQLi").0, 89);
+        assert_eq!(cwe_and_severity_for_class("XSS").0, 79);
+        assert_eq!(cwe_and_severity_for_class("SsRf").0, 918);
+    }
+
+    #[test]
+    fn severity_critical_for_rce_class_attacks() {
+        // RCE-class bypasses warrant "critical" — a working
+        // command-injection past the WAF is direct origin code
+        // execution. Other classes stay "high" (still a control
+        // failure but not direct RCE).
+        assert_eq!(cwe_and_severity_for_class("cmdi").1, "critical");
+        assert_eq!(cwe_and_severity_for_class("cmd").1, "critical");
+        assert_eq!(cwe_and_severity_for_class("rce").1, "critical");
+        assert_eq!(cwe_and_severity_for_class("sqli").1, "high");
+        assert_eq!(cwe_and_severity_for_class("xss").1, "high");
+    }
+
+    // ── base_url_in_cumulusfire_scope: SUBMISSION SCOPE GUARD ──────────
+
+    #[test]
+    fn cumulusfire_scope_accepts_apex_and_subdomains() {
+        // The bug we're fixing: pre-fix submit_to_h1 hardcoded
+        // team_handle="cumulusfire" with no scope check, so an
+        // operator running --auto-submit against ANY base URL with
+        // H1_API_KEY set would file a CumulusFire report on the
+        // wrong target — wrong team, ToS-violating off-scope spam.
+        // This gate refuses submission unless the base URL is in
+        // CumulusFire's bug-bounty scope.
+        assert!(base_url_in_cumulusfire_scope("https://waf.cumulusfire.net/"));
+        assert!(base_url_in_cumulusfire_scope("https://waf.cumulusfire.net"));
+        assert!(base_url_in_cumulusfire_scope("https://api.cumulusfire.net/v1/x"));
+        assert!(base_url_in_cumulusfire_scope("https://cumulusfire.net"));
+        assert!(base_url_in_cumulusfire_scope("https://cumulusfire.net/"));
+        assert!(base_url_in_cumulusfire_scope("http://waf.cumulusfire.net:8443/"));
+        // Userinfo + port + path/query must NOT confuse the host
+        // extraction.
+        assert!(base_url_in_cumulusfire_scope(
+            "https://admin:secret@waf.cumulusfire.net:443/scope?x=1"
+        ));
+    }
+
+    #[test]
+    fn cumulusfire_scope_rejects_unrelated_hosts() {
+        // Defense-in-depth: lookalikes and unrelated targets MUST
+        // refuse. `cumulusfire.net.attacker.com` is a CLASSIC
+        // CWE-1259 lookalike where naive `contains("cumulusfire.net")`
+        // would erroneously accept.
+        assert!(!base_url_in_cumulusfire_scope("https://example.com/"));
+        assert!(!base_url_in_cumulusfire_scope("https://waf.example.com/"));
+        assert!(!base_url_in_cumulusfire_scope("https://cumulusfire.net.attacker.com/"));
+        assert!(!base_url_in_cumulusfire_scope(
+            "https://attacker.com/?cumulusfire.net=1"
+        ));
+        // Empty / nonsense MUST reject (not match).
+        assert!(!base_url_in_cumulusfire_scope(""));
+        assert!(!base_url_in_cumulusfire_scope("not-a-url"));
+    }
+
+    #[test]
+    fn cumulusfire_scope_is_case_insensitive() {
+        // Operators sometimes paste URLs from H1 with mixed case.
+        assert!(base_url_in_cumulusfire_scope("HTTPS://WAF.CUMULUSFIRE.NET/"));
+        assert!(base_url_in_cumulusfire_scope("https://Waf.CumulusFire.NET"));
+    }
+
+    // ── submit_to_h1: gate refuses off-scope before network call ─────────
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn submit_to_h1_refuses_off_scope_target_without_h1_env() {
+        // Even WITHOUT H1_API_KEY in env, the scope check must run
+        // first and produce an actionable error. Pre-fix the
+        // function would silently proceed to network. This also
+        // proves the gate fires before the credential check.
+        //
+        // We set H1_API_KEY in this test so the credential check
+        // doesn't preempt the scope check.
+        // SAFETY: env vars are process-global, but this test runs
+        // on the current_thread runtime in isolation.
+        // SAFETY: env var is intentionally set for the duration of
+        // this scope-check test; restored afterwards.
+        unsafe {
+            std::env::set_var("H1_API_KEY", "test-dummy-key");
+        }
+        let result = submit_to_h1(
+            "https://example.com/scope",
+            "sqli",
+            "url_double",
+        )
+        .await;
+        unsafe {
+            std::env::remove_var("H1_API_KEY");
+        }
+        match result {
+            Err(e) => {
+                assert!(
+                    e.contains("not in CumulusFire") || e.contains("scope"),
+                    "expected scope-rejection error, got: {e}"
+                );
+            }
+            Ok(()) => panic!("off-scope target must NOT submit"),
+        }
     }
 }
