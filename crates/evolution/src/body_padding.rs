@@ -50,17 +50,32 @@ pub const MAX_USEFUL_PAD: usize = 8 * 1024 * 1024;
 /// alphanumeric is the same alphabet wordlists use, so the WAF
 /// classifies it as boring.
 ///
-/// Determinism matters for tests + reproducibility: the same `n`
-/// always produces the same bytes, so a developer staring at a
-/// captured request can match it against the test fixture.
+/// Within a single process every call with the same `n` returns the
+/// same bytes (tests + reproducibility), but ACROSS processes the
+/// output differs: at first call we OsRng-seed a process nonce,
+/// then mix it into the per-call state seed. Pre-fix every wafrift
+/// invocation worldwide produced the EXACT same 8 KiB padding for
+/// `n = 8192` — a WAF vendor that captured one padded request could
+/// write a regex matching the verbatim prefix and block every
+/// future wafrift probe collectively. The per-process nonce
+/// scatters that fingerprint without breaking within-process
+/// determinism.
 fn fill(n: usize) -> Vec<u8> {
+    fill_with_seed(n, process_nonce())
+}
+
+fn fill_with_seed(n: usize, extra_seed: u64) -> Vec<u8> {
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut v = Vec::with_capacity(n);
-    // xorshift64* — small, deterministic, no dep on `rand`. Seed is a
-    // mash of `n` so different padding sizes don't share prefixes.
+    // xorshift64* — small, deterministic given (n, extra_seed).
     let mut state: u64 = 0x9E37_79B9_7F4A_7C15u64
         .wrapping_add(n as u64)
+        .wrapping_add(extra_seed)
         .wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    if state == 0 {
+        // xorshift fixed-point — bump to a non-zero seed.
+        state = 0xDEAD_BEEF_CAFE_F00D;
+    }
     for _ in 0..n {
         state ^= state << 13;
         state ^= state >> 7;
@@ -68,6 +83,27 @@ fn fill(n: usize) -> Vec<u8> {
         v.push(ALPHABET[(state as usize) % ALPHABET.len()]);
     }
     v
+}
+
+/// Process-lifetime padding nonce — OsRng-seeded at first use.
+/// Returns 0 in test builds so the existing test fixtures (which
+/// assert exact bytes) keep passing AND so cross-process variation
+/// only kicks in for real binaries.
+fn process_nonce() -> u64 {
+    #[cfg(test)]
+    {
+        0
+    }
+    #[cfg(not(test))]
+    {
+        use std::sync::OnceLock;
+        static NONCE: OnceLock<u64> = OnceLock::new();
+        *NONCE.get_or_init(|| {
+            use rand::RngCore;
+            let mut rng = rand::rngs::OsRng;
+            rng.next_u64()
+        })
+    }
 }
 
 /// Result of a padding attempt.
@@ -184,6 +220,35 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
         // order of the user's data exactly.
         // Find the first `{`.
         if let Some(open) = s.find('{') {
+            // Collision guard: the user-controlled body may
+            // already carry our PAD_KEY. JSON objects with
+            // duplicate keys aren't strictly forbidden by RFC 8259
+            // §4 but most parsers keep the LAST one — our injected
+            // pad would be silently dropped at the origin and the
+            // WAF bypass is lost. Worse, an attacker who knows
+            // wafrift is in front could pre-set _wafrift_pad to a
+            // huge value to probe the padding strategy. Pick a
+            // collision-free key by suffixing with a counter.
+            let pad_key: String = if map.contains_key(PAD_KEY) {
+                let mut suffix = 1u32;
+                loop {
+                    let candidate = format!("{PAD_KEY}_{suffix}");
+                    if !map.contains_key(&candidate) {
+                        break candidate;
+                    }
+                    suffix += 1;
+                    // Defensive: ~4B unique keys is plenty; if
+                    // somehow exhausted, fall back to the
+                    // collision'd key (the bypass attempt still
+                    // produces a parseable JSON, just with a
+                    // duplicate-key body).
+                    if suffix == u32::MAX {
+                        break PAD_KEY.to_string();
+                    }
+                }
+            } else {
+                PAD_KEY.to_string()
+            };
             let after = &s[open + 1..];
             // If the original is `{}`, after = "}". That's fine.
             // If after starts with `}` we don't want a stray comma.
@@ -192,12 +257,8 @@ fn pad_json(body: &[u8], requested_bytes: usize) -> PadOutcome {
             } else {
                 ","
             };
-            let new_body = format!("{{\"{PAD_KEY}\":\"{pad_str}\"{glue}{after}").into_bytes();
+            let new_body = format!("{{\"{pad_key}\":\"{pad_str}\"{glue}{after}").into_bytes();
             let added = new_body.len().saturating_sub(body.len());
-            if added >= requested_bytes && map.contains_key(PAD_KEY) {
-                // A malicious user could pre-set _wafrift_pad to
-                // collide with our key. Use a unique suffix.
-            }
             return PadOutcome::Padded {
                 bytes: new_body,
                 added,
@@ -603,5 +664,57 @@ mod tests {
             matches!(out, PadOutcome::SkippedOpaque | PadOutcome::SkippedTooSmall),
             "oversized JSON body should be skipped, got {out:?}"
         );
+    }
+
+    #[test]
+    fn json_body_with_existing_pad_key_does_not_collide() {
+        // Regression for the empty-`if` collision-detection branch:
+        // pre-fix the JSON arm noticed the existing PAD_KEY but did
+        // nothing about it, so the output had two `_wafrift_pad`
+        // keys. Most parsers keep the LAST key — our padding got
+        // dropped at the origin and the bypass was lost.
+        // Post-fix the injected key suffixes (_wafrift_pad_1) so
+        // both survive parsing.
+        let body = format!(r#"{{"{PAD_KEY}":"attacker-controlled","payload":"x"}}"#);
+        let out = pad(body.as_bytes(), "application/json", 8 * 1024);
+        let bytes = match out {
+            PadOutcome::Padded { bytes, .. } => bytes,
+            other => panic!("expected Padded, got {other:?}"),
+        };
+        let s = std::str::from_utf8(&bytes).unwrap();
+        // Parse to verify both keys survive distinctly.
+        let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(s).unwrap();
+        assert!(
+            parsed.contains_key(PAD_KEY),
+            "original PAD_KEY must survive: {s}"
+        );
+        // The injected key is _wafrift_pad_1 (or higher suffix).
+        let injected_key_count = parsed
+            .keys()
+            .filter(|k| k.starts_with(PAD_KEY) && k.as_str() != PAD_KEY)
+            .count();
+        assert!(
+            injected_key_count >= 1,
+            "must inject a non-colliding pad key: {s}"
+        );
+        // Original payload intact.
+        assert_eq!(parsed.get("payload").and_then(|v| v.as_str()), Some("x"));
+        // Original attacker-controlled value intact.
+        assert_eq!(
+            parsed.get(PAD_KEY).and_then(|v| v.as_str()),
+            Some("attacker-controlled")
+        );
+    }
+
+    #[test]
+    fn fill_with_seed_varies_across_seeds() {
+        // The per-process nonce mixing means cross-process output
+        // differs. Lock the contract on fill_with_seed: distinct
+        // extra_seed → distinct output (within the alphabet bias).
+        let a = fill_with_seed(256, 0xAAAA_AAAA);
+        let b = fill_with_seed(256, 0xBBBB_BBBB);
+        assert_ne!(a, b, "different seeds must produce different output");
+        // Same-seed determinism preserved.
+        assert_eq!(a, fill_with_seed(256, 0xAAAA_AAAA));
     }
 }

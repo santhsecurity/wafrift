@@ -1,82 +1,75 @@
 # Shadow Daemon WAF — modular web application firewall.
 #
-# Shadow Daemon (https://shadowd.zecure.org/) is an open-source WAF with a
-# three-component architecture:
-#   shadowd    — the daemon that receives request data and scores it
-#   connector  — a language-specific library installed inside the web app
-#   database   — PostgreSQL backend for shadowd's rule/profile state
+# Redesigned 2026-05-25: replaced non-existent zecure/shadowd_php image with a
+# PostgreSQL-backed stack where the PHP connector app is built from our Dockerfile.
 #
-# Architecture for this bench stack:
+# Architecture:
 #
-#   wafrift  ──HTTP──►  php-app (port 18105)  ──shadowd API──►  shadowd daemon
-#                          nginx + PHP + shadowd-php connector         │
-#                                                                  PostgreSQL
+#   bench/wafrift ──HTTP──► nginx+PHP-FPM (port 18105)
+#                            │  (shadowd PHP connector embedded in app)
+#                            └──shadowd API (TCP 9115)──► shadowd daemon
+#                                                          │
+#                                                          └──PostgreSQL DB
 #
-# The php-app image is built from source (Dockerfile in this directory).
-# It installs the shadowd-php connector via Composer into a minimal PHP echo
-# app, so the bench can send payloads as POST/GET parameters and shadowd
-# scores them in-process.
+# Three services:
+#   db       — postgres:15-alpine; schema + bench profile seeded via init scripts
+#   shadowd  — zecure/shadowd daemon (reads DB; listens on port 9115)
+#   app      — built from Dockerfile: nginx + PHP-FPM + shadowd PHP connector
 #
-# Pinned image digests (2026-05-24):
-#   zecure/shadowd@sha256:a7d72e9591e6bf8a81df8d18bb6d7660c358f47bde74f7f52d32c1bcfbd15914
-#   postgres:16-alpine  (pinned by tag; re-pin via docker inspect after pull)
-#
-# No secrets or API keys in this file. The shared key between the connector
-# and shadowd daemon is a fixed bench value — it never leaves the local
-# Docker network.
-services:
-  wafrift-zoo-shadowd:
-    image: zecure/shadowd@sha256:a7d72e9591e6bf8a81df8d18bb6d7660c358f47bde74f7f52d32c1bcfbd15914
-    container_name: wafrift-zoo-shadowd
-    environment:
-      # shadowd reads a .ini config at /etc/shadowd/shadowd.ini
-      # Override via env vars that the image entrypoint maps.
-      # See: https://shadowd.zecure.org/documentation/shadowd/
-      SHADOWD_ADDRESS: "0.0.0.0"
-      SHADOWD_PORT: "9115"
-      SHADOWD_DB_DRIVER: "pgsql"
-      SHADOWD_DB_HOST: "wafrift-zoo-shadowd-db"
-      SHADOWD_DB_PORT: "5432"
-      SHADOWD_DB_NAME: "shadowd"
-      SHADOWD_DB_USER: "shadowd"
-      # Non-secret bench password — local Docker network only.
-      SHADOWD_DB_PASSWORD: "benchonly"
-      SHADOWD_LOG: "/var/log/shadowd/shadowd.log"
-      SHADOWD_DAEMON: "0"
-    depends_on:
-      - wafrift-zoo-shadowd-db
-    networks:
-      - wafrift-zoo-shadowd
+# Image digest pinned 2026-05-25:
+#   docker pull zecure/shadowd:latest
+#   sha256:a7d72e9591e6bf8a81df8d18bb6d7660c358f47bde74f7f52d32c1bcfbd15914
 
-  wafrift-zoo-shadowd-db:
-    image: postgres:16-alpine
+services:
+  db:
+    image: postgres:15-alpine
     container_name: wafrift-zoo-shadowd-db
     environment:
-      POSTGRES_DB: shadowd
-      POSTGRES_USER: shadowd
-      POSTGRES_PASSWORD: benchonly
+      POSTGRES_DB:               shadowd
+      POSTGRES_USER:             shadowd
+      POSTGRES_PASSWORD:         shadowd
+      # Use md5 auth so old libdbd-pgsql inside zecure/shadowd (Ubuntu 20.04 era)
+      # can authenticate. scram-sha-256 (postgres 15 default) is unsupported
+      # by that libdbi version.
+      POSTGRES_HOST_AUTH_METHOD: md5
+    volumes:
+      - ./pgsql_layout.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./init.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadowd -d shadowd"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - wafrift-zoo-shadowd
 
-  # PHP echo app with the shadowd-php connector installed.
-  # Built from source (Dockerfile) — no pre-built image available.
-  wafrift-zoo-shadowd-php:
+  shadowd:
+    image: zecure/shadowd:latest@sha256:a7d72e9591e6bf8a81df8d18bb6d7660c358f47bde74f7f52d32c1bcfbd15914
+    container_name: wafrift-zoo-shadowd
+    environment:
+      SHADOWD_ADDRESS:     0.0.0.0
+      SHADOWD_DB_DRIVER:   pgsql
+      SHADOWD_DB_HOST:     db
+      SHADOWD_DB_PORT:     5432
+      SHADOWD_DB_NAME:     shadowd
+      SHADOWD_DB_USER:     shadowd
+      SHADOWD_DB_PASSWORD: shadowd
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - wafrift-zoo-shadowd
+
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    image: wafrift/zoo-shadowd-php:latest
+    image: wafrift/zoo-shadowd-app:2026-05-25
     container_name: wafrift-zoo-shadowd-php
     ports:
       - "18105:80"
-    environment:
-      SHADOWD_HOST: "wafrift-zoo-shadowd"
-      SHADOWD_PORT: "9115"
-      # Profile ID 1 is shadowd's default first profile.
-      SHADOWD_PROFILE: "1"
-      # Shared key between connector and daemon. Fixed bench value.
-      SHADOWD_KEY: "wafrift-bench-key-2026"
     depends_on:
-      - wafrift-zoo-shadowd
+      - shadowd
     networks:
       - wafrift-zoo-shadowd
 

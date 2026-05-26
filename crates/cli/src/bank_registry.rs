@@ -833,7 +833,7 @@ mod tests {
         let path = dir.join("signing.hex");
         let key = SigningKey::generate();
         let hex = key.secret_hex();
-        write_secret_hex(&path, &hex).unwrap();
+        write_secret_hex(&path, hex).unwrap();
         let loaded = read_signing_key(&path).expect("must load");
         assert_eq!(loaded.secret_hex(), hex);
         let _ = std::fs::remove_dir_all(&dir);

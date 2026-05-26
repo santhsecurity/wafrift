@@ -97,8 +97,7 @@ impl CnameRuleEngine {
                 // CNAME hostnames are case-insensitive per RFC 1035
                 // §2.3.3, so every signature regex is wrapped (?i)
                 // automatically — same convention as waf_detect.
-                let full = if s.host_regex.starts_with("(?i)")
-                    || s.host_regex.starts_with("(?-i)")
+                let full = if s.host_regex.starts_with("(?i)") || s.host_regex.starts_with("(?-i)")
                 {
                     s.host_regex.clone()
                 } else {

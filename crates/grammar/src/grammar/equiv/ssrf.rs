@@ -286,8 +286,13 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     if !still_targets(payload, payload) {
         return out;
     }
-    let base = split_url(payload).unwrap();
-    let v = inet_aton(&base.host).unwrap();
+    // Invariant: still_targets(payload, payload) returned true, which
+    // internally calls split_url + inet_aton on the same payload and
+    // returns false when either is None — so both succeed here.
+    let base = split_url(payload)
+        .expect("invariant: still_targets() confirmed split_url succeeds");
+    let v = inet_aton(&base.host)
+        .expect("invariant: still_targets() confirmed inet_aton succeeds");
 
     for d in &deliveries {
         if !cfg.vary_delivery && !single_forced && !matches!(d, DeliveryShape::Query { .. }) {

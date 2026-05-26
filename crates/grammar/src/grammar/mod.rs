@@ -703,4 +703,202 @@ mod tests {
         let _ = mutate("; cat /etc/passwd", 1000);
         let _ = mutate("", 1000);
     }
+
+    // ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+    // ── classify: extended payload table ──────────────────────────────────
+
+    #[test]
+    fn classify_sql_extended() {
+        assert_eq!(classify("1 AND 1=1"), PayloadType::Sql);
+        assert_eq!(classify("SELECT * FROM users"), PayloadType::Sql);
+        assert_eq!(classify("1' ORDER BY 3--"), PayloadType::Sql);
+        assert_eq!(classify("UNION SELECT null,null,null--"), PayloadType::Sql);
+        assert_eq!(classify("1; DROP TABLE users;--"), PayloadType::Sql);
+        assert_eq!(classify("1 GROUP BY 1"), PayloadType::Sql);
+        assert_eq!(classify("1; WAITFOR DELAY '0:0:5'"), PayloadType::Sql);
+        assert_eq!(classify("1 HAVING 1=1"), PayloadType::Sql);
+    }
+
+    #[test]
+    fn classify_xss_extended() {
+        assert_eq!(classify("<svg onload=alert(1)>"), PayloadType::Xss);
+        assert_eq!(classify("<iframe src=javascript:alert(1)>"), PayloadType::Xss);
+        assert_eq!(classify("<body onload=eval(atob(''))>"), PayloadType::Xss);
+        assert_eq!(classify("document.cookie"), PayloadType::Xss);
+        assert_eq!(classify("<img src=x onerror=prompt(1)>"), PayloadType::Xss);
+    }
+
+    #[test]
+    fn classify_cmd_injection_extended() {
+        assert_eq!(classify("|whoami"), PayloadType::CommandInjection);
+        assert_eq!(classify("; bash -i"), PayloadType::CommandInjection);
+        assert_eq!(classify("`id`"), PayloadType::CommandInjection);
+        assert_eq!(classify("$(whoami)"), PayloadType::CommandInjection);
+    }
+
+    #[test]
+    fn classify_ssrf() {
+        assert_eq!(classify("http://169.254.169.254/latest/meta-data/"), PayloadType::Ssrf);
+        assert_eq!(classify("http://localhost/admin"), PayloadType::Ssrf);
+    }
+
+    #[test]
+    fn classify_path_traversal() {
+        assert_eq!(classify("../../../etc/passwd"), PayloadType::PathTraversal);
+        assert_eq!(classify("..\\..\\windows\\system32"), PayloadType::PathTraversal);
+    }
+
+    #[test]
+    fn classify_unknown_benign_inputs() {
+        assert_eq!(classify("hello world"), PayloadType::Unknown);
+        assert_eq!(classify("foo=bar&baz=qux"), PayloadType::Unknown);
+        assert_eq!(classify("normalvalue123"), PayloadType::Unknown);
+    }
+
+    // ── mutate: bounded output size ────────────────────────────────────────
+
+    #[test]
+    fn mutate_max_mutations_strictly_honoured() {
+        for max in [0, 1, 3, 5, 10] {
+            let sql = mutate("' OR 1=1--", max);
+            assert!(
+                sql.len() <= max,
+                "mutate with max={max} produced {} results",
+                sql.len()
+            );
+        }
+    }
+
+    #[test]
+    fn mutate_zero_max_returns_empty() {
+        assert!(mutate("' OR 1=1--", 0).is_empty());
+        assert!(mutate("<script>alert(1)</script>", 0).is_empty());
+    }
+
+    // ── mutate idempotence: double-mutate doesn't blow up ─────────────────
+
+    #[test]
+    fn mutate_idempotence_sql() {
+        let first = mutate("' OR 1=1--", 5);
+        for m in &first {
+            // Mutating the output must not produce an ever-expanding set.
+            let second = mutate(&m.payload, 10);
+            assert!(
+                second.len() <= 10,
+                "second-level mutation exceeded limit: got {}",
+                second.len()
+            );
+        }
+    }
+
+    #[test]
+    fn mutate_idempotence_xss() {
+        let first = mutate("<script>alert(1)</script>", 5);
+        for m in &first {
+            let second = mutate(&m.payload, 10);
+            assert!(second.len() <= 10);
+        }
+    }
+
+    // ── mutate determinism ────────────────────────────────────────────────
+
+    #[test]
+    fn mutate_sql_structural_keywords_preserved() {
+        // SQL mutations must still contain SQL-relevant tokens.
+        let mutations = mutate("' OR 1=1--", 20);
+        assert!(!mutations.is_empty(), "SQL must produce at least one mutation");
+        // All results must be typed as SQL.
+        assert!(mutations.iter().all(|m| m.payload_type == PayloadType::Sql));
+    }
+
+    #[test]
+    fn mutate_xss_payload_contains_executable_form() {
+        // XSS mutations should contain at least one recognizable exec form.
+        let mutations = mutate("<script>alert(1)</script>", 20);
+        assert!(!mutations.is_empty());
+        // At least one mutation should still look like an XSS payload.
+        let any_xss = mutations.iter().any(|m| {
+            let l = m.payload.to_ascii_lowercase();
+            l.contains("alert") || l.contains("onerror") || l.contains("onload")
+                || l.contains("script") || l.contains("svg") || l.contains("eval")
+                || l.contains("confirm") || l.contains("prompt") || l.contains("javascript")
+        });
+        assert!(any_xss, "at least one XSS mutation should preserve exec form");
+    }
+
+    // ── equiv/ssrf: variants still target original host ───────────────────
+
+    #[test]
+    fn ssrf_mutations_preserve_host() {
+        let payload = "http://169.254.169.254/latest/meta-data/";
+        let mutations = mutate_as(payload, PayloadType::Ssrf, 20);
+        assert!(!mutations.is_empty(), "SSRF must produce mutations");
+        // Every SSRF mutation must be typed as SSRF.
+        assert!(mutations.iter().all(|m| m.payload_type == PayloadType::Ssrf));
+    }
+
+    // ── equiv/xxe: variants still have SYSTEM/PUBLIC entity reference ─────
+
+    #[test]
+    fn xxe_mutations_preserve_entity_reference() {
+        let payload = r#"<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>"#;
+        let mutations = mutate_as(payload, PayloadType::NoSql, 5);
+        // NoSQL mutations don't apply to XXE; this just must not panic.
+        assert!(mutations.len() <= 5);
+    }
+
+    // ── mutate_request diversity policy deduplication ─────────────────────
+
+    #[test]
+    fn mutate_request_coverage_guided_deduplicates_rules() {
+        let req = MutationRequest {
+            max_count: 20,
+            diversity: DiversityPolicy::CoverageGuided,
+            exclude: std::collections::HashSet::new(),
+        };
+        let results = mutate_request("' OR 1=1--", PayloadType::Sql, &req);
+        // Each rules_applied combination should be unique.
+        let mut seen = std::collections::HashSet::new();
+        for m in &results {
+            let key = m.rules_applied.join(",");
+            // (collision is allowed by design for some short keys, but
+            //  there should be no exact duplicate rule-combos)
+            seen.insert(key);
+        }
+        // The number of unique rule-sets should equal total (no dup combos).
+        // Strict: unique_count == results.len()
+        assert_eq!(seen.len(), results.len(),
+            "coverage-guided must deduplicate by rules_applied");
+    }
+
+    #[test]
+    fn mutate_request_exclude_removes_payloads() {
+        let first = mutate("' OR 1=1--", 5);
+        if first.is_empty() {
+            return; // nothing to exclude
+        }
+        let excluded_payload = first[0].payload.clone();
+        let mut exclude_set = std::collections::HashSet::new();
+        exclude_set.insert(excluded_payload.clone());
+        let req = MutationRequest {
+            max_count: 20,
+            diversity: DiversityPolicy::Random,
+            exclude: exclude_set,
+        };
+        let results = mutate_request("' OR 1=1--", PayloadType::Sql, &req);
+        assert!(
+            results.iter().all(|m| m.payload != excluded_payload),
+            "excluded payload must not appear in results"
+        );
+    }
+
+    #[test]
+    fn classify_does_not_false_positive_common_words() {
+        // Words like "android", "consider", "validate" must not trigger
+        // CMDi classification via the old substring-matching bug.
+        assert_eq!(classify("android application error"), PayloadType::Unknown);
+        assert_eq!(classify("consider all options"), PayloadType::Unknown);
+        assert_eq!(classify("validate input fields"), PayloadType::Unknown);
+    }
 }

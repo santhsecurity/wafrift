@@ -40,12 +40,30 @@ pub struct HeaderTechnique {
 /// technique here corresponds to a documented WAF parser bug
 /// that's worth re-emitting against fresh targets.
 pub const TECHNIQUES: &[HeaderTechnique] = &[
-    HeaderTechnique { name: "case_mixing", target_header: "Content-Type" },
-    HeaderTechnique { name: "underscore_sub", target_header: "Content-Type" },
-    HeaderTechnique { name: "null_byte", target_header: "X-Forwarded-For" },
-    HeaderTechnique { name: "whitespace_pad", target_header: "Content-Type" },
-    HeaderTechnique { name: "trailing_space", target_header: "Content-Type" },
-    HeaderTechnique { name: "line_fold", target_header: "Content-Type" },
+    HeaderTechnique {
+        name: "case_mixing",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "underscore_sub",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "null_byte",
+        target_header: "X-Forwarded-For",
+    },
+    HeaderTechnique {
+        name: "whitespace_pad",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "trailing_space",
+        target_header: "Content-Type",
+    },
+    HeaderTechnique {
+        name: "line_fold",
+        target_header: "Content-Type",
+    },
 ];
 
 const HEADER_VALUE: &str = "application/x-www-form-urlencoded";
@@ -59,8 +77,12 @@ pub fn obfuscate(technique: &HeaderTechnique) -> String {
         "case_mixing" => header_obfuscation::case_mix(technique.target_header),
         "underscore_sub" => header_obfuscation::underscore_substitute(technique.target_header),
         "null_byte" => header_obfuscation::null_byte_inject(technique.target_header),
-        "whitespace_pad" => header_obfuscation::whitespace_pad(technique.target_header, HEADER_VALUE),
-        "trailing_space" => header_obfuscation::trailing_space(technique.target_header, HEADER_VALUE),
+        "whitespace_pad" => {
+            header_obfuscation::whitespace_pad(technique.target_header, HEADER_VALUE)
+        }
+        "trailing_space" => {
+            header_obfuscation::trailing_space(technique.target_header, HEADER_VALUE)
+        }
         "line_fold" => header_obfuscation::line_fold(technique.target_header, HEADER_VALUE),
         _ => technique.target_header.to_string(),
     }
@@ -93,10 +115,24 @@ pub struct PhaseOutcome {
     pub new_variant_outcomes: Vec<(Vec<String>, bool)>,
 }
 
-/// Build the (param=urlencoded(payload)) URL the same way scan/
-/// mod.rs's scan_url_with_param does — duplicated only because
-/// that function is `pub(crate)` on scan/mod.rs and we want to
-/// keep the phase module's deps minimal.
+/// Build the (param=urlencoded(payload)) URL. INTENTIONALLY a
+/// raw string-concat — NOT a delegation to
+/// `super::scan_url_with_param`. The two paths produce different
+/// outputs by design:
+///
+/// * `scan_url_with_param` routes through `reqwest::Url::query_pairs_mut`
+///   which RE-ENCODES any `%` in the input, double-encoding pre-
+///   encoded payloads (`%E2%9C%93` → `%25E2%259C%2593`). All scan-
+///   path callers already call `urlencoding::encode(...)` before
+///   passing to it, so the actual wire is double-encoded.
+/// * The header-obfuscation path needs the payload BYTES to land
+///   on the wire singly-encoded (the whole point of encoding-based
+///   bypass), so this local helper concatenates the already-encoded
+///   value without a second pass.
+///
+/// Unifying the two requires fixing `scan_url_with_param` to NOT
+/// re-encode (changes 10+ call sites + tests). Tracked separately;
+/// leaving the duplication explicit here is the safer interim.
 fn scan_url(target: &str, param: &str, value_encoded: &str) -> String {
     if target.contains('?') {
         format!("{target}&{param}={value_encoded}")
@@ -238,8 +274,7 @@ mod tests {
         // Anti-rig: a refactor that dropped case_mixing or
         // line_fold would silently weaken the engine. Lock the
         // headline techniques in.
-        let names: std::collections::HashSet<&str> =
-            TECHNIQUES.iter().map(|t| t.name).collect();
+        let names: std::collections::HashSet<&str> = TECHNIQUES.iter().map(|t| t.name).collect();
         for required in ["case_mixing", "underscore_sub", "null_byte", "line_fold"] {
             assert!(names.contains(required), "missing {required}");
         }
@@ -252,7 +287,7 @@ mod tests {
         // Output must differ in casing from the canonical
         // Content-Type. case_mix is the wafrift-encoding helper;
         // it always returns SOMETHING different than the input.
-        assert!(out.to_ascii_lowercase() == "content-type");
+        assert!(out.eq_ignore_ascii_case("content-type"));
         assert_ne!(out, "Content-Type", "case_mix must actually mix casing");
     }
 
@@ -467,7 +502,10 @@ mod tests {
         let out = obfuscate(t);
         let lower = out.to_ascii_lowercase();
         assert!(lower.contains("content-type"), "{out:?}");
-        assert!(lower.contains("application/x-www-form-urlencoded"), "{out:?}");
+        assert!(
+            lower.contains("application/x-www-form-urlencoded"),
+            "{out:?}"
+        );
     }
 
     #[test]
@@ -656,7 +694,10 @@ mod tests {
         // Cross-axis anti-rig: underscore_sub should ONLY be
         // associated with Content-Type (X-Forwarded-For has no
         // dash to substitute and would noop).
-        let underscore = TECHNIQUES.iter().find(|t| t.name == "underscore_sub").unwrap();
+        let underscore = TECHNIQUES
+            .iter()
+            .find(|t| t.name == "underscore_sub")
+            .unwrap();
         assert_eq!(underscore.target_header, "Content-Type");
     }
 

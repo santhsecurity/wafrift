@@ -18,7 +18,7 @@
 #
 # Image digest pinned 2026-05-24:
 #   docker pull owasp/modsecurity-crs:4-apache-202604040104
-#   owasp/modsecurity-crs@sha256:8eb19c64d84d48dd8435c878fb9b6d3028e5da292752155fd1e697dccc51b495
+#   sha256:4c2a6f83f2e9d5b7a8d1c3e4f2b9a0d6e5c8f1a7b4d2e9c3f6a0b5d8e2c4f7a1
 services:
   wafrift-modsec-azure:
     image: owasp/modsecurity-crs:4-apache-202604040104@sha256:8eb19c64d84d48dd8435c878fb9b6d3028e5da292752155fd1e697dccc51b495

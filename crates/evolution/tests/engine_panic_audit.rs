@@ -64,9 +64,7 @@ fn malformed_chromosome_feedback_after_candidate_still_errors_cleanly() {
     assert!(result.unwrap().is_err());
 
     // Valid index with verdict still works (uses the real in-flight chromosome).
-    let ok = catch_unwind(AssertUnwindSafe(|| {
-        engine.record_feedback(idx, true)
-    }));
+    let ok = catch_unwind(AssertUnwindSafe(|| engine.record_feedback(idx, true)));
     assert!(ok.is_ok());
     assert!(ok.unwrap().is_ok());
 

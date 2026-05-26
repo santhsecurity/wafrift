@@ -1,8 +1,14 @@
 //! wafrift-strategy — Evasion strategy pipeline.
 //!
 //! The orchestrator that wires all WAF Rift modules into a coherent
-//! evasion flow: request → fingerprint → grammar → encoding →
-//! header → content-type → result.
+//! evasion flow: request → detect → grammar → encoding →
+//! content-type → smuggling → fingerprint → result.
+//!
+//! Maintains per-host adaptive state (`HostState`), promotes proven-winner
+//! techniques into a rotation pool, evicts winners that get blocked, and
+//! restarts full discovery when all winners are exhausted. Per-WAF state
+//! persists to `~/.wafrift/genomes/<waf>.json` across sessions.
+//! Also integrates MCTS (`mcts_bridge`) and ML-WAF evasion (`ml_evasion`).
 //!
 //! # Examples
 //!
@@ -35,21 +41,32 @@
 
 pub mod composition;
 pub mod cost;
+/// Drift-aware evasion window detection (#115).
+/// CUSUM-based sequential change-point detector for WAF regime shifts.
+pub mod drift_window;
 pub mod gene_bank;
 pub mod host_state;
 pub mod learning_cache;
 /// MCTS bridge for intelligent evasion trajectory optimization.
 pub mod mcts_bridge;
+/// ML-WAF evasion routing (#129): decision-based boundary attack for learned
+/// classifiers (AWS Bot Control, Cloudflare Bot Management, Akamai Bot Manager).
+pub mod ml_evasion;
 pub mod pipeline;
 pub mod planner;
 pub mod strategy;
 /// WAF-specific evasion presets loaded from TOML rules.
 pub mod waf_presets;
 
+pub use drift_window::{DriftDetector, ProbeObservation, RegimeChange};
 pub use host_state::HostState;
 pub use learning_cache::LearningCache;
+pub use ml_evasion::{DEFAULT_ML_BUDGET, apply_ml_evasion_if_applicable, evade_ml_backed};
 pub use pipeline::{EvasionPipeline, EvasionPlanOutput};
 pub use planner::plan_pipelines;
 pub use strategy::*;
 
 pub mod explain;
+/// Plugin bridge — integrates external TOML/WASM tampers from wafrift-plugin-api
+/// into the evasion pipeline alongside built-in tampers.
+pub mod plugin_bridge;

@@ -4,7 +4,6 @@ use colored::Colorize;
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use tracing_subscriber::EnvFilter;
 
 mod attack_cmd;
 mod bank;
@@ -23,14 +22,10 @@ mod discover_cmd;
 mod distill_cmd;
 mod corpus_cmd;
 mod corpus_recorder;
-mod egress_args;
 mod egress_example;
 mod equiv_engine;
 mod evade_cmd;
 mod explain;
-mod http3_frames_cmd;
-mod ml_evade_cmd;
-mod wafmodel_solve_cmd;
 mod gql_diff_cmd;
 mod h2_diff_cmd;
 mod header_diff_cmd;
@@ -46,8 +41,13 @@ mod listener_cmd;
 mod man_cmd;
 mod method_diff_cmd;
 mod origin_hints;
+/// Target-permission gate. Refuse-by-default for non-bounty,
+/// non-allowlist hosts; `--i-have-permission &lt;reason&gt;` overrides.
+/// Local Docker bench targets (loopback / RFC1918) always pass.
+mod permission;
 mod parser_diff_cmd;
 mod parser_diff_common;
+mod poc_emit;
 mod probe_classify;
 mod probe_cmd;
 mod query_diff_cmd;
@@ -64,6 +64,7 @@ mod smuggle_cmd;
 mod target_context;
 mod technique_filter;
 mod trailer_diff_cmd;
+mod model_evade_cmd;
 mod wafmodel_cmd;
 mod tmin_cmd;
 mod cluster_cmd;
@@ -181,6 +182,13 @@ enum Commands {
     BypassProbe(bypass_probe::BypassProbeArgs),
     /// Generate a troff man page for `wafrift` (and optionally subcommands).
     Man(man_cmd::ManArgs),
+    /// Active-learning WAF bypass: learn the target's decision boundary
+    /// online (L* membership queries via HTTP), mine bypass candidates
+    /// offline against the learned SFA at ~1M/sec, and verify each online.
+    /// Deduces bypasses from the WAF's decision boundary — not from
+    /// mutation luck. Use `--budget` to cap live queries.
+    #[command(name = "model-evade")]
+    ModelEvade(model_evade_cmd::ModelEvadeArgs),
     /// Decompile a CRS-class ruleset and report the holes an attacker
     /// can drive through it (the WAF X-ray). Zero-config; `--ruleset`
     /// audits a custom Tier-B config.
@@ -374,6 +382,14 @@ enum Commands {
     /// With `--target cumulusfire`: pre-fills the CF testing endpoint and
     /// authorization reason for the CumulusFire public bug-bounty scope.
     Hunt(hunt_cmd::HuntArgs),
+    /// Inspect a `wafrift corpus` artifact (rule_corpus + edge-POP coverage
+    /// maps written by `wafrift bench-waf --corpus-out`). Subcommands:
+    ///
+    /// `stats` — print a structured summary of rules seen, total bypasses /
+    /// blocks, and edge POPs covered. Supports `--format json` for CI
+    /// gate integration (if rules_seen < N, fail the hunt).
+    #[command(name = "corpus")]
+    Corpus(corpus_cmd::CorpusArgs),
 }
 
 // Per-command structs + entry points live in their own modules:
@@ -683,18 +699,6 @@ pub struct ScanArgs {
     /// Seconds a cooled egress entry stays out of rotation. Default: 300.
     #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
     pub egress_cooldown_secs: u64,
-
-    /// Operator-supplied WAF detection signatures (TOML). Loaded once
-    /// at scan start and layered on top of the built-in 160+ rule
-    /// corpus — every response is matched against the built-ins
-    /// AND the custom set, with the highest-confidence detection
-    /// winning. Schema: see
-    /// `wafrift_evolution::custom_rules::CustomRulesFile`. Use this
-    /// for in-house appliances or for raising the confidence on
-    /// hosts the built-in rules already partially match. Default:
-    /// no custom rules.
-    #[arg(long = "custom-rules", value_name = "PATH")]
-    pub custom_rules: Option<PathBuf>,
 }
 
 impl ScanArgs {
@@ -1153,6 +1157,7 @@ fn main() -> ExitCode {
         }
         Some(Commands::Cluster(args)) => cluster_cmd::run_cluster(args),
         Some(Commands::Hunt(args)) => hunt_cmd::run_hunt(args),
+        Some(Commands::Corpus(args)) => corpus_cmd::run_corpus(args),
     }
 }
 
@@ -1338,7 +1343,6 @@ async fn run_scan_from_discovery(
             egress_tailscale_socks_addr: args.egress_tailscale_socks_addr.clone(),
             egress_challenge_threshold: args.egress_challenge_threshold,
             egress_cooldown_secs: args.egress_cooldown_secs,
-            custom_rules: args.custom_rules.clone(),
         };
         last = scan::run_scan(job_args, cancel.clone()).await;
         if let Some(ref p) = tmp_path {
@@ -1378,7 +1382,13 @@ async fn run_scan_from_discovery(
         match serde_json::to_string_pretty(&envelope) {
             Ok(s) => {
                 if let Some(out_path) = args.output.as_ref() {
-                    if let Err(e) = std::fs::write(out_path, &s) {
+                    // Atomic write: tmp sibling → rename, so a kill mid-write
+                    // never leaves a truncated JSON file on disk.
+                    let tmp = out_path.with_extension("json.tmp");
+                    let write_result = std::fs::write(&tmp, &s)
+                        .and_then(|()| std::fs::rename(&tmp, out_path));
+                    if let Err(e) = write_result {
+                        let _ = std::fs::remove_file(&tmp);
                         eprintln!(
                             "[wafrift scan] failed to write discovery output to {}: {e}",
                             out_path.display()

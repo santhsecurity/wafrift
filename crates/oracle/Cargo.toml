@@ -23,6 +23,13 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 url = "2"
 flate2 = "1"
+# DoH provider (RFC 8484 DNS wire format) + STUN provider polling.
+reqwest = { workspace = true }
+base64 = { workspace = true }
+# OOB canary IDs (always needed — dns_rebind.rs and doh_provider.rs use Uuid).
+uuid = { workspace = true, features = ["v4"] }
+# Optional: real interactsh OOB provider.
+interactsh = { path = "../../../../libs/offensive/interactsh", optional = true }
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }
@@ -30,7 +37,9 @@ toml = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-uuid = { workspace = true }
+
+[features]
+interactsh-provider = ["dep:interactsh"]
 
 [lints]
 workspace = true

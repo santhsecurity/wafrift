@@ -45,7 +45,7 @@ jobs:
 
       - name: install keyhog
         env:
-          KEYHOG_VERSION: v0.5.12
+          KEYHOG_VERSION: v0.5.13
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"

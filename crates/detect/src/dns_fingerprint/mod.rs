@@ -13,7 +13,7 @@
 //!   need a tokio runtime can disable it.
 //! * [`rules`] — the `CnameRuleEngine` that turns
 //!   `rules/detect/cname/*.toml` into compiled regexes and scores
-//!   probes against them, returning the same [`DetectedWaf`] shape
+//!   probes against them, returning the same `DetectedWaf` shape
 //!   the HTTP-layer engine uses.
 //!
 //! HTTP-level detection (`waf_detect`) fails when an origin strips

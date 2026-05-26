@@ -257,7 +257,7 @@ impl EvolutionEngine {
     }
 
     fn next_eval_id(&mut self) -> u64 {
-        self.next_id += 1;
+        self.next_id = self.next_id.saturating_add(1);
         self.next_id
     }
 
@@ -451,8 +451,8 @@ impl EvolutionEngine {
             // eval_id — population-based algorithms key their own
             // in_flight by it (see in_flight doc).
             to_submit.push((algorithm_candidate_id, verdict));
-            self.generation_evals += 1;
-            self.stats.evaluations += 1;
+            self.generation_evals = self.generation_evals.saturating_add(1);
+            self.stats.evaluations = self.stats.evaluations.saturating_add(1);
 
             if passed {
                 self.target_health.record_success();
@@ -521,7 +521,7 @@ impl EvolutionEngine {
             if improved {
                 self.stagnation_counter = 0;
             } else {
-                self.stagnation_counter += 1;
+                self.stagnation_counter = self.stagnation_counter.saturating_add(1);
             }
         }
         // Mirror into stats so should_terminate() (which reads
@@ -531,7 +531,7 @@ impl EvolutionEngine {
         // budget would be silently ignored.
         self.stats.stagnation_counter = self.stagnation_counter;
 
-        self.stats.generation += 1;
+        self.stats.generation = self.stats.generation.saturating_add(1);
         self.generation_evals = 0;
 
         if let Some(ref path) = self.checkpoint_path

@@ -2,21 +2,21 @@
 #[allow(clippy::module_inception)]
 mod tests {
     use crate::content_type::{
-        ContentTypeTechnique, MAX_FORM_BODY_SIZE, generate_variants, generate_variants_from_body,
-        parse_form_body, unique_boundary, xml_safe_name,
+        ContentTypeError, ContentTypeTechnique, MAX_FORM_BODY_SIZE, generate_variants,
+        generate_variants_from_body, parse_form_body, unique_boundary, xml_safe_name,
     };
 
     #[test]
     fn parse_form_body_basic() {
         let body = b"user=admin&pass=secret";
-        let params = parse_form_body(body);
+        let params = parse_form_body(body).unwrap();
         assert_eq!(params.len(), 2);
         assert_eq!(params[0], ("user".into(), "admin".into()));
     }
 
     #[test]
     fn parse_form_body_empty() {
-        assert!(parse_form_body(b"").is_empty());
+        assert!(parse_form_body(b"").unwrap().is_empty());
     }
 
     #[test]
@@ -217,14 +217,19 @@ mod tests {
     #[test]
     fn parse_form_body_rejects_oversized() {
         let huge = vec![b'A'; MAX_FORM_BODY_SIZE + 1];
-        assert!(parse_form_body(&huge).is_empty());
+        let err = parse_form_body(&huge).unwrap_err();
+        assert!(matches!(
+            err,
+            ContentTypeError::BodyTooLarge { got, cap }
+            if got == MAX_FORM_BODY_SIZE + 1 && cap == MAX_FORM_BODY_SIZE
+        ));
     }
 
     #[test]
     fn parse_form_body_accepts_max_size() {
         let body = vec![b'a'; MAX_FORM_BODY_SIZE];
         // No '=' delimiters → empty result, but must not panic or allocate huge vecs.
-        assert!(parse_form_body(&body).is_empty());
+        assert!(parse_form_body(&body).unwrap().is_empty());
     }
 
     #[test]
@@ -527,5 +532,312 @@ mod tests {
         // Different inputs produce different boundaries.
         let c = unique_boundary(&["y"]);
         assert_ne!(a, c, "unique_boundary must differ for different inputs");
+    }
+
+    // ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+    #[test]
+    fn parse_form_body_at_exact_max_size_returns_empty() {
+        // Exactly MAX_FORM_BODY_SIZE bytes with no '=' delimiter → empty vec, not Err.
+        let body = vec![b'a'; MAX_FORM_BODY_SIZE];
+        let result = parse_form_body(&body).unwrap();
+        assert!(result.is_empty(), "no '=' → empty parse result");
+    }
+
+    #[test]
+    fn parse_form_body_at_max_size_minus_one_succeeds() {
+        // MAX-1 bytes: should parse without error.
+        let body = vec![b'a'; MAX_FORM_BODY_SIZE - 1];
+        assert!(parse_form_body(&body).is_ok());
+    }
+
+    #[test]
+    fn parse_form_body_at_max_size_plus_one_errors() {
+        let body = vec![b'b'; MAX_FORM_BODY_SIZE + 1];
+        match parse_form_body(&body) {
+            Err(crate::content_type::ContentTypeError::BodyTooLarge { got, cap }) => {
+                assert_eq!(got, MAX_FORM_BODY_SIZE + 1);
+                assert_eq!(cap, MAX_FORM_BODY_SIZE);
+            }
+            other => panic!("expected BodyTooLarge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_form_body_lossy_returns_empty_for_oversized() {
+        // parse_form_body_lossy must return Vec::new() for oversized bodies.
+        #[allow(deprecated)]
+        let result = crate::content_type::parse_form_body_lossy(
+            &vec![b'z'; MAX_FORM_BODY_SIZE + 1]
+        );
+        assert!(result.is_empty(), "lossy wrapper must return empty Vec on oversized");
+    }
+
+    #[test]
+    fn boundary_collision_deterministic_rng_1000_variants() {
+        // Generate 1000 boundary pairs. No pair should have real == fake.
+        use std::collections::HashSet;
+        let mut seen: HashSet<String> = HashSet::new();
+        for _ in 0..1000 {
+            let b = unique_boundary(&[]);
+            // Each boundary must start with the expected prefix.
+            assert!(b.starts_with("----WafriftBoundary"), "unexpected prefix: {b}");
+            seen.insert(b);
+        }
+        // Almost all 1000 must be unique (entropy is 128-bit).
+        // Allow for an astronomically-unlikely collision: require >= 990 unique.
+        assert!(seen.len() >= 990, "too many collisions among 1000 boundaries: {}", seen.len());
+    }
+
+    #[test]
+    fn xml_cdata_variant_contains_cdata_exactly_once_open_and_close() {
+        let params = vec![("payload".to_string(), "test-injection".to_string())];
+        let variants = generate_variants(&params);
+        let xml_var = variants
+            .iter()
+            .find(|v| v.technique == crate::content_type::ContentTypeTechnique::XmlCdata)
+            .unwrap();
+        let body_str = String::from_utf8_lossy(&xml_var.body);
+        // The top-level structure must have exactly one CDATA per field.
+        assert_eq!(
+            body_str.matches("<![CDATA[").count(),
+            1,
+            "expected exactly 1 CDATA open for 1 param"
+        );
+        assert_eq!(
+            body_str.matches("]]>").count(),
+            1,
+            "expected exactly 1 CDATA close for 1 param"
+        );
+    }
+
+    #[test]
+    fn json_unicode_escape_payload_parses_as_valid_json() {
+        // Every JsonUnicodeEscape variant body must parse as strict JSON.
+        let payloads = [
+            ("k".to_string(), "' OR 1=1--".to_string()),
+            ("k".to_string(), "<script>alert(1)</script>".to_string()),
+            ("k".to_string(), "\"quoted\"".to_string()),
+            ("k".to_string(), "back\\slash".to_string()),
+        ];
+        for (key, val) in &payloads {
+            let params = vec![(key.clone(), val.clone())];
+            let variants = generate_variants(&params);
+            let json_var = variants
+                .iter()
+                .find(|v| v.technique == crate::content_type::ContentTypeTechnique::JsonUnicodeEscape)
+                .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&json_var.body)
+                .unwrap_or_else(|e| panic!("JsonUnicodeEscape body is not valid JSON for val={val:?}: {e}"));
+        }
+    }
+
+    #[test]
+    fn multipart_round_trip_field_names_present() {
+        let params = vec![
+            ("username".to_string(), "admin".to_string()),
+            ("token".to_string(), "abc123".to_string()),
+        ];
+        let variants = generate_variants(&params);
+        let mp = variants
+            .iter()
+            .find(|v| v.technique == crate::content_type::ContentTypeTechnique::Multipart)
+            .unwrap();
+        let body_str = String::from_utf8_lossy(&mp.body);
+        assert!(body_str.contains(r#"name="username""#));
+        assert!(body_str.contains(r#"name="token""#));
+        assert!(body_str.contains("admin"));
+        assert!(body_str.contains("abc123"));
+    }
+
+    #[test]
+    fn content_type_sniffing_malformed_headers_no_panic() {
+        // Malformed Content-Type strings in generate_variants_from_body should
+        // not panic — they just produce no variants.
+        let bodies: &[&[u8]] = &[
+            b"",
+            b"plain text with no equals",
+            b"\x80\x81\x82", // invalid UTF-8
+            b"a=b", // minimal valid
+        ];
+        for body in bodies {
+            let _ = crate::content_type::generate_variants_from_body(body);
+        }
+        // If we reached here without panicking, the test passes.
+    }
+
+    #[test]
+    fn xml_safe_name_xml_prefix_shifted() {
+        // Names starting with "xml" (any case) are reserved; the sanitiser
+        // must prepend '_' to avoid producing a reserved name.
+        assert!(xml_safe_name("xml_field").starts_with('_'));
+        assert!(xml_safe_name("XML_FIELD").starts_with('_'));
+        assert!(xml_safe_name("XmL").starts_with('_'));
+    }
+
+    #[test]
+    fn xml_safe_name_valid_names_pass_through() {
+        assert_eq!(xml_safe_name("myField"), "myField");
+        assert_eq!(xml_safe_name("_private"), "_private");
+        assert_eq!(xml_safe_name("field123"), "field123");
+    }
+
+    #[test]
+    fn generate_variants_from_body_valid_form_generates_all_techniques() {
+        let body = b"user=admin&pass=secret";
+        let variants = crate::content_type::generate_variants_from_body(body);
+        assert!(variants.len() >= 10, "expected >= 10 variants, got {}", variants.len());
+        // Check all major techniques are present.
+        use crate::content_type::ContentTypeTechnique;
+        let techniques: Vec<_> = variants.iter().map(|v| &v.technique).collect();
+        assert!(techniques.contains(&&ContentTypeTechnique::Multipart));
+        assert!(techniques.contains(&&ContentTypeTechnique::JsonUnicodeEscape));
+        assert!(techniques.contains(&&ContentTypeTechnique::XmlCdata));
+    }
+
+    // ── bound_params key-overflow fix (2026-05-25) ───────────────────────────
+
+    /// When the key alone exhausts the remaining byte budget, the previous code
+    /// emitted `(key, "")` via `saturating_sub → 0` — wasting the budget and
+    /// misrepresenting the param. The fix breaks out of the loop instead.
+    ///
+    /// Budget math:
+    /// - `MAX_VARIANT_VALUE_BYTES` = 8 KiB (per-key / per-value cap applied first).
+    /// - `MAX_VARIANT_INPUT_BYTES` = 64 KiB (aggregate cap).
+    ///
+    /// 7 params each consuming 8192 bytes (1-byte key + 8191-byte value) use
+    /// 57344 bytes → remaining = 8192. Then a param with a 8192-byte key
+    /// (capped at MAX_VARIANT_VALUE_BYTES) has `k.len() (8192) >= remaining
+    /// (8192)` → fixed code breaks; pre-fix emitted `(key, "")`.
+    #[test]
+    fn bound_params_skips_entry_when_key_alone_overflows_remaining_budget() {
+        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants};
+
+        // 7 params, each 8192 bytes → 57344 used, remaining = 8192.
+        let chunk_value = "x".repeat(MAX_VARIANT_VALUE_BYTES - 1); // 8191 bytes
+        let mut params: Vec<(String, String)> = (0..7)
+            .map(|i| (format!("{i}"), chunk_value.clone()))
+            .collect();
+        // Key of exactly MAX_VARIANT_VALUE_BYTES = 8192 bytes: fills remaining exactly.
+        let big_key = "K".repeat(MAX_VARIANT_VALUE_BYTES);
+        params.push((big_key.clone(), "should_not_appear".to_string()));
+
+        // Sanity check.
+        assert!(7 * MAX_VARIANT_VALUE_BYTES < MAX_VARIANT_INPUT_BYTES);
+
+        let variants = generate_variants(&params);
+        assert!(!variants.is_empty(), "must generate at least one variant");
+
+        for v in &variants {
+            let body_str = String::from_utf8_lossy(&v.body);
+            // The big-key param must NOT appear — neither key prefix nor value.
+            assert!(
+                !body_str.contains("should_not_appear"),
+                "value of skipped param must not appear in {:?} body",
+                v.technique
+            );
+            // Check a short prefix of the key (it's 8192 Ks — unmistakable).
+            let key_prefix = &big_key[..20];
+            assert!(
+                !body_str.contains(key_prefix),
+                "key of skipped param must not appear in {:?} body",
+                v.technique
+            );
+        }
+    }
+
+    // ── JsonDuplicateKey key-escaping fix (2026-05-25) ──────────────────────
+
+    /// Pre-fix: keys with `"` or `\` were interpolated raw into the
+    /// hand-rolled JSON, breaking the structure. The JsonDuplicateKey
+    /// variant body must always be valid JSON regardless of the key content.
+    #[test]
+    fn json_duplicate_key_escapes_special_chars_in_key() {
+        use crate::content_type::ContentTypeTechnique;
+
+        // Key with a double-quote — raw interpolation would produce {"a"b":... which is invalid.
+        let params = vec![(r#"a"b"#.to_string(), "injection_payload".to_string())];
+        let variants = generate_variants(&params);
+        let dup = variants
+            .iter()
+            .find(|v| v.technique == ContentTypeTechnique::JsonDuplicateKey)
+            .expect("JsonDuplicateKey variant must be generated");
+        // Must parse as valid JSON.
+        let parsed: serde_json::Value = serde_json::from_slice(&dup.body)
+            .expect("JsonDuplicateKey body must be valid JSON when key contains double-quote");
+        assert!(parsed.is_object());
+    }
+
+    #[test]
+    fn json_duplicate_key_escapes_backslash_in_key() {
+        use crate::content_type::ContentTypeTechnique;
+
+        let params = vec![(r#"a\b"#.to_string(), "v".to_string())];
+        let variants = generate_variants(&params);
+        let dup = variants
+            .iter()
+            .find(|v| v.technique == ContentTypeTechnique::JsonDuplicateKey)
+            .expect("JsonDuplicateKey variant must be generated");
+        serde_json::from_slice::<serde_json::Value>(&dup.body)
+            .expect("JsonDuplicateKey body must be valid JSON when key contains backslash");
+    }
+
+    #[test]
+    fn json_duplicate_key_normal_key_still_works() {
+        use crate::content_type::ContentTypeTechnique;
+
+        let params = vec![("username".to_string(), "' OR 1=1--".to_string())];
+        let variants = generate_variants(&params);
+        let dup = variants
+            .iter()
+            .find(|v| v.technique == ContentTypeTechnique::JsonDuplicateKey)
+            .expect("JsonDuplicateKey variant must be generated");
+        let body_str = std::str::from_utf8(&dup.body).unwrap();
+        // Must contain both "safe" and the payload value.
+        assert!(body_str.contains("safe"), "first (safe) key must be present: {body_str}");
+        // Value should appear (possibly escaped).
+        assert!(
+            body_str.contains("username"),
+            "key must appear in body: {body_str}"
+        );
+        serde_json::from_slice::<serde_json::Value>(&dup.body)
+            .expect("body must be valid JSON");
+    }
+
+    /// The previous `remaining.saturating_sub(k.len())` would yield `0` when
+    /// `k.len() == remaining`, producing an empty-string value. Confirm the
+    /// fixed code drops the entry in that exact boundary case too.
+    ///
+    /// Same budget math as the test above: 7 × 8192 = 57344 used, remaining = 8192.
+    /// Key = 8192 bytes: `k.len() (8192) >= remaining (8192)` → break (post-fix).
+    #[test]
+    fn bound_params_skips_entry_when_key_len_equals_remaining() {
+        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants};
+
+        let chunk_value = "x".repeat(MAX_VARIANT_VALUE_BYTES - 1);
+        let mut params: Vec<(String, String)> = (0..7)
+            .map(|i| (format!("{i}"), chunk_value.clone()))
+            .collect();
+        // Key is exactly MAX_VARIANT_VALUE_BYTES bytes (= remaining after 7 params).
+        let exact_key = "E".repeat(MAX_VARIANT_VALUE_BYTES);
+        params.push((exact_key.clone(), "forbidden_val".to_string()));
+
+        assert!(7 * MAX_VARIANT_VALUE_BYTES < MAX_VARIANT_INPUT_BYTES);
+
+        let variants = generate_variants(&params);
+        for v in &variants {
+            let body_str = String::from_utf8_lossy(&v.body);
+            assert!(
+                !body_str.contains("forbidden_val"),
+                "value of exact-remaining-key param must not appear in {:?} body",
+                v.technique
+            );
+            let key_prefix = &exact_key[..20];
+            assert!(
+                !body_str.contains(key_prefix),
+                "exact-remaining-key must not appear in {:?} body",
+                v.technique
+            );
+        }
     }
 }

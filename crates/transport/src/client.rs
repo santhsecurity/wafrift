@@ -44,6 +44,45 @@ impl EvasionClient {
             .lock()
             .unwrap_or_else(|poisoned: std::sync::PoisonError<_>| poisoned.into_inner())
     }
+
+    /// FIFO-evict at the 10k cap if needed, then register `host` in
+    /// the states map if absent and push it onto the FIFO tail.
+    /// Returns a mutable reference to the (possibly freshly-inserted)
+    /// HostState.
+    ///
+    /// Lock-ordering contract (states → fifo) lives in this ONE
+    /// place so the three send-loop branches (HardBlock /
+    /// RateLimit / Pass) and any future caller can't inherit the
+    /// wrong order. Takes the states guard as a parameter so the
+    /// caller still owns the critical-section boundary.
+    fn ensure_host_registered<'a>(
+        &self,
+        states: &'a mut HashMap<String, HostState>,
+        host: &str,
+    ) -> &'a mut HostState {
+        // Cap-evict if at the bound AND the new key isn't already
+        // present (already-present means no growth).
+        if states.len() >= 10_000 && !states.contains_key(host) {
+            let mut fifo = self
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            while let Some(key_to_remove) = fifo.pop_front() {
+                if states.remove(&key_to_remove).is_some() {
+                    break;
+                }
+            }
+        }
+        let is_new = !states.contains_key(host);
+        if is_new {
+            let mut fifo = self
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            fifo.push_back(host.to_string());
+        }
+        states.entry(host.to_string()).or_default()
+    }
     /// Create a new evasion client with default configuration.
     ///
     /// # Errors
@@ -58,14 +97,14 @@ impl EvasionClient {
     pub fn with_config(config: EvasionConfig) -> Result<Self, EvasionError> {
         config.validate().map_err(EvasionError::InvalidRequest)?;
 
-        let mut builder = reqwest::Client::builder()
-            .danger_accept_invalid_certs(config.insecure_tls)
-            .redirect(reqwest::redirect::Policy::limited(
-                wafrift_types::DEFAULT_MAX_REDIRECTS,
-            ))
-            .timeout(std::time::Duration::from_secs(
-                wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
-            ));
+        let mut builder = crate::http_builder::base_client_builder(
+            wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+            config.insecure_tls,
+            None,
+        )
+        .redirect(reqwest::redirect::Policy::limited(
+            wafrift_types::DEFAULT_MAX_REDIRECTS,
+        ));
 
         #[cfg(feature = "proxy-pool")]
         if !config.proxies.is_empty()
@@ -254,26 +293,7 @@ impl EvasionClient {
                     );
                     {
                         let mut states = self.lock_states();
-                        if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            while let Some(key_to_remove) = fifo.pop_front() {
-                                if states.remove(&key_to_remove).is_some() {
-                                    break;
-                                }
-                            }
-                        }
-                        let is_new = !states.contains_key(&host);
-                        let state = states.entry(host.clone()).or_default();
-                        if is_new {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            fifo.push_back(host.clone());
-                        }
+                        let state = self.ensure_host_registered(&mut states, &host);
                         state.record_signal(
                             classification == BlockClass::HardBlock,
                             classification == BlockClass::SoftBlock,
@@ -299,26 +319,7 @@ impl EvasionClient {
                     );
                     {
                         let mut states = self.lock_states();
-                        if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            while let Some(key_to_remove) = fifo.pop_front() {
-                                if states.remove(&key_to_remove).is_some() {
-                                    break;
-                                }
-                            }
-                        }
-                        let is_new = !states.contains_key(&host);
-                        let state = states.entry(host.clone()).or_default();
-                        if is_new {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            fifo.push_back(host.clone());
-                        }
+                        let state = self.ensure_host_registered(&mut states, &host);
                         state.record_signal(
                             false,
                             false,
@@ -340,26 +341,7 @@ impl EvasionClient {
                     // Pass or last attempt — record success (if Pass) and return
                     if !classification.is_blocked() {
                         let mut states = self.lock_states();
-                        if states.len() >= 10_000 && !states.contains_key(&host) {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            while let Some(key_to_remove) = fifo.pop_front() {
-                                if states.remove(&key_to_remove).is_some() {
-                                    break;
-                                }
-                            }
-                        }
-                        let is_new = !states.contains_key(&host);
-                        let state = states.entry(host.clone()).or_default();
-                        if is_new {
-                            let mut fifo = self
-                                .host_fifo
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            fifo.push_back(host.clone());
-                        }
+                        let state = self.ensure_host_registered(&mut states, &host);
                         if !techniques.is_empty() {
                             state.record_success_for_many(&techniques);
                         }
@@ -441,12 +423,21 @@ impl EvasionClient {
     }
 
     /// Reset evasion state for all hosts.
+    ///
+    /// Atomically clears both `host_states` and `host_fifo` under
+    /// the same lock acquisition order used everywhere else in
+    /// this module (states first, fifo second). Pre-fix the two
+    /// clears were separated by a guard drop — a concurrent
+    /// `send()` between them could register a new host that
+    /// survived the fifo clear, orphaning it in `host_states`
+    /// where the FIFO cap could never evict it.
     pub fn reset(&self) {
-        self.lock_states().clear();
+        let mut states = self.lock_states();
         let mut fifo = self
             .host_fifo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        states.clear();
         fifo.clear();
     }
 
@@ -573,35 +564,14 @@ pub enum EvasionError {
 
 /// Extract host from URL.
 ///
-/// Properly handles IPv6 addresses (e.g., `[::1]`) and IPv4/hostname.
+/// Thin Result-returning wrapper around
+/// [`crate::url_util::host_from_url`] (shared with the 3 cli sites
+/// that previously had their own copy). The Option → Result mapping
+/// converts the canonical None into the existing EvasionError
+/// variant so this call's contract is unchanged.
 fn extract_host(url: &str) -> Result<String, EvasionError> {
-    let url = url.trim();
-    if url.is_empty() {
-        return Err(EvasionError::InvalidUrl("Empty URL provided".into()));
-    }
-
-    // Ensure scheme exists for parsing
-    let parse_url = if !url.starts_with("http://") && !url.starts_with("https://") {
-        std::borrow::Cow::Owned(format!("https://{url}"))
-    } else {
-        std::borrow::Cow::Borrowed(url)
-    };
-
-    let parsed =
-        reqwest::Url::parse(&parse_url).map_err(|e| EvasionError::InvalidUrl(e.to_string()))?;
-
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| EvasionError::InvalidUrl("missing host component".into()))?;
-
-    let mut h = host.to_ascii_lowercase();
-    if h.starts_with('[') && h.ends_with(']') {
-        h = h[1..h.len() - 1].to_string();
-    }
-
-    if h.is_empty() {
-        return Err(EvasionError::InvalidUrl("empty host parsed".into()));
-    }
+    let h = crate::url_util::host_from_url(url)
+        .ok_or_else(|| EvasionError::InvalidUrl(format!("could not extract host from {url:?}")))?;
 
     Ok(h)
 }
@@ -893,5 +863,66 @@ mod tests {
         };
         let display = format!("{err}");
         assert!(display.contains("WAF blocked all 5 evasion attempts for example.org"));
+    }
+
+    // ── reset() atomicity ─────────────────────────────────────
+
+    #[test]
+    fn reset_clears_both_states_and_fifo() {
+        let client = EvasionClient::default();
+        // Plant a state by directly mutating under the same lock
+        // order reset() uses, so the post-reset inspection is
+        // unambiguous.
+        {
+            let mut states = client.lock_states();
+            let mut fifo = client
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            states.insert("a.com".to_string(), HostState::default());
+            states.insert("b.com".to_string(), HostState::default());
+            fifo.push_back("a.com".to_string());
+            fifo.push_back("b.com".to_string());
+        }
+        client.reset();
+        // Both must be empty — if either survives, the FIFO cap
+        // could leak entries indefinitely.
+        assert!(client.lock_states().is_empty(), "states not cleared");
+        let fifo_len = client
+            .host_fifo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
+        assert_eq!(fifo_len, 0, "fifo not cleared");
+    }
+
+    #[test]
+    fn reset_holds_both_locks_simultaneously() {
+        // Lock-order regression test: take `host_fifo` first from
+        // this thread, then spawn a thread that calls reset(). If
+        // reset() ever changed to acquire fifo BEFORE states,
+        // this would deadlock. The 50 ms join timeout is loose
+        // enough to absorb scheduling jitter on any platform.
+        use std::sync::Arc;
+        let client = Arc::new(EvasionClient::default());
+        {
+            let _fifo = client
+                .host_fifo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // Reset on a background thread — must be waiting on
+            // `host_states` (which we don't hold), not on
+            // `host_fifo` (which we do). When we drop our guard
+            // it should proceed.
+            let c = Arc::clone(&client);
+            let handle = std::thread::spawn(move || c.reset());
+            // Tiny sleep so the thread definitely tries to grab
+            // states before we drop fifo.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            drop(_fifo);
+            handle
+                .join()
+                .expect("reset thread must finish, not deadlock");
+        }
     }
 }

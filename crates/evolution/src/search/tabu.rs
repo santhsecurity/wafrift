@@ -86,7 +86,7 @@ impl SearchAlgorithm for TabuSearch {
         let mut attempts = 0;
         while out.len() < n && attempts < n * 10 {
             attempts += 1;
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let candidate = self.neighbor(rng);
             let hash = candidate.hash();
             // Tabu check. The aspiration criterion ("allow a tabu move
@@ -121,7 +121,7 @@ impl SearchAlgorithm for TabuSearch {
                 }
             }
         }
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn should_terminate(&self, stats: &SearchStats, budget: &Budget) -> bool {
@@ -176,6 +176,7 @@ mod tests {
                 latency_ms: 0,
                 confidence: f64::NAN,
                 triggered_rules: 1,
+                ..Default::default()
             },
         )]);
         let best_after_nan = comparable_fitness(alg.best().expect("best must exist").fitness);
@@ -183,5 +184,62 @@ mod tests {
         alg.submit_evaluations(vec![(2, OracleVerdict::from_bool(true))]);
         let best_after_valid = comparable_fitness(alg.best().expect("best must exist").fitness);
         assert!(best_after_valid > best_after_nan);
+    }
+
+    // ── Saturating-arithmetic regression tests ────────────────────────────────
+
+    /// `eval_counter` must saturate at `u64::MAX` instead of wrapping to 0.
+    #[test]
+    fn eval_counter_saturates_at_u64_max() {
+        let mut alg = TabuSearch::new(10);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(40);
+        alg.initialize(vec![Chromosome::new(vec![])], &pool, &mut rng);
+        alg.eval_counter = u64::MAX;
+        let _ = alg.request_evaluations(1, &mut rng);
+        assert_eq!(
+            alg.eval_counter,
+            u64::MAX,
+            "eval_counter must saturate at u64::MAX, not wrap to 0"
+        );
+    }
+
+    /// `generation` must saturate at `u32::MAX` instead of wrapping to 0.
+    #[test]
+    fn generation_saturates_at_u32_max() {
+        let mut alg = TabuSearch::new(10);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(41);
+        alg.initialize(vec![Chromosome::new(vec![])], &pool, &mut rng);
+        alg.generation = u32::MAX;
+        alg.submit_evaluations(vec![(0, OracleVerdict::from_bool(false))]);
+        assert_eq!(
+            alg.generation,
+            u32::MAX,
+            "generation must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    /// IDs returned by `request_evaluations` must be unique (no counter wrap).
+    #[test]
+    fn eval_counter_ids_are_unique_across_generations() {
+        let mut alg = TabuSearch::new(50);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(42);
+        alg.initialize(vec![Chromosome::new(vec![])], &pool, &mut rng);
+        let mut ids: Vec<u64> = Vec::new();
+        for _ in 0..10 {
+            let batch = alg.request_evaluations(2, &mut rng);
+            for c in &batch {
+                ids.push(c.id);
+            }
+            let verdicts: Vec<_> = batch
+                .into_iter()
+                .map(|c| (c.id, OracleVerdict::from_bool(false)))
+                .collect();
+            alg.submit_evaluations(verdicts);
+        }
+        let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+        assert_eq!(unique.len(), ids.len(), "eval IDs must never collide");
     }
 }

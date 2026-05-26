@@ -4,6 +4,15 @@
 //! have been tried, which succeeded, and how aggressively we need
 //! to escalate. Maintains a pool of proven winners and continuously
 //! re-evaluates as the WAF adapts.
+//!
+//! # Drift detection
+//!
+//! The [`DriftDetector`] embedded in every [`HostState`] tracks four CUSUM
+//! signal streams (median latency, P95 latency, block rate, body-hash entropy)
+//! and fires a [`RegimeChange`] when ≥ 2 signals agree that the WAF has
+//! changed its enforcement posture.  When [`RegimeChange::LooserNow`] fires,
+//! `previously_blocked` is re-queued so the strategy can retry payloads that
+//! were blocked under the old regime.
 
 use lru::LruCache;
 use parking_lot::Mutex;
@@ -13,6 +22,8 @@ use wafrift_content_type as content_type;
 use wafrift_encoding::encoding;
 use wafrift_types::Technique;
 use wafrift_types::escalation::EscalationLevel;
+
+use crate::drift_window::{DriftDetector, ProbeObservation, RegimeChange};
 
 /// Minimum number of attempts before a technique is eligible for
 /// promotion to the winner pool or demotion to the blocklist.
@@ -95,49 +106,98 @@ pub struct HostState {
     /// Number of JS challenges (Cloudflare captcha pages, etc.) seen.
     pub challenges: u32,
 
-    // -- MCTS principal-variation cache (H2) -----------------------------------------
-    /// LRU cache keyed by FNV-1a hash of (HTTP-method | URL-path) to the
-    /// MCTS principal variation (technique Display-strings). Wrapped in
-    /// Arc<Mutex<...>> so all HostState clones share the same backing store.
-    /// Capacity 256. No serde -- rebuilt fresh on each proxy restart.
-    pub mcts_cache: Arc<Mutex<LruCache<u64, Vec<String>>>>,
-}
-
-/// Capacity of the per-host MCTS principal-variation LRU cache (H2).
-/// 256 entries covers a typical scan session while keeping per-host
-/// overhead negligible (each entry is a small Vec<String>).
-const MCTS_CACHE_CAPACITY: usize = 256;
-
-impl Default for HostState {
-    fn default() -> Self {
-        Self {
-            blocks: 0,
-            successes: 0,
-            tried_encodings: Vec::new(),
-            tried_content_types: Vec::new(),
-            last_success: None,
-            technique_stats: Vec::new(),
-            waf_confirmed: false,
-            waf_name: None,
-            proven_winners: Vec::new(),
-            blocklisted: Vec::new(),
-            rotation_index: 0,
-            winner_consecutive_blocks: Vec::new(),
-            discovery_complete: false,
-            prioritized_techniques: Vec::new(),
-            avoided_techniques: Vec::new(),
-            inspection_model: None,
-            rate_limits: 0,
-            challenges: 0,
-            mcts_cache: Arc::new(Mutex::new(LruCache::new(
-                NonZeroUsize::new(MCTS_CACHE_CAPACITY)
-                    .expect("MCTS_CACHE_CAPACITY is non-zero"),
-            ))),
-        }
-    }
+    // ── Drift-aware evasion window (#115) ───────────────────────────
+    /// CUSUM-based drift detector tracking per-target WAF regime changes.
+    /// Updated on every probe result via `observe_probe`.
+    pub drift: DriftDetector,
+    /// Payloads (technique key strings) that were blocked under a previous
+    /// WAF regime and are eligible for retry when `LooserNow` fires.
+    pub previously_blocked: Vec<String>,
+    /// Payloads queued for retry after a `LooserNow` regime change.
+    /// The strategy drains this queue before generating new candidates.
+    pub drift_retry_queue: Vec<String>,
 }
 
 impl HostState {
+    // ── Drift-aware probe observation (#115) ────────────────────────────
+
+    /// Feed a probe result into the drift detector.
+    ///
+    /// Call this on **every** probe, in addition to the technique-tracking
+    /// methods (`record_block_for`, `record_success_for_many`, etc.).
+    ///
+    /// When [`RegimeChange::LooserNow`] fires, all entries in
+    /// `previously_blocked` are moved to `drift_retry_queue` so the
+    /// strategy engine can retry them under the new, more permissive regime.
+    ///
+    /// Returns the detected [`RegimeChange`] if one was fired, `None`
+    /// otherwise.
+    pub fn observe_probe(&mut self, obs: ProbeObservation) -> Option<RegimeChange> {
+        // Track blocked technique keys for potential retry on LooserNow.
+        if obs.was_blocked {
+            // `previously_blocked` is drained into `drift_retry_queue` on
+            // LooserNow, so it naturally cycles. Cap at 1000 entries to
+            // bound memory on a long-running proxy session against a target
+            // that blocks 100% of probes.
+            const MAX_PREVIOUSLY_BLOCKED: usize = 1_000;
+            if self.previously_blocked.len() < MAX_PREVIOUSLY_BLOCKED {
+                // Record the probe-level event as a sentinel; callers that
+                // have richer context (technique key) can push directly to
+                // `previously_blocked` instead of relying on the sentinel.
+                // The sentinel keeps the retry queue functional even for
+                // callers that only call `observe_probe`.
+                let sentinel = format!("probe:{}", self.blocks.saturating_add(1));
+                self.previously_blocked.push(sentinel);
+            }
+        }
+
+        let change = self.drift.observe(obs)?;
+
+        match &change {
+            RegimeChange::LooserNow => {
+                // WAF relaxed: move the entire blocked corpus to retry queue.
+                // The strategy drains `drift_retry_queue` with
+                // `drain_drift_retry_queue()`.
+                self.drift_retry_queue
+                    .extend(self.previously_blocked.drain(..));
+            }
+            RegimeChange::StricterNow => {
+                // WAF tightened: discard the retry queue (those techniques
+                // will fail again under the stricter regime).
+                self.drift_retry_queue.clear();
+            }
+            RegimeChange::Unclear => {
+                // Mixed signals: keep the retry queue intact but don't add
+                // to it. The next observation may resolve the direction.
+            }
+        }
+
+        Some(change)
+    }
+
+    /// Enqueue a specific blocked technique key for potential retry on the
+    /// next `LooserNow` regime change.
+    ///
+    /// Call this alongside `record_block_for` when you have the technique
+    /// key handy.  Bounded at 1000 entries per host.
+    pub fn mark_blocked_for_retry(&mut self, technique_key: &str) {
+        const MAX_PREVIOUSLY_BLOCKED: usize = 1_000;
+        if self.previously_blocked.len() < MAX_PREVIOUSLY_BLOCKED
+            && !self.previously_blocked.contains(&technique_key.to_string())
+        {
+            self.previously_blocked.push(technique_key.to_string());
+        }
+    }
+
+    /// Drain the drift retry queue, returning all technique keys that should
+    /// be retried under the newly-detected permissive WAF regime.
+    ///
+    /// Returns an empty `Vec` if no regime change has fired yet or if the
+    /// queue has already been drained.
+    pub fn drain_drift_retry_queue(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.drift_retry_queue)
+    }
+
     /// Record a blocked response (no technique tracking).
     pub fn record_block(&mut self) {
         self.blocks = self.blocks.saturating_add(1);
@@ -202,7 +262,12 @@ impl HostState {
             // the same technique in a long-running proxy session).
             stat.1 = stat.1.saturating_add(1);
             stat.2 = stat.2.saturating_add(1);
-        } else {
+        } else if self.technique_stats.len() < MAX_TECHNIQUE_STATS {
+            // Audit (F133 2026-05-24): the block path already capped new
+            // insertions at MAX_TECHNIQUE_STATS; the success path did not,
+            // allowing unbounded growth if an adversary stream produced
+            // unlimited distinct technique names that all "pass".  Mirror
+            // the same guard here.
             self.technique_stats.push((name.clone(), 1, 1));
         }
 
@@ -496,6 +561,16 @@ impl HostState {
             // Success attribution is handled by the caller via
             // record_success_for_many() since it needs the full
             // Technique objects, not just string keys.
+            //
+            // Defensive: also run evaluate_pools here so the winner
+            // pool populates EVEN IF a future caller forgets to
+            // invoke record_success_for_many. record_success_for_many
+            // also calls evaluate_pools so the existing
+            // proxy/transport call paths just run it twice (cheap).
+            // Without this, a caller that ONLY invoked record_signal
+            // would never see discovery_complete flip to true and
+            // the next_winner() rotation would never start.
+            self.evaluate_pools();
         }
 
         // Ingest WAF profile hints (only update, never downgrade).
@@ -1051,11 +1126,9 @@ mod tests {
         let mut state = HostState::default();
         // Inject a stat entry already at (u32::MAX - 1, u32::MAX - 1)
         // to force the boundary on the very next success.
-        state.technique_stats.push((
-            "encoding:Test".to_string(),
-            u32::MAX - 1,
-            u32::MAX - 1,
-        ));
+        state
+            .technique_stats
+            .push(("encoding:Test".to_string(), u32::MAX - 1, u32::MAX - 1));
         // Record one more success — this used to plain-add, now saturates.
         state.bump_success_for_technique(&Technique::PayloadEncoding("Test".into()));
         let stat = state
@@ -1074,8 +1147,16 @@ mod tests {
             .iter()
             .find(|(n, _, _)| n == "encoding:Test")
             .expect("stat entry must exist");
-        assert_eq!(stat2.1, u32::MAX, "successes must remain at u32::MAX after second saturating add");
-        assert_eq!(stat2.2, u32::MAX, "attempts must remain at u32::MAX after second saturating add");
+        assert_eq!(
+            stat2.1,
+            u32::MAX,
+            "successes must remain at u32::MAX after second saturating add"
+        );
+        assert_eq!(
+            stat2.2,
+            u32::MAX,
+            "attempts must remain at u32::MAX after second saturating add"
+        );
     }
 
     #[test]
@@ -1087,7 +1168,9 @@ mod tests {
         let name = "encoding:Sym".to_string();
 
         // Start at u32::MAX - 2 so we can hit the boundary in two ops.
-        state.technique_stats.push((name.clone(), u32::MAX - 2, u32::MAX - 2));
+        state
+            .technique_stats
+            .push((name.clone(), u32::MAX - 2, u32::MAX - 2));
 
         // Two successes take successes+attempts to MAX then stick.
         state.bump_success_for_technique(&Technique::PayloadEncoding("Sym".into()));
@@ -1102,5 +1185,129 @@ mod tests {
             .unwrap();
         assert_eq!(stat.1, u32::MAX);
         assert_eq!(stat.2, u32::MAX);
+    }
+
+    // ── F133: technique_stats cap on success path ───────────────────────
+
+    #[test]
+    fn bump_success_respects_max_technique_stats_cap() {
+        // Before F133 the success path had no cap; the block path did.
+        // Fill technique_stats to exactly MAX_TECHNIQUE_STATS entries via
+        // the block path (which is already capped), then attempt to add a
+        // brand-new unique technique via the success path.  The cap must
+        // prevent the vector growing beyond MAX_TECHNIQUE_STATS.
+        let mut state = HostState::default();
+
+        // Fill to the cap using direct insertion (bypasses both code paths).
+        for i in 0..MAX_TECHNIQUE_STATS {
+            state
+                .technique_stats
+                .push((format!("dummy:{i}"), 0, 1));
+        }
+        assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
+
+        // Now attempt to add a new technique via the success path.
+        // The name "encoding:NewTech" does NOT exist in technique_stats yet.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("NewTech".into()));
+
+        // Vector must NOT have grown.
+        assert_eq!(
+            state.technique_stats.len(),
+            MAX_TECHNIQUE_STATS,
+            "technique_stats grew past MAX_TECHNIQUE_STATS on success path"
+        );
+        // And the new entry must NOT be present.
+        assert!(
+            !state
+                .technique_stats
+                .iter()
+                .any(|(n, _, _)| n == "encoding:NewTech"),
+            "new entry was inserted despite cap being reached"
+        );
+    }
+
+    #[test]
+    fn bump_success_updates_existing_entry_at_capacity() {
+        // Even when at capacity, updating an EXISTING entry must still work.
+        let mut state = HostState::default();
+
+        // Insert the target entry first.
+        state
+            .technique_stats
+            .push(("encoding:Existing".to_string(), 1, 2));
+
+        // Fill the rest to the cap.
+        for i in 0..(MAX_TECHNIQUE_STATS - 1) {
+            state
+                .technique_stats
+                .push((format!("filler:{i}"), 0, 1));
+        }
+        assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
+
+        // Record a success for the already-present entry.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("Existing".into()));
+
+        // Stats for the existing entry must have incremented.
+        let stat = state
+            .technique_stats
+            .iter()
+            .find(|(n, _, _)| n == "encoding:Existing")
+            .expect("entry must exist");
+        assert_eq!(stat.1, 2, "success count must increment");
+        assert_eq!(stat.2, 3, "attempt count must increment");
+
+        // Length unchanged.
+        assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
+    }
+
+    #[test]
+    fn success_and_block_paths_symmetric_cap_enforcement() {
+        // Both paths must refuse to insert beyond MAX_TECHNIQUE_STATS.
+        // Fill to cap, then try one of each — neither may grow the vec.
+        let mut state = HostState::default();
+
+        for i in 0..MAX_TECHNIQUE_STATS {
+            state
+                .technique_stats
+                .push((format!("pre:{i}"), 0, 1));
+        }
+
+        // Success path — new technique.
+        state.bump_success_for_technique(&Technique::PayloadEncoding("SuccessNew".into()));
+        // Block path — new technique name.
+        state.bump_block_attempt_for_technique("BlockNew");
+
+        assert_eq!(
+            state.technique_stats.len(),
+            MAX_TECHNIQUE_STATS,
+            "neither path may grow technique_stats past the cap"
+        );
+    }
+
+    #[test]
+    fn record_success_for_many_capped_at_max_technique_stats() {
+        // record_success_for_many calls bump_success_for_technique in a loop;
+        // the cap must hold even when multiple unique techniques are passed.
+        let mut state = HostState::default();
+
+        for i in 0..MAX_TECHNIQUE_STATS {
+            state
+                .technique_stats
+                .push((format!("existing:{i}"), 0, 1));
+        }
+
+        // Pass four brand-new unique techniques at once.
+        state.record_success_for_many(&[
+            Technique::PayloadEncoding("Bulk1".into()),
+            Technique::PayloadEncoding("Bulk2".into()),
+            Technique::PayloadEncoding("Bulk3".into()),
+            Technique::PayloadEncoding("Bulk4".into()),
+        ]);
+
+        assert_eq!(
+            state.technique_stats.len(),
+            MAX_TECHNIQUE_STATS,
+            "record_success_for_many must not bypass the per-technique cap"
+        );
     }
 }

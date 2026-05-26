@@ -1,7 +1,6 @@
 //! End-to-end test for `wafrift method-diff`.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -35,7 +34,23 @@ async fn spawn_method_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -68,13 +83,17 @@ fn method_diff_finds_propfind_divergence_on_mod_dav_mock() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--timeout-secs",
+        "30",
     ]);
     assert_eq!(code, 0, "method-diff exit 0 — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let total_div = p["divergences"]["high"].as_u64().unwrap_or(0)
         + p["divergences"]["medium"].as_u64().unwrap_or(0);
-    assert!(total_div > 0, "PROPFIND must diverge against mod_dav mock: {p}");
+    assert!(
+        total_div > 0,
+        "PROPFIND must diverge against mod_dav mock: {p}"
+    );
 
     let results = p["results"].as_array().expect("results array");
     // Each probe carries curl_cmd with the variant method.

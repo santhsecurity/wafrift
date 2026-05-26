@@ -34,7 +34,13 @@ pub fn plan_pipelines(
         let key = CacheKey::new(waf, payload);
         if let Some(entry) = cache.get(&key) {
             let mut cached = entry.pipeline.clone();
-            cached.success_bps = (entry.success_rate() * 10000.0) as u16;
+            // Saturating-via-min defends against a caller bug that
+            // recorded more successes than attempts (success_rate
+            // > 1.0). Bare `as u16` would wrap silently above
+            // ~6.55× — saturating at 10_000 bps (100%) is the
+            // semantically-correct ceiling for a rate metric.
+            cached.success_bps =
+                ((entry.success_rate() * 10000.0).clamp(0.0, 10_000.0)) as u16;
             if within_budget(cached.cost, budget) {
                 pipelines.push(cached);
             }

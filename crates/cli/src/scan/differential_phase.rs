@@ -43,8 +43,7 @@ pub async fn run(
     }
     for probe in &diff_probes {
         let probe_payload = format!("{:?}", probe.tests);
-        let probe_url =
-            scan_url_with_param(target, param, &urlencoding::encode(&probe_payload));
+        let probe_url = scan_url_with_param(target, param, &urlencoding::encode(&probe_payload));
         let was_blocked = match http.get(&probe_url).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();

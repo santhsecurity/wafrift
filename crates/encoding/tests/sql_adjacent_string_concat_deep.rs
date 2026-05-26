@@ -2,8 +2,8 @@
 //! tamper. Pins every subtle case so future regressions surface
 //! exactly the broken behavior.
 
+use wafrift_encoding::tamper;
 use wafrift_encoding::tamper::TamperRegistry;
-use wafrift_encoding::{TamperStrategy, tamper};
 
 fn run(payload: &str) -> String {
     tamper("sql_adjacent_string_concat", payload, Some("sql")).expect("tamper exists")
@@ -217,7 +217,7 @@ fn unterminated_with_no_content() {
 fn unterminated_after_closed_literal() {
     let out = run("'admin' 'open");
     assert!(out.contains("'a' 'd' 'm' 'i' 'n'"));
-    assert!(out.contains("'open") || out.contains("' 'o"));  // either form OK
+    assert!(out.contains("'open") || out.contains("' 'o")); // either form OK
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -323,10 +323,17 @@ fn shattered_output_is_sql_parser_compatible_shape() {
     // Tokens split by ' '.
     let tokens: Vec<&str> = out.split(' ').collect();
     for t in &tokens {
-        assert!(t.starts_with('\'') && t.ends_with('\''), "token {t} not a quoted literal");
+        assert!(
+            t.starts_with('\'') && t.ends_with('\''),
+            "token {t} not a quoted literal"
+        );
         // Inner content is exactly 1 char (or escaped form).
         let inner = &t[1..t.len() - 1];
-        assert_eq!(inner.chars().count(), 1, "expected 1 char between quotes in {t}");
+        assert_eq!(
+            inner.chars().count(),
+            1,
+            "expected 1 char between quotes in {t}"
+        );
     }
 }
 
@@ -352,7 +359,10 @@ fn fifty_passes_bound_within_4x() {
     for _ in 0..50 {
         current = run(&current);
     }
-    assert!(current.len() <= original_len * 8, "growth exceeded 8x in 50 passes");
+    assert!(
+        current.len() <= original_len * 8,
+        "growth exceeded 8x in 50 passes"
+    );
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -370,7 +380,10 @@ fn handles_one_long_literal_5kb() {
 
 #[test]
 fn handles_many_short_literals() {
-    let p: String = (0..500).map(|i| format!("'{i}'")).collect::<Vec<_>>().join(" ");
+    let p: String = (0..500)
+        .map(|i| format!("'{i}'"))
+        .collect::<Vec<_>>()
+        .join(" ");
     let out = run(&p);
     // Each 'N' is len 1-3; the >=2-char ones shatter.
     assert!(!out.is_empty());
@@ -476,7 +489,9 @@ fn concurrent_calls_consistent() {
         let p = payload.to_string();
         let e = expected.clone();
         handles.push(thread::spawn(move || {
-            let out = r.tamper_with("sql_adjacent_string_concat", &p, None).unwrap();
+            let out = r
+                .tamper_with("sql_adjacent_string_concat", &p, None)
+                .unwrap();
             assert_eq!(out, e);
         }));
     }

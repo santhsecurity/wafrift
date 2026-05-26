@@ -110,8 +110,8 @@ fn load_all_cases() -> Vec<(PathBuf, BenchCase)> {
                 }
                 let body = fs::read_to_string(&path)
                     .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-                let file: CorpusFile = toml::from_str(&body)
-                    .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                let file: CorpusFile =
+                    toml::from_str(&body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
                 for case in file.cases {
                     all.push((path.clone(), case));
                 }
@@ -176,8 +176,8 @@ fn every_corpus_case_produces_nonempty_request() {
         let req = build_request(base, case);
         let url_empty = req.url().trim_matches('/').is_empty()
             || req.url() == base
-            || req.url() == &format!("{base}/");
-        let body_empty = req.body_bytes().map_or(true, |b| b.is_empty());
+            || req.url() == format!("{base}/");
+        let body_empty = req.body_bytes().is_none_or(|b| b.is_empty());
 
         if url_empty && body_empty {
             failures.push(format!(

@@ -45,7 +45,7 @@ fn scn() -> u64 {
 }
 /// Proptest case count.
 ///
-/// Production / CI target: 10 000 (full coverage gate).
+/// CI target: 10 000 (full coverage gate).
 /// Default when `WAFMODEL_PROPTEST_CASES` is unset: 200.
 ///
 /// Rationale for 200 not 10 000: each proptest case calls `l_star`,
@@ -138,11 +138,11 @@ fn assert_triple_exact(pat: &[u8], tag: &str) {
     let d = pat.len() + 3;
 
     let mut w1 = waf(pat);
-    let mut e1 = BoundedExhaustiveEq { max_len: d };
+    let mut e1 = BoundedExhaustiveEq { max_len: d, max_queries: None };
     let la = l_star(&mut w1, &body, &a, &mut e1).unwrap().sfa;
 
     let mut w2 = waf(pat);
-    let mut e2 = BoundedExhaustiveEq { max_len: d };
+    let mut e2 = BoundedExhaustiveEq { max_len: d, max_queries: None };
     let kv = kv_learn(&mut w2, &body, &a, &mut e2).unwrap().sfa;
 
     let mut w3 = waf(pat);
@@ -192,11 +192,13 @@ fn thousand_random_oracles_triple_learner_exact_and_nonvacuous() {
             let mut wa = waf(&pat);
             let mut ea = BoundedExhaustiveEq {
                 max_len: pat.len() + 3,
+                max_queries: None,
             };
             let lpa = l_star(&mut wa, &body, &a, &mut ea).unwrap().sfa;
             let mut wb = waf(&mut_pat);
             let mut eb = BoundedExhaustiveEq {
                 max_len: mut_pat.len() + 3,
+                max_queries: None,
             };
             let lpb = l_star(&mut wb, &body, &a, &mut eb).unwrap().sfa;
             assert!(

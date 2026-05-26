@@ -65,10 +65,7 @@ pub fn substitute(payload: &str, callback_base_url: &str) -> Option<Substitution
         return None;
     }
     let token = generate_token();
-    let callback_url = format!(
-        "{}/{token}",
-        callback_base_url.trim_end_matches('/')
-    );
+    let callback_url = format!("{}/{token}", callback_base_url.trim_end_matches('/'));
     let substituted = payload.replace("{{CALLBACK}}", &callback_url);
     Some(Substitution {
         payload: substituted,
@@ -101,7 +98,7 @@ mod tests {
         assert_eq!(t.len(), 26);
         for c in t.chars() {
             assert!(
-                (c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7'),
+                c.is_ascii_uppercase() || ('2'..='7').contains(&c),
                 "non-base32 char `{c}`"
             );
         }
@@ -130,11 +127,8 @@ mod tests {
 
     #[test]
     fn substitute_replaces_placeholder_with_callback_url() {
-        let s = substitute(
-            "<img src='{{CALLBACK}}/x.png'>",
-            "http://callback:9000",
-        )
-        .expect("placeholder present");
+        let s = substitute("<img src='{{CALLBACK}}/x.png'>", "http://callback:9000")
+            .expect("placeholder present");
         assert!(s.payload.contains(&s.callback_url));
         assert!(!s.payload.contains("{{CALLBACK}}"));
         assert!(s.callback_url.starts_with("http://callback:9000/"));

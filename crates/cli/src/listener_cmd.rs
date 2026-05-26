@@ -387,15 +387,9 @@ async fn handle_conn(
     // an infinite read loop without ever sending the header
     // terminator. 64 KiB is more than enough for any header section.
     let mut total_read = 0_usize;
+    let mut found: Option<(usize, usize)> = None;
     let header_cap = 64 * 1024;
-    // Pre-fix this was a `while` loop with an `Option<(usize, usize)>`
-    // sentinel and a trailing `.expect("loop exited only when found")`
-    // — logically infallible because the only `break` was guarded by
-    // `Some(loc)`, but an `expect` in a long-running listener path is
-    // still a panic surface a future refactor could trip. Restructure
-    // as `loop { ... break loc; }` so the value is produced directly
-    // by the loop expression and no Option/expect remains.
-    let (header_end, header_terminator_len) = loop {
+    while found.is_none() {
         let read_fut = sock.read(&mut buf[total_read..]);
         let n = tokio::time::timeout(read_timeout, read_fut)
             .await
@@ -406,7 +400,8 @@ async fn handle_conn(
         }
         total_read += n;
         if let Some(loc) = find_double_crlf(&buf[..total_read]) {
-            break loc;
+            found = Some(loc);
+            break;
         }
         if total_read >= header_cap {
             return Err("header too large".into());
@@ -414,7 +409,8 @@ async fn handle_conn(
         if total_read == buf.len() {
             buf.resize(buf.len() * 2, 0);
         }
-    };
+    }
+    let (header_end, header_terminator_len) = found.expect("loop exited only when found");
     let head =
         std::str::from_utf8(&buf[..header_end]).map_err(|e| format!("non-utf8 headers: {e}"))?;
     let mut lines = head.split("\r\n");
@@ -427,6 +423,14 @@ async fn handle_conn(
 
     let mut headers: Vec<(String, String)> = Vec::new();
     let mut content_length: usize = 0;
+    // F101: pre-fix every `Content-Length:` header overwrote the
+    // value, so a hostile client sending `Content-Length: 100\r\n
+    // Content-Length: 0` set the listener to read 0 body bytes and
+    // interpret the real body as the NEXT request — log-injection
+    // attack on the callback registry via classic request smuggling.
+    // Take the FIRST value; ignore subsequent duplicates (RFC 7230
+    // §3.3.2 forbids them outright).
+    let mut content_length_seen = false;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -434,15 +438,26 @@ async fn handle_conn(
         if let Some((k, v)) = line.split_once(':') {
             let k_lc = k.trim().to_ascii_lowercase();
             let v_trim = v.trim().to_string();
-            if k_lc == "content-length" {
-                content_length = v_trim.parse().unwrap_or(0);
+            if k_lc == "content-length" && !content_length_seen {
+                // F-LISTENER-CL-01: parse_or_0 was a request-smuggling
+                // vector. A hostile client sending `Content-Length: abc`
+                // would silently set content_length=0; the listener would
+                // then read zero body bytes and treat the actual body as
+                // the next request's headers — classic CL desync. Reject
+                // malformed CL with an actionable error so the connection
+                // is closed before any framing damage.
+                content_length = v_trim
+                    .parse::<usize>()
+                    .map_err(|e| format!("malformed Content-Length {v_trim:?}: {e}"))?;
+                content_length_seen = true;
             }
             headers.push((k_lc, v_trim));
         }
     }
 
     // Body = (bytes already in buf past the header terminator) + the rest.
-    let header_terminator_len = 4; // CRLF CRLF
+    // `header_terminator_len` is 4 for \r\n\r\n, 2 for \n\n — computed
+    // alongside `header_end` so non-CRLF clients don't lose body bytes.
     let body_start = header_end + header_terminator_len;
     let already_have = total_read.saturating_sub(body_start);
     let mut body_truncated = 0_usize;
@@ -479,7 +494,11 @@ async fn handle_conn(
     if let Some(rest) = path.strip_prefix("/_wafrift/check/") {
         // Trim any trailing query string / slash; token alphabet is
         // alnum only so anything past it is noise.
-        let token = rest.split(&['/', '?', '#'][..]).next().unwrap_or("").to_string();
+        let token = rest
+            .split(&['/', '?', '#'][..])
+            .next()
+            .unwrap_or("")
+            .to_string();
         let received = registry
             .callbacks()
             .await
@@ -545,14 +564,20 @@ async fn handle_conn(
     }))
 }
 
-fn find_double_crlf(buf: &[u8]) -> Option<usize> {
-    // Standard HTTP header terminator is `\r\n\r\n`; tolerate the
-    // `\n\n` form some clients send.
+/// Locate the end-of-headers double-CRLF (or bare-LF tolerated form).
+/// Returns `Some((offset, terminator_len))` so the caller knows where
+/// the body starts — `body_start = offset + terminator_len`. The
+/// terminator_len is 4 for the canonical `\r\n\r\n` and 2 for the
+/// `\n\n` form some scripted clients (curl with `--data-raw`,
+/// hand-rolled Python `urllib`) emit. Returning a fixed `4` for the
+/// `\n\n` case would silently truncate the first 2 bytes of every
+/// body from non-CRLF clients.
+fn find_double_crlf(buf: &[u8]) -> Option<(usize, usize)> {
     if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-        return Some(pos);
+        return Some((pos, 4));
     }
     if let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
-        return Some(pos);
+        return Some((pos, 2));
     }
     None
 }
@@ -592,18 +617,19 @@ mod tests {
         r.register("ABCDEFGHIJKLMNOPQRSTUVWXY2").await;
         // Exact, prefix, suffix, embedded — all must match.
         assert_eq!(
-            r.match_token_in("ABCDEFGHIJKLMNOPQRSTUVWXY2").await.as_deref(),
+            r.match_token_in("ABCDEFGHIJKLMNOPQRSTUVWXY2")
+                .await
+                .as_deref(),
             Some("ABCDEFGHIJKLMNOPQRSTUVWXY2")
         );
         assert_eq!(
-            r.match_token_in("/ABCDEFGHIJKLMNOPQRSTUVWXY2/x").await.as_deref(),
+            r.match_token_in("/ABCDEFGHIJKLMNOPQRSTUVWXY2/x")
+                .await
+                .as_deref(),
             Some("ABCDEFGHIJKLMNOPQRSTUVWXY2")
         );
         // Different token must not falsely match.
-        assert_eq!(
-            r.match_token_in("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").await,
-            None
-        );
+        assert_eq!(r.match_token_in("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").await, None);
     }
 
     #[serial_test::serial]
@@ -613,10 +639,7 @@ mod tests {
         // NOT match (caller's contract — we never normalise on lookup).
         let r = Registry::new();
         r.register("ABCDEFGHIJKLMNOPQRSTUVWXY2").await;
-        assert_eq!(
-            r.match_token_in("abcdefghijklmnopqrstuvwxy2").await,
-            None
-        );
+        assert_eq!(r.match_token_in("abcdefghijklmnopqrstuvwxy2").await, None);
     }
 
     #[serial_test::serial]
@@ -700,7 +723,11 @@ mod tests {
         }
         let elapsed = started.elapsed();
         let cbs = r.callbacks.read().await;
-        assert_eq!(cbs.len(), MAX_CALLBACK_LOG, "log must stay capped under flood");
+        assert_eq!(
+            cbs.len(),
+            MAX_CALLBACK_LOG,
+            "log must stay capped under flood"
+        );
         assert!(
             elapsed.as_secs() < 30,
             "eviction storm took {elapsed:?} — suspect O(n) eviction regression"
@@ -723,9 +750,12 @@ mod tests {
     fn find_double_crlf_handles_canonical_and_loose_forms() {
         // `GET / HTTP/1.1` is 14 bytes, so `\r\n\r\n` starts at
         // position 14. `\n\n` starts at position 14 in the lf-only
-        // form too (request line is still 14 bytes).
-        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\r\n\r\n"), Some(14));
-        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\n\n"), Some(14));
+        // form too (request line is still 14 bytes). The second
+        // return field is the terminator byte length — 4 for CRLF,
+        // 2 for bare LF; the caller adds this to `pos` to find the
+        // body start.
+        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\r\n\r\n"), Some((14, 4)));
+        assert_eq!(find_double_crlf(b"GET / HTTP/1.1\n\n"), Some((14, 2)));
         assert_eq!(find_double_crlf(b"no terminator here"), None);
     }
 
@@ -733,8 +763,25 @@ mod tests {
     fn find_double_crlf_locates_terminator_at_buffer_end() {
         let mut buf = vec![b'X'; 100];
         buf.extend_from_slice(b"\r\n\r\n");
-        let pos = find_double_crlf(&buf).expect("must find");
+        let (pos, terminator_len) = find_double_crlf(&buf).expect("must find");
         assert_eq!(pos, 100);
+        assert_eq!(terminator_len, 4);
+    }
+
+    #[test]
+    fn find_double_crlf_lf_only_terminator_reports_two_byte_length() {
+        // Regression test: pre-fix, callers hardcoded
+        // header_terminator_len=4 unconditionally and ate the first
+        // 2 bytes of every \n\n-terminated callback body. The bare-
+        // LF case must report 2.
+        let mut buf = b"POST /cb HTTP/1.1\nHost: x\n\n".to_vec();
+        buf.extend_from_slice(b"BODYDATA");
+        let (pos, terminator_len) = find_double_crlf(&buf).expect("must find");
+        assert_eq!(terminator_len, 2);
+        // Body must start exactly at pos + 2 — verify the first
+        // body byte is the 'B' of BODYDATA, not '0' / 'D' (which
+        // the old off-by-two would have dropped to).
+        assert_eq!(buf[pos + terminator_len], b'B');
     }
 
     // ── end-to-end: real TCP listener answers a real callback ────
@@ -765,25 +812,27 @@ mod tests {
                     .expect("handle_conn returned a callback (not a management response)")
             }
         });
-        // Tiny pause so the listener has time to be ready before we
-        // connect.
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        // Connect with a short retry loop — Windows TCP under
-        // parallel test load occasionally returns OS error 10060
-        // (timed out) on the first connect even though the listener
-        // is bound. We retry up to 5× with a 100ms backoff; total
-        // wait stays well under the 30s integration-test budget.
+        // Pause so the listener task has time to reach accept() before
+        // the client connects. On Windows under heavy parallel test
+        // load the spawned task may need more than a few milliseconds
+        // to be scheduled for the first time.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Connect with a retry loop — Windows TCP loopback under heavy
+        // parallel test load occasionally returns OS error 10060 (timed
+        // out) even though the listener is bound. We retry up to 10× with
+        // 200 ms backoff; total budget ≤ 2 s, well within the integration-
+        // test wall-clock limit.
         let mut client = None;
-        for attempt in 0..5 {
+        for attempt in 0..10 {
             match tokio::net::TcpStream::connect(addr).await {
                 Ok(s) => {
                     client = Some(s);
                     break;
                 }
-                Err(_e) if attempt < 4 => {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                Err(_e) if attempt < 9 => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
                 }
-                Err(e) => panic!("connect after 5 attempts: {e}"),
+                Err(e) => panic!("connect after 10 attempts: {e}"),
             }
         }
         let mut client = client.expect("connected");
@@ -798,9 +847,7 @@ mod tests {
     async fn end_to_end_callback_with_matching_token_in_path() {
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
         assert_eq!(cb.method, "GET");
         assert_eq!(cb.path, format!("/{token}"));
@@ -862,9 +909,7 @@ mod tests {
     async fn registry_matched_count_excludes_unmatched_callbacks() {
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req_match = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let req_match = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let req_no_match = b"GET /random HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n";
         let (cb1, _) = drive_one_callback(registry.clone(), req_match.as_bytes()).await;
         registry.push(cb1).await;
@@ -887,7 +932,14 @@ mod tests {
         let registry_c = registry.clone();
         let server = tokio::spawn(async move {
             let (sock, peer) = listener.accept().await.unwrap();
-            handle_conn(sock, peer, &registry_c, 8 * 1024, Duration::from_millis(200)).await
+            handle_conn(
+                sock,
+                peer,
+                &registry_c,
+                8 * 1024,
+                Duration::from_millis(200),
+            )
+            .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
         let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -908,10 +960,7 @@ mod tests {
     /// Drive one /_wafrift/check/<token> request. Reads the raw
     /// response off the socket so we can assert on the status line
     /// + JSON body.
-    async fn drive_management_check(
-        registry: Arc<Registry>,
-        token: &str,
-    ) -> (String, String) {
+    async fn drive_management_check(registry: Arc<Registry>, token: &str) -> (String, String) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
@@ -960,11 +1009,7 @@ mod tests {
         let resp = String::from_utf8_lossy(&resp_buf).into_owned();
         // Split status line + body for the caller.
         let (status_line, rest) = resp.split_once("\r\n").unwrap_or(("", ""));
-        let body = rest
-            .split("\r\n\r\n")
-            .nth(1)
-            .unwrap_or("")
-            .to_string();
+        let body = rest.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
         (status_line.to_string(), body)
     }
 
@@ -973,8 +1018,7 @@ mod tests {
     async fn management_check_unknown_token_returns_404_with_received_false() {
         let registry = Arc::new(Registry::new());
         let _ = registry.mint(1).await; // mint one so the registry is non-empty
-        let (status, body) =
-            drive_management_check(registry, "NEVERSEENABCDEFGHIJKLMNOPQ").await;
+        let (status, body) = drive_management_check(registry, "NEVERSEENABCDEFGHIJKLMNOPQ").await;
         assert!(status.contains("404"), "status was: {status}");
         assert!(body.contains("\"received\":false"), "body: {body}");
     }
@@ -986,16 +1030,17 @@ mod tests {
         let token = registry.mint(1).await.into_iter().next().unwrap();
         // Record a callback for this token by going through the
         // normal callback path.
-        let cb_req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let cb_req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry.clone(), cb_req.as_bytes()).await;
         registry.push(cb).await;
         // Now ask the management endpoint.
         let (status, body) = drive_management_check(registry, &token).await;
         assert!(status.contains("200"), "status was: {status}");
         assert!(body.contains("\"received\":true"), "body: {body}");
-        assert!(body.contains(&token), "body should include the token: {body}");
+        assert!(
+            body.contains(&token),
+            "body should include the token: {body}"
+        );
     }
 
     #[serial_test::serial]
@@ -1022,9 +1067,7 @@ mod tests {
         // trailing slash) must still get the right answer.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let cb_req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let cb_req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry.clone(), cb_req.as_bytes()).await;
         registry.push(cb).await;
         // Use a token with a trailing slash in the URL request.
@@ -1047,11 +1090,13 @@ mod tests {
         // to worry about `"get"` vs `"GET"`.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "post /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
-        );
+        let req = format!("post /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n");
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
-        assert_eq!(cb.method, "POST", "method must be uppercased, got `{}`", cb.method);
+        assert_eq!(
+            cb.method, "POST",
+            "method must be uppercased, got `{}`",
+            cb.method
+        );
     }
 
     #[serial_test::serial]
@@ -1092,7 +1137,10 @@ mod tests {
         );
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
         assert_eq!(cb.body_preview.len(), exact);
-        assert_eq!(cb.body_truncated_bytes, 0, "exact-cap body must NOT truncate");
+        assert_eq!(
+            cb.body_truncated_bytes, 0,
+            "exact-cap body must NOT truncate"
+        );
         assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
     }
 
@@ -1120,20 +1168,68 @@ mod tests {
         );
     }
 
+    /// Same as `drive_one_callback` but returns the raw `Result` from
+    /// `handle_conn` instead of unwrapping. Used for adversarial tests
+    /// where the connection is expected to be rejected (e.g. malformed
+    /// Content-Length) — we want to assert the listener doesn't panic or
+    /// hang, not that it records a callback.
+    async fn drive_one_conn_result(
+        registry: Arc<Registry>,
+        request: &[u8],
+    ) -> Result<Option<Callback>, String> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let req = request.to_vec();
+        let server = tokio::spawn({
+            let registry = registry.clone();
+            async move {
+                let (sock, peer) = listener.accept().await.expect("accept");
+                handle_conn(sock, peer, &registry, 8 * 1024, Duration::from_secs(5)).await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut connected = false;
+        for attempt in 0..10 {
+            match tokio::net::TcpStream::connect(addr).await {
+                Ok(mut s) => {
+                    s.write_all(&req).await.expect("write");
+                    let _ = s.shutdown().await;
+                    connected = true;
+                    break;
+                }
+                Err(_) if attempt < 9 => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Err(e) => panic!("connect after 10 attempts: {e}"),
+            }
+        }
+        assert!(connected, "client must connect");
+        server.await.expect("server task did not panic")
+    }
+
     #[serial_test::serial]
     #[tokio::test(flavor = "current_thread")]
     async fn end_to_end_negative_content_length_does_not_crash() {
-        // Adversarial Content-Length: garbage value. Our parser
-        // falls back to 0 on parse-failure (already-have body bytes
-        // are still captured), and the listener must NOT crash or
-        // hang on the read loop.
+        // Adversarial Content-Length: negative integer. The F-LISTENER-CL-01
+        // fix changed the fallback-to-zero behaviour to a hard reject (to
+        // close CL desync attacks); so `handle_conn` now returns Err for a
+        // malformed CL. The contract here is that the listener terminates
+        // cleanly — no panic, no hang — not that it records a callback.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: -7\r\n\r\n"
+        let req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: -7\r\n\r\n");
+        let result = drive_one_conn_result(registry, req.as_bytes()).await;
+        assert!(
+            result.is_err(),
+            "malformed Content-Length must be rejected: {result:?}"
         );
-        let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
-        assert_eq!(cb.matched_token.as_deref(), Some(token.as_str()));
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("malformed Content-Length"),
+            "error message must name the cause: {err:?}"
+        );
     }
 
     #[serial_test::serial]
@@ -1146,9 +1242,7 @@ mod tests {
         // we just see an empty body.
         let registry = Arc::new(Registry::new());
         let token = registry.mint(1).await.into_iter().next().unwrap();
-        let req = format!(
-            "GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 9999999999\r\n\r\n"
-        );
+        let req = format!("GET /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: 9999999999\r\n\r\n");
         let (cb, _) = drive_one_callback(registry, req.as_bytes()).await;
         // We at least got the request line + headers parsed (token
         // match in path proves it). Body is empty because the client

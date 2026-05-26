@@ -36,16 +36,12 @@ for stack in "${STACKS[@]}"; do
         continue
     fi
     echo "[$stack] docker compose up -d"
-    # These stacks are built from source (no pre-built Docker Hub image).
-    # --build is a no-op after the first run (layer cache hit).
-    case "$stack" in
-        naxsi|coraza|shadowdaemon)
-            docker compose -f "$compose_file" up -d --build
-            ;;
-        *)
-            docker compose -f "$compose_file" up -d
-            ;;
-    esac
+    # naxsi must be built from source on first run.
+    if [ "$stack" = "naxsi" ]; then
+        docker compose -f "$compose_file" up -d --build
+    else
+        docker compose -f "$compose_file" up -d
+    fi
 done
 
 echo

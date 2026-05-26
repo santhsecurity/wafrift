@@ -13,11 +13,8 @@ Coraza is the WAF engine behind Fastly Next-Gen WAF, Traefik Enterprise WAF,
 and several cloud-edge platforms. Benching against it measures real-world
 exposure beyond the ModSec-specific modsec-pl* stacks.
 
-Stack: Caddy + `coraza_waf` middleware plugin + OWASP CRS, built from source
-via `xcaddy`. Caddy does not ship a coraza_waf module in its official binary;
-the `Dockerfile` in this directory uses `xcaddy` to compile a pinned version
-(Caddy v2.8.4, coraza-caddy v0.3.2). First build takes ~3-5 min. SecRuleEngine
-is forced to `On` (blocking mode) in the Caddyfile.
+Stack: `coraza-caddy` (Caddy reverse proxy + `coraza_waf` middleware plugin +
+OWASP CRS). SecRuleEngine is forced to `On` (blocking mode) in the Caddyfile.
 
 ## Port
 
@@ -35,8 +32,8 @@ and is independently managed.
 ## How to run
 
 ```bash
-# 1. Build and start (first run ~3-5 min to compile Caddy + coraza_waf)
-docker compose -f bench/waf-zoo/coraza/docker-compose.yml up -d --build
+# 1. Start the stack
+docker compose -f bench/waf-zoo/coraza/docker-compose.yml up -d
 
 # 2. Smoke test — expect 200 OK
 curl -si http://127.0.0.1:18103/get | head -2
@@ -69,8 +66,6 @@ SecAction "id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=2"
 
 ## Licensing
 
-Coraza (`corazawaf/coraza-caddy` module) — Apache 2.0 (OWASP Coraza project).
-Caddy — Apache 2.0.
-xcaddy — Apache 2.0.
+`ghcr.io/corazawaf/coraza-caddy` — Apache 2.0 (OWASP Coraza project).
 `kennethreitz/httpbin` — ISC.
 No commercial or trial licenses required.

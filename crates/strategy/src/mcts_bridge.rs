@@ -165,10 +165,22 @@ impl Environment for WafRiftEnv {
         }
 
         // ── Dimension 2: Grammar mutations (only once per path) ──
+        //
+        // Deduplicate by action key before pushing.  Multiple grammar mutations
+        // can share the same first rule name (e.g. "separator_swap" once per
+        // separator variant, "case_alternation" twice for different XSS shapes).
+        // Without deduplication `legal_actions` advertises N identical
+        // `GrammarMutate("separator_swap")` entries; MCTS treats them as N
+        // distinct siblings but `apply` always resolves to the *first* matching
+        // mutation — so N-1 branches are structural duplicates that waste the
+        // search budget without ever producing a different result.
         if !self.grammar_applied {
+            let mut seen_keys = std::collections::HashSet::new();
             for mutation in &self.grammar_mutations {
                 let desc = mutation.rules_applied.first().copied().unwrap_or("grammar");
-                action_set.insert(TechniqueAction::GrammarMutate(desc.to_string()));
+                if seen_keys.insert(desc) {
+                    actions.push(TechniqueAction::GrammarMutate(desc.to_string()));
+                }
             }
         }
 
@@ -177,7 +189,9 @@ impl Environment for WafRiftEnv {
             && let Some(ref body) = self.req.body
             && crate::strategy::is_text_payload(&self.req)
         {
-            let params = wafrift_content_type::parse_form_body(body);
+            // F115: parse_form_body returns Result; treat oversized /
+            // unparseable as "no params" for action-list enumeration.
+            let params = wafrift_content_type::parse_form_body(body).unwrap_or_default();
             if !params.is_empty() {
                 action_set.insert(TechniqueAction::ContentTypeSwitch(
                     wafrift_content_type::ContentTypeTechnique::Multipart.technique_key().to_string(),
@@ -204,7 +218,23 @@ impl Environment for WafRiftEnv {
         // defeats the search. Now we expose every known header trick
         // as a distinct action so MCTS can actually choose between
         // them.
-        if !self.header_applied {
+        // F145: only expose HeaderTrick if there's actually a
+        // Content-Type header to mutate. The apply() arm is
+        // implemented purely against Content-Type — if no such
+        // header exists (e.g. GET request, or a POST whose
+        // Content-Type was already stripped by an earlier stage),
+        // every trick is a silent no-op AND sets
+        // `header_applied = true`, locking out future tries even
+        // though zero bytes changed. Same hazard class as the
+        // duplicate-grammar-action F138: MCTS spends budget on
+        // structural no-ops. Gating on the header's actual
+        // presence makes the action space honest.
+        let has_content_type = self
+            .req
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+        if !self.header_applied && has_content_type {
             // Only expose tricks the apply() arm can actually execute
             // on the structured Vec<(name, value)> the proxy hands
             // to reqwest. Wire-format-only tricks (TabSeparator,
@@ -291,7 +321,12 @@ impl Environment for WafRiftEnv {
                 if let Some(ref body) = self.req.body
                     && crate::strategy::is_text_payload(&self.req)
                 {
-                    let params = wafrift_content_type::parse_form_body(body);
+                    // F115: parse_form_body now returns Result; an
+                    // oversized / unparseable body for the content-type
+                    // switch means "no params to switch on" — fall
+                    // through rather than erroring the whole MCTS step.
+                    let params = wafrift_content_type::parse_form_body(body)
+                        .unwrap_or_default();
                     if !params.is_empty() {
                         let variants = wafrift_content_type::generate_variants(&params);
                         // Use technique_key() for a stable, compiler-independent match
@@ -529,7 +564,20 @@ mod tests {
 
     #[test]
     fn action_space_includes_multiple_dimensions() {
-        let req = Request::post("http://example.com/search", b"q=admin' OR 1=1--".to_vec());
+        // ALL four dimensions need their preconditions: Encoding always
+        // applies, Grammar fires on classifiable payloads, ContentType
+        // needs a form-decodable body with at least one param, and
+        // HeaderTrick (F145) needs a Content-Type header on the request.
+        // Build a request that satisfies every gate so the test
+        // asserts breadth of the action space, not a single gate.
+        let mut req = Request::post(
+            "http://example.com/search",
+            b"q=admin' OR 1=1--".to_vec(),
+        );
+        req.headers.push((
+            "Content-Type".into(),
+            "application/x-www-form-urlencoded".into(),
+        ));
         let env = WafRiftEnv::new(req, 3);
         let actions = env.legal_actions();
 
@@ -770,6 +818,159 @@ mod tests {
             assert!(
                 !header_tricks.iter().any(|t| t == must_not),
                 "wire-only trick {must_not} should not appear — got {header_tricks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn header_trick_actions_not_offered_when_content_type_header_missing() {
+        // F145 regression: pre-fix legal_actions advertised the 4
+        // HeaderTrick names regardless of whether a Content-Type
+        // header actually existed on the request. The apply() arm
+        // only mutates Content-Type, so for any request without
+        // one (e.g. a plain GET, or a POST whose CT was stripped),
+        // every HeaderTrick was a silent no-op AND sets
+        // header_applied=true, locking out future tries — burning
+        // an MCTS node on an action that can't change a single byte.
+        // Post-fix legal_actions checks for Content-Type's presence
+        // and skips the whole branch when it's absent.
+        let req_no_ct = Request::get("http://example.com/");
+        assert!(
+            !req_no_ct
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type")),
+            "preconditions: GET request must have no Content-Type"
+        );
+        let env = WafRiftEnv::new(req_no_ct, 4);
+        let header_trick_count = env
+            .legal_actions()
+            .iter()
+            .filter(|a| matches!(a, TechniqueAction::HeaderTrick(_)))
+            .count();
+        assert_eq!(
+            header_trick_count, 0,
+            "no HeaderTrick action should be offered when Content-Type is absent"
+        );
+        // Positive: same env shape WITH a Content-Type still offers
+        // the tricks (proves the gate isn't a blanket disable).
+        let env_with_ct = WafRiftEnv::new(req_with_ct(), 4);
+        let with_ct_tricks: usize = env_with_ct
+            .legal_actions()
+            .iter()
+            .filter(|a| matches!(a, TechniqueAction::HeaderTrick(_)))
+            .count();
+        assert!(
+            with_ct_tricks >= 4,
+            "with Content-Type set, all 4 HeaderTrick names must still be advertised; got {with_ct_tricks}"
+        );
+    }
+
+    // ── Grammar-action deduplication (F138) ──────────────────────────────
+
+    /// `legal_actions` must never advertise two identical `GrammarMutate`
+    /// actions for the same rule name.  Multiple grammar mutations can share
+    /// the same first rule (e.g. "separator_swap" once per separator variant,
+    /// "case_alternation" twice for different XSS shapes).  Without
+    /// deduplication MCTS creates N structurally identical siblings; `apply`
+    /// always resolves to the *first* match so N-1 branches are wasted.
+    #[test]
+    fn grammar_actions_in_legal_actions_are_unique() {
+        // A CMDI payload typically generates multiple "separator_swap"
+        // mutations (one per separator in the set).
+        let req = Request::post(
+            "http://example.com/exec",
+            b"cmd=ls%20-la".to_vec(),
+        );
+        let env = WafRiftEnv::new(req, 6);
+        let actions = env.legal_actions();
+
+        let mut grammar_names: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                TechniqueAction::GrammarMutate(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let total = grammar_names.len();
+        grammar_names.dedup();  // in-place dedup of consecutive (sort first for safety)
+        grammar_names.sort();
+        grammar_names.dedup();
+        assert_eq!(
+            grammar_names.len(),
+            total,
+            "legal_actions returned duplicate GrammarMutate actions; \
+             unique={} vs total={}",
+            grammar_names.len(),
+            total,
+        );
+    }
+
+    /// When grammar mutations are present, every unique rule name in
+    /// `legal_actions` must be independently resolvable in `apply` — i.e.
+    /// applying that action must mutate the body (not be a no-op).
+    #[test]
+    fn each_grammar_action_produces_a_distinct_body() {
+        let req = Request::post(
+            "http://example.com/exec",
+            b"cmd=ls%20-la".to_vec(),
+        );
+        let original_body = req.body.clone().unwrap();
+        let env = WafRiftEnv::new(req.clone(), 6);
+        let grammar_actions: Vec<TechniqueAction> = env
+            .legal_actions()
+            .into_iter()
+            .filter(|a| matches!(a, TechniqueAction::GrammarMutate(_)))
+            .collect();
+
+        for action in &grammar_actions {
+            let mut env2 = WafRiftEnv::new(req.clone(), 6);
+            env2.apply(action);
+            // Body must have changed — a no-op means `apply` couldn't find
+            // the mutation for this rule name (old bug: N-1 duplicates were
+            // unreachable because `apply` picked the first match every time).
+            assert_ne!(
+                env2.req.body.as_deref(),
+                Some(original_body.as_slice()),
+                "GrammarMutate({:?}) did not mutate the body — \
+                 apply() couldn't resolve the rule",
+                match action {
+                    TechniqueAction::GrammarMutate(n) => n,
+                    _ => unreachable!(),
+                }
+            );
+        }
+    }
+
+    /// After applying any single grammar action the grammar dimension must be
+    /// closed (`grammar_applied = true`), regardless of which rule was used.
+    #[test]
+    fn grammar_dimension_closed_after_any_grammar_action() {
+        let req = Request::post(
+            "http://example.com/search",
+            b"q=admin' OR 1=1--".to_vec(),
+        );
+        let env = WafRiftEnv::new(req.clone(), 6);
+        let grammar_actions: Vec<TechniqueAction> = env
+            .legal_actions()
+            .into_iter()
+            .filter(|a| matches!(a, TechniqueAction::GrammarMutate(_)))
+            .collect();
+
+        // Test with first and last to cover both ends of the (possibly
+        // deduplicated) list.
+        for action in grammar_actions.iter().take(1).chain(grammar_actions.last()) {
+            let mut env2 = WafRiftEnv::new(req.clone(), 6);
+            env2.apply(action);
+            let remaining = env2.legal_actions();
+            let has_grammar = remaining
+                .iter()
+                .any(|a| matches!(a, TechniqueAction::GrammarMutate(_)));
+            assert!(
+                !has_grammar,
+                "grammar dimension still open after applying {:?}",
+                action
             );
         }
     }

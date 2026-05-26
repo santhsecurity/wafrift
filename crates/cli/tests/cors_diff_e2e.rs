@@ -1,7 +1,6 @@
 //! End-to-end test for `wafrift cors-diff`.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -20,7 +19,7 @@ async fn spawn_cors_mock() -> std::net::SocketAddr {
                 let origin = req
                     .lines()
                     .find(|l| l.to_ascii_lowercase().starts_with("origin:"))
-                    .and_then(|l| l.splitn(2, ':').nth(1))
+                    .and_then(|l| l.split_once(':').map(|x| x.1))
                     .map(|s| s.trim().to_string())
                     .unwrap_or_default();
                 let extra = if origin.is_empty() {
@@ -42,7 +41,23 @@ async fn spawn_cors_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -75,10 +90,11 @@ fn cors_diff_finds_high_severity_on_reflective_mock() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--timeout-secs",
+        "30",
     ]);
     assert_eq!(code, 0, "cors-diff exit 0 — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let high = p["divergences"]["high"].as_u64().unwrap_or(0);
     assert!(
         high > 0,

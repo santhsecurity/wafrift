@@ -236,7 +236,7 @@ pub fn decompress(blob: &CompressedBody) -> Result<Vec<u8>, CompressionError> {
     let algos: Vec<Algorithm> = blob
         .content_encoding
         .split(',')
-        .filter_map(|t| Algorithm::from_token(t))
+        .filter_map(Algorithm::from_token)
         .collect();
     let mut current = blob.body.clone();
     // Decode in the SAME order the header lists (outer-to-inner).
@@ -259,13 +259,15 @@ fn decompress_bytes(bytes: &[u8], algo: Algorithm) -> Result<Vec<u8>, Compressio
         Algorithm::Deflate => {
             let mut dec = flate2::read::DeflateDecoder::new(bytes);
             let mut out = Vec::new();
-            dec.read_to_end(&mut out).map_err(CompressionError::Deflate)?;
+            dec.read_to_end(&mut out)
+                .map_err(CompressionError::Deflate)?;
             Ok(out)
         }
         Algorithm::Brotli => {
             let mut dec = brotli::Decompressor::new(bytes, 4096);
             let mut out = Vec::new();
-            dec.read_to_end(&mut out).map_err(CompressionError::Brotli)?;
+            dec.read_to_end(&mut out)
+                .map_err(CompressionError::Brotli)?;
             Ok(out)
         }
     }
@@ -391,7 +393,8 @@ mod tests {
 
     #[test]
     fn chain_at_exactly_cap_succeeds() {
-        let just_enough: Vec<Algorithm> = (0..MAX_CHAIN_LAYERS).map(|_| Algorithm::Identity).collect();
+        let just_enough: Vec<Algorithm> =
+            (0..MAX_CHAIN_LAYERS).map(|_| Algorithm::Identity).collect();
         let chained = chain(b"x", &just_enough).expect("at-cap chain ok");
         // All-identity chain leaves the body untouched.
         assert_eq!(chained.body, b"x");
@@ -403,11 +406,17 @@ mod tests {
         // the bytes level, but the header lists ALL three (we honour
         // exactly what the operator asked for in the header).
         let original = b"middle identity";
-        let with_id = chain(original, &[Algorithm::Gzip, Algorithm::Identity, Algorithm::Brotli])
-            .expect("chain with identity");
-        let without = chain(original, &[Algorithm::Gzip, Algorithm::Brotli])
-            .expect("chain without identity");
-        assert_eq!(with_id.body, without.body, "identity must be byte-transparent");
+        let with_id = chain(
+            original,
+            &[Algorithm::Gzip, Algorithm::Identity, Algorithm::Brotli],
+        )
+        .expect("chain with identity");
+        let without =
+            chain(original, &[Algorithm::Gzip, Algorithm::Brotli]).expect("chain without identity");
+        assert_eq!(
+            with_id.body, without.body,
+            "identity must be byte-transparent"
+        );
         assert_eq!(with_id.content_encoding, "gzip, identity, br");
         let recovered = decompress(&with_id).expect("decompress with id");
         assert_eq!(recovered, original);
@@ -417,9 +426,14 @@ mod tests {
 
     #[test]
     fn empty_body_compresses_and_round_trips() {
-        for algo in [Algorithm::Gzip, Algorithm::Deflate, Algorithm::Brotli, Algorithm::Identity] {
-            let compressed = compress(b"", algo)
-                .unwrap_or_else(|e| panic!("empty body with {algo:?}: {e}"));
+        for algo in [
+            Algorithm::Gzip,
+            Algorithm::Deflate,
+            Algorithm::Brotli,
+            Algorithm::Identity,
+        ] {
+            let compressed =
+                compress(b"", algo).unwrap_or_else(|e| panic!("empty body with {algo:?}: {e}"));
             let recovered = decompress(&compressed)
                 .unwrap_or_else(|e| panic!("empty body decode with {algo:?}: {e}"));
             assert_eq!(recovered, Vec::<u8>::new());
@@ -428,7 +442,12 @@ mod tests {
 
     #[test]
     fn one_byte_body_round_trips_under_every_algorithm() {
-        for algo in [Algorithm::Gzip, Algorithm::Deflate, Algorithm::Brotli, Algorithm::Identity] {
+        for algo in [
+            Algorithm::Gzip,
+            Algorithm::Deflate,
+            Algorithm::Brotli,
+            Algorithm::Identity,
+        ] {
             let original = &[0xAB_u8][..];
             let compressed = compress(original, algo).expect("compress");
             let recovered = decompress(&compressed).expect("decompress");
@@ -509,7 +528,12 @@ mod tests {
             b"the quick brown fox jumps over the lazy dog the quick brown fox",
         ];
         for payload in corpus {
-            for algo in [Algorithm::Gzip, Algorithm::Deflate, Algorithm::Brotli, Algorithm::Identity] {
+            for algo in [
+                Algorithm::Gzip,
+                Algorithm::Deflate,
+                Algorithm::Brotli,
+                Algorithm::Identity,
+            ] {
                 let c = compress(payload, algo)
                     .unwrap_or_else(|e| panic!("{algo:?} on {payload:?}: {e}"));
                 let r = decompress(&c)

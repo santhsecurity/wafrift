@@ -29,7 +29,32 @@ pub enum DiscoveryError {
     RateLimited { retry_after: u64 },
     #[error("Wordlist empty")]
     WordlistEmpty,
+    #[error("Discovery input cap exceeded ({what}: {got} > {cap}) — refusing to process hostile-looking spec/response")]
+    InputCapExceeded {
+        what: &'static str,
+        got: usize,
+        cap: usize,
+    },
 }
+
+/// Hard cap on the number of `paths` entries we'll iterate from a
+/// single OpenAPI spec. An adversarial / unbounded spec with
+/// 100k+ paths × 100 vars each would allocate hundreds of MB of
+/// InjectionPoints before producing usable output.
+pub const MAX_OPENAPI_PATHS: usize = 10_000;
+
+/// Hard cap on the wordlist length param_miner will spawn tasks for.
+/// One task per entry is allocated up-front; a typo'd
+/// `--wordlist /dev/urandom` previously caused tens-of-millions of
+/// queued futures and OOM'd the process before the Semaphore-limited
+/// concurrency could land any actual probes.
+pub const MAX_PARAM_WORDLIST: usize = 100_000;
+
+/// Hard cap on the number of GraphQL `args` per field we'll parse.
+/// An adversarial introspection response with a million args per
+/// operation would otherwise allocate ~120 MB per operation in
+/// InjectionPoint structs.
+pub const MAX_GRAPHQL_ARGS_PER_FIELD: usize = 1_000;
 
 /// Parse an `OpenAPI` spec (2.0 or 3.x JSON) into discovered endpoints.
 ///
@@ -75,6 +100,13 @@ pub fn from_openapi(spec: &str) -> Result<Vec<DiscoveredEndpoint>, DiscoveryErro
     let Some(paths) = root.get("paths").and_then(Value::as_object) else {
         return Ok(Vec::new());
     };
+    if paths.len() > MAX_OPENAPI_PATHS {
+        return Err(DiscoveryError::InputCapExceeded {
+            what: "openapi.paths",
+            got: paths.len(),
+            cap: MAX_OPENAPI_PATHS,
+        });
+    }
 
     let mut endpoints = Vec::new();
     for (path, ops) in paths {
@@ -176,6 +208,13 @@ fn parameter_to_point(p: &Value, version: VersionKind) -> Option<InjectionPoint>
     })
 }
 
+/// F107: per-schema property cap. An adversarial OpenAPI spec with
+/// `MAX_OPENAPI_PATHS` paths × an unbounded properties map per body
+/// schema would allocate N × 10_000 `InjectionPoint` structs before
+/// any caller could react. The sibling GraphQL parser caps args per
+/// field at 1_000; mirror that here.
+pub const MAX_OPENAPI_PROPS_PER_SCHEMA: usize = 1_000;
+
 fn request_body_to_points(rb: &Value) -> Vec<InjectionPoint> {
     let mut out = Vec::new();
     let Some(content) = rb.get("content").and_then(Value::as_object) else {
@@ -208,7 +247,11 @@ fn request_body_to_points(rb: &Value) -> Vec<InjectionPoint> {
                     .collect()
             })
             .unwrap_or_default();
-        for (prop_name, _) in properties {
+        // F107: silently truncate at the per-schema cap rather than
+        // erroring — request_body_to_points returns a Vec (no Result),
+        // and a partial enumeration is still useful for discovery.
+        // The cap is high enough that no realistic spec hits it.
+        for (prop_name, _) in properties.iter().take(MAX_OPENAPI_PROPS_PER_SCHEMA) {
             out.push(InjectionPoint {
                 name: prop_name.clone(),
                 location: ParameterLocation::Body,
@@ -216,6 +259,14 @@ fn request_body_to_points(rb: &Value) -> Vec<InjectionPoint> {
                 content_type_hint: Some(media_type.clone()),
                 required: required_set.contains(prop_name),
             });
+        }
+        if properties.len() > MAX_OPENAPI_PROPS_PER_SCHEMA {
+            tracing::warn!(
+                got = properties.len(),
+                cap = MAX_OPENAPI_PROPS_PER_SCHEMA,
+                media_type = %media_type,
+                "OpenAPI body schema exceeded per-schema property cap; truncated"
+            );
         }
     }
     out
@@ -473,6 +524,28 @@ mod tests {
         assert_eq!(endpoints.len(), 2);
         for ep in &endpoints {
             assert!(ep.injection_points.iter().any(|p| p.name == "tenant"));
+        }
+    }
+
+    #[test]
+    fn from_openapi_rejects_over_max_paths_count() {
+        // Build a spec with MAX_OPENAPI_PATHS + 1 unique paths.
+        let mut paths = String::new();
+        for i in 0..=MAX_OPENAPI_PATHS {
+            if i > 0 {
+                paths.push(',');
+            }
+            paths.push_str(&format!("\"/p{i}\":{{\"get\":{{}}}}"));
+        }
+        let spec = format!("{{\"openapi\":\"3.0.0\",\"paths\":{{{paths}}}}}");
+        let err = from_openapi(&spec).expect_err("over-cap must reject");
+        match err {
+            DiscoveryError::InputCapExceeded { what, got, cap } => {
+                assert_eq!(what, "openapi.paths");
+                assert!(got > cap, "got={got} cap={cap}");
+                assert_eq!(cap, MAX_OPENAPI_PATHS);
+            }
+            other => panic!("expected InputCapExceeded, got {other:?}"),
         }
     }
 }

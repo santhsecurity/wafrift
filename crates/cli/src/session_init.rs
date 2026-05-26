@@ -26,9 +26,19 @@ use std::fmt;
 use std::path::Path;
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::import_curl::{ParsedCurl, parse_curl, shell_tokenize};
+
+/// Origin triple `(scheme, host, port)` for cross-origin detection.
+/// Matches RFC 6454 §4: two URIs share an origin iff all three
+/// components are equal. `None` when the URL has no host (cannot be
+/// the origin of a redirect we'd follow anyway).
+fn origin_triple(u: &reqwest::Url) -> Option<(String, String, u16)> {
+    let host = u.host_str()?.to_ascii_lowercase();
+    let port = u.port_or_known_default()?;
+    Some((u.scheme().to_string(), host, port))
+}
 
 /// Captured session state — the headers (cookies + auth + any
 /// caller-pinned values from the init curl) that should be carried
@@ -91,7 +101,13 @@ pub async fn establish_from_curl(
     let method = parsed
         .method
         .clone()
-        .or_else(|| if parsed.body.is_some() { Some("POST".into()) } else { None })
+        .or_else(|| {
+            if parsed.body.is_some() {
+                Some("POST".into())
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(|| "GET".into());
 
     // The init request follows redirects deeper than the parser-diff
@@ -99,9 +115,40 @@ pub async fn establish_from_curl(
     // before setting the final cookies). Shared floor via
     // base_client_builder for timeout + insecure + UA; the redirect
     // policy stays caller-owned.
+    //
+    // CREDENTIAL-LEAK GUARD: reqwest's default redirect policy keeps
+    // request-set headers across hops. With `Authorization: Bearer X`
+    // applied per the operator's curl, a `302 → https://sso.external.tld/`
+    // would replay the bearer to an unintended third party. The custom
+    // policy below mirrors RFC 9110 §15.4 / browser behaviour: when
+    // the redirect hop changes origin (scheme + host + port), drop
+    // `Authorization`, `Cookie`, `Proxy-Authorization`, and `Cookie2`.
+    // Capped at 8 hops same as before.
     let ua = crate::config::shared_user_agent();
     let client = wafrift_transport::base_client_builder(timeout.as_secs(), insecure, Some(&ua))
-        .redirect(reqwest::redirect::Policy::limited(8))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 8 {
+                return attempt.error("too many redirects");
+            }
+            // reqwest's Attempt API doesn't let us mutate the
+            // outgoing headers, so on a cross-origin hop we STOP
+            // rather than follow — the captured `Authorization` /
+            // `Cookie` would otherwise replay to the new origin.
+            // Stop returns whatever response we already have (the
+            // 302 itself, including any Set-Cookie). Callers can
+            // still extract cookies from the redirect response.
+            let prev_origin = attempt
+                .previous()
+                .last()
+                .and_then(origin_triple);
+            let next_origin = origin_triple(attempt.url());
+            if let (Some(prev), Some(next)) = (prev_origin, next_origin)
+                && prev != next
+            {
+                return attempt.stop();
+            }
+            attempt.follow()
+        }))
         .build()
         .map_err(|e| SessionInitError::Request(format!("build client: {e}")))?;
 
@@ -180,13 +227,14 @@ pub async fn establish_from_curl(
     // An Authorization header explicitly set in the curl carries
     // forward — bearer tokens / basic-auth need to be replayed on
     // every attack request the same way they were set on the init.
+    // Routed through the shared parse_header_kv so the
+    // HeaderName/HeaderValue conversion policy stays in lock-step
+    // with the pentest -H/--header path.
     for (k, v) in &parsed.headers {
-        if k.eq_ignore_ascii_case("authorization") {
-            if let (Ok(name), Ok(val)) =
-                (HeaderName::try_from(k.as_str()), HeaderValue::from_str(v))
-            {
-                headers.insert(name, val);
-            }
+        if k.eq_ignore_ascii_case("authorization")
+            && let Some((name, val)) = crate::scan::pentest_client::parse_header_kv(k, v)
+        {
+            headers.insert(name, val);
         }
     }
 
@@ -334,7 +382,12 @@ mod tests {
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
             .expect("init must succeed");
-        let cookie = state.headers.get(reqwest::header::COOKIE).unwrap().to_str().unwrap();
+        let cookie = state
+            .headers
+            .get(reqwest::header::COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(cookie.contains("manual=value"));
         assert!(cookie.contains("persistent=keep"));
     }
@@ -345,18 +398,27 @@ mod tests {
         // Mirrors browser cookie-jar semantics: a server Set-Cookie
         // replaces the same-name client-supplied cookie. Anti-rig
         // against a stale token surviving past its rotation.
-        let addr = spawn_session_server(|_| {
-            ok_with_setcookie("rotated", &[("session", "NEW")])
-        })
-        .await;
+        let addr =
+            spawn_session_server(|_| ok_with_setcookie("rotated", &[("session", "NEW")])).await;
         let mut parsed = curl_from_url(&format!("http://{addr}/refresh"));
         parsed.cookie = Some("session=OLD".into());
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
             .expect("init must succeed");
-        let cookie = state.headers.get(reqwest::header::COOKIE).unwrap().to_str().unwrap();
-        assert!(cookie.contains("session=NEW"), "rotated cookie must win: {cookie}");
-        assert!(!cookie.contains("session=OLD"), "stale cookie must be evicted: {cookie}");
+        let cookie = state
+            .headers
+            .get(reqwest::header::COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            cookie.contains("session=NEW"),
+            "rotated cookie must win: {cookie}"
+        );
+        assert!(
+            !cookie.contains("session=OLD"),
+            "stale cookie must be evicted: {cookie}"
+        );
     }
 
     #[serial]
@@ -396,7 +458,12 @@ mod tests {
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
             .expect("init must succeed");
-        let cookie = state.headers.get(reqwest::header::COOKIE).unwrap().to_str().unwrap();
+        let cookie = state
+            .headers
+            .get(reqwest::header::COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
         // Cookie request header = "k=v" exactly, no attributes.
         assert_eq!(cookie, "k=v");
     }
@@ -417,10 +484,8 @@ mod tests {
     #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_summary_names_status_and_cookie_count() {
-        let addr = spawn_session_server(|_| {
-            ok_with_setcookie("ok", &[("a", "1"), ("b", "2")])
-        })
-        .await;
+        let addr =
+            spawn_session_server(|_| ok_with_setcookie("ok", &[("a", "1"), ("b", "2")])).await;
         let parsed = curl_from_url(&format!("http://{addr}/"));
         let state = establish_from_curl(parsed, Duration::from_secs(3), false)
             .await
@@ -460,9 +525,8 @@ mod tests {
             ok_with_setcookie("ok", &[("session", "ABC123XYZ"), ("csrf", "DEF456")])
         })
         .await;
-        let curl = format!(
-            "curl 'http://{addr}/login' \\\n  -X POST \\\n  -H 'Accept: application/json'"
-        );
+        let curl =
+            format!("curl 'http://{addr}/login' \\\n  -X POST \\\n  -H 'Accept: application/json'");
         let path = write_curl_to_temp(&curl);
 
         let state = establish_from_file(&path, Duration::from_secs(5), false)
@@ -494,8 +558,7 @@ mod tests {
     #[serial]
     #[tokio::test(flavor = "current_thread")]
     async fn establish_from_file_missing_file_returns_read_file_error() {
-        let missing = std::env::temp_dir()
-            .join("wafrift-session-init-DOES-NOT-EXIST-9999.curl");
+        let missing = std::env::temp_dir().join("wafrift-session-init-DOES-NOT-EXIST-9999.curl");
         let err = establish_from_file(&missing, Duration::from_secs(2), false)
             .await
             .expect_err("missing file must error");
@@ -542,5 +605,42 @@ mod tests {
             other => panic!("expected NoUrl/Parse, got {other:?}"),
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ── origin_triple ───────────────────────────────────────
+
+    #[test]
+    fn origin_triple_same_scheme_host_port_match() {
+        let a = reqwest::Url::parse("https://example.com:443/a").unwrap();
+        let b = reqwest::Url::parse("https://example.com/b").unwrap();
+        assert_eq!(origin_triple(&a), origin_triple(&b));
+    }
+
+    #[test]
+    fn origin_triple_different_host_does_not_match() {
+        let a = reqwest::Url::parse("https://example.com/").unwrap();
+        let b = reqwest::Url::parse("https://sso.external.tld/").unwrap();
+        assert_ne!(origin_triple(&a), origin_triple(&b));
+    }
+
+    #[test]
+    fn origin_triple_different_scheme_does_not_match() {
+        let a = reqwest::Url::parse("https://example.com/").unwrap();
+        let b = reqwest::Url::parse("http://example.com/").unwrap();
+        assert_ne!(origin_triple(&a), origin_triple(&b));
+    }
+
+    #[test]
+    fn origin_triple_different_port_does_not_match() {
+        let a = reqwest::Url::parse("https://example.com/").unwrap();
+        let b = reqwest::Url::parse("https://example.com:8443/").unwrap();
+        assert_ne!(origin_triple(&a), origin_triple(&b));
+    }
+
+    #[test]
+    fn origin_triple_host_lowercased() {
+        let a = reqwest::Url::parse("https://EXAMPLE.com/").unwrap();
+        let b = reqwest::Url::parse("https://example.com/").unwrap();
+        assert_eq!(origin_triple(&a), origin_triple(&b));
     }
 }

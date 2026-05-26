@@ -86,19 +86,10 @@ pub const PROFILES: &[BrowserProfile] = &[
     },
 ];
 
-/// FNV-1a hash of context bytes for deterministic profile selection.
-fn fnv1a_profile_hash(data: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in data {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
-
-/// Select a browser profile deterministically from context bytes (e.g. host name).
+/// Select a random browser profile using the global thread RNG.
 ///
-/// Two calls with identical `context` always return the same profile.
+/// Non-deterministic: two calls in the same process may return different
+/// profiles. Use [`seeded_profile`] when reproducibility is required.
 #[must_use]
 pub fn random_profile_from(context: &[u8]) -> Option<&'static BrowserProfile> {
     if PROFILES.is_empty() {
@@ -114,6 +105,26 @@ pub fn random_profile_from(context: &[u8]) -> Option<&'static BrowserProfile> {
 #[must_use]
 pub fn random_profile() -> Option<&'static BrowserProfile> {
     PROFILES.first()
+}
+
+/// Select a browser profile deterministically from `seed`.
+///
+/// Given the same `seed` this always returns the same profile, regardless
+/// of how many times the process has called `random_profile`. Used by
+/// `bench-waf --seed` to make two identical invocations produce the same
+/// User-Agent header and therefore byte-identical JSON output.
+#[must_use]
+pub fn seeded_profile(seed: u64) -> Option<&'static BrowserProfile> {
+    if PROFILES.is_empty() {
+        return None;
+    }
+    // Mix the seed through a cheap bijection (splitmix64 finalizer) so
+    // seeds 0, 1, 2 … don't all map to the same low-index profiles.
+    let mixed = seed
+        .wrapping_add(0x9e37_79b9_7f4a_7c15)
+        .wrapping_mul(0x6eed_0e9d_a4d9_4a4f);
+    let idx = (mixed as usize) % PROFILES.len();
+    Some(&PROFILES[idx])
 }
 
 /// Apply a browser profile to a request's headers.

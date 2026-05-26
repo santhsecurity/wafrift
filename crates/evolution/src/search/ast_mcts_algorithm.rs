@@ -30,7 +30,7 @@ use crate::evolution::{Chromosome, GenePool, population::random_chromosome};
 use crate::lineage::Lineage;
 use crate::search::{EvalCandidate, SearchAlgorithm, fitness_cmp};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
-use rand::Rng;
+use rand::RngCore;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -156,7 +156,7 @@ impl AstMctsAlgorithm {
         if self.best_payload.is_empty() {
             // No payload yet — emit baseline chromosomes drawn from gene pool.
             for _ in 0..n {
-                self.eval_counter += 1;
+                self.eval_counter = self.eval_counter.saturating_add(1);
                 let mut c = random_chromosome(&self.gene_pool, rng);
                 c.genes.push(("ast_mcts_payload".into(), String::new()));
                 c.lineage = Lineage::genesis(self.generation);
@@ -166,7 +166,7 @@ impl AstMctsAlgorithm {
         }
 
         // Run MCTS using an inline oracle to enumerate candidate rewrites.
-        let jitter: u64 = rng.r#gen();
+        let jitter: u64 = rng.next_u64();
         let mut generated: Vec<String> = Vec::new();
         let mut inline = InlineOracle {
             candidates: &mut generated,
@@ -181,8 +181,23 @@ impl AstMctsAlgorithm {
         if let Some(ref r) = result {
             for &(action, visits, mean_reward) in &r.arm_stats {
                 let entry = self.rule_stats.entry(action.rule.0).or_insert((0, 0.0));
-                entry.0 += visits;
-                entry.1 += mean_reward * visits as f64;
+                entry.0 = entry.0.saturating_add(visits);
+                // Guard against non-finite mean_reward to prevent Inf/NaN
+                // accumulation in the running total. visits is u64 cast to f64;
+                // above 2^53 the cast loses precision but cannot produce NaN/Inf.
+                let addend = if mean_reward.is_finite() {
+                    mean_reward * (visits as f64)
+                } else {
+                    0.0
+                };
+                entry.1 = if entry.1.is_finite() {
+                    entry.1 + addend
+                } else {
+                    // The running total somehow became non-finite (adversarial
+                    // oracle, upstream bug). Reset to the current observation
+                    // rather than propagating the poison.
+                    addend
+                };
             }
         }
 
@@ -191,13 +206,18 @@ impl AstMctsAlgorithm {
         // Always include the MCTS-best payload if it produced one.
         if let Some(ref r) = result {
             if !r.best_payload.is_empty() && seen.insert(r.best_payload.clone()) {
-                self.eval_counter += 1;
+                self.eval_counter = self.eval_counter.saturating_add(1);
                 let mut c = self.best.clone();
                 let payload = r.best_payload.clone();
                 set_gene(&mut c, "ast_mcts_payload", &payload);
                 c.lineage = Lineage::mutation(
                     &self.best,
-                    vec![format!("ast_mcts:best_payload")],
+                    vec![crate::lineage::MutationOp {
+                        gene_name: "ast_mcts_payload".into(),
+                        from: self.best_payload.clone(),
+                        to: payload.clone(),
+                        operator: "ast_mcts:best_payload".into(),
+                    }],
                     self.generation,
                 );
                 self.pending.push((self.eval_counter, c));
@@ -212,12 +232,17 @@ impl AstMctsAlgorithm {
             if payload.is_empty() || !seen.insert(payload.clone()) {
                 continue;
             }
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let mut c = self.best.clone();
             set_gene(&mut c, "ast_mcts_payload", &payload);
             c.lineage = Lineage::mutation(
                 &self.best,
-                vec![format!("ast_mcts:inline_candidate")],
+                vec![crate::lineage::MutationOp {
+                    gene_name: "ast_mcts_payload".into(),
+                    from: self.best_payload.clone(),
+                    to: payload.clone(),
+                    operator: "ast_mcts:inline_candidate".into(),
+                }],
                 self.generation,
             );
             self.pending.push((self.eval_counter, c));
@@ -225,7 +250,7 @@ impl AstMctsAlgorithm {
 
         // If MCTS produced nothing useful, emit the original payload as a fallback.
         if self.pending.is_empty() {
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let mut c = self.best.clone();
             set_gene(&mut c, "ast_mcts_payload", &self.best_payload);
             c.lineage = Lineage::genesis(self.generation);
@@ -318,7 +343,7 @@ impl SearchAlgorithm for AstMctsAlgorithm {
                 self.best = chromosome;
             }
         }
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn should_terminate(&self, stats: &SearchStats, budget: &Budget) -> bool {
@@ -486,7 +511,7 @@ mod tests {
         let seed = Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())]);
         alg.initialize(vec![seed], &pool, &mut rng);
 
-        let mut cloned = alg.clone_box();
+        let cloned = alg.clone_box();
         // Mutate clone — original must not change.
         alg.bypass_found = true;
         assert!(!cloned.best().unwrap().has_gene("non_existent"));
@@ -505,5 +530,138 @@ mod tests {
         let alg = AstMctsAlgorithm::new();
         let snap = alg.population_snapshot();
         assert_eq!(snap.len(), 1);
+    }
+
+    // ── Saturating-arithmetic + NaN/Inf regression tests ─────────────────────
+
+    /// `eval_counter` must saturate at `u64::MAX` rather than wrapping to 0.
+    /// A wrap-around would reuse previously-issued IDs, causing the engine's
+    /// `in_flight` map to collide and silently drop evaluations.
+    #[test]
+    fn eval_counter_saturates_at_u64_max() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+        alg.eval_counter = u64::MAX;
+        // request_evaluations calls saturating_add — counter must stay at MAX.
+        let _ = alg.request_evaluations(1, &mut rng);
+        assert_eq!(
+            alg.eval_counter,
+            u64::MAX,
+            "eval_counter must saturate at u64::MAX, not wrap to 0"
+        );
+    }
+
+    /// `generation` must saturate at `u32::MAX` rather than wrapping.
+    #[test]
+    fn generation_saturates_at_u32_max() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(vec![], &pool, &mut rng);
+        alg.generation = u32::MAX;
+        // submit_evaluations increments generation.
+        alg.submit_evaluations(vec![(0, OracleVerdict::from_bool(false))]);
+        assert_eq!(
+            alg.generation,
+            u32::MAX,
+            "generation must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    /// A NaN `mean_reward` from the oracle must NOT permanently poison the
+    /// running `rule_stats` total.  After the NaN injection, a valid reward
+    /// must still produce a finite and positive running total.
+    #[test]
+    fn rule_stats_nan_reward_does_not_poison_ucb1() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+
+        // Manually inject NaN into rule_stats (simulating a buggy oracle).
+        alg.rule_stats.insert(0, (10, f64::NAN));
+
+        // Submit a valid passing verdict — the NaN total must be cleared.
+        let candidates = alg.request_evaluations(2, &mut rng);
+        if let Some(c) = candidates.into_iter().next() {
+            alg.submit_evaluations(vec![(c.id, OracleVerdict::from_bool(true))]);
+        }
+
+        // The rule_stats entry for rule 0 must now hold a finite total.
+        for (_rule, (visits, total)) in &alg.rule_stats {
+            assert!(
+                total.is_finite() || *visits == 0,
+                "rule_stats total must be finite after NaN reset, got {total}"
+            );
+        }
+    }
+
+    /// `+Inf` in the running total must also be cleared (same guard).
+    #[test]
+    fn rule_stats_inf_reward_does_not_poison_ucb1() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+
+        alg.rule_stats.insert(1, (5, f64::INFINITY));
+
+        let candidates = alg.request_evaluations(2, &mut rng);
+        if let Some(c) = candidates.into_iter().next() {
+            alg.submit_evaluations(vec![(c.id, OracleVerdict::from_bool(false))]);
+        }
+
+        for (_rule, (visits, total)) in &alg.rule_stats {
+            assert!(
+                total.is_finite() || *visits == 0,
+                "rule_stats total must be finite after Inf reset, got {total}"
+            );
+        }
+    }
+
+    /// A NaN `mean_reward` from a single oracle call must not affect a
+    /// *different* rule's stats entry — the guard is per-entry.
+    #[test]
+    fn rule_stats_nan_does_not_cross_contaminate_other_rules() {
+        let mut alg = AstMctsAlgorithm::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = make_rng();
+        alg.initialize(
+            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            &pool,
+            &mut rng,
+        );
+
+        // Rule 0: healthy entry; rule 1: NaN-poisoned.
+        alg.rule_stats.insert(0, (3, 2.5));
+        alg.rule_stats.insert(1, (7, f64::NAN));
+
+        // Trigger a submit that might update stats.
+        let candidates = alg.request_evaluations(1, &mut rng);
+        if let Some(c) = candidates.into_iter().next() {
+            alg.submit_evaluations(vec![(c.id, OracleVerdict::from_bool(true))]);
+        }
+
+        // Rule 0's total must still be finite (may have grown from the new award).
+        if let Some((_, total)) = alg.rule_stats.get(&0) {
+            assert!(
+                total.is_finite(),
+                "healthy rule_stats entry must remain finite, got {total}"
+            );
+        }
     }
 }

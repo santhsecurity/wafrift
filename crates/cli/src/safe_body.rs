@@ -386,7 +386,9 @@ mod tests {
         .expect_err("must fail");
         assert!(matches!(err, ReadError::Transport(_)));
         let msg = format!("{err}");
-        assert!(msg.contains("open") || msg.contains("does not exist") || msg.contains("system cannot"));
+        assert!(
+            msg.contains("open") || msg.contains("does not exist") || msg.contains("system cannot")
+        );
     }
 
     #[test]
@@ -403,7 +405,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn read_bounded_defends_against_real_gzip_bomb() {
         // `#[serial]` because this test spawns a real HTTP server +
         // a reqwest client.  Under parallel cargo-test the localhost
@@ -503,7 +505,9 @@ mod tests {
         let body = b"1234567890"; // 10 bytes
         let url = spawn_server(ok_response(body)).await;
         let resp = reqwest::get(&url).await.unwrap();
-        let err = read_bounded(resp, 9).await.expect_err("cap = len-1 must overrun");
+        let err = read_bounded(resp, 9)
+            .await
+            .expect_err("cap = len-1 must overrun");
         match err {
             ReadError::Overrun {
                 cap_bytes,
@@ -529,7 +533,9 @@ mod tests {
     async fn read_bounded_returns_empty_vec_for_empty_body_with_positive_cap() {
         let url = spawn_server(ok_response(b"")).await;
         let resp = reqwest::get(&url).await.unwrap();
-        let got = read_bounded(resp, 1).await.expect("empty body always under cap");
+        let got = read_bounded(resp, 1)
+            .await
+            .expect("empty body always under cap");
         assert!(got.is_empty());
     }
 
@@ -540,7 +546,9 @@ mod tests {
         // empty body there are no chunks to compare.
         let url = spawn_server(ok_response(b"")).await;
         let resp = reqwest::get(&url).await.unwrap();
-        let got = read_bounded(resp, 0).await.expect("empty body + zero cap is valid");
+        let got = read_bounded(resp, 0)
+            .await
+            .expect("empty body + zero cap is valid");
         assert!(got.is_empty());
     }
 
@@ -548,7 +556,9 @@ mod tests {
     async fn read_bounded_single_byte_body_with_one_byte_cap_succeeds() {
         let url = spawn_server(ok_response(b"x")).await;
         let resp = reqwest::get(&url).await.unwrap();
-        let got = read_bounded(resp, 1).await.expect("one-byte cap covers one-byte body");
+        let got = read_bounded(resp, 1)
+            .await
+            .expect("one-byte cap covers one-byte body");
         assert_eq!(&got[..], b"x");
     }
 
@@ -757,9 +767,7 @@ mod tests {
             let _ = sock.read(&mut read).await;
             // Header
             let _ = sock
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\nConnection: close\r\n\r\n",
-                )
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\nConnection: close\r\n\r\n")
                 .await;
             // Body in 1-byte chunks
             for b in b"sixteen byte body" {
@@ -787,7 +795,9 @@ mod tests {
         let body = vec![b'X'; 1_000_000];
         let url = spawn_server(ok_response(&body)).await;
         let resp = reqwest::get(&url).await.unwrap();
-        let err = read_bounded(resp, 1024).await.expect_err("first-chunk overrun");
+        let err = read_bounded(resp, 1024)
+            .await
+            .expect_err("first-chunk overrun");
         assert!(matches!(err, ReadError::Overrun { .. }));
     }
 }

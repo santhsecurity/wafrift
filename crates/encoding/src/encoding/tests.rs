@@ -44,7 +44,8 @@ fn iis_unicode_encode_basic() {
 
 #[test]
 fn json_encode_basic() {
-    assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "\"A<\"");
+    // F67: no wrapping quotes (encoder escapes string content only).
+    assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "A<");
 }
 
 #[test]
@@ -307,9 +308,15 @@ fn space_to_dash() {
 
 #[test]
 fn space_to_hash() {
+    // `#` is MySQL's line-comment marker; it MUST be terminated
+    // with a newline or the rest of the payload is silently
+    // consumed as a single comment, leaving only the first token.
+    // Pre-fix the test pinned the broken bare-`#` form. Post-fix
+    // the encoder emits `#\n` per space, mirroring the `--\n`
+    // pattern in SpaceToDash.
     assert_eq!(
         encode("SELECT * FROM", Strategy::SpaceToHash).unwrap(),
-        "SELECT#*#FROM"
+        "SELECT#\n*#\nFROM"
     );
 }
 

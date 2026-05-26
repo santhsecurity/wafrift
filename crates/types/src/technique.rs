@@ -44,6 +44,21 @@ pub enum Technique {
     /// only inspect the first 8 KB (Cloudflare Pro) or 16 KB (AWS WAF)
     /// see only padding and forward the real payload unmodified.
     BodyPadding(usize),
+    /// ML-WAF boundary attack evasion (decision-based, manifold-constrained).
+    ///
+    /// Applied when the target WAF fingerprint indicates a learned classifier
+    /// (AWS Bot Control, Cloudflare Bot Management, Akamai Bot Manager, etc.).
+    /// The boundary attack perturbs the payload toward the decision boundary
+    /// while the manifold projection ensures the mutated payload is still a
+    /// working attack (anti-rig: no vacuous "bypass" by destroying the payload).
+    MlEvasion {
+        /// The detected WAF class (e.g. `"AwsBotControl"`).
+        waf_class: String,
+        /// ML oracle queries spent.
+        queries: u64,
+        /// Candidates rejected by the manifold projection (anti-rig ledger).
+        off_manifold_rejected: u64,
+    },
 }
 
 impl Technique {
@@ -101,6 +116,10 @@ impl fmt::Display for Technique {
             Self::H2Evasion(s) => write!(f, "h2:{s}"),
             Self::DifferentialProbe => f.write_str("differential-probe"),
             Self::BodyPadding(n) => write!(f, "body-padding:{n}"),
+            Self::MlEvasion { waf_class, queries, off_manifold_rejected } => write!(
+                f,
+                "ml-evasion:{waf_class}(q={queries},off={off_manifold_rejected})"
+            ),
         }
     }
 }

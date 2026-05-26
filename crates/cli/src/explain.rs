@@ -120,8 +120,7 @@ impl ExplainTrace {
         if already {
             return;
         }
-        self.tampers
-            .push(TamperExplainEntry { name, outcome });
+        self.tampers.push(TamperExplainEntry { name, outcome });
     }
 
     pub fn print_text(&self) {
@@ -157,10 +156,9 @@ impl ExplainTrace {
             for t in &self.tampers {
                 let path = format!("tamper/{}", t.name);
                 match t.outcome {
-                    TamperOutcome::Applied => println!(
-                        "  {} {path}: tamper produced a variant",
-                        "✓".green().bold()
-                    ),
+                    TamperOutcome::Applied => {
+                        println!("  {} {path}: tamper produced a variant", "✓".green().bold())
+                    }
                     TamperOutcome::Idempotent => println!(
                         "  {} {path}: payload unchanged — tamper not applicable to this input",
                         "·".yellow()

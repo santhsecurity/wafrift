@@ -106,15 +106,29 @@ pub struct InterceptStore {
     inner: Arc<Mutex<InterceptInner>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct InterceptInner {
     /// Per-request rendezvous sender. Removed when the operator
     /// resolves the intercept (release/kill) or when a timeout fires.
     senders: BTreeMap<u64, oneshot::Sender<InterceptDecision>>,
     /// Snapshot of the same set the TUI iterates for display.
     pending: BTreeMap<u64, PendingIntercept>,
-    /// Monotonic ID generator.
+    /// Monotonic ID generator. Starts at 0 so the first `register`
+    /// call's `wrapping_add(1)` yields id=1 — id=0 is RESERVED as
+    /// an "invalid intercept" sentinel. `resolve(0, ...)` and
+    /// `cancel(0, ...)` silently return false, so callers must
+    /// never pass 0 expecting it to map to a real intercept.
     next_id: u64,
+}
+
+impl Default for InterceptInner {
+    fn default() -> Self {
+        Self {
+            senders: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            next_id: 0,
+        }
+    }
 }
 
 /// Default intercept timeout — after which the request defaults
@@ -157,7 +171,16 @@ impl InterceptStore {
             inner.senders.remove(&id);
             inner.pending.remove(&id);
         }
+        // Advance the counter and skip 0 (reserved sentinel). After
+        // u64::MAX registrations, wrapping_add gives 0; wrapping_add
+        // once more gives 1, resuming the sequence. IDs are not
+        // guaranteed unique if the map still holds the re-issued ID
+        // at wraparound, but that requires ~1.8×10^19 concurrent
+        // pending intercepts — practically impossible.
         inner.next_id = inner.next_id.wrapping_add(1);
+        if inner.next_id == 0 {
+            inner.next_id = 1;
+        }
         let id = inner.next_id;
         inner.senders.insert(id, tx);
         inner.pending.insert(
@@ -360,5 +383,85 @@ mod tests {
         let (id3, _) = s.register("a", "GET", "/");
         assert_eq!(id2, id1 + 1);
         assert_eq!(id3, id2 + 1);
+    }
+
+    #[test]
+    fn id_zero_is_reserved_and_resolve_cancel_return_false() {
+        // Contract regression: id=0 is a reserved sentinel — no
+        // register() call can ever assign it (the first call hands
+        // back id=1). Caller mistakes that pass 0 must not match
+        // any real intercept; both resolve and cancel return false.
+        let s = store();
+        // No intercepts registered yet.
+        assert!(!s.resolve(0, InterceptDecision::Release));
+        assert!(!s.cancel(0));
+        // Register one — id is 1, never 0.
+        let (id, _rx) = s.register("h", "GET", "/");
+        assert_eq!(id, 1, "first id must be 1 (0 is reserved)");
+        // 0 still returns false even with real intercepts present.
+        assert!(!s.resolve(0, InterceptDecision::Release));
+        assert!(!s.cancel(0));
+    }
+
+    #[test]
+    fn id_wraparound_skips_zero() {
+        // Regression: after u64::MAX registrations, wrapping_add(1) == 0,
+        // violating the "0 is reserved" contract. The fix skips 0 and
+        // assigns 1. Simulate by forcing next_id to u64::MAX - 1.
+        let s = store();
+        {
+            let mut inner = s.inner.lock().unwrap();
+            inner.next_id = u64::MAX - 1;
+        }
+        // This register gets id = u64::MAX.
+        let (id1, _rx1) = s.register("h", "GET", "/");
+        assert_eq!(id1, u64::MAX, "pre-wraparound id must be u64::MAX");
+        // Next register wraps: 0 is skipped, lands at 1.
+        let (id2, _rx2) = s.register("h", "GET", "/");
+        assert_eq!(id2, 1, "post-wraparound id must skip 0 and return 1");
+        assert_ne!(id2, 0, "id=0 must never be issued");
+    }
+
+    #[test]
+    fn cancel_removes_from_both_maps() {
+        let s = store();
+        let (id, _rx) = s.register("h", "GET", "/path");
+        assert_eq!(s.pending_count(), 1);
+        let removed = s.cancel(id);
+        assert!(removed, "cancel must return true for a valid id");
+        assert_eq!(s.pending_count(), 0, "cancel must drain from pending map");
+        // Second cancel is idempotent.
+        assert!(!s.cancel(id), "second cancel returns false (already gone)");
+    }
+
+    #[test]
+    fn gc_dead_senders_removes_disconnected_rx() {
+        let s = store();
+        let (id, rx) = s.register("h", "GET", "/");
+        // Drop the receiver — simulates client disconnect.
+        drop(rx);
+        // gc_dead_senders must clean up the orphaned sender + pending entry.
+        let removed = s.gc_dead_senders();
+        assert_eq!(removed, 1, "exactly one dead sender must be GCd");
+        assert_eq!(s.pending_count(), 0);
+        // The id must now be truly gone.
+        assert!(!s.cancel(id));
+    }
+
+    #[test]
+    fn resolve_zero_id_never_matches_real_intercept() {
+        // After wraparound the first real id re-issued is 1, never 0.
+        // An outstanding resolve(0) must not accidentally hit the real id=1.
+        let s = store();
+        {
+            let mut inner = s.inner.lock().unwrap();
+            inner.next_id = u64::MAX;
+        }
+        // id=1 after wraparound.
+        let (id, _rx) = s.register("h", "GET", "/");
+        assert_eq!(id, 1);
+        // resolve(0) must not affect the real id=1 entry.
+        assert!(!s.resolve(0, InterceptDecision::Kill));
+        assert_eq!(s.pending_count(), 1, "id=1 must still be pending after resolve(0)");
     }
 }

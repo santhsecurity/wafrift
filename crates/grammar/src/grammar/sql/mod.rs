@@ -3,8 +3,6 @@
 //! Understands SQL semantics and generates equivalent queries that look
 //! different to regex-based WAF rules while preserving behavior.
 
-use rand::Rng;
-
 /// AST-level SQL metamorphism (sqlparser lift -> transform -> lower).
 pub mod ast_metamorph;
 /// Blind and time-based SQL mutation helpers.
@@ -72,7 +70,6 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     }
 
     let mut results = Vec::new();
-    let mut rng = rand::thread_rng();
     let lower = payload.to_ascii_lowercase();
 
     // Priority 1: quote-free / comment-free rewrites (Naxsi, AWS WAF
@@ -246,7 +243,7 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         }
     }
 
-    push_combined_whitespace_mutations(&mut results, max_mutations, &mut rng);
+    push_combined_whitespace_mutations(&mut results, max_mutations, payload);
     extend_until_limit(
         &mut results,
         max_mutations,
@@ -572,16 +569,33 @@ fn push_comment_keyword_mutations(
 fn push_combined_whitespace_mutations(
     results: &mut Vec<SqlMutation>,
     max_mutations: usize,
-    rng: &mut impl Rng,
+    payload: &str,
 ) {
     if results.is_empty() || results.len() >= max_mutations {
         return;
     }
 
+    // F143: pre-fix this used rand::thread_rng().gen_range so every
+    // call to mutate() produced a different combined-whitespace
+    // suffix on the SAME input — gene-bank replay was broken for
+    // any winner that ended up in this branch. Same hazard fixed
+    // in parameter_pollute (F114), whitespace_pad (F136),
+    // space_to_random_blank (F140), replace_logical_operator
+    // (F142). Derive both indices deterministically from
+    // (payload + iteration) via FNV-1a so identical input emits
+    // byte-identical mutations while still rotating across the
+    // available bases and whitespace alternatives.
     let n_combined = (max_mutations - results.len()).min(5);
-    for _ in 0..n_combined {
-        let base_index = rng.r#gen_range(0..results.len());
-        let whitespace_index = rng.r#gen_range(1..WHITESPACE_ALTERNATIVES.len());
+    let seed: u64 = payload.bytes().fold(0xcbf2_9ce4_8422_2325, |acc, b| {
+        (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    for iter in 0..n_combined {
+        let mix = seed
+            .wrapping_add(iter as u64)
+            .wrapping_mul(0x0000_0100_0000_01b3);
+        let base_index = (mix as usize) % results.len();
+        let ws_range = WHITESPACE_ALTERNATIVES.len() - 1; // 1..len()
+        let whitespace_index = 1 + ((mix.rotate_left(17) as usize) % ws_range);
         let base_payload = results[base_index].payload.clone();
         let combined = base_payload.replace(' ', WHITESPACE_ALTERNATIVES[whitespace_index]);
         if combined != base_payload {

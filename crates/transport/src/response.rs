@@ -77,7 +77,7 @@ pub fn is_waf_block_status(status: u16) -> bool {
 /// attempts regressed evasion behaviour. The three diverge by design.
 ///
 /// See also:
-/// - [`wafrift_detect::waf_detect::is_blocked_response`] — broad WAF-ish
+/// - `wafrift_detect::waf_detect::is_blocked_response` — broad WAF-ish
 ///   detection for the learning phase (FN-balanced; TOML-driven indicators).
 /// - [`wafrift_types::calibration::analyze_calibration`] — calibration probe
 ///   classification (FN-EXPENSIVE → broad, bare vendor names ARE wanted; an

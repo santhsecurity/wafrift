@@ -394,7 +394,14 @@ fn rw_js_unicode(s: &str, rng: &mut Rng) -> Option<String> {
             if !after.trim_start().starts_with('(') {
                 continue;
             }
-            if !rng.chance(1, 1) {
+            // F91: was `chance(1, 1)` — that's always-true (`x % 1 < 1`
+            // ⇒ 0 < 1), so the `continue` was dead and the function
+            // emitted the escape on the first sink-name match
+            // regardless of seed. That collapsed bypass diversity and
+            // made the equivalence class deterministic where the rest
+            // of the rewriter pool deliberately samples. Match the
+            // 50/50 cadence the other gates in this file use.
+            if !rng.chance(1, 2) {
                 continue;
             }
             let first = name.as_bytes()[0];

@@ -25,6 +25,20 @@ use tracing::{info, warn};
 
 use crate::ProxyState;
 
+/// Hard cap on the persisted gene-bank file size accepted at load
+/// time. A real gene-bank for a long-running proxy session against
+/// ~thousands of hosts × handful of per-host fields is well under
+/// 1 MiB; 64 MiB is generous head-room and small enough that a
+/// pathological / adversarial / corrupted multi-GB file won't OOM
+/// the proxy on startup. F141 — same hazard class as the strategy
+/// crate's gene-bank cap.
+pub const MAX_GENE_BANK_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Cap on hosts restored from a persisted bank. Matches the runtime
+/// cap in `restore` so a million-host bank can't trigger a million
+/// `entry(...).or_default()` allocations before we start evicting.
+pub const MAX_RESTORED_HOSTS: usize = 10_000;
+
 /// Subset of `HostState` worth persisting across proxy restarts.
 /// Block counts and pending discovery state re-accumulate naturally;
 /// what we don't want to lose is the painstakingly-discovered winners
@@ -77,7 +91,13 @@ pub struct PersistedGeneBank {
 #[must_use]
 pub fn default_gene_bank_path(supplied: &str) -> Option<PathBuf> {
     if supplied.is_empty() {
-        let home = std::env::var_os("HOME")?;
+        // F98: was `HOME`-only — on Windows `HOME` is typically unset
+        // and the function silently returned `None`, disabling gene-bank
+        // persistence for every Windows user with no warning. The
+        // sibling `trust.rs::default_path()` already falls back to
+        // `USERPROFILE`; matching here.
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))?;
         let p = PathBuf::from(home).join(".wafrift").join("gene-bank.json");
         Some(p)
     } else if supplied == "off" || supplied == "-" {
@@ -94,6 +114,36 @@ pub fn default_gene_bank_path(supplied: &str) -> Option<PathBuf> {
 /// deliberate: proxy startup must not be blocked by a corrupt
 /// gene-bank.
 pub fn load(path: &Path) -> PersistedGeneBank {
+    // F141: cap the file size BEFORE reading so a multi-GB
+    // gene-bank.json (corrupted, adversarial, or wrong path
+    // pointing at a tarball) can't OOM the proxy at startup.
+    // Pre-fix `std::fs::read_to_string(path)` would happily slurp
+    // any file the OS would let it allocate for. The "always
+    // succeed" contract is preserved — an oversized file logs a
+    // warning and returns the default empty bank, matching the
+    // malformed-JSON branch behavior.
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.len() > MAX_GENE_BANK_BYTES => {
+            warn!(
+                path = %path.display(),
+                size = meta.len(),
+                cap = MAX_GENE_BANK_BYTES,
+                "gene bank file exceeds {MAX_GENE_BANK_BYTES}-byte cap; starting fresh. \
+                 Fix: this file is far larger than any real bank — inspect for corruption \
+                 or remove it. If a legitimate operator workflow needs more, raise \
+                 MAX_GENE_BANK_BYTES rather than disabling the guard."
+            );
+            return PersistedGeneBank::default();
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Fall through to read_to_string so the existing
+            // "not found = fresh bank" branch handles the log.
+        }
+        Err(_) => {
+            // Same — read_to_string will surface the same error.
+        }
+    }
     match std::fs::read_to_string(path) {
         Ok(s) => {
             if s.trim().is_empty() {
@@ -228,6 +278,19 @@ pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
     let mut fifo_seen: std::collections::HashSet<String> =
         state.host_fifo.iter().cloned().collect();
     for (host, persisted) in bank.hosts {
+        // F141: stop accepting new hosts once we hit the runtime
+        // cap. Pre-fix this loop inserted EVERY host first and then
+        // popped down to 10_000 at the end — a corrupted /
+        // adversarial gene-bank with a million hosts allocated a
+        // million HostState entries before the cap kicked in,
+        // briefly spiking proxy RAM by ~GBs during startup.
+        // Skipping new entries (vs. evicting one to make room) is
+        // the bounded-work choice — the persisted set is already
+        // truncated by the time the cap fires, and the proxy will
+        // discover the missing hosts on first request.
+        if !state.hosts.contains_key(&host) && state.hosts.len() >= MAX_RESTORED_HOSTS {
+            continue;
+        }
         let hs = state.hosts.entry(host.clone()).or_default();
         if !persisted.proven_winners.is_empty() {
             hs.proven_winners = persisted.proven_winners;
@@ -241,35 +304,14 @@ pub fn restore(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
             hs.waf_name = persisted.waf_name;
             hs.waf_confirmed = true;
         }
-        // C2: restore statistical state so winner rotation and drift
-        // detection resume exactly where they left off.
-        if !persisted.technique_stats.is_empty() {
-            hs.technique_stats = persisted.technique_stats;
-        }
-        if !persisted.winner_consecutive_blocks.is_empty() {
-            hs.winner_consecutive_blocks = persisted.winner_consecutive_blocks;
-        }
-        // rotation_index is usize on HostState; clamp via saturating cast
-        // so a gene-bank written on a 64-bit host loads safely on a 32-bit
-        // target (theoretical: we only ship x86_64/aarch64, but be safe).
-        hs.rotation_index = usize::try_from(persisted.rotation_index)
-            .unwrap_or(usize::MAX);
-        if let Some(ref name) = persisted.last_success {
-            // Technique::from_pool_key parses the Display-format name
-            // (e.g. "encoding:UrlEncode"). Unknown future variants return
-            // None -- harmless, the proxy picks from the winner pool.
-            if let Some(t) = wafrift_types::Technique::from_pool_key(name) {
-                hs.last_success = Some(t);
-            }
-        }
         if fifo_seen.insert(host.clone()) {
             state.host_fifo.push_back(host);
         }
     }
-    // Enforce the same runtime cap that applies during request processing.
-    // A malicious or corrupted gene-bank with millions of hosts must not
-    // exhaust proxy RAM on startup.
-    while state.hosts.len() > 10_000 {
+    // Belt-and-braces: if anything else inserted into state.hosts
+    // before restore was called (shouldn't, given the lock contract),
+    // pop back down to the cap so the post-condition holds.
+    while state.hosts.len() > MAX_RESTORED_HOSTS {
         if let Some(oldest) = state.host_fifo.pop_front() {
             state.hosts.remove(&oldest);
         } else {
@@ -354,54 +396,69 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// C2: old gene-bank files without the new fields must still load
-    /// cleanly (serde(default) provides zero values for missing keys).
     #[test]
-    fn persisted_host_state_new_fields_are_backwards_compatible() {
+    fn load_oversized_file_returns_empty_bank_does_not_oom() {
+        // F141 regression: pre-fix `std::fs::read_to_string` would
+        // happily slurp any file size, so a multi-GB corrupted
+        // gene-bank.json (or wrong path pointing at a tarball)
+        // OOMed the proxy at startup. Write a file fractionally
+        // over the cap and assert load() returns the empty bank
+        // without reading the bytes.
         let path = std::env::temp_dir().join(format!(
-            "wafrift-genebank-compat-{}",
-            std::process::id()
+            "wafrift-genebank-load-oversize-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
-        // Write a bank that only has the original three fields
-        let legacy = r#"{
-            "schema": 1,
-            "hosts": {
-                "example.com": {
-                    "proven_winners": ["encoding:UrlEncode"],
-                    "blocklisted": [],
-                    "waf_name": "Cloudflare"
-                }
-            }
-        }"#;
-        std::fs::write(&path, legacy).unwrap();
+        // Write a sparse-feeling file just past the cap — we don't
+        // actually need every byte, set_len is enough on most
+        // filesystems and the metadata().len() check catches it.
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(MAX_GENE_BANK_BYTES + 1).unwrap();
+        drop(f);
         let bank = load(&path);
-        let host = bank.hosts.get("example.com").expect("host present");
-        // New fields must be their zero-value defaults.
-        assert!(host.technique_stats.is_empty(), "technique_stats should default empty");
-        assert!(host.winner_consecutive_blocks.is_empty(), "winner_consecutive_blocks should default empty");
-        assert_eq!(host.rotation_index, 0, "rotation_index should default to 0");
-        assert!(host.last_success.is_none(), "last_success should default None");
+        assert_eq!(
+            bank.schema, 0,
+            "oversize file must return default empty bank, not partial parse"
+        );
+        assert!(bank.hosts.is_empty());
         let _ = std::fs::remove_file(&path);
     }
 
-    /// C2: the four new fields survive a save+load round-trip.
     #[test]
-    fn persisted_host_state_new_fields_round_trip_through_json() {
-        // Build a PersistedHostState with all new fields populated.
-        let phs = PersistedHostState {
-            proven_winners: vec!["encoding:UrlEncode".into()],
-            blocklisted: vec![],
-            waf_name: Some("Cloudflare".into()),
-            technique_stats: vec![("encoding:UrlEncode".into(), 7, 10)],
-            winner_consecutive_blocks: vec![("encoding:UrlEncode".into(), 1)],
-            rotation_index: 42,
-            last_success: Some("encoding:UrlEncode".into()),
+    fn restore_caps_hosts_during_loop_not_only_at_end() {
+        // F141 regression: pre-fix restore() inserted every host
+        // first and only popped down at the end. For a million-host
+        // bank that briefly allocated a million HostState entries
+        // — gigabytes of transient RAM during startup. Synthesize a
+        // bank with cap + 50 hosts and verify the final state.hosts
+        // length never exceeds the cap (the in-loop guard fires).
+        let mut bank = PersistedGeneBank {
+            schema: 1,
+            hosts: HashMap::new(),
         };
-        let json = serde_json::to_string(&phs).expect("serialize");
-        let back: PersistedHostState = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back.technique_stats, phs.technique_stats);
-        assert_eq!(back.winner_consecutive_blocks, phs.winner_consecutive_blocks);
-        assert_eq!(back.rotation_index, 42);
-        assert_eq!(back.last_success.as_deref(), Some("encoding:UrlEncode"));
+        for i in 0..(MAX_RESTORED_HOSTS + 50) {
+            bank.hosts.insert(
+                format!("h{i}.example"),
+                PersistedHostState {
+                    proven_winners: vec!["url_encode".into()],
+                    blocklisted: vec![],
+                    waf_name: None,
+                },
+            );
+        }
+        let mut state = ProxyState::default();
+        let restored = restore(&mut state, bank);
+        assert!(
+            state.hosts.len() <= MAX_RESTORED_HOSTS,
+            "restore must never leave state.hosts above the cap (saw {})",
+            state.hosts.len()
+        );
+        assert!(
+            restored <= MAX_RESTORED_HOSTS,
+            "restore must not report more entries than the cap"
+        );
     }
 }

@@ -68,10 +68,20 @@ impl ScopeFilter {
         if !self.only_methods.is_empty() && !self.only_methods.contains(method) {
             return false;
         }
-        if !self.only_hosts.is_empty() && !self.only_hosts.iter().any(|p| glob_match(p, host)) {
+        // Strip an optional port suffix before glob-matching. Hyper /
+        // many HTTP parsers surface the host as `api.example.com:8443`
+        // for non-default ports; pre-fix the glob `*.example.com`
+        // would NOT match because `:8443` is an unexpected suffix.
+        // Out-of-scope requests to non-standard ports could pass the
+        // filter unguarded. IPv6 literals `[::1]:443` are also covered
+        // — split on the LAST `:` keeps the bracketed v6 intact.
+        let host_no_port = strip_port(host);
+        if !self.only_hosts.is_empty()
+            && !self.only_hosts.iter().any(|p| glob_match(p, host_no_port))
+        {
             return false;
         }
-        if self.skip_hosts.iter().any(|p| glob_match(p, host)) {
+        if self.skip_hosts.iter().any(|p| glob_match(p, host_no_port)) {
             return false;
         }
         if !self.only_paths.is_empty() && !self.only_paths.iter().any(|p| glob_match(p, path)) {
@@ -81,6 +91,26 @@ impl ScopeFilter {
             return false;
         }
         true
+    }
+}
+
+/// Drop a trailing `:PORT` suffix if present. Bracketed IPv6 literals
+/// (`[::1]`) keep their brackets; only the suffix AFTER the closing
+/// `]` is stripped. For bare hosts (no `:`) the input is returned
+/// unchanged.
+fn strip_port(host: &str) -> &str {
+    if let Some(stripped) = host.strip_prefix('[') {
+        // IPv6 literal: find the closing `]`. The port (if any) is
+        // after that. Return everything up to and including the `]`.
+        if let Some(close) = stripped.find(']') {
+            return &host[..close + 2];
+        }
+        return host;
+    }
+    // IPv4 / DNS: a single `:` separates host and port.
+    match host.rsplit_once(':') {
+        Some((h, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => h,
+        _ => host,
     }
 }
 
@@ -221,5 +251,64 @@ mod tests {
         // through "*.example.com" — the glob anchors the whole string.
         let f = ScopeFilter::new(vec!["*.example.com".into()], vec![], vec![], vec![], vec![]);
         assert!(!f.allows("api.example.com.attacker.tld", "/", &Method::from("GET")));
+    }
+
+    // ── strip_port + allows() with :port suffix ───────────────
+
+    #[test]
+    fn strip_port_handles_bare_host() {
+        assert_eq!(strip_port("api.example.com"), "api.example.com");
+    }
+
+    #[test]
+    fn strip_port_removes_port_suffix() {
+        assert_eq!(strip_port("api.example.com:8443"), "api.example.com");
+        assert_eq!(strip_port("api.example.com:80"), "api.example.com");
+    }
+
+    #[test]
+    fn strip_port_leaves_non_numeric_suffix_alone() {
+        // `:something-not-a-port` is part of the host (defensive
+        // against malformed input — keep it visible).
+        assert_eq!(
+            strip_port("api.example.com:notaport"),
+            "api.example.com:notaport"
+        );
+    }
+
+    #[test]
+    fn strip_port_handles_ipv6_literal_with_port() {
+        assert_eq!(strip_port("[::1]:8443"), "[::1]");
+        assert_eq!(strip_port("[2001:db8::1]:443"), "[2001:db8::1]");
+    }
+
+    #[test]
+    fn strip_port_handles_ipv6_literal_without_port() {
+        assert_eq!(strip_port("[::1]"), "[::1]");
+    }
+
+    #[test]
+    fn allows_glob_match_after_port_strip() {
+        // Regression: pre-fix `*.example.com` would NOT match
+        // `api.example.com:8443` and the request would slip past
+        // the scope filter unguarded. The port-strip makes the
+        // match work as the operator expects.
+        let f = ScopeFilter::new(vec!["*.example.com".into()], vec![], vec![], vec![], vec![]);
+        assert!(f.allows("api.example.com:8443", "/", &Method::from("GET")));
+        assert!(f.allows("api.example.com:80", "/", &Method::from("GET")));
+    }
+
+    #[test]
+    fn allows_skip_host_match_after_port_strip() {
+        // Skip-host also benefits — an attacker can't bypass a
+        // skip rule by adding a port.
+        let f = ScopeFilter::new(
+            vec![],
+            vec![],
+            vec!["admin.internal".into()],
+            vec![],
+            vec![],
+        );
+        assert!(!f.allows("admin.internal:9000", "/", &Method::from("GET")));
     }
 }

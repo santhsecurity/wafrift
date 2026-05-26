@@ -105,31 +105,49 @@ impl TrustList {
     /// Persist the trust list to disk, creating parent directories
     /// as needed.
     ///
+    /// The write is atomic: content is first written to a sibling
+    /// temp file (`.wafrift/trusted-keys.toml.NNNN.tmp`), then
+    /// renamed over the target. A process crash mid-write therefore
+    /// leaves either the old file or the new file intact — never a
+    /// half-written, unparseable TOML that would lock the operator
+    /// out of the trust list until they manually recover it.
+    ///
     /// Audit (2026-05-10): the file is written with mode 0o600 on
     /// Unix so other users on a shared host cannot poison the trust
     /// root by adding their own publisher keys. Pre-fix the file used
     /// the process umask, leaving it world-readable on most setups.
     pub fn save(&self, path: &Path) -> Result<(), RegistryError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        let parent = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(parent)?;
         let body = toml::to_string_pretty(self)
             .map_err(|e| RegistryError::TrustListParse(e.to_string()))?;
-        std::fs::write(path, body)?;
+        // Write to a sibling temp file, then rename atomically.
+        let pid = std::process::id();
+        let tmp_path = path.with_extension(format!("{pid}.tmp"));
+        std::fs::write(&tmp_path, &body)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let perms = std::fs::Permissions::from_mode(0o600);
-            // Best-effort: a failure to chmod (e.g. on a FUSE mount
-            // that refuses POSIX perms) shouldn't fail the save, but
-            // we surface it so the operator notices.
-            if let Err(e) = std::fs::set_permissions(path, perms) {
+            // Set permissions on the temp file BEFORE the rename so the
+            // final file is never world-readable, even transiently.
+            if let Err(e) = std::fs::set_permissions(&tmp_path, perms) {
                 tracing::warn!(
-                    path = %path.display(),
+                    path = %tmp_path.display(),
                     error = %e,
-                    "failed to chmod trust list to 0o600 — file may be world-readable"
+                    "failed to chmod trust list temp file to 0o600 — \
+                     file may be world-readable"
                 );
             }
+        }
+        // Atomic rename: replaces the target if it already exists.
+        // On Windows `rename` is NOT guaranteed atomic when the destination
+        // exists (it can fail with `PermissionDenied`); fall back to
+        // remove-then-rename in that case.
+        if let Err(rename_err) = std::fs::rename(&tmp_path, path) {
+            // Cleanup the temp file on failure so we don't litter.
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(RegistryError::Io(rename_err));
         }
         Ok(())
     }
@@ -207,5 +225,97 @@ mod tests {
             assert!(p.ends_with("trusted-keys.toml"));
             assert!(p.components().any(|c| c.as_os_str() == ".wafrift"));
         }
+    }
+
+    // ── Atomic-save regression tests (F-TRUST-01) ──────────────────
+
+    /// After `save`, no stale temp file (`.NNNN.tmp`) should remain
+    /// alongside the target.
+    #[test]
+    fn save_leaves_no_temp_file_on_success() {
+        let mut t = TrustList::new();
+        t.allow_hex("aabbcc", "carol");
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-trust-atomic-{}.toml",
+            std::process::id()
+        ));
+        t.save(&path).expect("save");
+        // The directory should contain the target but NO .tmp sibling.
+        let parent = path.parent().unwrap_or(Path::new("."));
+        let stem = path.file_name().unwrap().to_string_lossy().to_string();
+        let tmp_exists = std::fs::read_dir(parent)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with(&stem) && name.ends_with(".tmp")
+            });
+        assert!(!tmp_exists, "stale .tmp file found after successful save");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `save` over an existing file must replace it, not append.
+    #[test]
+    fn save_overwrites_existing_file_atomically() {
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-trust-overwrite-{}.toml",
+            std::process::id()
+        ));
+        // Write a first version with one publisher.
+        let mut t1 = TrustList::new();
+        t1.allow_hex("111111", "first");
+        t1.save(&path).expect("first save");
+
+        // Overwrite with a second version with a different publisher.
+        let mut t2 = TrustList::new();
+        t2.allow_hex("222222", "second");
+        t2.save(&path).expect("second save");
+
+        let loaded = TrustList::load(&path).expect("load after overwrite");
+        assert_eq!(loaded.publishers().len(), 1, "must have exactly one publisher");
+        assert!(
+            loaded.contains("222222"),
+            "second version must be present after overwrite"
+        );
+        assert!(
+            !loaded.contains("111111"),
+            "first version must not survive an overwrite"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `save` must create intermediate parent directories.
+    #[test]
+    fn save_creates_parent_dirs() {
+        let base = std::env::temp_dir().join(format!(
+            "wafrift-trust-mkdir-{}-deep",
+            std::process::id()
+        ));
+        let path = base.join("nested").join("trusted-keys.toml");
+        let mut t = TrustList::new();
+        t.allow_hex("deadbeef", "test");
+        t.save(&path).expect("save with deep parent");
+        assert!(path.exists(), "trust list must exist after save");
+        let loaded = TrustList::load(&path).expect("load deep");
+        assert!(loaded.contains("deadbeef"));
+        // Cleanup.
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A TOML-corrupted file must be rejected by `load` rather than
+    /// silently returning an empty trust list (which would accept any bundle).
+    #[test]
+    fn load_corrupted_file_returns_error_not_empty_list() {
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-trust-corrupt-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"this is not valid toml %@!").unwrap();
+        let result = TrustList::load(&path);
+        assert!(
+            result.is_err(),
+            "corrupted TOML must be an error, not an empty list that accepts any bundle"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }

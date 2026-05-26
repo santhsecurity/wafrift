@@ -30,7 +30,7 @@ docker stop \
     wafrift-modsec-azure wafrift-modsec-azure-backend \
     wafrift-zoo-coraza  wafrift-zoo-coraza-backend \
     wafrift-zoo-naxsi   wafrift-zoo-naxsi-backend \
-    wafrift-zoo-shadowd wafrift-zoo-shadowd-php \
+    wafrift-zoo-shadowd wafrift-zoo-shadowd-php wafrift-zoo-shadowd-db \
     2>/dev/null || true
 
 docker rm \
@@ -38,5 +38,5 @@ docker rm \
     wafrift-modsec-azure wafrift-modsec-azure-backend \
     wafrift-zoo-coraza  wafrift-zoo-coraza-backend \
     wafrift-zoo-naxsi   wafrift-zoo-naxsi-backend \
-    wafrift-zoo-shadowd wafrift-zoo-shadowd-php \
+    wafrift-zoo-shadowd wafrift-zoo-shadowd-php wafrift-zoo-shadowd-db \
     2>/dev/null || true

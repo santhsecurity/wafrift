@@ -1,0 +1,120 @@
+name: PL4 Bench Gate
+
+# Runs only on PRs targeting main. Fails the PR if the PL4 bypass rate
+# regresses by more than 2 percentage points against the committed baseline.
+on:
+  pull_request:
+    branches: [main]
+
+# Cancel a superseded run for the same PR branch so we don't queue up
+# back-to-back expensive bench jobs when someone pushes several fixups.
+concurrency:
+  group: bench-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench-pl4:
+    name: PL4 bypass-rate gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── 1. Source ──────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── 2. Rust toolchain ─────────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@stable
+
+      # ── 3. Cargo cache (keyed on Cargo.lock so a lock-file bump
+      #        busts the cache and forces a full rebuild) ─────────────
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench-gate
+
+      # ── 4. Build ──────────────────────────────────────────────────
+      - name: Build wafrift (release)
+        run: cargo build --release -p wafrift-cli
+
+      # ── 5. Start ModSec PL4 ───────────────────────────────────────
+      - name: Start ModSec CRS PL4
+        run: bash wafrift-bench/scripts/up.sh modsec-pl4
+
+      # ── 6. Wait for ModSec to accept traffic ──────────────────────
+      # up.sh already polls /get (200) and / (403/406) for 60 s; this
+      # step is an explicit belt-and-suspenders probe in CI output so
+      # the log shows exactly when the container answered.
+      - name: Wait for ModSec PL4 healthy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18084/ || true)
+            if [[ "$code" == "200" || "$code" == "403" || "$code" == "406" ]]; then
+              echo "ModSec PL4 is up (HTTP $code)"
+              exit 0
+            fi
+            echo "  attempt $i — HTTP $code, retrying in 2 s…"
+            sleep 2
+          done
+          echo "::error::ModSec PL4 did not become healthy within 60 s"
+          docker logs wafrift-pl4 2>&1 || true
+          exit 1
+
+      # ── 7. Run canonical bench ────────────────────────────────────
+      - name: Run canonical bench (PL4)
+        run: |
+          ./target/release/wafrift bench-waf \
+            --base-url http://localhost:18084 \
+            --corpus wafrift-bench/corpus \
+            --evade \
+            --strategies heavy,equiv-cegis \
+            --variants 5 \
+            --format json \
+            --output /tmp/bench.json \
+            --summary-only
+        env:
+          RUST_LOG: warn
+
+      # ── 8. Compare to baseline ────────────────────────────────────
+      - name: Compare bypass rate to baseline
+        run: |
+          set -euo pipefail
+
+          current=$(jq '.evaded_summary.oracle_valid_rate' /tmp/bench.json)
+          baseline=$(jq '.oracle_valid_rate' wafrift-bench/canonical-baseline.json)
+
+          # bc-based arithmetic (no Python dependency, always available).
+          delta=$(echo "scale=4; $current - $baseline" | bc)
+          # Regression threshold: -0.02 (2 percentage points drop).
+          regressed=$(echo "$delta < -0.02" | bc)
+
+          # Format as percentages for the summary line.
+          current_pct=$(echo "scale=1; $current * 100" | bc)
+          baseline_pct=$(echo "scale=1; $baseline * 100" | bc)
+          delta_pct=$(echo "scale=1; $delta * 100" | bc)
+
+          summary="PL4 bypass rate: ${current_pct}%  (baseline ${baseline_pct}%,  Δ ${delta_pct} pp)"
+          echo "$summary"
+          echo "$summary" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$regressed" -eq 1 ]; then
+            echo "::error::Bypass rate regressed by more than 2 pp — block merge."
+            echo "  current:  ${current_pct}%"
+            echo "  baseline: ${baseline_pct}%"
+            echo "  delta:    ${delta_pct} pp  (threshold: -2.0 pp)"
+            exit 1
+          fi
+
+          echo "Gate passed."
+
+      # ── 9. Tear down (always, even on failure) ────────────────────
+      - name: Tear down ModSec PL4
+        if: always()
+        run: bash wafrift-bench/scripts/down.sh modsec-pl4
+
+      # ── 10. Upload bench JSON for reviewers ───────────────────────
+      - name: Upload bench artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-pl4-pr-${{ github.event.pull_request.number }}
+          path: /tmp/bench.json

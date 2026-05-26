@@ -67,10 +67,7 @@ impl SharedSessionPool {
     /// semantics: 0 is coerced to 1; same-host calls return the same
     /// profile until the counter trips, then re-shuffle.
     #[must_use]
-    pub fn new(
-        profiles: Vec<&'static BrowserProfile>,
-        rotate_after_requests: u32,
-    ) -> Self {
+    pub fn new(profiles: Vec<&'static BrowserProfile>, rotate_after_requests: u32) -> Self {
         Self(Arc::new(SessionPool::new(profiles, rotate_after_requests)))
     }
 
@@ -138,7 +135,10 @@ mod tests {
         let input = vec![
             ("Host".into(), "x".into()),
             ("Accept".into(), "*/*".into()),
-            ("Sec-Ch-Ua".into(), "leftover-from-prior-chrome-session".into()),
+            (
+                "Sec-Ch-Ua".into(),
+                "leftover-from-prior-chrome-session".into(),
+            ),
             ("User-Agent".into(), "safari".into()),
         ];
         let n_in = input.len();
@@ -176,11 +176,23 @@ mod tests {
             ("Host".into(), "x.com".into()),
         ];
         let out = reorder_headers_for_profile("firefox133", input);
-        let host_pos = out.iter().position(|(k, _)| k.eq_ignore_ascii_case("host")).unwrap();
-        let ua_pos = out.iter().position(|(k, _)| k.eq_ignore_ascii_case("user-agent")).unwrap();
-        let cookie_pos = out.iter().position(|(k, _)| k.eq_ignore_ascii_case("cookie")).unwrap();
+        let host_pos = out
+            .iter()
+            .position(|(k, _)| k.eq_ignore_ascii_case("host"))
+            .unwrap();
+        let ua_pos = out
+            .iter()
+            .position(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+            .unwrap();
+        let cookie_pos = out
+            .iter()
+            .position(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            .unwrap();
         assert!(host_pos < ua_pos);
-        assert!(ua_pos < cookie_pos, "Firefox: user-agent must come before cookie");
+        assert!(
+            ua_pos < cookie_pos,
+            "Firefox: user-agent must come before cookie"
+        );
     }
 
     // ── header_order_for_profile ───────────────────────────────────

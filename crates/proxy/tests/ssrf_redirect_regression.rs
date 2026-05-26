@@ -21,20 +21,27 @@ use tokio::net::TcpListener;
 
 /// Spawn an HTTP server that immediately returns 302 → link-local IMDS.
 async fn start_redirect_origin() -> (u16, tokio::task::JoinHandle<()>) {
-    let app = Router::new().route("/", get(|| async {
-        // 169.254.169.254 is the AWS/Azure/GCP Instance Metadata Service —
-        // the canonical cloud SSRF target. The proxy MUST surface this 302
-        // to the downstream client rather than following it.
-        (
-            StatusCode::FOUND,
-            [("location", "http://169.254.169.254/latest/meta-data/")],
-        )
-            .into_response()
-    }));
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind redirect origin");
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            // 169.254.169.254 is the AWS/Azure/GCP Instance Metadata Service —
+            // the canonical cloud SSRF target. The proxy MUST surface this 302
+            // to the downstream client rather than following it.
+            (
+                StatusCode::FOUND,
+                [("location", "http://169.254.169.254/latest/meta-data/")],
+            )
+                .into_response()
+        }),
+    );
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind redirect origin");
     let port = listener.local_addr().expect("local addr").port();
     let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("redirect origin serve");
+        axum::serve(listener, app)
+            .await
+            .expect("redirect origin serve");
     });
     (port, handle)
 }
@@ -97,13 +104,16 @@ async fn proxy_does_not_follow_redirect_to_bogon_imds() {
 #[tokio::test]
 async fn proxy_does_not_follow_redirect_to_rfc1918() {
     // Spawn an origin that redirects to an RFC1918 address (10.0.0.1).
-    let app = Router::new().route("/rfc1918", get(|| async {
-        (
-            StatusCode::MOVED_PERMANENTLY,
-            [("location", "http://10.0.0.1/admin")],
-        )
-            .into_response()
-    }));
+    let app = Router::new().route(
+        "/rfc1918",
+        get(|| async {
+            (
+                StatusCode::MOVED_PERMANENTLY,
+                [("location", "http://10.0.0.1/admin")],
+            )
+                .into_response()
+        }),
+    );
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
     let port = listener.local_addr().expect("addr").port();
     let handle = tokio::spawn(async move {

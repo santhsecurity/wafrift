@@ -133,9 +133,7 @@ mod tests {
         // raw binary compression output.
         assert!(context_applicability(Strategy::DeflateEncode, TargetContext::Header).is_err());
         assert!(context_applicability(Strategy::DeflateEncode, TargetContext::Cookie).is_err());
-        assert!(
-            context_applicability(Strategy::DeflateEncode, TargetContext::QueryParam).is_err()
-        );
+        assert!(context_applicability(Strategy::DeflateEncode, TargetContext::QueryParam).is_err());
         assert!(context_applicability(Strategy::DeflateEncode, TargetContext::Body).is_ok());
     }
 

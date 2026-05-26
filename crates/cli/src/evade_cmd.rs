@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use wafrift_grammar::grammar;
 
+use crate::Level;
 use crate::explain::ExplainTrace;
 use crate::helpers::{
     build_variants_explained, confidence_badge, max_mutations_for_level, payload_type_label,
@@ -23,7 +24,6 @@ use crate::helpers::{
 };
 use crate::target_context::TargetContext;
 use crate::technique_filter::TechniqueFilter;
-use crate::Level;
 
 #[derive(Args, Debug)]
 pub struct EvadeArgs {
@@ -182,10 +182,8 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
                 if label.is_empty() { None } else { Some(label) }
             }
         };
-        let mut seen_tamper_payloads: std::collections::HashSet<String> = variants
-            .iter()
-            .map(|v| v.payload.clone())
-            .collect();
+        let mut seen_tamper_payloads: std::collections::HashSet<String> =
+            variants.iter().map(|v| v.payload.clone()).collect();
         for &tamper_name in wafrift_encoding::tamper::all_tamper_names() {
             let path = format!("tamper/{tamper_name}");
             if !filter.allows_path(&path) {
@@ -300,10 +298,13 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             let variant_objs: Vec<_> = variants
                 .iter()
                 .map(|variant| {
+                    // Round to 2 dp to suppress floating-point noise
+                    // (e.g. 0.93 stored as 0.9299999999999999 in f64).
+                    let conf = (variant.confidence * 100.0).round() / 100.0;
                     json!({
                         "payload": variant.payload,
                         "techniques": variant.techniques,
-                        "confidence": variant.confidence,
+                        "confidence": conf,
                     })
                 })
                 .collect();
@@ -332,10 +333,11 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
         } else {
             // Legacy NDJSON form: one object per line.
             for variant in &variants {
+                let conf = (variant.confidence * 100.0).round() / 100.0;
                 let obj = json!({
                     "payload": variant.payload,
                     "techniques": variant.techniques,
-                    "confidence": variant.confidence,
+                    "confidence": conf,
                 });
                 if args.output.is_some() {
                     buf.push_str(&obj.to_string());
@@ -451,7 +453,9 @@ fn top_n_summary_text(variants: &[crate::helpers::Variant]) -> String {
     let _ = writeln!(
         out,
         "{}",
-        "─── Summary (top-5 by confidence) ───".bold().bright_black()
+        "─── Summary (top-5 by confidence) ───"
+            .bold()
+            .bright_black()
     );
     let mut ranked: Vec<(usize, &crate::helpers::Variant)> = variants.iter().enumerate().collect();
     // Stable-sort by descending confidence; ties keep input order.
@@ -768,9 +772,7 @@ mod tests {
         // the contract; document via test.
         use base64::Engine as _;
         let mut args = args_with_payload("WRONG");
-        args.payload_b64 = Some(
-            base64::engine::general_purpose::STANDARD.encode(b"RIGHT"),
-        );
+        args.payload_b64 = Some(base64::engine::general_purpose::STANDARD.encode(b"RIGHT"));
         assert_eq!(resolve_payload(&args).unwrap(), "RIGHT");
     }
 
@@ -844,8 +846,7 @@ mod tests {
     #[test]
     fn tamper_leaf_selector_isolates_single_tamper() {
         // A specific tamper leaf produces at most one variant.
-        let hits =
-            count_tamper_variants_for(&["tamper/zero_width_inject"], "' OR 1=1--");
+        let hits = count_tamper_variants_for(&["tamper/zero_width_inject"], "' OR 1=1--");
         assert!(
             hits <= 1,
             "tamper/zero_width_inject must produce at most one variant; got {hits}"
@@ -860,8 +861,7 @@ mod tests {
         // postgres_dollar_quote only transforms single-quoted
         // literals.  A payload with no `'` should produce no
         // variant.
-        let hits =
-            count_tamper_variants_for(&["tamper/postgres_dollar_quote"], "1=1");
+        let hits = count_tamper_variants_for(&["tamper/postgres_dollar_quote"], "1=1");
         assert_eq!(hits, 0);
     }
 
@@ -974,10 +974,7 @@ mod tests {
     fn tamper_unknown_leaf_fails_filter_parse() {
         // Unknown selectors error out at the filter layer — must
         // not silently match nothing.
-        let r = TechniqueFilter::parse(
-            &["tamper/no_such_tamper".to_string()],
-            &[],
-        );
+        let r = TechniqueFilter::parse(&["tamper/no_such_tamper".to_string()], &[]);
         assert!(r.is_err());
     }
 
@@ -997,13 +994,7 @@ mod tests {
                 #[command(flatten)]
                 ev: EvadeArgs,
             }
-            let r = Wrap::try_parse_from([
-                "evade",
-                "--payload",
-                "X",
-                "--format",
-                value,
-            ]);
+            let r = Wrap::try_parse_from(["evade", "--payload", "X", "--format", value]);
             assert!(r.is_ok(), "format `{value}` must parse: {:?}", r.err());
         }
     }
@@ -1016,13 +1007,7 @@ mod tests {
             #[command(flatten)]
             ev: EvadeArgs,
         }
-        let r = Wrap::try_parse_from([
-            "evade",
-            "--payload",
-            "X",
-            "--format",
-            "yaml",
-        ]);
+        let r = Wrap::try_parse_from(["evade", "--payload", "X", "--format", "yaml"]);
         assert!(r.is_err(), "unknown format must reject");
     }
 
@@ -1039,24 +1024,29 @@ mod tests {
     #[test]
     fn top_n_summary_lists_top_5_by_descending_confidence() {
         let variants = vec![
-            variant("low",  &["url"],    0.10),
+            variant("low", &["url"], 0.10),
             variant("mid1", &["base64"], 0.50),
-            variant("hi1",  &["dwd"],    0.90),
-            variant("hi2",  &["wide"],   0.95),
-            variant("mid2", &["case"],   0.55),
-            variant("low2", &["nada"],   0.05),
-            variant("hi3",  &["pp"],     0.99),
-            variant("mid3", &["xor"],    0.60),
+            variant("hi1", &["dwd"], 0.90),
+            variant("hi2", &["wide"], 0.95),
+            variant("mid2", &["case"], 0.55),
+            variant("low2", &["nada"], 0.05),
+            variant("hi3", &["pp"], 0.99),
+            variant("mid3", &["xor"], 0.60),
         ];
         let s = strip_ansi(&top_n_summary_text(&variants));
         // Header present.
-        assert!(s.contains("Summary (top-5 by confidence)"), "summary header missing:\n{s}");
+        assert!(
+            s.contains("Summary (top-5 by confidence)"),
+            "summary header missing:\n{s}"
+        );
         // The 5 highest confidence variants are #7 (0.99), #4 (0.95),
         // #3 (0.90), #8 (0.60), #5 (0.55), in that order.
         let expected_order = ["#7", "#4", "#3", "#8", "#5"];
         let mut last_pos = 0;
         for label in expected_order {
-            let pos = s.find(label).unwrap_or_else(|| panic!("missing {label} in:\n{s}"));
+            let pos = s
+                .find(label)
+                .unwrap_or_else(|| panic!("missing {label} in:\n{s}"));
             assert!(
                 pos >= last_pos,
                 "summary order broken: {label} appeared before previous row at pos {pos} vs last {last_pos}\n{s}"
@@ -1064,7 +1054,10 @@ mod tests {
             last_pos = pos;
         }
         // The two lowest-confidence variants must NOT appear.
-        assert!(!s.contains("#6 "), "low2 (#6 conf 0.05) must not be in top-5:\n{s}");
+        assert!(
+            !s.contains("#6 "),
+            "low2 (#6 conf 0.05) must not be in top-5:\n{s}"
+        );
     }
 
     #[test]
@@ -1124,7 +1117,10 @@ mod tests {
         let header_pos = s.find("Summary (top-5").unwrap();
         let after = &s[header_pos..];
         let count = after.matches("conf ").count();
-        assert_eq!(count, 5, "top block must show exactly 5 entries, found {count}:\n{after}");
+        assert_eq!(
+            count, 5,
+            "top block must show exactly 5 entries, found {count}:\n{after}"
+        );
     }
 
     /// Strip ANSI color codes so assertions are deterministic

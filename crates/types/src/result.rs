@@ -128,6 +128,8 @@ impl EvasionResult {
                 Technique::H2Evasion(_) => 0.25,
                 Technique::DifferentialProbe => 0.0,
                 Technique::BodyPadding(_) => 0.20,
+                // ML boundary attack: high confidence bypass.
+                Technique::MlEvasion { .. } => 0.40,
             };
         }
 

@@ -35,8 +35,9 @@ const SQL_OPERATORS_TOML: &str = include_str!("../../../rules/sql/operators.toml
 #[serde(deny_unknown_fields)]
 struct OrAlternative {
     pattern: String,
-    /// Schema field: human-readable description.
-    description: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
 }
 
 /// AND alternative definition from TOML.
@@ -44,8 +45,9 @@ struct OrAlternative {
 #[serde(deny_unknown_fields)]
 struct AndAlternative {
     pattern: String,
-    /// Schema field: human-readable description.
-    description: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
 }
 
 /// Equality alternative definition from TOML.
@@ -53,8 +55,9 @@ struct AndAlternative {
 #[serde(deny_unknown_fields)]
 struct EqualityAlternative {
     pattern: String,
-    /// Schema field: human-readable description.
-    description: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
 }
 
 /// Root structure for operators.toml.
@@ -75,35 +78,35 @@ impl Default for SqlOperatorRules {
             or_alternative: vec![
                 OrAlternative {
                     pattern: "OR".into(),
-                    description: "Standard SQL OR".into(),
+                    _description: "Standard SQL OR".into(),
                 },
                 OrAlternative {
                     pattern: "||".into(),
-                    description: "SQLite/Oracle OR".into(),
+                    _description: "SQLite/Oracle OR".into(),
                 },
             ],
             and_alternative: vec![
                 AndAlternative {
                     pattern: "AND".into(),
-                    description: "Standard SQL AND".into(),
+                    _description: "Standard SQL AND".into(),
                 },
                 AndAlternative {
                     pattern: "&&".into(),
-                    description: "MySQL logical AND".into(),
+                    _description: "MySQL logical AND".into(),
                 },
             ],
             equality_alternative: vec![
                 EqualityAlternative {
                     pattern: "=".into(),
-                    description: "Standard equality".into(),
+                    _description: "Standard equality".into(),
                 },
                 EqualityAlternative {
                     pattern: " LIKE ".into(),
-                    description: "LIKE operator".into(),
+                    _description: "LIKE operator".into(),
                 },
                 EqualityAlternative {
                     pattern: " REGEXP ".into(),
-                    description: "REGEXP operator".into(),
+                    _description: "REGEXP operator".into(),
                 },
             ],
         }

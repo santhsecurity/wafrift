@@ -83,7 +83,10 @@ fn normalize_pub_strips_plain_comment_and_lowercases() {
     // After stripping the comment the tokens are `select` `1`; joining
     // whitespace collapses any runs.
     assert!(n.contains("select"), "must lowercase: got {n:?}");
-    assert!(!n.contains("/*"), "plain comment must be stripped: got {n:?}");
+    assert!(
+        !n.contains("/*"),
+        "plain comment must be stripped: got {n:?}"
+    );
 }
 
 #[test]
@@ -119,8 +122,10 @@ fn normalize_pub_strips_line_comment_with_dash_dash() {
         !n.contains("comment"),
         "line comment content must be stripped: got {n:?}"
     );
-    assert!(n.trim().ends_with("1=1") || n.contains("1=1"),
-        "core expression must survive: got {n:?}");
+    assert!(
+        n.trim().ends_with("1=1") || n.contains("1=1"),
+        "core expression must survive: got {n:?}"
+    );
 }
 
 #[test]
@@ -139,7 +144,10 @@ fn normalize_pub_on_empty_input_returns_empty_or_whitespace_only() {
     // PROPERTY: normalising the empty string must return something empty
     // (never inject synthetic content).
     let n = esql::normalize_pub("");
-    assert!(n.trim().is_empty(), "empty input must normalise to empty: got {n:?}");
+    assert!(
+        n.trim().is_empty(),
+        "empty input must normalise to empty: got {n:?}"
+    );
 }
 
 // ─── still_executes ───────────────────────────────────────────────────────────
@@ -216,7 +224,7 @@ fn still_executes_rejects_junk_payload() {
     // classified as executing any SQL attack (anti-rig).
     let junk_cases = [
         "hello world",
-        "SELECT",   // keyword alone is not an attack
+        "SELECT", // keyword alone is not an attack
         "123",
         "true",
         "null",
@@ -298,10 +306,7 @@ fn delivery_kind_label_covers_all_arms() {
     for i in 0..esql::DELIVERY_ARMS {
         let label = esql::delivery_kind_label(i);
         assert!(!label.is_empty(), "arm {i} has empty label");
-        assert!(
-            seen.insert(label),
-            "arm {i} label {label:?} is a duplicate"
-        );
+        assert!(seen.insert(label), "arm {i} label {label:?} is a duplicate");
     }
 }
 
@@ -312,7 +317,10 @@ fn delivery_kind_label_out_of_range_returns_query() {
     // crash the adaptive scan.
     assert_eq!(esql::delivery_kind_label(usize::MAX), "query");
     assert_eq!(esql::delivery_kind_label(esql::DELIVERY_ARMS), "query");
-    assert_eq!(esql::delivery_kind_label(esql::DELIVERY_ARMS + 100), "query");
+    assert_eq!(
+        esql::delivery_kind_label(esql::DELIVERY_ARMS + 100),
+        "query"
+    );
 }
 
 #[test]
@@ -321,11 +329,20 @@ fn delivery_arms_constant_is_at_least_seven() {
     // as statistically distinct in the CRS bypass study was 7 (the
     // original 7 axes). A regression below this value would silently
     // disable proven bypass channels.
-    assert!(
-        esql::DELIVERY_ARMS >= 7,
-        "DELIVERY_ARMS must be ≥ 7; got {}",
-        esql::DELIVERY_ARMS
-    );
+    // Constant-value assertion is INTENTIONAL — this is a build-time
+    // regression gate: a DELIVERY_ARMS change below 7 should fail
+    // CI, and clippy's `assertions_on_constants` lint would
+    // otherwise hide the assert in test compilation. The const
+    // const_assert! crate would be the alternative but pulls in an
+    // unnecessary build dep for one site.
+    #[allow(clippy::assertions_on_constants)]
+    {
+        assert!(
+            esql::DELIVERY_ARMS >= 7,
+            "DELIVERY_ARMS must be ≥ 7; got {}",
+            esql::DELIVERY_ARMS
+        );
+    }
 }
 
 // ─── generate (the main public API) ─────────────────────────────────────────
@@ -406,8 +423,14 @@ fn generate_is_deterministic_across_invocations() {
     let p = "1' OR 1=1-- -";
     let a = equiv::equiv_sql(p, &cfg_max(32));
     let b = equiv::equiv_sql(p, &cfg_max(32));
-    let av: Vec<_> = a.iter().map(|x| (x.payload.as_str(), x.delivery.label())).collect();
-    let bv: Vec<_> = b.iter().map(|x| (x.payload.as_str(), x.delivery.label())).collect();
+    let av: Vec<_> = a
+        .iter()
+        .map(|x| (x.payload.as_str(), x.delivery.label()))
+        .collect();
+    let bv: Vec<_> = b
+        .iter()
+        .map(|x| (x.payload.as_str(), x.delivery.label()))
+        .collect();
     assert_eq!(av, bv, "same seed must yield same output across two calls");
 }
 
@@ -512,6 +535,8 @@ fn delivery_shape_label_matches_delivery_kind_label() {
     assert_eq!(mp.label(), "multipart_file");
     let ps = DeliveryShape::PathSegment;
     assert_eq!(ps.label(), "path_segment");
-    let hv = DeliveryShape::HeaderValue { name: "X-Forwarded-Host".into() };
+    let hv = DeliveryShape::HeaderValue {
+        name: "X-Forwarded-Host".into(),
+    };
     assert_eq!(hv.label(), "header_value");
 }

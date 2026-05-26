@@ -323,10 +323,13 @@ pub struct ProbeEnvelope {
     /// Response headers as `(name, value)` pairs in the order returned
     /// by reqwest. Name is lowercased on the wire; we preserve it
     /// verbatim so callers can pattern-match on case as the WAF saw it.
-    /// Consumed by `CorpusRecorder::record` → `parse_cf_block`.
+    // Consumed by CorpusRecorder::record → parse_cf_block. Suppress the
+    // "never read" lint until the per-probe hook in bench_waf is wired up.
+    #[allow(dead_code)]
     pub headers: Vec<(String, String)>,
     /// Response body bytes (bounded by `safe_body::DEFAULT_MAX_RESPONSE_BYTES`).
-    /// Consumed by `CorpusRecorder::record` → `parse_cf_block` + `fnv1a_64`.
+    // Consumed by CorpusRecorder::record → parse_cf_block + fnv1a_64.
+    #[allow(dead_code)]
     pub body: Vec<u8>,
     /// Same `is_waf_block` signal `send()` returns.
     pub blocked: bool,
@@ -346,7 +349,7 @@ pub async fn send_with_envelope(
     client: &reqwest::Client,
     req: &Request,
     timeout_secs: u64,
-) -> Result<(u16, bool, f64), String> {
+) -> Result<ProbeEnvelope, String> {
     let start = std::time::Instant::now();
     // Map our `Method` enum to reqwest's method. Pre-fix the match
     // had an `_ => client.get(...)` catch-all that silently
@@ -400,27 +403,51 @@ pub async fn send_with_envelope(
         builder = builder.body(body.clone());
     }
     builder = builder.timeout(std::time::Duration::from_secs(timeout_secs));
-    // Surface the FULL cause chain instead of the bare "builder
-    // error" / "error sending request" display strings — pre-fix
-    // every scan emitted hundreds of `warn: equiv learn send (sql):
-    // builder error` lines with no actionable detail. Dogfood
-    // sonnet 3 (2026-05) flagged the noise as boy-cried-wolf
-    // training: operators learn to ignore `warn:`.
     let resp = builder
         .send()
         .await
         .map_err(|e| crate::helpers::walk_reqwest_error(&e))?;
     let status = resp.status().as_u16();
+    // Snapshot headers BEFORE consuming the body — reqwest::Response
+    // moves the body but headers are clonable.
+    let headers: Vec<(String, String)> = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| {
+            let value = v.to_str().map(str::to_string).unwrap_or_else(|_| {
+                String::from_utf8_lossy(v.as_bytes()).into_owned()
+            });
+            (k.as_str().to_string(), value)
+        })
+        .collect();
     // Bounded read — decompression-bomb defence on the WAF response.
-    let body = crate::safe_body::read_bounded(
-        resp,
-        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| e.to_string())?;
     let blocked = is_waf_block(status, &body);
-    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    Ok((status, blocked, elapsed_ms))
+    let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+    Ok(ProbeEnvelope {
+        status,
+        headers,
+        body,
+        blocked,
+        latency_ms,
+    })
+}
+
+/// Fire one `wafrift_types::Request` through the shared reqwest client.
+/// Returns `(status, blocked, latency_ms)`. `blocked` is the SAME
+/// `is_waf_block` signal the scan baseline uses.
+///
+/// Thin wrapper around [`send_with_envelope`] for call sites that only
+/// need the verdict and don't want to allocate the headers vec.
+pub async fn send(
+    client: &reqwest::Client,
+    req: &Request,
+    timeout_secs: u64,
+) -> Result<(u16, bool, f64), String> {
+    let e = send_with_envelope(client, req, timeout_secs).await?;
+    Ok((e.status, e.blocked, e.latency_ms))
 }
 
 // ─────────────────── B→C→A active boundary-learning loop ───────────────────
@@ -834,11 +861,7 @@ mod tests {
     #[test]
     fn oracle_valid_sql_rejects_unparseable_noise() {
         // The whole point of the oracle gate.
-        assert!(!oracle_valid(
-            "sql",
-            "1 OR 1=1",
-            ")) not sql at all (("
-        ));
+        assert!(!oracle_valid("sql", "1 OR 1=1", ")) not sql at all (("));
     }
 
     // ── json_escape ───────────────────────────────────────────
@@ -890,8 +913,8 @@ mod tests {
             "newline:\nand:tab\t",
         ] {
             let wrapped = format!("\"{}\"", json_escape(input));
-            let parsed: String = serde_json::from_str(&wrapped)
-                .expect("escaped output must be valid JSON string");
+            let parsed: String =
+                serde_json::from_str(&wrapped).expect("escaped output must be valid JSON string");
             assert_eq!(parsed, input, "round-trip mismatch on {input:?}");
         }
     }

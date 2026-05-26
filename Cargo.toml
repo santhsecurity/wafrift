@@ -1,46 +1,54 @@
 [workspace]
 resolver = "2"
 members = [
-    # ── Foundation ──
+    # ── Foundation ── shared types, bogon classifier, technique
+    # enum, verdict shapes. Every other crate depends on this.
     "crates/types",
-    # ── Evasion technique crates ──
-    "crates/encoding",
-    "crates/grammar",
-    "crates/content-type",
-    "crates/smuggling",
-    "crates/fingerprint",
-    # ── Intelligence crates ──
-    "crates/detect",
-    "crates/evolution",
-    "crates/wafmodel",
-    # ── Pipeline ──
-    "crates/strategy",
-    # ── Existing outer crates ──
-    "crates/core",
-    "crates/cli",
-    "crates/proxy",  # May require external dependencies
-    "crates/transport", "crates/oracle",
-    "crates/recon",
-    "crates/genome-registry",
-    "crates/captchaforge-bridge",
-    "crates/graphql",
-    "crates/http3-evasion",
-    "crates/grpc-evasion",
-    # ── Plugin / Tamper API ──
-    "crates/plugin-api",
+
+    # ── Wire-level mutators ── byte / token / frame transforms.
+    "crates/encoding",          # encoders + 21 attack-payload libs
+    "crates/grammar",           # per-class payload grammars
+    "crates/content-type",      # multipart / charset / json variants
+    "crates/smuggling",         # CL.TE / TE.CL / H2 / Kettle / WS
+    "crates/fingerprint",       # TLS JA3/JA4, H2 SETTINGS
+    "crates/http3-evasion",     # QPACK desync, conn migration, 0-RTT
+    "crates/grpc-evasion",      # protobuf opaque-payload framing
+    "crates/graphql",           # introspection + alias-bomb + op-mismatch
+
+    # ── Intelligence ── learn the WAF / evolve / score / model.
+    "crates/detect",            # WAF fingerprint via headers + DNS
+    "crates/evolution",         # MAP-Elites, ast_mcts, coverage-feedback
+    "crates/wafmodel",          # L*, SFA, mine, solve, mlwaf, booster
+
+    # ── Pipeline ── orchestrate the techniques.
+    "crates/strategy",          # host_state, MCTS bridge, drift_window
+    "crates/oracle",            # per-payload-class semantic oracles
+
+    # ── Runtime ── send the bytes, observe the responses.
+    "crates/transport",         # client + tls-impersonate + egress pool
+    "crates/proxy",             # MITM forward proxy + intercept
+    "crates/pool",              # proxy-list rotation (separate from egress)
+    "crates/captchaforge-bridge", # optional captcha-solver bridge
+
+    # ── Frontend ── operator surface.
+    "crates/cli",               # 40+ subcommands
+    "crates/core",              # facade re-exports
+    "crates/recon",             # crt.sh + DNS origin discovery
+    "crates/genome-registry",   # community bypass exchange
+    "crates/plugin-api",        # external TOML + WASM tampers
 ]
 
 [workspace.package]
-version = "0.2.17"
+version = "0.2.21"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/santhsecurity/wafrift"
-description = "Intelligent WAF evasion engine — Content-Type switching, parsing discrepancy exploitation, TLS fingerprint rotation"
+description = "Programmable WAF-evasion engine — encoding × grammar mutation × HTTP smuggling × Content-Type confusion × TLS fingerprint rotation × active-learning WAF decompilation"
 keywords = ["waf", "evasion", "security", "bypass", "firewall"]
 categories = ["network-programming", "web-programming"]
-authors = ["Santh Project <contact@santh.dev>"]
+authors = ["Santh Project <security@santh.dev>"]
 
 [workspace.metadata.santh]
 status = "beta"
@@ -52,6 +60,26 @@ status = "beta"
 [workspace.lints.rust]
 unsafe_code = "warn"
 unused_must_use = "deny"
+
+# Clippy lints the workspace explicitly opts out of. Each entry has
+# a reason — drift the policy by editing this block, not by sprinkling
+# `#[allow]` attributes across the codebase.
+[workspace.lints.clippy]
+# Orchestrator functions (scan::run_scan + raw_runner + a few CLI
+# entry points) thread 8-14 argument values through their phase
+# pipelines because each is an operator-provided CLI knob.
+# Refactoring into a single Args struct costs more documentation
+# than it saves; the wide signatures are pinned to the CLI flag
+# surface deliberately.
+too_many_arguments = "allow"
+# Build-time regression gates (e.g. `MAX_TUNNEL_BYTES_PER_DIRECTION
+# < u64::MAX/1000`, `DELIVERY_ARMS >= 7`) intentionally assert on
+# constants; clippy's `assertions_on_constants` would erase the gate.
+assertions_on_constants = "allow"
+# Doc comments use `///   - sub-bullet` (3-space indent) in several
+# places; the lint wants 2-space which conflicts with rustfmt's
+# wrap behaviour. We already enforce rustfmt — let it win.
+doc_lazy_continuation = "allow"
 
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)
@@ -76,10 +104,8 @@ wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.2.21" }
 wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.2.21" }
 wafrift-plugin-api = { path = "crates/plugin-api", version = "0.2.21" }
 mctrust = "=0.4.0"
-# External dependencies (unavailable in this environment)
-# attackstr = { path = "../../libs/offensive/attackstr" }
-# scanclient = { path = "../../libs/scanner/scanclient" }
-# secfinding = { path = "../../libs/scanner/secfinding" }
+pocgen = { path = "../../libs/offensive/pocgen" }
+
 # Core
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
@@ -121,7 +147,7 @@ tokio-rustls = "0.26"
 # the origin strips every HTTP header — `www.ebay.com → akamaiedge.net`
 # is the canonical example. Resolution happens once per `wafrift detect`
 # probe, in parallel with the HTTP fetch, so the latency cost is hidden.
-hickory-resolver = { version = "0.24", default-features = false, features = ["tokio-runtime", "system-config"] }
+hickory-resolver = { version = "0.26", default-features = false, features = ["tokio", "system-config"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -133,6 +159,7 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 clap_mangen = "0.2"
 urlencoding = "2"
+url = "2"
 regex = "1"
 toml = "0.8"
 ratatui = "0.30"
@@ -166,6 +193,6 @@ webpki-roots = "1.0.6"
 fs4 = "1.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 # WASM sandbox engine for plugin-api external tampers.
-wasmtime = { version = "30", default-features = false, features = ["runtime", "cranelift", "component-model"] }
-# Temporary file helper used in plugin-api tests.
+wasmtime = { version = "30", default-features = false, features = ["runtime", "cranelift"] }
 tempfile = "3"
+lru = "0.18"

@@ -79,10 +79,7 @@ pub const INJECTION_MARKER: &str = "§§";
 /// Returns a human-readable error when the request line is malformed,
 /// the `Host:` header is absent (cannot reconstruct URL), or any
 /// header line is structurally invalid.
-pub fn parse_raw_http_request_with_scheme(
-    text: &str,
-    scheme: &str,
-) -> Result<RawRequest, String> {
+pub fn parse_raw_http_request_with_scheme(text: &str, scheme: &str) -> Result<RawRequest, String> {
     if text.is_empty() {
         return Err("empty request file".to_string());
     }
@@ -218,7 +215,11 @@ impl RawRequest {
         if self.url.contains(INJECTION_MARKER) {
             return true;
         }
-        if self.headers.iter().any(|(_, v)| v.contains(INJECTION_MARKER)) {
+        if self
+            .headers
+            .iter()
+            .any(|(_, v)| v.contains(INJECTION_MARKER))
+        {
             return true;
         }
         find_subseq(&self.body, INJECTION_MARKER.as_bytes()).is_some()
@@ -381,11 +382,8 @@ mod tests {
 
     #[test]
     fn https_scheme_via_explicit_call() {
-        let r = parse_raw_http_request_with_scheme(
-            "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
-            "https",
-        )
-        .unwrap();
+        let r = parse_raw_http_request_with_scheme("GET / HTTP/1.1\r\nHost: x\r\n\r\n", "https")
+            .unwrap();
         assert_eq!(r.url, "https://x/");
     }
 
@@ -471,10 +469,8 @@ mod tests {
 
     #[test]
     fn has_injection_marker_detects_marker_in_header() {
-        let r = parse_raw_http_request(
-            "GET / HTTP/1.1\r\nHost: x\r\nCookie: sess=§§\r\n\r\n",
-        )
-        .unwrap();
+        let r =
+            parse_raw_http_request("GET / HTTP/1.1\r\nHost: x\r\nCookie: sess=§§\r\n\r\n").unwrap();
         assert!(r.has_injection_marker());
     }
 
@@ -634,8 +630,14 @@ mod tests {
         let m = r.with_payload("' OR 1=1--");
         let curl = m.to_curl();
         assert!(curl.contains("-X POST"), "got: {curl}");
-        assert!(curl.contains("'http://target.example/login'"), "got: {curl}");
-        assert!(curl.contains("'Content-Type: application/json'"), "got: {curl}");
+        assert!(
+            curl.contains("'http://target.example/login'"),
+            "got: {curl}"
+        );
+        assert!(
+            curl.contains("'Content-Type: application/json'"),
+            "got: {curl}"
+        );
         // Payload is in the body, single-quote escaped.
         assert!(curl.contains("--data-binary"), "got: {curl}");
         // The apostrophes in the payload were escaped properly.
@@ -668,9 +670,8 @@ mod tests {
         // A body with 100 K `§§` markers.  with_payload must complete
         // without panic or OOM, just with a very large output.
         let markers = "§§".repeat(100_000);
-        let raw = format!(
-            "POST /fuzz HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\n\r\n{markers}"
-        );
+        let raw =
+            format!("POST /fuzz HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\n\r\n{markers}");
         let r = parse_raw_http_request(&raw).expect("parse with 100K markers");
         // Substitute a 1-byte payload — output is 100 K chars.
         let out = r.with_payload("X");
@@ -739,9 +740,7 @@ mod tests {
     fn adversarial_header_with_very_long_value_does_not_panic() {
         // A header value of 256 KB — common in JWT-heavy APIs.
         let long_val = "A".repeat(256 * 1024);
-        let raw = format!(
-            "GET / HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {long_val}\r\n\r\n"
-        );
+        let raw = format!("GET / HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {long_val}\r\n\r\n");
         let r = parse_raw_http_request(&raw).expect("long header value must parse");
         let auth = r
             .headers
@@ -749,7 +748,10 @@ mod tests {
             .find(|(n, _)| n.eq_ignore_ascii_case("Authorization"))
             .map(|(_, v)| v.as_str())
             .unwrap_or("");
-        assert!(auth.starts_with("Bearer A"), "Authorization value preserved");
+        assert!(
+            auth.starts_with("Bearer A"),
+            "Authorization value preserved"
+        );
     }
 
     #[test]

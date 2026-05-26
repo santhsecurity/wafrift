@@ -70,10 +70,26 @@ const BODY_ONLY_MIN_CONFIDENCE: f64 = 0.5;
 /// an inline `(?-i)` flag — preserved verbatim because we only prepend
 /// when the pattern doesn't already declare an outer case flag.
 fn compile_ci_regex(pattern: &str, kind: &str) -> Result<Regex, String> {
-    let has_outer_case_flag = pattern.starts_with("(?i)")
-        || pattern.starts_with("(?-i)")
-        || pattern.starts_with("(?i-")
-        || pattern.starts_with("(?-i-");
+    // Look for an `i` flag (positive or negated) anywhere in the
+    // first `(?FLAGS)` or `(?FLAGS:...)` group, not just at exact
+    // prefix positions. Pre-fix this only matched the four exact
+    // strings `(?i)`, `(?-i)`, `(?i-`, `(?-i-` — a rule author
+    // writing `(?si)` (dotall + case-insensitive), `(?mi)`, or
+    // `(?-si)` (which EXPLICITLY disables `i`) tripped the wrap.
+    // The `(?-si)` case was the worst: the engine prepended `(?i)`
+    // over the author's explicit case-sensitive intent.
+    //
+    // Important: the flag chars are between `(?` and the FIRST
+    // `:` or `)` — not just up to the first `)`. A non-capturing
+    // group like `(?:F5\-TrafficShield)` has no flags; the colon
+    // delimits the "flags" from the pattern body, and anything
+    // after the `:` (even a literal `i`) is regex syntax, not a
+    // flag.
+    let has_outer_case_flag = pattern.starts_with("(?")
+        && pattern[2..]
+            .split(|c: char| c == ':' || c == ')')
+            .next()
+            .is_some_and(|flags| flags.contains('i'));
     let full = if has_outer_case_flag {
         pattern.to_string()
     } else {
@@ -106,11 +122,7 @@ fn strip_outer_flag_group(src: &str) -> &str {
         }
         i += 1;
     }
-    if i < bytes.len() {
-        &src[i + 1..]
-    } else {
-        src
-    }
+    if i < bytes.len() { &src[i + 1..] } else { src }
 }
 
 fn clamped_snippet(s: &str, start: usize, max: usize) -> &str {
@@ -442,9 +454,19 @@ impl RuleEngine {
             for sig in &rule.signatures {
                 if let Some(ref re) = sig.body_regex {
                     if patterns.len() >= MAX_BODY_REGEX_PATTERNS {
+                        // Name the WAF being truncated so the
+                        // operator can see exactly which family
+                        // lost coverage — pre-fix this was a
+                        // bare "some signatures will not match"
+                        // warning with no indication of which.
                         tracing::warn!(
                             limit = MAX_BODY_REGEX_PATTERNS,
-                            "truncating body regex set; some WAF signatures will not match on body text"
+                            waf_truncation_started_at = %name,
+                            "body regex set hit cap; signatures for this WAF \
+                             and every WAF after it in iteration order will \
+                             NOT match on body text. Consider raising \
+                             MAX_BODY_REGEX_PATTERNS or pruning low-weight \
+                             rules."
                         );
                         break;
                     }
@@ -997,6 +1019,35 @@ weight = 0.4
     }
 
     #[test]
+    fn ci_wrapper_respects_multi_letter_flag_groups() {
+        // Pre-fix the prefix-only check missed `(?si)` and friends
+        // — the engine prepended `(?i)` and the resulting
+        // `(?i)(?si)pattern` was redundant but harmless. Worse:
+        // `(?-si)` (explicit case-SENSITIVE + dotall off) got
+        // wrapped too, NEGATING the author's intent.
+        // F58 fix: detect `i` anywhere in the leading flag group.
+
+        // (?si) — both flags on, case-insensitive.
+        let re = compile_ci_regex("(?si)Cloudflare", "header").expect("compile");
+        assert!(re.is_match("CLOUDFLARE"));
+
+        // (?-si) — explicit case-SENSITIVE. Must NOT match
+        // lower-case after the fix.
+        let re = compile_ci_regex("(?-si)Cloudflare", "header").expect("compile");
+        assert!(re.is_match("Cloudflare"));
+        assert!(
+            !re.is_match("cloudflare"),
+            "(?-si) author intent: case-sensitive — must not match lowercase"
+        );
+
+        // (?:non-capturing) with literal `i` in the body must
+        // still get the `(?i)` wrap (the `:` ends the flag group).
+        let re = compile_ci_regex("(?:Imperva)", "header").expect("compile");
+        assert!(re.is_match("IMPERVA"));
+        assert!(re.is_match("imperva"));
+    }
+
+    #[test]
     fn ci_wrapper_compiles_patterns_with_unicode_metaclasses() {
         // Some catalogs use \w which under case-insensitivity still
         // matches digits, underscore, ascii letters.
@@ -1084,7 +1135,10 @@ weight = 0.4
                 }
             }
         }
-        assert!(checked >= 30, "expected many CI-wrapped header rules, got {checked}");
+        assert!(
+            checked >= 30,
+            "expected many CI-wrapped header rules, got {checked}"
+        );
     }
 
     #[test]
@@ -1179,8 +1233,7 @@ weight = 0.4
         let mut missed: Vec<(String, String, String)> = Vec::new();
         for rule in engine.rules.values() {
             for sig in &rule.signatures {
-                let (Some(name), Some(re)) =
-                    (sig.header_name.as_ref(), sig.header_regex.as_ref())
+                let (Some(name), Some(re)) = (sig.header_name.as_ref(), sig.header_regex.as_ref())
                 else {
                     continue;
                 };
@@ -1192,19 +1245,14 @@ weight = 0.4
                 // digits, space, hyphen, period, underscore).
                 if literal.is_empty()
                     || !literal.chars().all(|c| {
-                        c.is_ascii_alphanumeric()
-                            || matches!(c, ' ' | '-' | '_' | '.' | '/')
+                        c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '/')
                     })
                 {
                     continue;
                 }
                 // Capitalize the literal as a server would emit it.
                 let value = literal.to_string();
-                let detected = classifier::detect(
-                    200,
-                    &[(name.clone(), value.clone())],
-                    b"",
-                );
+                let detected = classifier::detect(200, &[(name.clone(), value.clone())], b"");
                 if detected.iter().any(|r| r.name == rule.name) {
                     tested += 1;
                 } else {
@@ -1234,8 +1282,7 @@ weight = 0.4
         let mut sampled = 0;
         for rule in engine.rules.values() {
             for sig in &rule.signatures {
-                let (Some(name), Some(re)) =
-                    (sig.header_name.as_ref(), sig.header_regex.as_ref())
+                let (Some(name), Some(re)) = (sig.header_name.as_ref(), sig.header_regex.as_ref())
                 else {
                     continue;
                 };
@@ -1259,11 +1306,7 @@ weight = 0.4
                     .collect::<Vec<_>>()
                     .join("-");
                 let value: String = literal.to_string();
-                let detected = classifier::detect(
-                    200,
-                    &[(title_name, value)],
-                    b"",
-                );
+                let detected = classifier::detect(200, &[(title_name, value)], b"");
                 if detected.iter().any(|r| r.name == rule.name) {
                     sampled += 1;
                 }
@@ -1435,11 +1478,7 @@ weight = 0.6
         // regex engine being O(n) — which it is, by design).
         use crate::waf_detect::classifier;
         let value = "a".repeat(100 * 1024);
-        let detected = classifier::detect(
-            200,
-            &[("X-Junk".into(), value)],
-            b"",
-        );
+        let detected = classifier::detect(200, &[("X-Junk".into(), value)], b"");
         // Just must not panic / hang.
         let _ = detected;
     }

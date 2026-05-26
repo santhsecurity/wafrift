@@ -1,7 +1,7 @@
 use crate::evolution::crossover::mutation::mutate_with_log;
 use crate::evolution::{Chromosome, GenePool, population::random_chromosome};
 use crate::lineage::Lineage;
-use crate::search::{EvalCandidate, SearchAlgorithm};
+use crate::search::{EvalCandidate, SearchAlgorithm, comparable_fitness, fitness_cmp};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
 use rand::Rng;
 use rand::rngs::StdRng;
@@ -134,7 +134,7 @@ impl SearchAlgorithm for MapElites {
     fn request_evaluations(&mut self, n: usize, rng: &mut StdRng) -> Vec<EvalCandidate> {
         let mut out = Vec::with_capacity(n);
         for _ in 0..n {
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let candidate = self.generate_individual(rng);
             self.in_flight.insert(self.eval_counter, candidate.clone());
             out.push(EvalCandidate {
@@ -150,8 +150,20 @@ impl SearchAlgorithm for MapElites {
             if let Some(mut candidate) = self.in_flight.remove(&id) {
                 candidate.record_verdict(&verdict);
                 let descriptor = FeatureDescriptor::from_chromosome(&candidate);
+                // F144: route through comparable_fitness so a NaN /
+                // ±inf cell never becomes permanently inelastic. Pre-
+                // fix `candidate.fitness > existing.fitness` returned
+                // false for ANY candidate when existing.fitness was
+                // NaN (every comparison with NaN is false) — the cell
+                // was frozen forever. Mapping non-finite to
+                // NEG_INFINITY makes new finite fitness strictly
+                // greater so the poisoned cell gets replaced on the
+                // very next eval.
                 let should_insert = match self.grid.iter().find(|(d, _)| *d == descriptor) {
-                    Some((_, existing)) => candidate.fitness > existing.fitness,
+                    Some((_, existing)) => {
+                        comparable_fitness(candidate.fitness)
+                            > comparable_fitness(existing.fitness)
+                    }
                     None => true,
                 };
                 if should_insert {
@@ -168,7 +180,7 @@ impl SearchAlgorithm for MapElites {
                 }
             }
         }
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn should_terminate(&self, stats: &SearchStats, budget: &Budget) -> bool {
@@ -178,11 +190,15 @@ impl SearchAlgorithm for MapElites {
     }
 
     fn best(&self) -> Option<&Chromosome> {
-        self.grid.iter().map(|(_, c)| c).max_by(|a, b| {
-            a.fitness
-                .partial_cmp(&b.fitness)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        // F144: use fitness_cmp (which routes through comparable_fitness)
+        // so a NaN-fitness cell can never be returned as "best" just
+        // because every partial_cmp against it returned `None` and
+        // got mapped to `Equal`. A finite-fitness cell always wins
+        // against a NaN cell after the mapping.
+        self.grid
+            .iter()
+            .map(|(_, c)| c)
+            .max_by(|a, b| fitness_cmp(a.fitness, b.fitness))
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, EvolutionError> {
@@ -276,6 +292,7 @@ mod tests {
                 latency_ms: 10,
                 confidence: 0.9,
                 triggered_rules: 0,
+                ..Default::default()
             },
         )]);
 
@@ -306,10 +323,65 @@ mod tests {
                 latency_ms: 10,
                 confidence: 0.9,
                 triggered_rules: 0,
+                ..Default::default()
             },
         )]);
 
         assert!(alg.best().unwrap().fitness > 0.5);
+    }
+
+    #[test]
+    fn nan_poisoned_grid_cell_can_still_be_replaced() {
+        // F144 regression: pre-fix `candidate.fitness > existing.fitness`
+        // returned false for ANY candidate when existing.fitness was
+        // NaN (every comparison with NaN is false in IEEE-754), so a
+        // single bad eval poisoned the cell PERMANENTLY — every future
+        // candidate landing in that feature region was rejected and
+        // the search effectively lost that descriptor forever. Post-
+        // fix the comparison routes through comparable_fitness, which
+        // maps NaN to NEG_INFINITY so a finite-fitness candidate
+        // always strictly beats the poisoned cell.
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(7);
+        // Seed the grid with a NaN-fitness chromosome at a known descriptor.
+        let mut poisoned = dummy_chromosome("UrlEncode", "sqli", "json");
+        poisoned.fitness = f64::NAN;
+        alg.initialize(vec![poisoned], &pool, &mut rng);
+        assert_eq!(alg.grid.len(), 1);
+
+        // Fire a candidate with the same descriptor and a finite, low
+        // fitness. Pre-fix this was rejected (NaN > 0 is false ⇒
+        // `candidate.fitness > existing.fitness` is also false).
+        let mut healer = dummy_chromosome("UrlEncode", "sqli", "json");
+        healer.fitness = 0.0; // start at zero; record_verdict will push it up.
+        alg.in_flight.insert(99, healer);
+        alg.submit_evaluations(vec![(
+            99,
+            OracleVerdict {
+                passed: true,
+                status_delta: 0,
+                body_delta: 0,
+                latency_ms: 0,
+                confidence: 1.0,
+                triggered_rules: 0,
+                ..Default::default()
+            },
+        )]);
+
+        // The grid cell at that descriptor should now hold the
+        // finite-fitness chromosome, not the NaN one.
+        let cell_fitness = alg
+            .grid
+            .iter()
+            .find(|(d, _)| d.encoding == "UrlEncode")
+            .map(|(_, c)| c.fitness)
+            .expect("descriptor must still exist");
+        assert!(
+            cell_fitness.is_finite(),
+            "NaN cell must be evictable: got {cell_fitness}"
+        );
+        assert!(cell_fitness > 0.0, "healer must have replaced poisoned cell");
     }
 
     #[test]
@@ -352,5 +424,80 @@ mod tests {
     fn best_returns_none_for_empty_grid() {
         let alg = MapElites::new();
         assert!(alg.best().is_none());
+    }
+
+    // ── Saturating-arithmetic regression tests ────────────────────────────────
+
+    /// `eval_counter` must saturate at `u64::MAX` rather than wrapping to 0.
+    /// A wrap-around would collide with existing in-flight IDs and silently
+    /// drop grid updates.
+    #[test]
+    fn eval_counter_saturates_at_u64_max() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(99);
+        alg.initialize(
+            vec![dummy_chromosome("UrlEncode", "sqli", "json")],
+            &pool,
+            &mut rng,
+        );
+        alg.eval_counter = u64::MAX;
+        // request_evaluations must use saturating_add — counter must stay at MAX.
+        let _ = alg.request_evaluations(1, &mut rng);
+        assert_eq!(
+            alg.eval_counter,
+            u64::MAX,
+            "eval_counter must saturate at u64::MAX, not wrap to 0"
+        );
+    }
+
+    /// `generation` must saturate at `u32::MAX` rather than wrapping.
+    #[test]
+    fn generation_saturates_at_u32_max() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(100);
+        alg.initialize(vec![], &pool, &mut rng);
+        alg.generation = u32::MAX;
+        // submit_evaluations increments generation.
+        alg.submit_evaluations(vec![]);
+        assert_eq!(
+            alg.generation,
+            u32::MAX,
+            "generation must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    /// Across many `request_evaluations` + `submit_evaluations` cycles,
+    /// the `eval_counter` must always increment monotonically and IDs must
+    /// never collide.
+    #[test]
+    fn eval_counter_is_strictly_increasing() {
+        let mut alg = MapElites::new();
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(101);
+        alg.initialize(
+            vec![dummy_chromosome("CaseAlternation", "xss", "json")],
+            &pool,
+            &mut rng,
+        );
+        let mut all_ids: Vec<u64> = Vec::new();
+        for _ in 0..5 {
+            let batch = alg.request_evaluations(3, &mut rng);
+            for c in &batch {
+                all_ids.push(c.id);
+            }
+            let verdicts: Vec<_> = batch
+                .into_iter()
+                .map(|c| (c.id, OracleVerdict::from_bool(false)))
+                .collect();
+            alg.submit_evaluations(verdicts);
+        }
+        let unique: std::collections::HashSet<_> = all_ids.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            all_ids.len(),
+            "all eval_counter-derived IDs must be unique across generations"
+        );
     }
 }

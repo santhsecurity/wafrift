@@ -1,5 +1,6 @@
 //! Session handling tests — cookie jars, CSRF extraction, injection.
 
+use authjar::{AuthSession, SessionSettings, SessionStore};
 use wafrift_transport::session::{SessionError, extract_csrf, inject_csrf, load_jar, save_jar};
 use wafrift_types::Request;
 use wafrift_types::session::CsrfInjectionLocation;
@@ -59,7 +60,7 @@ fn extract_csrf_first_match_only() {
 #[test]
 fn inject_csrf_header() {
     let mut req = Request::get("https://example.com/api");
-    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Header);
+    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Header).unwrap();
     assert!(
         req.headers
             .iter()
@@ -70,14 +71,14 @@ fn inject_csrf_header() {
 #[test]
 fn inject_csrf_query_no_existing_params() {
     let mut req = Request::get("https://example.com/api");
-    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Query);
+    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Query).unwrap();
     assert!(req.url.contains("?csrf_token=tok123"));
 }
 
 #[test]
 fn inject_csrf_query_with_existing_params() {
     let mut req = Request::get("https://example.com/api?foo=bar");
-    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Query);
+    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Query).unwrap();
     assert!(req.url.contains("foo=bar"));
     assert!(req.url.contains("&csrf_token=tok123"));
 }
@@ -85,14 +86,18 @@ fn inject_csrf_query_with_existing_params() {
 #[test]
 fn inject_csrf_query_url_encoding() {
     let mut req = Request::get("https://example.com/api");
-    inject_csrf(&mut req, "tok=123", CsrfInjectionLocation::Query);
+    inject_csrf(&mut req, "tok=123", CsrfInjectionLocation::Query).unwrap();
     assert!(req.url.contains("csrf_token=tok%3D123"));
 }
 
 #[test]
 fn inject_csrf_body_empty() {
     let mut req = Request::post("https://example.com/api", Vec::new());
-    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body);
+    req.headers.push((
+        "Content-Type".into(),
+        "application/x-www-form-urlencoded".into(),
+    ));
+    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap();
     let body = String::from_utf8(req.body.unwrap()).unwrap();
     assert_eq!(body, "csrf_token=tok123");
 }
@@ -101,7 +106,11 @@ fn inject_csrf_body_empty() {
 fn inject_csrf_body_existing() {
     let mut req = Request::post("https://example.com/api", Vec::new());
     req.body = Some(b"username=admin".to_vec());
-    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body);
+    req.headers.push((
+        "Content-Type".into(),
+        "application/x-www-form-urlencoded".into(),
+    ));
+    inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap();
     let body = String::from_utf8(req.body.unwrap()).unwrap();
     assert_eq!(body, "username=admin&csrf_token=tok123");
 }
@@ -109,9 +118,23 @@ fn inject_csrf_body_existing() {
 #[test]
 fn inject_csrf_body_url_encoding() {
     let mut req = Request::post("https://example.com/api", Vec::new());
-    inject_csrf(&mut req, "tok&123", CsrfInjectionLocation::Body);
+    req.headers.push((
+        "Content-Type".into(),
+        "application/x-www-form-urlencoded".into(),
+    ));
+    inject_csrf(&mut req, "tok&123", CsrfInjectionLocation::Body).unwrap();
     let body = String::from_utf8(req.body.unwrap()).unwrap();
     assert!(body.contains("csrf_token=tok%26123"));
+}
+
+#[test]
+fn inject_csrf_body_rejects_json() {
+    let mut req = Request::post("https://example.com/api", Vec::new());
+    req.body = Some(b"{\"key\":\"val\"}".to_vec());
+    req.headers
+        .push(("Content-Type".into(), "application/json".into()));
+    let err = inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
+    assert!(matches!(err, SessionError::CsrfInjectIncompatibleBody { .. }));
 }
 
 // ── Cookie jar persistence ─────────────────────────────────────────────────
@@ -119,24 +142,27 @@ fn inject_csrf_body_url_encoding() {
 #[test]
 fn load_jar_nonexistent_creates_empty() {
     let path = std::path::Path::new("/tmp/wafrift_nonexistent_cookie_jar_12345.txt");
-    let jar = load_jar(path).unwrap();
-    // Empty jar loaded successfully (stub behavior)
-    let _ = jar;
+    let store = load_jar(path).unwrap();
+    assert!(store.is_empty());
 }
 
 #[test]
 fn save_and_load_jar_roundtrip() {
-    let tmp = std::env::temp_dir().join("wafrift_cookie_jar_test.txt");
+    let tmp = std::env::temp_dir().join("wafrift_cookie_jar_test.json");
     let _ = std::fs::remove_file(&tmp);
 
-    let jar = reqwest::cookie::Jar::default();
-    let url = reqwest::Url::parse("https://example.com/").unwrap();
-    jar.add_cookie_str("session=abc123; Path=/; Secure", &url);
+    let mut store = SessionStore::new();
+    let mut session = AuthSession::new("default");
+    session.add_cookie("session", "abc123", "example.com");
+    store.add(session);
 
-    save_jar(&jar, &tmp).unwrap();
-    let _loaded = load_jar(&tmp).unwrap();
+    save_jar(&store, &tmp).unwrap();
+    let loaded = load_jar(&tmp).unwrap();
 
-    // Jar loaded successfully (persistence is a stub; this verifies no panic)
+    assert_eq!(loaded.len(), 1);
+    let session = loaded.get("default").unwrap();
+    let header = session.cookie_header("example.com", &SessionSettings::default());
+    assert!(header.contains("session=abc123"));
     assert!(tmp.exists());
 
     let _ = std::fs::remove_file(&tmp);
@@ -144,11 +170,12 @@ fn save_and_load_jar_roundtrip() {
 
 #[test]
 fn save_jar_creates_file() {
-    let tmp = std::env::temp_dir().join("wafrift_cookie_jar_create_test.txt");
+    let tmp = std::env::temp_dir().join("wafrift_cookie_jar_create_test.json");
     let _ = std::fs::remove_file(&tmp);
 
-    let jar = reqwest::cookie::Jar::default();
-    save_jar(&jar, &tmp).unwrap();
+    let mut store = SessionStore::new();
+    store.add(AuthSession::new("default"));
+    save_jar(&store, &tmp).unwrap();
     assert!(tmp.exists());
 
     let _ = std::fs::remove_file(&tmp);

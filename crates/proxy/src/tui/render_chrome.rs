@@ -62,7 +62,7 @@ pub fn draw_header(f: &mut Frame, area: Rect, cfg: &DashboardConfig, state: &Sta
     let p = Paragraph::new(Line::from(spans)).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
+            .border_style(crate::tui::style::DIM),
     );
     f.render_widget(p, area);
 }
@@ -71,7 +71,7 @@ pub fn draw_tabs(f: &mut Frame, area: Rect, state: &State) {
     let mut spans = vec![Span::raw("  ")];
     for (i, t) in Tab::ORDER.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(" │ ", crate::tui::style::DIM));
         }
         let style = if state.tab == *t {
             Style::default()
@@ -163,7 +163,7 @@ pub fn draw_footer(f: &mut Frame, area: Rect, state: &State) {
         Span::raw("    "),
         Span::styled(
             format!("({} reqs · {} retries)", state.total, state.attempts_sum),
-            Style::default().fg(Color::DarkGray),
+            crate::tui::style::DIM,
         ),
     ]);
 
@@ -179,11 +179,11 @@ fn title_style() -> Style {
 }
 
 fn meta_label(s: &str) -> Span<'static> {
-    Span::styled(format!("{s} "), Style::default().fg(Color::DarkGray))
+    Span::styled(format!("{s} "), crate::tui::style::DIM)
 }
 
 fn sep() -> Span<'static> {
-    Span::styled(" · ", Style::default().fg(Color::DarkGray))
+    Span::styled(" · ", crate::tui::style::DIM)
 }
 
 fn follow_chip(state: &State) -> Span<'static> {

@@ -1,7 +1,7 @@
 use crate::evolution::crossover::mutation::mutate_with_log;
 use crate::evolution::{Chromosome, GenePool, population::random_chromosome};
 use crate::lineage::Lineage;
-use crate::search::{EvalCandidate, SearchAlgorithm};
+use crate::search::{EvalCandidate, SearchAlgorithm, fitness_cmp};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
 use rand::Rng;
 use rand::rngs::StdRng;
@@ -92,7 +92,7 @@ impl SearchAlgorithm for NoveltySearch {
     fn request_evaluations(&mut self, n: usize, rng: &mut StdRng) -> Vec<EvalCandidate> {
         let mut out = Vec::with_capacity(n);
         for _ in 0..n {
-            self.eval_counter += 1;
+            self.eval_counter = self.eval_counter.saturating_add(1);
             let candidate = self.generate_individual(rng);
             self.in_flight.insert(self.eval_counter, candidate.clone());
             out.push(EvalCandidate {
@@ -150,7 +150,7 @@ impl SearchAlgorithm for NoveltySearch {
             self.population = scored.into_iter().map(|(_, c)| c).collect();
         }
 
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
     }
 
     fn should_terminate(&self, stats: &SearchStats, budget: &Budget) -> bool {
@@ -160,14 +160,15 @@ impl SearchAlgorithm for NoveltySearch {
     }
 
     fn best(&self) -> Option<&Chromosome> {
+        // F144 sibling: route through fitness_cmp so a NaN-fitness
+        // chromosome can never beat a finite one. Bare partial_cmp
+        // with `.unwrap_or(Equal)` collapsed every NaN comparison
+        // into Equal, letting a poisoned chromosome become "best"
+        // by simple iteration order.
         self.population
             .iter()
             .chain(self.archive.iter())
-            .max_by(|a, b| {
-                a.fitness
-                    .partial_cmp(&b.fitness)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|a, b| fitness_cmp(a.fitness, b.fitness))
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, EvolutionError> {
@@ -291,6 +292,7 @@ mod tests {
                     latency_ms: 10,
                     confidence: 0.9,
                     triggered_rules: 0,
+                    ..Default::default()
                 },
             ),
             (
@@ -302,6 +304,7 @@ mod tests {
                     latency_ms: 10,
                     confidence: 0.1,
                     triggered_rules: 1,
+                    ..Default::default()
                 },
             ),
         ]);
@@ -331,6 +334,7 @@ mod tests {
                         latency_ms: 10,
                         confidence: 0.9,
                         triggered_rules: 0,
+                        ..Default::default()
                     },
                 )
             })
@@ -405,5 +409,66 @@ mod tests {
         assert_eq!(super::levenshtein_distance("", ""), 0);
         assert_eq!(super::levenshtein_distance("a", ""), 1);
         assert_eq!(super::levenshtein_distance("", "b"), 1);
+    }
+
+    // ── Saturating-arithmetic regression tests ────────────────────────────────
+
+    /// `eval_counter` must saturate at `u64::MAX` instead of wrapping to 0.
+    #[test]
+    fn eval_counter_saturates_at_u64_max() {
+        let mut alg = NoveltySearch::new(5, 0.0);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(50);
+        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+        alg.eval_counter = u64::MAX;
+        let _ = alg.request_evaluations(1, &mut rng);
+        assert_eq!(
+            alg.eval_counter,
+            u64::MAX,
+            "eval_counter must saturate at u64::MAX, not wrap to 0"
+        );
+    }
+
+    /// `generation` must saturate at `u32::MAX` instead of wrapping to 0.
+    #[test]
+    fn generation_saturates_at_u32_max() {
+        let mut alg = NoveltySearch::new(5, 0.0);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(51);
+        alg.initialize(vec![], &pool, &mut rng);
+        alg.generation = u32::MAX;
+        alg.submit_evaluations(vec![]);
+        assert_eq!(
+            alg.generation,
+            u32::MAX,
+            "generation must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    /// IDs emitted by `request_evaluations` must never collide across rounds.
+    #[test]
+    fn eval_counter_ids_are_unique_across_generations() {
+        let mut alg = NoveltySearch::new(5, 0.0);
+        let pool = GenePool::default_wafrift();
+        let mut rng = StdRng::seed_from_u64(52);
+        alg.initialize(
+            vec![dummy_chromosome("CaseAlternation", "xss", "form")],
+            &pool,
+            &mut rng,
+        );
+        let mut ids: Vec<u64> = Vec::new();
+        for _ in 0..8 {
+            let batch = alg.request_evaluations(3, &mut rng);
+            for c in &batch {
+                ids.push(c.id);
+            }
+            let verdicts: Vec<_> = batch
+                .into_iter()
+                .map(|c| (c.id, OracleVerdict::from_bool(false)))
+                .collect();
+            alg.submit_evaluations(verdicts);
+        }
+        let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+        assert_eq!(unique.len(), ids.len(), "eval IDs must never collide");
     }
 }

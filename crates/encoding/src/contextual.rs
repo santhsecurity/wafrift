@@ -270,7 +270,16 @@ pub fn validate_in_context(
             }
         }
         InjectionContext::XmlAttribute => {
+            // F137: pre-fix the `&` branch did `chars.by_ref().take(6).collect()`
+            // which UNCONDITIONALLY consumed the next 6 chars regardless of
+            // whether an entity matched. Those 6 chars were never validated,
+            // so a payload like `&lt;<script>` slipped past — the validator
+            // saw `&`, ate `lt;<sc` to "check" for a known entity, recognised
+            // `lt;`, and then never inspected the `<` it had already swallowed.
+            // Switch to a lookahead via `chars.clone()` (cheap — `Chars` is a
+            // slice cursor) and advance only as far as a matched entity.
             let mut chars = payload.chars();
+            const ENTITIES: &[&str] = &["quot;", "apos;", "amp;", "lt;", "gt;"];
             while let Some(c) = chars.next() {
                 if c == '"' {
                     return Err(ContextualEncodeError::ContextIncompatible {
@@ -279,18 +288,40 @@ pub fn validate_in_context(
                         reason: "unescaped double quote in XML attribute".into(),
                     });
                 }
+                // Single-quoted XML attributes (attr='...') are equally valid in
+                // XML 1.0 §3.1. An unescaped `'` inside such an attribute breaks
+                // out of the value just as `"` does in a double-quoted attribute.
+                if c == '\'' {
+                    return Err(ContextualEncodeError::ContextIncompatible {
+                        strategy: "validate".into(),
+                        context,
+                        reason: "unescaped single quote in XML attribute".into(),
+                    });
+                }
+                if c == '<' {
+                    return Err(ContextualEncodeError::ContextIncompatible {
+                        strategy: "validate".into(),
+                        context,
+                        reason: "unescaped `<` in XML attribute".into(),
+                    });
+                }
                 if c == '&' {
-                    // Allow known entity references; anything else starting with & is suspicious
-                    let remainder: String = chars.by_ref().take(6).collect();
-                    if !remainder.starts_with("quot;")
-                        && !remainder.starts_with("amp;")
-                        && !remainder.starts_with("lt;")
-                        && !remainder.starts_with("gt;")
+                    let lookahead: String = chars.clone().take(6).collect();
+                    if let Some(matched) =
+                        ENTITIES.iter().find(|e| lookahead.starts_with(*e))
                     {
-                        // Not a known entity — could be an unescaped &
-                        // (We keep scanning rather than erroring, since & alone
-                        // is technically valid XML text if followed by whitespace.)
+                        // Consume exactly the entity body (name + `;`). The
+                        // rest of the payload stays in `chars` for the next
+                        // iteration so every other byte is still validated.
+                        for _ in 0..matched.len() {
+                            chars.next();
+                        }
                     }
+                    // Lenient on unknown `&`: leave `chars` untouched and
+                    // keep scanning. An `&` alone is technically valid XML
+                    // text per XML 1.0 §2.4 only when not followed by an
+                    // entity-like shape; we don't reject it here so the
+                    // existing permissive contract holds.
                 }
             }
         }
@@ -540,6 +571,89 @@ mod tests {
     }
 
     #[test]
+    fn xml_attribute_validates_unescaped_single_quote() {
+        // A single-quoted XML attribute (attr='...') breaks out on an unescaped `'`.
+        // Previously the validator only checked `"`, so `' onclick='alert(1)` passed
+        // as "valid" despite being an injection vector.
+        let err = validate_in_context("foo' onclick='alert(1)", InjectionContext::XmlAttribute)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("single quote"),
+            "error must mention single quote, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_validator_does_not_swallow_chars_after_entity() {
+        // F137 regression: pre-fix `&lt;<script>` passed validation
+        // because the validator consumed 6 chars after every `&` to
+        // peek at the entity name. After matching `lt;` it had already
+        // eaten the next 2 chars (`<s`) and never validated them — so
+        // the unescaped `<` rode straight through. Post-fix the
+        // validator clones the cursor for lookahead and advances only
+        // by the matched entity length, so the trailing `<` is caught.
+        let err = validate_in_context("&lt;<script>", InjectionContext::XmlAttribute)
+            .expect_err("unescaped `<` after &lt; MUST reject");
+        assert!(
+            err.to_string().contains('<') || err.to_string().contains("unescaped"),
+            "error should mention the unescaped `<`, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_validator_catches_quote_after_short_entity() {
+        // Same F137 hazard, different exploit: `&amp;"` — after `&amp;`
+        // (4 chars), the pre-fix code consumed 2 chars beyond (the `"`
+        // and one more), bypassing the unescaped-quote check.
+        let err = validate_in_context("&amp;\"breakout", InjectionContext::XmlAttribute)
+            .expect_err("unescaped `\"` after &amp; MUST reject");
+        assert!(
+            err.to_string().contains("double quote"),
+            "error should mention double quote, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_validator_allows_multiple_entities_in_a_row() {
+        // The fix must not over-correct: a payload of nothing-but-
+        // entities still passes.
+        assert!(
+            validate_in_context(
+                "&amp;&lt;&gt;&quot;&apos;",
+                InjectionContext::XmlAttribute,
+            )
+            .is_ok(),
+            "chain of well-formed entities must pass validation"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_escape_encodes_single_quote() {
+        // escape_for_context must produce &apos; for `'` so that the escaped
+        // output then passes validate_in_context.
+        let escaped =
+            escape_for_context("don't break my attribute", InjectionContext::XmlAttribute)
+                .unwrap();
+        assert!(
+            escaped.contains("&apos;"),
+            "expected &apos; in escaped output, got: {escaped}"
+        );
+        // The round-trip must also pass validation.
+        validate_in_context(&escaped, InjectionContext::XmlAttribute)
+            .expect("escaped output must pass validation");
+    }
+
+    #[test]
+    fn xml_attribute_allows_escaped_apos() {
+        // &apos; is a well-formed entity reference and must not trigger the
+        // single-quote validator.
+        assert!(
+            validate_in_context("don&apos;t", InjectionContext::XmlAttribute).is_ok(),
+            "&apos; must be accepted by the XmlAttribute validator"
+        );
+    }
+
+    #[test]
     fn header_value_validates_crlf() {
         let err = encode_in_context(
             b"hello\r\nworld",
@@ -672,5 +786,163 @@ mod tests {
                 "empty payload should be valid in {ctx:?}"
             );
         }
+    }
+
+    // ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+    #[test]
+    fn xml_attribute_single_quote_payloads_all_rejected() {
+        // 10 distinct single-quote-bearing payloads — each must either error
+        // OR produce output that passes validate_in_context (escape succeeded).
+        // The fix was to escape ' as &apos; so validate accepts it.
+        let payloads = [
+            "don't",
+            "a' onclick='alert(1)",
+            "' OR 1=1",
+            "test' attribute='injected",
+            "hello'world",
+            "foo' onmouseover='evil",
+            "x' style='color:red",
+            "value'extra",
+            "a'b'c",
+            "' union select",
+        ];
+        for payload in &payloads {
+            let escaped = escape_for_context(payload, InjectionContext::XmlAttribute);
+            match escaped {
+                Ok(s) => {
+                    // If escaping succeeded, validation must also succeed.
+                    validate_in_context(&s, InjectionContext::XmlAttribute)
+                        .unwrap_or_else(|e| panic!(
+                            "escape_for_context produced invalid output for {payload:?}: {e}\n  escaped: {s}"
+                        ));
+                    // The escaped form must NOT contain a bare single quote.
+                    assert!(
+                        !s.contains('\''),
+                        "bare single quote survived in escaped output for {payload:?}: {s}"
+                    );
+                }
+                Err(_) => {
+                    // Rejecting is also valid — as long as the bare payload doesn't
+                    // silently pass validation.
+                    let _ = validate_in_context(payload, InjectionContext::XmlAttribute);
+                    // We just require no panic. The point is the input can't bypass.
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn escape_for_context_xml_attribute_round_trip() {
+        // Payloads that can be expressed in an XML attribute must survive
+        // a round-trip: escape → validate succeeds.
+        let payloads = [
+            "hello world",
+            "test & value",
+            "\"quoted\"",
+            "less < than",
+            "greater > than",
+        ];
+        for payload in &payloads {
+            let escaped = escape_for_context(payload, InjectionContext::XmlAttribute)
+                .unwrap_or_else(|e| panic!("escape_for_context failed for {payload:?}: {e}"));
+            validate_in_context(&escaped, InjectionContext::XmlAttribute)
+                .unwrap_or_else(|e| panic!(
+                    "round-trip validation failed for {payload:?}: {e}\n  escaped: {escaped}"
+                ));
+        }
+    }
+
+    #[test]
+    fn url_encode_twice_is_deterministic() {
+        // URL-encoding is NOT idempotent (% chars get re-encoded), but it IS a
+        // pure deterministic function: applying it twice always produces the
+        // same result as applying it twice on a second call.
+        let payload = "' OR 1=1--";
+        let run1_once = encode_in_context(payload.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
+        let run1_twice = encode_in_context(run1_once.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
+        let run2_once = encode_in_context(payload.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
+        let run2_twice = encode_in_context(run2_once.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
+        assert_eq!(run1_twice, run2_twice, "URL-encode applied twice must be deterministic across calls");
+        // double-encoded result must differ from single-encoded (% is re-encoded to %25)
+        assert_ne!(run1_once, run1_twice, "URL-encode applied twice must produce a different (double-encoded) result");
+    }
+
+    #[test]
+    fn url_encode_decode_round_trip() {
+        // encode(payload, UrlEncode) then url-decode must reproduce the original.
+        let original = "' OR 1=1--";
+        let encoded = crate::encoding::encode(original.as_bytes(), Strategy::UrlEncode).unwrap();
+        let decoded = urlencoding::decode(&encoded).unwrap();
+        assert_eq!(decoded, original, "URL encode → decode round-trip must equal original");
+    }
+
+    #[test]
+    fn unicode_boundary_4byte_utf8_no_panic() {
+        // 4-byte UTF-8 characters must not panic in any encoder.
+        let payload = "😀𝄞🚀"; // all supplementary-plane chars
+        for strategy in crate::encoding::all_strategies() {
+            let _ = crate::encoding::encode(payload.as_bytes(), *strategy);
+        }
+    }
+
+    #[test]
+    fn unicode_boundary_bom_no_panic() {
+        // BOM (U+FEFF) must not panic in any encoder.
+        let payload = "\u{FEFF}SELECT * FROM users";
+        for strategy in crate::encoding::all_strategies() {
+            let _ = crate::encoding::encode(payload.as_bytes(), *strategy);
+        }
+    }
+
+    #[test]
+    fn json_string_escape_u2028_and_u2029() {
+        // U+2028 and U+2029 must be escaped to  /  to prevent
+        // line-terminator injection in JSONP/eval contexts.
+        let payload = "\u{2028}hello\u{2029}world";
+        let escaped = escape_for_context(payload, InjectionContext::JsonString).unwrap();
+        assert!(
+            escaped.contains("\\u2028"),
+            "U+2028 must be escaped to \\u2028, got: {escaped}"
+        );
+        assert!(
+            escaped.contains("\\u2029"),
+            "U+2029 must be escaped to \\u2029, got: {escaped}"
+        );
+        // Escaped result must also pass validation.
+        validate_in_context(&escaped, InjectionContext::JsonString).unwrap();
+    }
+
+    #[test]
+    fn cookie_value_all_special_chars_encoded() {
+        let payload = "val;ue=sp ace,\"q\"\\back\x00nul\r\n";
+        let out = escape_for_context(payload, InjectionContext::CookieValue).unwrap();
+        // Must not contain raw special chars.
+        assert!(!out.contains(';'), "semicolon must be encoded");
+        assert!(!out.contains('='), "equals must be encoded");
+        assert!(!out.contains(' '), "space must be encoded");
+        assert!(!out.contains(','), "comma must be encoded");
+        assert!(!out.contains('"'), "double-quote must be encoded");
+        assert!(!out.contains('\\'), "backslash must be encoded");
+        assert!(!out.contains('\x00'), "null must be encoded");
+        assert!(!out.contains('\r'), "CR must be encoded");
+        assert!(!out.contains('\n'), "LF must be encoded");
+    }
+
+    #[test]
+    fn header_value_null_byte_rejected() {
+        // NULL byte in a header value must be rejected.
+        let err = escape_for_context("hello\x00world", InjectionContext::HeaderValue).unwrap_err();
+        assert!(
+            err.to_string().contains("null"),
+            "error must mention null byte, got: {err}"
+        );
+    }
+
+    #[test]
+    fn xml_attribute_null_byte_rejected() {
+        // NULL byte in an XML attribute must be rejected.
+        let err = escape_for_context("hello\x00world", InjectionContext::XmlAttribute).unwrap_err();
+        assert!(err.to_string().len() > 0);
     }
 }

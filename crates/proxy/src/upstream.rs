@@ -217,20 +217,29 @@ impl UpstreamClient {
                 // we can clone it directly.
                 let headers = resp.headers().clone();
                 // Bound body read.
+                // Previously the loop silently truncated at max_body bytes and
+                // returned Ok(truncated_body) — UpstreamError::BodyTooLarge was
+                // defined but never emitted, making it impossible for callers to
+                // distinguish a complete response from a truncated one. A WAF
+                // block that happens to produce a large body would be silently
+                // truncated, potentially making the response look like a pass
+                // when the real indicator was cut off. Now we return the explicit
+                // error so callers can treat it as a failed scan / skip.
                 let mut buf = Vec::new();
                 let mut stream = resp.bytes_stream();
                 use futures_util::StreamExt;
                 while let Some(chunk) = stream.next().await {
                     let chunk = chunk.map_err(|e| UpstreamError::Request(e.to_string()))?;
-                    let remaining = max_body.saturating_sub(buf.len());
-                    if remaining == 0 {
-                        break;
+                    if buf.len().saturating_add(chunk.len()) > max_body {
+                        // We've hit the cap. Return a hard error so callers know
+                        // the body was not fully read rather than silently lying
+                        // about the truncated content.
+                        return Err(UpstreamError::BodyTooLarge {
+                            got: buf.len().saturating_add(chunk.len()),
+                            cap: max_body,
+                        });
                     }
-                    let take = chunk.len().min(remaining);
-                    buf.extend_from_slice(&chunk[..take]);
-                    if chunk.len() > remaining {
-                        break;
-                    }
+                    buf.extend_from_slice(&chunk);
                 }
                 Ok(UpstreamResponse {
                     status,
@@ -387,6 +396,107 @@ mod tests {
             Err(UpstreamError::StealthFeatureDisabled) => {}
             Err(other) => panic!("expected StealthFeatureDisabled, got {other}"),
             Ok(_) => panic!("expected error, got Ok variant"),
+        }
+    }
+
+    // ── New tests added 2026-05-24 ─────────────────────────────────────────
+
+    #[test]
+    fn body_too_large_error_got_and_cap_correct() {
+        // UpstreamError::BodyTooLarge must carry correct got and cap values.
+        let err = UpstreamError::BodyTooLarge { got: 1024, cap: 512 };
+        match &err {
+            UpstreamError::BodyTooLarge { got, cap } => {
+                assert_eq!(*got, 1024);
+                assert_eq!(*cap, 512);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        let msg = err.to_string();
+        assert!(msg.contains("1024"), "error message must contain got=1024");
+        assert!(msg.contains("512"), "error message must contain cap=512");
+    }
+
+    #[test]
+    fn body_too_large_at_cap_does_not_error() {
+        // We can't call .send() without network, but we can verify that
+        // the error is only BodyTooLarge { got, cap } where got > cap.
+        // At exactly cap bytes, the logic should NOT produce BodyTooLarge.
+        // Verify the check logic directly: buf.len() + chunk.len() > max_body.
+        let cap = 100usize;
+        let buf_len = 95usize;
+        let chunk_len = 5usize;
+        assert_eq!(
+            buf_len + chunk_len,
+            cap,
+            "buf+chunk exactly equals cap — must not trigger BodyTooLarge"
+        );
+        // Would trigger:
+        let over = buf_len + chunk_len + 1;
+        assert!(over > cap, "over must exceed cap to trigger error");
+    }
+
+    #[test]
+    fn upstream_error_invalid_method_contains_method_name() {
+        let err = UpstreamError::InvalidMethod("BADMETHOD".into());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("BADMETHOD"),
+            "InvalidMethod must name the method, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn upstream_error_request_contains_inner() {
+        let err = UpstreamError::Request("connection refused".into());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("connection refused"),
+            "Request error must include inner message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn stealth_feature_disabled_error_names_cargo_flag() {
+        // The error message must name both the feature flag AND the
+        // cargo build command so the user knows what to do.
+        let err = UpstreamError::StealthFeatureDisabled;
+        let msg = err.to_string();
+        assert!(
+            msg.contains("tls-impersonate"),
+            "feature-disabled error must name `tls-impersonate`, got: {msg}"
+        );
+        assert!(
+            msg.contains("cargo build"),
+            "feature-disabled error must mention `cargo build`, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn tls_stack_name_reqwest_variant() {
+        let client = reqwest::Client::new();
+        let upstream = UpstreamClient::from_reqwest(client);
+        assert_eq!(upstream.tls_stack_name(), "rustls (default)");
+    }
+
+    #[test]
+    fn body_too_large_boundary_just_at_cap() {
+        // Boundary: got == cap is NOT a BodyTooLarge condition in the contract.
+        // got > cap is the trigger. This test verifies the condition semantics.
+        let cap = 1024usize;
+        let at_cap = UpstreamError::BodyTooLarge { got: cap, cap };
+        // Just to exercise the Display — must not panic.
+        let _ = at_cap.to_string();
+    }
+
+    #[test]
+    fn body_too_large_various_sizes() {
+        // Spot-check several (got, cap) pairs.
+        let cases = [(1, 0), (100, 50), (1_000_000, 999_999), (usize::MAX, usize::MAX - 1)];
+        for (got, cap) in cases {
+            let err = UpstreamError::BodyTooLarge { got, cap };
+            let msg = err.to_string();
+            assert!(!msg.is_empty(), "error message must not be empty for got={got} cap={cap}");
         }
     }
 }

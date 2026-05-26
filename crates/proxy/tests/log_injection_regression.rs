@@ -19,7 +19,7 @@
 //! sanitisation is applied before the log call.
 
 mod common;
-use common::{pick_free_port, start_proxy_and_wait, stop_proxy};
+use common::pick_free_port;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -58,7 +58,10 @@ async fn mitm_host_header_newline_is_stripped_from_logs() {
     // Wait for the proxy to be ready.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        if TcpStream::connect(format!("127.0.0.1:{proxy_port}")).await.is_ok() {
+        if TcpStream::connect(format!("127.0.0.1:{proxy_port}"))
+            .await
+            .is_ok()
+        {
             break;
         }
         if std::time::Instant::now() >= deadline {
@@ -71,24 +74,23 @@ async fn mitm_host_header_newline_is_stripped_from_logs() {
     // The injected payload: `Host: evil.com\r\nFAKE_LOG_ENTRY: injected`
     // After the Host line, the CRLF + FAKE_LOG_ENTRY looks like another
     // HTTP header — and would appear as a separate log line when logged raw.
-    let connect_request = format!(
-        "CONNECT evil.com:443 HTTP/1.1\r\n\
+    let connect_request = "CONNECT evil.com:443 HTTP/1.1\r\n\
          Host: evil.com\nFAKE_LOG_ENTRY\r\n\
          \r\n"
-    );
+        .to_string();
 
     let mut stream = TcpStream::connect(format!("127.0.0.1:{proxy_port}"))
         .await
         .expect("connect to proxy");
-    stream.write_all(connect_request.as_bytes()).await.expect("write CONNECT");
+    stream
+        .write_all(connect_request.as_bytes())
+        .await
+        .expect("write CONNECT");
 
     // Read the proxy's response (any response — we care about the log, not the HTTP reply).
     let mut buf = vec![0u8; 1024];
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        stream.read(&mut buf),
-    )
-    .await;
+    let _ =
+        tokio::time::timeout(std::time::Duration::from_millis(500), stream.read(&mut buf)).await;
     drop(stream);
 
     // Give the proxy a moment to flush its logs, then kill it.
@@ -126,7 +128,10 @@ async fn mitm_host_header_crlf_injection_is_stripped_from_logs() {
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        if TcpStream::connect(format!("127.0.0.1:{proxy_port}")).await.is_ok() {
+        if TcpStream::connect(format!("127.0.0.1:{proxy_port}"))
+            .await
+            .is_ok()
+        {
             break;
         }
         if std::time::Instant::now() >= deadline {
@@ -144,11 +149,8 @@ async fn mitm_host_header_crlf_injection_is_stripped_from_logs() {
     stream.write_all(connect_request.as_bytes()).await.ok();
 
     let mut buf = vec![0u8; 512];
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_millis(400),
-        stream.read(&mut buf),
-    )
-    .await;
+    let _ =
+        tokio::time::timeout(std::time::Duration::from_millis(400), stream.read(&mut buf)).await;
     drop(stream);
 
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;

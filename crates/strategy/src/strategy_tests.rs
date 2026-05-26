@@ -531,4 +531,200 @@ mod tests {
         let result = evade(&req, &state, &config);
         assert_eq!(result.request.method.as_str(), "PUT");
     }
+
+    #[test]
+    fn winner_pick_varies_with_request_url() {
+        // F146 regression: pre-fix `current_winner` used
+        // `state.rotation_index % state.proven_winners.len()` but `evade`
+        // gets a CLONED &HostState that is dropped after each call —
+        // `rotation_index` is never advanced from the transport path, so
+        // every request picked `proven_winners[0]` and the round-robin
+        // claim was a lie. Post-fix the pick hashes (URL + method), so
+        // distinct requests rotate across the winner pool naturally
+        // even when state is immutable.
+        //
+        // Use POST with bodies so the encoding techniques actually fire
+        // (apply_encoding skips bodyless requests, which would mask the
+        // bug).
+        let mut state = HostState::default();
+        state.proven_winners = vec![
+            "encoding:UrlEncode".to_string(),
+            "encoding:DoubleUrlEncode".to_string(),
+            "encoding:Base64Encode".to_string(),
+            "encoding:HexEncode".to_string(),
+        ];
+        state.discovery_complete = true;
+        let config = EvasionConfig::default();
+
+        let mut seen_techniques = std::collections::HashSet::new();
+        for url in [
+            "https://target/api/users",
+            "https://target/api/posts",
+            "https://target/api/login",
+            "https://target/api/admin",
+            "https://target/health",
+            "https://target/search",
+            "https://target/v1/data",
+            "https://target/v2/data",
+        ] {
+            let req = Request::post(url, b"q=admin' OR 1=1--".to_vec());
+            let result = evade(&req, &state, &config);
+            // Extract just the PayloadEncoding entries (fingerprint
+            // techniques aren't gated on URL so they'd add noise).
+            let encoding_techs: Vec<String> = result
+                .techniques
+                .iter()
+                .filter_map(|t| match t {
+                    Technique::PayloadEncoding(name) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            seen_techniques.insert(format!("{encoding_techs:?}"));
+        }
+        assert!(
+            seen_techniques.len() >= 2,
+            "winner pick must vary across distinct URLs (pre-fix every URL got encoding:UrlEncode); saw only {} distinct encoding choices: {seen_techniques:?}",
+            seen_techniques.len()
+        );
+    }
+
+    #[test]
+    fn winner_pick_is_deterministic_per_url() {
+        // Same URL -> same winner -> same evasion. Replay safety.
+        let mut state = HostState::default();
+        state.proven_winners = vec![
+            "encoding:UrlEncode".to_string(),
+            "encoding:DoubleUrlEncode".to_string(),
+            "encoding:HexEncode".to_string(),
+        ];
+        state.discovery_complete = true;
+        let config = EvasionConfig::default();
+        let req = Request::post(
+            "https://target/api/x",
+            b"q=admin' OR 1=1--".to_vec(),
+        );
+        let a = evade(&req, &state, &config);
+        let b = evade(&req, &state, &config);
+        let a_enc: Vec<&Technique> = a
+            .techniques
+            .iter()
+            .filter(|t| matches!(t, Technique::PayloadEncoding(_)))
+            .collect();
+        let b_enc: Vec<&Technique> = b
+            .techniques
+            .iter()
+            .filter(|t| matches!(t, Technique::PayloadEncoding(_)))
+            .collect();
+        assert_eq!(
+            format!("{a_enc:?}"),
+            format!("{b_enc:?}"),
+            "same URL must pick the same winner deterministically"
+        );
+    }
+
+    // ============================================
+    // GraphQL routing tests (61-67)
+    // ============================================
+
+    #[test]
+    fn is_graphql_request_detects_application_graphql_content_type() {
+        use crate::strategy::is_graphql_request;
+        let req = Request::post(
+            "https://example.com/graphql",
+            b"{ user { id name } }".to_vec(),
+        )
+        .header("Content-Type", "application/graphql");
+        assert!(
+            is_graphql_request(&req),
+            "application/graphql Content-Type must be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn is_graphql_request_detects_json_body_with_query_key() {
+        use crate::strategy::is_graphql_request;
+        let body = br#"{"query":"{ user { id name } }","variables":{}}"#;
+        let req = Request::post("https://example.com/graphql", body.to_vec())
+            .header("Content-Type", "application/json");
+        assert!(
+            is_graphql_request(&req),
+            "JSON body containing \"query\": key must be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn is_graphql_request_rejects_plain_form_body() {
+        use crate::strategy::is_graphql_request;
+        let req = Request::post(
+            "https://example.com/api",
+            b"q=SELECT+1+FROM+users".to_vec(),
+        )
+        .header("Content-Type", "application/x-www-form-urlencoded");
+        assert!(
+            !is_graphql_request(&req),
+            "form-urlencoded body must NOT be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn is_graphql_request_rejects_get_without_body() {
+        use crate::strategy::is_graphql_request;
+        let req = Request::get("https://example.com/graphql?query={__typename}");
+        assert!(
+            !is_graphql_request(&req),
+            "GET without body must not be detected as GraphQL"
+        );
+    }
+
+    #[test]
+    fn graphql_payloads_for_request_returns_battery_for_graphql_request() {
+        use crate::strategy::{graphql_payloads_for_request, is_graphql_request};
+        let body = br#"{"query":"{ __typename }"}"#;
+        let req = Request::post("https://example.com/graphql", body.to_vec())
+            .header("Content-Type", "application/json");
+        assert!(is_graphql_request(&req));
+        let payloads = graphql_payloads_for_request(&req);
+        assert!(
+            !payloads.is_empty(),
+            "graphql_payloads_for_request must return the full battery for a GraphQL request"
+        );
+        // Verify all three core classes are present.
+        let has_alias = payloads.iter().any(|p| p.contains("AliasFlood"));
+        let has_intro = payloads.iter().any(|p| p.contains("__schema"));
+        let has_mismatch = payloads.iter().any(|p| p.contains("operationName"));
+        assert!(has_alias, "alias-flood payloads missing from battery");
+        assert!(has_intro, "introspection payloads missing from battery");
+        assert!(has_mismatch, "op-name-mismatch payloads missing from battery");
+    }
+
+    #[test]
+    fn graphql_payloads_for_request_empty_for_non_graphql() {
+        use crate::strategy::graphql_payloads_for_request;
+        let req = Request::get("https://example.com/api?q=test");
+        let payloads = graphql_payloads_for_request(&req);
+        assert!(
+            payloads.is_empty(),
+            "graphql_payloads_for_request must return empty Vec for non-GraphQL requests"
+        );
+    }
+
+    #[test]
+    fn content_type_routing_application_graphql_returns_battery() {
+        use crate::strategy::graphql_payloads_for_request;
+        let req = Request::post(
+            "https://api.example.com/graphql",
+            b"query { viewer { login } }".to_vec(),
+        )
+        .header("Content-Type", "application/graphql");
+        let payloads = graphql_payloads_for_request(&req);
+        assert!(
+            !payloads.is_empty(),
+            "application/graphql Content-Type must route to GraphQL battery"
+        );
+        assert!(
+            payloads.len() >= 10,
+            "GraphQL battery must have at least 10 payloads, got {}",
+            payloads.len()
+        );
+    }
 }

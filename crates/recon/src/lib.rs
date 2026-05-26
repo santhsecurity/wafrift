@@ -1,4 +1,4 @@
-//! Origin discovery via OSINT (CT logs, DNS history) for WAF evasion.
+//! Origin discovery via OSINT (CT logs, DNS history) and active HTTP/TCP probing for WAF evasion.
 //!
 //! ## Active probing
 //!
@@ -131,6 +131,12 @@ pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
 fn parse_crtsh_response(body: &str, domain: &str) -> Result<Vec<String>> {
     let entries: Vec<CrtShEntry> = serde_json::from_str(body)?;
 
+    // Normalise the caller-supplied domain once so it can be compared
+    // against the already-lowercased subdomain entries. Without this,
+    // passing domain="Example.COM" would cause s="example.com" != domain
+    // (case mismatch) and the base domain would leak into the results.
+    let domain_lower = domain.to_ascii_lowercase();
+
     let mut subdomains: Vec<String> = entries
         .into_iter()
         .flat_map(|e| {
@@ -139,7 +145,7 @@ fn parse_crtsh_response(body: &str, domain: &str) -> Result<Vec<String>> {
                 .map(|s| s.trim().to_lowercase())
                 .collect::<Vec<_>>()
         })
-        .filter(|s| !s.is_empty() && !s.contains('*') && s != domain)
+        .filter(|s| !s.is_empty() && !s.contains('*') && s.as_str() != domain_lower)
         .collect();
 
     subdomains.sort();
@@ -283,6 +289,51 @@ mod tests {
         assert_eq!(result, vec!["api.example.com", "www.example.com",]);
     }
 
+    // ── F132: domain case-normalisation regression tests ──────────────
+
+    #[test]
+    fn mixed_case_domain_excludes_base() {
+        // Caller passes "Example.COM" — crt.sh entries are normalised to
+        // lowercase. Before F132 the comparison s != domain was always
+        // true (case mismatch), causing "example.com" to appear in results.
+        let json = r#"[
+            {"name_value": "sub.example.com"},
+            {"name_value": "example.com"}
+        ]"#;
+        let result = parse_crtsh_response(json, "Example.COM").unwrap();
+        assert_eq!(result, vec!["sub.example.com"]);
+        assert!(!result.contains(&"example.com".to_string()));
+    }
+
+    #[test]
+    fn all_caps_domain_excludes_base() {
+        let json = r#"[{"name_value": "EXAMPLE.COM"},{"name_value": "api.example.com"}]"#;
+        let result = parse_crtsh_response(json, "EXAMPLE.COM").unwrap();
+        assert_eq!(result, vec!["api.example.com"]);
+    }
+
+    #[test]
+    fn camel_case_domain_excludes_base() {
+        let json = r#"[{"name_value": "mail.ExAmPlE.cOm"},{"name_value": "ExAmPlE.cOm"}]"#;
+        let result = parse_crtsh_response(json, "ExAmPlE.cOm").unwrap();
+        assert_eq!(result, vec!["mail.example.com"]);
+    }
+
+    #[test]
+    fn lowercase_domain_still_works() {
+        // Regression guard: existing lowercase behaviour must be unchanged.
+        let json = r#"[{"name_value": "api.example.com"},{"name_value": "example.com"}]"#;
+        let result = parse_crtsh_response(json, "example.com").unwrap();
+        assert_eq!(result, vec!["api.example.com"]);
+    }
+
+    #[test]
+    fn mixed_case_domain_empty_result_when_only_base() {
+        let json = r#"[{"name_value": "Example.COM"}]"#;
+        let result = parse_crtsh_response(json, "Example.COM").unwrap();
+        assert!(result.is_empty());
+    }
+
     // ── is_edge_ip tests ───────────────────────────────────────────────
 
     #[test]
@@ -331,6 +382,86 @@ mod tests {
     fn empty_list_returns_empty() {
         let origins = filter_origin_ips(&[]);
         assert!(origins.is_empty());
+    }
+
+    // ── is_edge_ip hostile-input tests ─────────────────────────────────
+
+    #[test]
+    fn is_edge_ip_handles_empty_string() {
+        assert!(!is_edge_ip(""));
+    }
+
+    #[test]
+    fn is_edge_ip_handles_garbage_input() {
+        // The string-prefix lookup happily inspects non-IP input;
+        // hostile-source candidate lists (e.g. malformed entries
+        // from a CT log) must not panic and must classify as
+        // non-edge so the caller doesn't silently drop them.
+        assert!(!is_edge_ip("not.an.ip"));
+        assert!(!is_edge_ip("hello"));
+        assert!(!is_edge_ip("..."));
+    }
+
+    #[test]
+    fn is_edge_ip_handles_ipv6() {
+        // No IPv6 ranges are encoded; IPv6 always classifies as
+        // non-edge. The dual-stack origin-filtering path must
+        // remain stable — `2606:4700::1111` is Cloudflare but the
+        // prefix table only covers v4.
+        assert!(!is_edge_ip("2606:4700::1111"));
+        assert!(!is_edge_ip("::1"));
+        assert!(!is_edge_ip("fe80::1"));
+    }
+
+    #[test]
+    fn is_edge_ip_rejects_substring_match_in_middle() {
+        // "10.104.16.0.1" CONTAINS "104.16." but doesn't START
+        // with it — must not be classified as Cloudflare. This is
+        // the regression test for the string-prefix approach: only
+        // a true leading match counts.
+        assert!(!is_edge_ip("10.104.16.0.1"));
+        assert!(!is_edge_ip("99.151.101.1"));
+    }
+
+    #[test]
+    fn is_edge_ip_handles_boundary_ips() {
+        // Exact first IP of a Cloudflare prefix.
+        assert!(is_edge_ip("104.16.0.0"));
+        // Exact-prefix boundary — the trailing dot rule means
+        // "104.16." matches "104.16.x.y" but NOT "104.160.0.1"
+        // (which lives in a different /16). Documented invariant.
+        assert!(!is_edge_ip("104.160.0.1"));
+        assert!(!is_edge_ip("104.280.0.1")); // 104.28. is NOT covered
+    }
+
+    #[test]
+    fn is_edge_ip_detects_fastly_secondary_prefix() {
+        // 199.232. (the lesser-known Fastly prefix) is included.
+        assert!(is_edge_ip("199.232.0.1"));
+    }
+
+    #[test]
+    fn filter_origin_preserves_order() {
+        let ips = vec![
+            "203.0.113.5".into(),
+            "104.16.0.1".into(), // CF — drop
+            "203.0.113.6".into(),
+        ];
+        // Order of survivors == order in input.
+        assert_eq!(
+            filter_origin_ips(&ips),
+            vec!["203.0.113.5".to_string(), "203.0.113.6".to_string()]
+        );
+    }
+
+    #[test]
+    fn filter_origin_preserves_duplicates() {
+        // No dedup — caller decides. A repeated non-edge IP comes
+        // back twice. (Important: dedup-by-default could silently
+        // mask a CT log that lists the same origin under multiple
+        // alias names.)
+        let ips = vec!["10.0.0.1".into(), "10.0.0.1".into()];
+        assert_eq!(filter_origin_ips(&ips).len(), 2);
     }
 }
 

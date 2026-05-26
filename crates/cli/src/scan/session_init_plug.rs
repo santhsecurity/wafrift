@@ -72,8 +72,8 @@ mod tests {
         // doesn't exist. The wrapper must error (not silently
         // proceed unauthenticated, which would change scan
         // semantics).
-        let missing = std::env::temp_dir()
-            .join("wafrift-scan-session-init-DOES-NOT-EXIST-9999.curl");
+        let missing =
+            std::env::temp_dir().join("wafrift-scan-session-init-DOES-NOT-EXIST-9999.curl");
         let result = run(Some(&missing), false, false, Duration::from_secs(2)).await;
         match result {
             Err(_) => {} // ExitCode::from(1) — Debug not derivable on ExitCode

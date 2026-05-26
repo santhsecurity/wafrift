@@ -62,6 +62,8 @@
 mod ascii_scan;
 /// Per-target calibration session.
 pub mod calibration;
+/// Cloudflare-specific WAF response parser.
+pub mod cloudflare;
 /// Command injection oracle.
 pub mod cmdi;
 /// LDAP injection oracle.
@@ -89,6 +91,10 @@ pub mod sql;
 pub mod ssrf;
 /// SSTI (Server-Side Template Injection) oracle.
 pub mod ssti;
+/// Timing oracle — confirms blind attacks via latency anomaly when
+/// the DNS callback channel is blocked and the error oracle is
+/// squashed by the WAF.
+pub mod timing;
 /// Oracle trait definition.
 pub mod traits;
 /// XSS (Cross-Site Scripting) oracle.

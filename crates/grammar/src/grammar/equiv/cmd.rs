@@ -95,6 +95,16 @@ pub fn still_executes_cmd(original: &str, cand: &str) -> bool {
     if cand.trim().is_empty() || !has_shell_context(original) {
         return false;
     }
+    // F109: anti-rig — if the original carried shell context (the
+    // metacharacter that turns it into a command-injection rather
+    // than a literal arg), the candidate MUST also carry shell
+    // context. A future rewrite that strips every metacharacter
+    // while preserving the token vocabulary would pass the
+    // sig-token check below but produce a string that no longer
+    // injects. Close the asymmetry.
+    if !has_shell_context(cand) {
+        return false;
+    }
     let no = normalize(original);
     let nc = normalize(cand);
     if nc.is_empty() {

@@ -50,6 +50,20 @@ pub enum RegistryError {
         len: usize,
         limit: usize,
     },
+    #[error(
+        "bundle created_unix={created_unix} is older than max age \
+         ({age_secs}s > {max_age_secs}s) — refusing replay of stale bundle"
+    )]
+    BundleTooOld {
+        created_unix: u64,
+        age_secs: u64,
+        max_age_secs: u64,
+    },
+    #[error(
+        "bundle created_unix={created_unix} is dated more than \
+         {skew_secs}s in the future (system clock skew? rejecting)"
+    )]
+    BundleFutureDated { created_unix: u64, skew_secs: u64 },
 }
 
 /// ed25519 secret key wrapper.

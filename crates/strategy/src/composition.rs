@@ -196,10 +196,7 @@ mod tests {
     #[test]
     fn h2_requires_header_prereq() {
         assert!(!is_valid_sequence(&[EvasionLayer::H2]));
-        assert!(is_valid_sequence(&[
-            EvasionLayer::Header,
-            EvasionLayer::H2
-        ]));
+        assert!(is_valid_sequence(&[EvasionLayer::Header, EvasionLayer::H2]));
     }
 
     #[test]

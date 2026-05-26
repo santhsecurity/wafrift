@@ -125,7 +125,7 @@ proptest! {
         let out = t.tamper(&s, None);
         let stripped: String = out
             .chars()
-            .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+            .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | '\u{180E}'))
             .collect();
         prop_assert_eq!(
             stripped.as_str(),

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "WAF evasion toolkit CLI"
+description = "wafrift CLI — scan, detect, parser-diff, smuggle, model-evade, bench-waf, bypass-probe and 35+ subcommands for WAF evasion and analysis"
 readme = "README.md"
 repository.workspace = true
 keywords = ["waf", "cli", "evasion", "security", "scanner"]
@@ -35,6 +35,7 @@ futures-util = { workspace = true }
 toml = { workspace = true }
 regex = { workspace = true }
 urlencoding = { workspace = true }
+hex = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 dirs = { workspace = true }
@@ -42,9 +43,16 @@ wafrift-strategy = { workspace = true }
 wafrift-transport = { workspace = true }
 wafrift-oracle = { workspace = true }
 wafrift-genome-registry = { workspace = true }
+wafrift-graphql = { workspace = true }
 wafrift-types = { workspace = true }
+pocgen = { workspace = true }
 wafrift-smuggling = { workspace = true, features = ["unsafe-probes"] }
 wafrift-content-type = { workspace = true }
+# HTTP/3 + QUIC evasion data-plane primitives (QPACK desync, 0-RTT
+# replay, CID rotation, stream priority topology, MTU fragmentation).
+# Pulled in so `techniques list` enumerates the HTTP/3 surface and
+# the bench corpus can reference its EvasionTechnique variants.
+wafrift-http3-evasion = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
 # Retry-After header parsing (RFC 9110 §10.2.3): integer delta-seconds
@@ -93,6 +101,8 @@ libc = "0.2"
 
 [dev-dependencies]
 proptest = { workspace = true }
+wiremock = { workspace = true }
+reqwest = { workspace = true }
 # Used by safe_body's gzip-bomb integration test — proves the
 # bounded-reader defence actually defeats a real-world bomb.
 flate2 = "1"

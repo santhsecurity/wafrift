@@ -154,7 +154,22 @@ pub async fn run_scan_raw(
         match fire_one(&http, &mutated).await {
             Ok(FireOutcome::Bypass) => {
                 bypassed += 1;
-                let repro_curl = mutated.to_curl();
+                // Prefer the annotated PoC curl (metadata comment block
+                // names the technique chain and confidence) when pocgen
+                // renders cleanly; fall back to the plain `to_curl()`
+                // output so bypasses are never lost on render errors.
+                let repro_curl = crate::poc_emit::render_raw_curl(
+                    &mutated.url,
+                    &mutated.method,
+                    &mutated.headers,
+                    if mutated.body.is_empty() { None } else { Some(&mutated.body) },
+                    &v.techniques,
+                    v.confidence,
+                    &format!("raw-runner bypass (variant {idx})"),
+                    None,
+                    Some(&format!("variant.{idx}")),
+                )
+                .unwrap_or_else(|_| mutated.to_curl());
                 bypass_variants.push(BypassRecord {
                     idx,
                     payload: v.payload.clone(),
@@ -181,10 +196,7 @@ pub async fn run_scan_raw(
             Err(e) => {
                 errors += 1;
                 if scan_text {
-                    eprintln!(
-                        "  {} variant {idx}: error — {e}",
-                        "!".yellow().bold()
-                    );
+                    eprintln!("  {} variant {idx}: error — {e}", "!".yellow().bold());
                 }
             }
         }
@@ -232,8 +244,7 @@ pub async fn run_scan_raw(
                         if cancel.is_cancelled() {
                             return false;
                         }
-                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= cap
-                        {
+                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= cap {
                             return false;
                         }
                         let mutated = template.with_payload(&candidate);
@@ -295,19 +306,8 @@ pub async fn run_scan_raw(
 /// they need; layering a second session would double-set them.
 fn build_http_client(args: &ScanArgs) -> Result<Client, ExitCode> {
     let ua = crate::config::shared_user_agent();
-    // Pre-fix this hardcoded `DEFAULT_REQUEST_TIMEOUT_SECS`, so the
-    // `-r` raw-runner path ignored the operator's `--timeout-secs`.
-    // The non-raw scan path (mod.rs::run_scan) correctly computes
-    // `request_timeout` from args.timeout_secs; raw_runner now
-    // mirrors that logic (0 = workspace default, else operator
-    // value).
-    let timeout_secs = if args.timeout_secs > 0 {
-        args.timeout_secs
-    } else {
-        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS
-    };
     let mut builder = wafrift_transport::base_client_builder(
-        timeout_secs,
+        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
         args.insecure,
         Some(&ua),
     )
@@ -317,18 +317,9 @@ fn build_http_client(args: &ScanArgs) -> Result<Client, ExitCode> {
         args.proxy.as_deref(),
         &args.header,
         None,
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("  {} {e}", "✗ pentest flag invalid:".red().bold());
-            return Err(ExitCode::from(1));
-        }
-    };
+    )?;
     builder.build().map_err(|e| {
-        eprintln!(
-            "  {} {e}",
-            "✗ Failed to build HTTP client:".red().bold()
-        );
+        eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
     })
 }
@@ -341,9 +332,7 @@ async fn fire_one(http: &Client, raw: &RawRequest) -> Result<FireOutcome, String
         .map_err(|e| format!("invalid method {:?}: {e}", raw.method))?;
     let mut req = http.request(method, &raw.url);
     for (name, value) in &raw.headers {
-        if name.eq_ignore_ascii_case("host")
-            || name.eq_ignore_ascii_case("content-length")
-        {
+        if name.eq_ignore_ascii_case("host") || name.eq_ignore_ascii_case("content-length") {
             continue;
         }
         req = req.header(name.as_str(), value);
@@ -470,10 +459,7 @@ fn emit_json(
         Ok(s) => {
             if let Some(ref path) = args.output {
                 if let Err(e) = std::fs::write(path, &s) {
-                    eprintln!(
-                        "failed to write scan output to {}: {e}",
-                        path.display()
-                    );
+                    eprintln!("failed to write scan output to {}: {e}", path.display());
                     return;
                 }
                 eprintln!("scan results written to {}", path.display());
@@ -550,7 +536,57 @@ mod tests {
             egress_cooldown_secs: 300,
             i_have_permission: None,
             graphql: false,
-            custom_rules: None,
+        };
+        let cancel = CancellationToken::new();
+        let code = run_scan_raw(template_without_marker(), args, cancel).await;
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(2)),
+            "missing-marker template must exit 2"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_payload() {
+        let args = ScanArgs {
+            target_positional: None,
+            target: None,
+            from_discovery: None,
+            payload: String::new(),
+            param: "q".into(),
+            payload_class: None,
+            callback_url: None,
+            session_init: None,
+            level: crate::Level::Light,
+            encoding_only: true,
+            delay_ms: 0,
+            format: "json".into(),
+            stealth_browser: None,
+            insecure: false,
+            report_layers: false,
+            only: Vec::new(),
+            exclude: Vec::new(),
+            output: None,
+            proxy: None,
+            header: Vec::new(),
+            raw_request: None,
+            raw_request_scheme: "http".into(),
+            auto_distill: false,
+            auto_distill_max_fires: 200,
+            concurrency: 0,
+            timeout_secs: 0,
+            quiet: false,
+            callback_timeout_secs: 5,
+            exploit_cap: 500,
+            variants_cap: 0,
+            egress_socks5: Vec::new(),
+            egress_http_proxy: Vec::new(),
+            egress_tailscale_nodes: Vec::new(),
+            egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
+            egress_challenge_threshold: 3,
+            egress_cooldown_secs: 300,
+            i_have_permission: None,
+            graphql: false,
         };
         let cancel = CancellationToken::new();
         let code = run_scan_raw(template_with_marker(), args, cancel).await;
@@ -570,9 +606,7 @@ mod tests {
 
     async fn spawn_mock_waf() -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
@@ -649,7 +683,6 @@ mod tests {
             egress_cooldown_secs: 300,
             i_have_permission: None,
             graphql: false,
-            custom_rules: None,
         }
     }
 
@@ -717,7 +750,10 @@ mod tests {
         let template = RawRequest {
             method: "POST".into(),
             url: format!("http://{addr}/login"),
-            headers: vec![("Content-Type".into(), "application/x-www-form-urlencoded".into())],
+            headers: vec![(
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
             body: b"user=admin&pass=\xC2\xA7\xC2\xA7".to_vec(), // "§§" in UTF-8
         };
         let args = args_for(addr, "SAFEPASS", "json");

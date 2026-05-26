@@ -40,21 +40,28 @@
 
 pub mod challenge;
 mod client;
+pub mod egress_pool;
 mod http_builder;
 pub mod pool;
 mod response;
 pub mod session_coherence;
 pub mod signal;
 pub mod stealth;
+mod url_util;
 
 pub use client::EvasionClient;
 pub use client::EvasionError;
-pub use http_builder::base_client_builder;
-pub use pool::*;
+pub use egress_pool::{
+    EgressBackend, EgressEntry, EgressError, EgressPool, EgressPoolBuilder, EgressRouter,
+    parse_http_proxy_url, parse_socks5_url,
+};
+pub use http_builder::{base_client_builder, base_client_builder_with_egress};
 pub use response::EvasionResponse;
 pub use response::{is_waf_block, is_waf_block_status, scan_body_lowercase};
 pub use signal::{BlockClass, ResponseProfileDb, ResponseSignal};
 pub use stealth::{ImpersonateProfile, StealthClient, StealthError, StealthResponse};
+pub use url_util::host_from_url;
 
+pub mod alpn_confusion;
 pub mod jwt;
 pub mod session;

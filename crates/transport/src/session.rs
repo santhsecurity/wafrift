@@ -1,4 +1,4 @@
-use reqwest::cookie::Jar;
+use authjar::{AuthJarError, AuthSession, SessionStore};
 use std::path::Path;
 use thiserror::Error;
 use wafrift_types::Request;
@@ -20,32 +20,53 @@ pub enum SessionError {
         #[source]
         source: std::io::Error,
     },
+    #[error("authjar error: {0}")]
+    AuthJar(#[from] AuthJarError),
+    /// Body CSRF injection requires `application/x-www-form-urlencoded`.
+    /// For multipart, JSON, or binary bodies the caller must use a header-
+    /// based CSRF mechanism or inject the token out-of-band.
+    #[error(
+        "CSRF body injection requires application/x-www-form-urlencoded, got '{content_type}'"
+    )]
+    CsrfInjectIncompatibleBody { content_type: String },
+    /// Body CSRF injection failed because the existing body is not valid UTF-8.
+    #[error("CSRF body injection failed: body is not valid UTF-8")]
+    CsrfInjectInvalidUtf8,
 }
 
 /// Load a cookie jar from disk.
 ///
 /// Reads a newline-delimited file of `Set-Cookie | url` pairs. Lines
-/// starting with `#` are comments. Returns an empty jar if the file
+/// starting with `#` are comments. Returns an empty store if the file
 /// does not exist (caller can `save_jar` to create it later).
 ///
-/// # Limitation
-///
-/// Stock `reqwest::cookie::Jar` does not expose its internal cookie
-/// store. We track cookies on disk by recording each `add_cookie_str`
-/// call separately — but `load_jar` has no way to enumerate cookies
-/// added to a `Jar` produced elsewhere. Cookies added programmatically
-/// after `load_jar` returns are NOT persisted unless `save_jar` is
-/// called with the updated jar AND the wrapper that tracked the adds.
-/// For full bi-directional persistence, see the `cookie_store` crate.
-pub fn load_jar(path: &Path) -> Result<Jar, SessionError> {
-    let jar = Jar::default();
+/// Since v0.2.4 adoption, the in-memory representation is an
+/// [`authjar::SessionStore`] (named session `"default"`). This gives
+/// wafrift full cookie domain/path scoping, CSRF token tracking, and
+/// JSON persistence for free.
+pub fn load_jar(path: &Path) -> Result<SessionStore, SessionError> {
+    let mut store = SessionStore::new();
+
     if !path.exists() {
-        return Ok(jar);
+        return Ok(store);
     }
+
+    let mut session = AuthSession::new("default");
+
     let contents = std::fs::read_to_string(path).map_err(|e| SessionError::Io {
         path: path.display().to_string(),
         source: e,
     })?;
+
+    // If the file looks like JSON (starts with '{' or '['), treat it as
+    // an authjar SessionStore dump.
+    let first_non_ws = contents.trim_start().chars().next();
+    if first_non_ws == Some('{') || first_non_ws == Some('[') {
+        let loaded = SessionStore::load_from_file(path)?;
+        return Ok(loaded);
+    }
+
+    // Legacy newline-delimited format: Set-Cookie | https://origin/
     for (lineno, line) in contents.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -63,23 +84,20 @@ pub fn load_jar(path: &Path) -> Result<Jar, SessionError> {
                 line: lineno + 1,
             });
         };
-        jar.add_cookie_str(cookie_spec.trim(), &url);
+        session.add_set_cookie(cookie_spec.trim(), url.host_str().unwrap_or(""));
     }
-    Ok(jar)
+
+    store.add(session);
+    Ok(store)
 }
 
 /// Save a cookie jar to disk.
 ///
-/// Writes the magic header + a placeholder marker. Per the limitation
-/// noted on `load_jar`, stock `reqwest::cookie::Jar` does not expose
-/// its cookie store, so we cannot enumerate cookies from an arbitrary
-/// jar to serialize them. The file is created (so subsequent `load_jar`
-/// finds something) but has no cookie payload.
-///
-/// For real bi-directional persistence, callers should track
-/// `add_cookie_str` calls themselves and write the file via this
-/// function's same line format: `Set-Cookie | https://origin/`.
-pub fn save_jar(_jar: &Jar, path: &Path) -> Result<(), SessionError> {
+/// Persist the [`SessionStore`] as JSON (authjar's native format).
+/// This finally gives wafrift bi-directional cookie persistence — the
+/// old `reqwest::cookie::Jar` implementation could not enumerate its
+/// cookies, so `save_jar` was a stub that only wrote a header.
+pub fn save_jar(store: &SessionStore, path: &Path) -> Result<(), SessionError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -88,11 +106,7 @@ pub fn save_jar(_jar: &Jar, path: &Path) -> Result<(), SessionError> {
             source: e,
         })?;
     }
-    let header = "# wafrift cookie jar v1\n# format: Set-Cookie | https://origin/\n";
-    std::fs::write(path, header).map_err(|e| SessionError::Io {
-        path: path.display().to_string(),
-        source: e,
-    })?;
+    store.save_to_file(path)?;
     Ok(())
 }
 
@@ -107,51 +121,103 @@ pub fn extract_csrf(response_body: &str, regex: &regex::Regex) -> Result<String,
     })
 }
 
-pub fn inject_csrf(request: &mut Request, token: &str, location: CsrfInjectionLocation) {
-    match location {
+/// Bridge wafrift's 3-variant `CsrfInjectionLocation` onto authjar's
+/// 5-variant `CsrfInjectionLocation`, then apply to a `Request`.
+///
+/// # Errors
+///
+/// Returns [`SessionError::CsrfInjectIncompatibleBody`] when the injection
+/// location is `Body` and the request's `Content-Type` is not
+/// `application/x-www-form-urlencoded`. Form-field injection into JSON,
+/// multipart, or binary bodies silently corrupts them; callers should use
+/// `Header` injection or set the correct content type instead.
+///
+/// Returns [`SessionError::CsrfInjectInvalidUtf8`] when the location is
+/// `Body` and the existing body bytes are not valid UTF-8.
+pub fn inject_csrf(
+    request: &mut Request,
+    token: &str,
+    location: CsrfInjectionLocation,
+) -> Result<(), SessionError> {
+    let authjar_loc: authjar::CsrfInjectionLocation = match location {
         CsrfInjectionLocation::Header => {
-            request
-                .headers
-                .push(("X-CSRF-Token".to_string(), token.to_string()));
+            authjar::CsrfInjectionLocation::Header("X-CSRF-Token".to_string())
         }
         CsrfInjectionLocation::Query => {
-            let sep = if request.url.contains('?') { "&" } else { "?" };
-            request.url = format!(
-                "{}{sep}csrf_token={}",
-                request.url,
-                urlencoding::encode(token)
-            );
+            authjar::CsrfInjectionLocation::QueryParam("csrf_token".to_string())
         }
         CsrfInjectionLocation::Body => {
+            authjar::CsrfInjectionLocation::FormField("csrf_token".to_string())
+        }
+    };
+
+    let injection = authjar_loc.with_token(token);
+    match injection {
+        authjar::CsrfInjection::Header { name, value } => {
+            request.headers.push((name, value));
+        }
+        authjar::CsrfInjection::QueryParam { name, value } => {
+            let sep = if request.url.contains('?') { "&" } else { "?" };
+            request.url = format!("{}{sep}{}={}", request.url, name, urlencoding::encode(&value));
+        }
+        authjar::CsrfInjection::FormField { name, value } => {
             if let Some(ref mut body) = request.body {
-                let mut body_str = String::from_utf8_lossy(body).into_owned();
+                // Form-field CSRF injection only applies to
+                // application/x-www-form-urlencoded. For any other content
+                // type (multipart, JSON, binary) we refuse rather than
+                // silently corrupt. The previous `from_utf8_lossy` path
+                // wrote mojibake into the body — invisible in happy-path
+                // tests, catastrophic for non-Latin payloads.
+                let ct = request
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    .map(|(_, v)| v.as_str())
+                    .unwrap_or("");
+                if !ct.contains("application/x-www-form-urlencoded") {
+                    return Err(SessionError::CsrfInjectIncompatibleBody {
+                        content_type: ct.to_string(),
+                    });
+                }
+                let body_str = std::str::from_utf8(body)
+                    .map_err(|_| SessionError::CsrfInjectInvalidUtf8)?;
                 let sep = if body_str.is_empty() { "" } else { "&" };
-                body_str = format!("{}{sep}csrf_token={}", body_str, urlencoding::encode(token));
-                *body = body_str.into_bytes();
+                let new_body =
+                    format!("{}{sep}{}={}", body_str, name, urlencoding::encode(&value));
+                *body = new_body.into_bytes();
             }
         }
+        _ => {
+            // JsonPath / MultipartField are not reachable from the 3-variant
+            // wafrift bridge, but CsrfInjection is non_exhaustive.
+            tracing::warn!("Unsupported CSRF injection variant in wafrift bridge");
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use authjar::SessionSettings;
 
     #[test]
     fn load_jar_missing_file_returns_empty() {
         let tmp = std::env::temp_dir().join("wafrift_test_nonexistent_jar_12345.txt");
         let _ = std::fs::remove_file(&tmp);
-        let jar = load_jar(&tmp).unwrap();
-        // Jar is empty — we can't inspect it, but loading didn't panic.
-        let _ = jar;
+        let store = load_jar(&tmp).unwrap();
+        assert!(store.is_empty());
     }
 
     #[test]
     fn load_jar_parses_cookie_line() {
         let tmp = std::env::temp_dir().join("wafrift_test_jar_12345.txt");
         std::fs::write(&tmp, "session=abc123 | https://example.com/\n").unwrap();
-        let jar = load_jar(&tmp).unwrap();
-        let _ = jar;
+        let store = load_jar(&tmp).unwrap();
+        assert_eq!(store.len(), 1);
+        let session = store.get("default").unwrap();
+        let header = session.cookie_header("example.com", &SessionSettings::default());
+        assert!(header.contains("session=abc123"));
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -163,8 +229,11 @@ mod tests {
             "# comment\n\nfoo=bar | https://example.com/\n# another comment\n",
         )
         .unwrap();
-        let jar = load_jar(&tmp).unwrap();
-        let _ = jar;
+        let store = load_jar(&tmp).unwrap();
+        assert_eq!(store.len(), 1);
+        let session = store.get("default").unwrap();
+        let header = session.cookie_header("example.com", &SessionSettings::default());
+        assert!(header.contains("foo=bar"));
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -178,13 +247,34 @@ mod tests {
     }
 
     #[test]
-    fn save_jar_creates_file_with_header() {
-        let tmp = std::env::temp_dir().join("wafrift_test_jar_save_12345.txt");
+    fn save_jar_creates_file_with_json() {
+        let tmp = std::env::temp_dir().join("wafrift_test_jar_save_12345.json");
         let _ = std::fs::remove_file(&tmp);
-        let jar = Jar::default();
-        save_jar(&jar, &tmp).unwrap();
+        let mut store = SessionStore::new();
+        store.add(AuthSession::new("default"));
+        save_jar(&store, &tmp).unwrap();
         let contents = std::fs::read_to_string(&tmp).unwrap();
-        assert!(contents.contains("wafrift cookie jar"));
+        assert!(contents.contains("default"));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn save_and_load_jar_roundtrip() {
+        let tmp = std::env::temp_dir().join("wafrift_cookie_jar_roundtrip_12345.json");
+        let _ = std::fs::remove_file(&tmp);
+
+        let mut store = SessionStore::new();
+        let mut session = AuthSession::new("default");
+        session.add_cookie("session", "abc123", "example.com");
+        store.add(session);
+
+        save_jar(&store, &tmp).unwrap();
+        let loaded = load_jar(&tmp).unwrap();
+        assert_eq!(loaded.len(), 1);
+        let session = loaded.get("default").unwrap();
+        let header = session.cookie_header("example.com", &SessionSettings::default());
+        assert!(header.contains("session=abc123"));
+
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -206,7 +296,7 @@ mod tests {
     #[test]
     fn inject_csrf_into_header() {
         let mut req = Request::get("https://example.com/");
-        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Header);
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Header).unwrap();
         assert!(
             req.headers
                 .contains(&("X-CSRF-Token".to_string(), "tok123".to_string()))
@@ -216,28 +306,67 @@ mod tests {
     #[test]
     fn inject_csrf_into_query_no_existing() {
         let mut req = Request::get("https://example.com/");
-        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Query);
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Query).unwrap();
         assert_eq!(req.url, "https://example.com/?csrf_token=tok123");
     }
 
     #[test]
     fn inject_csrf_into_query_with_existing() {
         let mut req = Request::get("https://example.com/?id=1");
-        inject_csrf(&mut req, "tok 123", CsrfInjectionLocation::Query);
+        inject_csrf(&mut req, "tok 123", CsrfInjectionLocation::Query).unwrap();
         assert!(req.url.contains("&csrf_token=tok%20123"));
     }
 
     #[test]
     fn inject_csrf_into_empty_body() {
         let mut req = Request::post("https://example.com/", b"");
-        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body);
+        req.headers.push((
+            "Content-Type".into(),
+            "application/x-www-form-urlencoded".into(),
+        ));
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap();
         assert_eq!(req.body, Some(b"csrf_token=tok123".to_vec()));
     }
 
     #[test]
     fn inject_csrf_into_existing_body() {
         let mut req = Request::post("https://example.com/", b"id=1");
-        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body);
+        req.headers.push((
+            "Content-Type".into(),
+            "application/x-www-form-urlencoded".into(),
+        ));
+        inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap();
         assert_eq!(req.body, Some(b"id=1&csrf_token=tok123".to_vec()));
+    }
+
+    #[test]
+    fn inject_csrf_body_rejects_json_content_type() {
+        let mut req = Request::post("https://example.com/", b"{\"a\":1}");
+        req.headers
+            .push(("Content-Type".into(), "application/json".into()));
+        let err =
+            inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
+        assert!(matches!(err, SessionError::CsrfInjectIncompatibleBody { .. }));
+    }
+
+    #[test]
+    fn inject_csrf_body_rejects_missing_content_type() {
+        // No Content-Type header → treated as incompatible (not form-encoded)
+        let mut req = Request::post("https://example.com/", b"id=1");
+        let err =
+            inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
+        assert!(matches!(err, SessionError::CsrfInjectIncompatibleBody { .. }));
+    }
+
+    #[test]
+    fn inject_csrf_body_rejects_non_utf8() {
+        let mut req = Request::post("https://example.com/", b"\xff\xfe");
+        req.headers.push((
+            "Content-Type".into(),
+            "application/x-www-form-urlencoded".into(),
+        ));
+        let err =
+            inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
+        assert!(matches!(err, SessionError::CsrfInjectInvalidUtf8));
     }
 }

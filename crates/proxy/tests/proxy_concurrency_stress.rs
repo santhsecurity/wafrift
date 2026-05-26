@@ -27,9 +27,7 @@ use common::{pick_free_port, proxy_client, start_proxy_and_wait, stop_proxy};
 
 async fn start_origin() -> (u16, tokio::task::JoinHandle<()>) {
     let app = Router::new().route("/*path", any(handler));
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind origin");
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind origin");
     let port = listener.local_addr().unwrap().port();
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
@@ -59,13 +57,9 @@ async fn proxy_concurrent_200_clients_50_requests_each() {
         .await
         .expect("proxy start");
 
-    let target_url = Arc::new(format!(
-        "http://127.0.0.1:{origin_port}/stress-test"
-    ));
+    let target_url = Arc::new(format!("http://127.0.0.1:{origin_port}/stress-test"));
 
-    let client = Arc::new(
-        proxy_client(proxy_port).expect("build proxy client"),
-    );
+    let client = Arc::new(proxy_client(proxy_port).expect("build proxy client"));
 
     let ok_count = Arc::new(AtomicU64::new(0));
     let err_count = Arc::new(AtomicU64::new(0));

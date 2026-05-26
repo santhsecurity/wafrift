@@ -58,7 +58,11 @@ fn corpus_root() -> PathBuf {
         .map(PathBuf::from)
         .expect("CARGO_MANIFEST_DIR is always set under cargo test");
     // `crates/cli` -> `crates/cli/../..` = workspace root.
-    workspace.join("..").join("..").join("wafrift-bench").join("corpus")
+    workspace
+        .join("..")
+        .join("..")
+        .join("wafrift-bench")
+        .join("corpus")
 }
 
 #[test]
@@ -200,7 +204,8 @@ fn every_case_has_id_class_and_payload_fields() {
                     current_payload = None;
                     continue;
                 }
-                if !in_case_block && !line.starts_with("id ")
+                if !in_case_block
+                    && !line.starts_with("id ")
                     && !line.starts_with("id=")
                     && !line.starts_with("class ")
                     && !line.starts_with("class=")
@@ -217,10 +222,10 @@ fn every_case_has_id_class_and_payload_fields() {
                     if let Some(v) = strip_eq_quoted(rest) {
                         current_class = Some(v);
                     }
-                } else if let Some(rest) = line.strip_prefix("payload") {
-                    if let Some(v) = strip_eq_quoted(rest) {
-                        current_payload = Some(v);
-                    }
+                } else if let Some(rest) = line.strip_prefix("payload")
+                    && let Some(v) = strip_eq_quoted(rest)
+                {
+                    current_payload = Some(v);
                 }
             }
             // Last case in the file.
@@ -246,10 +251,10 @@ fn every_case_has_id_class_and_payload_fields() {
 fn strip_eq_quoted(rest: &str) -> Option<String> {
     let rest = rest.trim_start();
     let rest = rest.strip_prefix('=')?.trim_start();
-    if let Some(inner) = rest.strip_prefix('"') {
-        if let Some(end) = inner.find('"') {
-            return Some(inner[..end].to_string());
-        }
+    if let Some(inner) = rest.strip_prefix('"')
+        && let Some(end) = inner.find('"')
+    {
+        return Some(inner[..end].to_string());
     }
     None
 }
@@ -267,10 +272,7 @@ fn case_counts_per_class() -> BTreeMap<&'static str, usize> {
                     continue;
                 }
                 if let Ok(body) = fs::read_to_string(&path) {
-                    n += body
-                        .lines()
-                        .filter(|l| l.trim() == "[[case]]")
-                        .count();
+                    n += body.lines().filter(|l| l.trim() == "[[case]]").count();
                 }
             }
         }
@@ -326,10 +328,7 @@ fn every_corpus_toml_file_parses_via_serde() {
                 }
             };
             if let Err(e) = toml::from_str::<toml::Value>(&body) {
-                violations.push(format!(
-                    "{}: invalid TOML — {e}",
-                    path.display()
-                ));
+                violations.push(format!("{}: invalid TOML — {e}", path.display()));
             }
         }
     }

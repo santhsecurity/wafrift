@@ -699,53 +699,12 @@ pub(crate) async fn run_scan(
     // blocks `reqwest/*`, `curl/*`, `python-requests/*` before any
     // payload inspection ever runs.
     let scan_ua = crate::config::shared_user_agent();
-
-    // Build the optional egress rotation pool from --egress-* flags
-    // before the http client.  When ANY of --egress-socks5,
-    // --egress-http-proxy, --egress-tailscale-nodes is non-empty the
-    // pool routes every request through a rotating backend (with
-    // challenge-based cooldown).  Empty inputs short-circuit to
-    // None so the legacy single-client hot path is unchanged.
-    let egress_inputs = crate::egress_args::EgressArgs {
-        socks5: &args.egress_socks5,
-        http_proxy: &args.egress_http_proxy,
-        tailscale_nodes: &args.egress_tailscale_nodes,
-        tailscale_socks_addr: &args.egress_tailscale_socks_addr,
-        challenge_threshold: args.egress_challenge_threshold,
-        cooldown_secs: args.egress_cooldown_secs,
-    };
-    let egress_pool = match crate::egress_args::build_egress_pool(&egress_inputs) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{} {e}", "✗ Egress pool config:".red().bold());
-            return ExitCode::from(1);
-        }
-    };
-    // Extract bare host for egress validation. EgressPool::next_for
-    // gates on host-keyed cooldown state, so we feed it the target's
-    // host. Empty string is the "no-pool" sentinel inside transport.
-    let egress_host = egress_pool
-        .as_ref()
-        .and(crate::egress_args::target_host(target))
-        .unwrap_or_default();
-    let mut http_builder = match wafrift_transport::base_client_builder_with_egress(
+    let mut http_builder = wafrift_transport::base_client_builder(
         request_timeout.as_secs(),
         args.insecure,
         Some(&scan_ua),
-        egress_pool.as_ref(),
-        &egress_host,
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!(
-                "{} {e}\n    {}",
-                "✗ Failed to build egress-aware HTTP client:".red().bold(),
-                "hint: every entry in --egress-* may be in cooldown; lower --egress-challenge-threshold or wait for --egress-cooldown-secs".bright_black()
-            );
-            return ExitCode::from(1);
-        }
-    };
-    http_builder = http_builder.redirect(reqwest::redirect::Policy::limited(5));
+    )
+    .redirect(reqwest::redirect::Policy::limited(5));
     if let Some(ref state) = session_state {
         // Default headers travel on every request issued by this
         // client — so cookies/auth captured at init replay through
@@ -792,29 +751,6 @@ pub(crate) async fn run_scan(
         } else {
             (Vec::new(), None)
         };
-
-    // Optional: load operator-supplied custom WAF detection signatures
-    // (`--custom-rules <PATH>`). Layered on top of the built-in 160+
-    // rule corpus inside `detect_phase::run`. A load error aborts the
-    // scan early with a clear message rather than silently falling
-    // back to built-ins, since the operator EXPLICITLY asked for the
-    // custom set.
-    let custom_rules = match args.custom_rules.as_ref() {
-        Some(path) => {
-            match wafrift_evolution::custom_rules::load_rules_from_file(path) {
-                Ok(r) => Some(r),
-                Err(e) => {
-                    eprintln!(
-                        "{} failed to load --custom-rules {}: {e}",
-                        "error:".red().bold(),
-                        path.display()
-                    );
-                    return ExitCode::from(1);
-                }
-            }
-        }
-        None => None,
-    };
 
     // Step 1: WAF detection + advisor planning — see `detect_phase`.
     let detect_outcome = match detect_phase::run(

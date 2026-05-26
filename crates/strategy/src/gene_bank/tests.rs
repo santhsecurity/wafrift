@@ -338,13 +338,22 @@ fn advisory_lock_blocks_concurrent_writers() {
 
 #[test]
 fn class_stat_success_rate_basic_and_zero_attempts() {
-    let a = ClassStat { successes: 7, attempts: 10 };
+    let a = ClassStat {
+        successes: 7,
+        attempts: 10,
+    };
     assert!((a.success_rate() - 0.7).abs() < f64::EPSILON);
-    let zero = ClassStat { successes: 0, attempts: 0 };
+    let zero = ClassStat {
+        successes: 0,
+        attempts: 0,
+    };
     assert!(zero.success_rate().abs() < f64::EPSILON);
     // Anti-rig: high successes with zero attempts is malformed input;
     // we return 0.0 rather than infinity or NaN.
-    let nonsensical = ClassStat { successes: 99, attempts: 0 };
+    let nonsensical = ClassStat {
+        successes: 99,
+        attempts: 0,
+    };
     assert!(nonsensical.success_rate().abs() < f64::EPSILON);
 }
 
@@ -371,8 +380,13 @@ fn technique_record_class_lookup_is_case_insensitive() {
         total_attempts: 10,
         ..Default::default()
     };
-    rec.per_class
-        .insert("sql".into(), ClassStat { successes: 5, attempts: 10 });
+    rec.per_class.insert(
+        "sql".into(),
+        ClassStat {
+            successes: 5,
+            attempts: 10,
+        },
+    );
     // Various caller-casings must all resolve to the lowercase key.
     assert!((rec.success_rate_for_class("sql").unwrap() - 0.5).abs() < f64::EPSILON);
     assert!((rec.success_rate_for_class("SQL").unwrap() - 0.5).abs() < f64::EPSILON);
@@ -605,10 +619,12 @@ fn merge_and_save_for_class_concurrent_safe_via_lock() {
     let _ = fs::remove_dir_all(&tmp);
     {
         let mut bank = GeneBank::open(&tmp).expect("open");
-        bank.merge_and_save("WAF", &[("A".into(), 1, 2)]).expect("class-less");
+        bank.merge_and_save("WAF", &[("A".into(), 1, 2)])
+            .expect("class-less");
         bank.merge_and_save_for_class("WAF", "sql", &[("A".into(), 3, 4)])
             .expect("class-aware");
-        bank.merge_and_save("WAF", &[("B".into(), 5, 5)]).expect("class-less B");
+        bank.merge_and_save("WAF", &[("B".into(), 5, 5)])
+            .expect("class-less B");
     }
     {
         let mut bank = GeneBank::open(&tmp).expect("re-open");
@@ -616,7 +632,7 @@ fn merge_and_save_for_class_concurrent_safe_via_lock() {
         let a = genome.techniques.iter().find(|t| t.name == "A").unwrap();
         assert_eq!(a.total_successes, 4, "1+3 from both merges");
         assert_eq!(a.total_attempts, 6, "2+4 from both merges");
-        assert!(a.per_class.get("sql").is_some(), "sql per-class persisted");
+        assert!(a.per_class.contains_key("sql"), "sql per-class persisted");
         let b = genome.techniques.iter().find(|t| t.name == "B").unwrap();
         assert_eq!(b.total_successes, 5);
         // B had no per-class merge, so its per_class is empty.
@@ -712,7 +728,11 @@ fn max_techniques_cap_prevents_unbounded_per_class_growth() {
     // But an EXISTING technique can still accumulate (cap is on
     // distinct names, not on aggregate data).
     genome.merge_session_for_class("sql", &[("Tech0".into(), 1, 1)]);
-    let tech0 = genome.techniques.iter().find(|t| t.name == "Tech0").unwrap();
+    let tech0 = genome
+        .techniques
+        .iter()
+        .find(|t| t.name == "Tech0")
+        .unwrap();
     assert_eq!(
         tech0.total_attempts, 2,
         "existing technique's accumulation continues past the cap"
@@ -759,9 +779,15 @@ fn seed_winners_for_class_does_not_recommend_a_class_with_zero_attempts() {
         name: "Phantom".into(),
         total_successes: 0,
         total_attempts: 0,
-        per_class: [("sql".into(), ClassStat { successes: 0, attempts: 0 })]
-            .into_iter()
-            .collect(),
+        per_class: [(
+            "sql".into(),
+            ClassStat {
+                successes: 0,
+                attempts: 0,
+            },
+        )]
+        .into_iter()
+        .collect(),
         ..Default::default()
     });
     let winners = g.seed_winners_for_class("sql");
@@ -782,23 +808,36 @@ fn seed_winners_for_class_ranks_by_per_class_rate_not_global() {
         name: "GoodGloballyBadOnSql".into(),
         total_successes: 90,
         total_attempts: 100,
-        per_class: [("sql".into(), ClassStat { successes: 3, attempts: 10 })]
-            .into_iter()
-            .collect(),
+        per_class: [(
+            "sql".into(),
+            ClassStat {
+                successes: 3,
+                attempts: 10,
+            },
+        )]
+        .into_iter()
+        .collect(),
         ..Default::default()
     });
     g.techniques.push(TechniqueRecord {
         name: "OnlyGoodOnSql".into(),
         total_successes: 5,
         total_attempts: 100, // global rate = 5%
-        per_class: [("sql".into(), ClassStat { successes: 5, attempts: 5 })]
-            .into_iter()
-            .collect(),
+        per_class: [(
+            "sql".into(),
+            ClassStat {
+                successes: 5,
+                attempts: 5,
+            },
+        )]
+        .into_iter()
+        .collect(),
         ..Default::default()
     });
     let winners = g.seed_winners_for_class("sql");
     assert_eq!(
-        winners, vec!["OnlyGoodOnSql".to_string()],
+        winners,
+        vec!["OnlyGoodOnSql".to_string()],
         "warm-start must rank by per-class rate, not global"
     );
 }
@@ -819,7 +858,10 @@ fn round_trip_genome_with_per_class_serialises_to_stable_json() {
     // BTreeMap also guarantees alphabetical key order: sql before xss.
     let sql_pos = j1.find("\"sql\"").expect("sql key present");
     let xss_pos = j1.find("\"xss\"").expect("xss key present");
-    assert!(sql_pos < xss_pos, "BTreeMap keys must serialise in alphabetical order");
+    assert!(
+        sql_pos < xss_pos,
+        "BTreeMap keys must serialise in alphabetical order"
+    );
 }
 
 #[test]
@@ -881,4 +923,94 @@ fn merge_and_save_for_class_under_shared_bank_thread_contention() {
         "per-class sql attempts must equal sum of class-aware merges"
     );
     let _ = fs::remove_dir_all(&tmp);
+}
+
+// ── F137: genome file-size cap tests ──────────────────────────────────────
+
+#[test]
+fn oversized_genome_is_quarantined_on_load_not_read() {
+    // A genome file that exceeds MAX_GENOME_FILE_BYTES must be quarantined
+    // and NOT read into memory — defending against OOM on crafted files.
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_oversize_load_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    let _ = fs::create_dir_all(&tmp);
+
+    // Write a file of exactly MAX_GENOME_FILE_BYTES + 1 bytes.
+    // Content doesn't matter — the cap check fires before the read.
+    let genome_path = tmp.join("cloudflare.json");
+    let oversized: Vec<u8> = vec![b'x'; GeneBank::MAX_GENOME_FILE_BYTES as usize + 1];
+    fs::write(&genome_path, &oversized).unwrap();
+
+    let mut bank = GeneBank::open(tmp.clone()).unwrap();
+    let result = bank.load("Cloudflare");
+
+    // Must return None (file too large — not read).
+    assert!(
+        result.is_none(),
+        "oversized genome must be rejected, not loaded"
+    );
+
+    // The oversized file must have been quarantined (renamed or removed).
+    assert!(
+        !genome_path.exists(),
+        "oversized genome file must be quarantined/removed, not left in place"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn oversized_genome_is_quarantined_on_merge_and_save() {
+    // The merge_and_save path calls read_genome_from_disk, which now
+    // has the same cap. An oversized genome on disk must be quarantined
+    // and the merge must create a fresh genome from the session data.
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift_test_oversize_merge_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    let _ = fs::create_dir_all(&tmp);
+
+    // Write oversized file.
+    let genome_path = tmp.join("cloudflare.json");
+    let oversized: Vec<u8> = vec![b'x'; GeneBank::MAX_GENOME_FILE_BYTES as usize + 1];
+    fs::write(&genome_path, &oversized).unwrap();
+
+    let mut bank = GeneBank::open(tmp.clone()).unwrap();
+    // merge_and_save must succeed: oversized file is dropped, fresh
+    // genome is created with the session stats.
+    bank.merge_and_save("cloudflare", &[("TestTech".into(), 1u32, 1u32)])
+        .unwrap();
+
+    // The genome must now be loadable with the session data.
+    let mut bank2 = GeneBank::open(tmp.clone()).unwrap();
+    let loaded = bank2.load("cloudflare").expect("post-merge genome must load");
+    assert_eq!(loaded.techniques.len(), 1);
+    assert_eq!(loaded.techniques[0].name, "TestTech");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn max_genome_file_bytes_constant_is_in_sane_range() {
+    // Documents the constant's value and prevents a future change to a
+    // too-small number (less than any real genome) or too-large number
+    // (defeats the OOM protection).
+    assert!(
+        GeneBank::MAX_GENOME_FILE_BYTES >= 1024 * 1024,
+        "cap must be at least 1 MiB (real genomes can be several hundred KiB)"
+    );
+    assert!(
+        GeneBank::MAX_GENOME_FILE_BYTES <= 256 * 1024 * 1024,
+        "cap must be ≤ 256 MiB (otherwise OOM protection is meaningless)"
+    );
 }

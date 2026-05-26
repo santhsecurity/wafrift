@@ -214,16 +214,13 @@ fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
 
 /// Reduce a target URL to a bare host (the gene-bank/report key).
 fn host_from_target(target: &str) -> String {
-    let no_scheme = target.split_once("://").map_or(target, |(_, rest)| rest);
-    let host_port = no_scheme.split(['/', '?', '#']).next().unwrap_or(no_scheme);
-    // Strip userinfo and port.
-    let host = host_port.rsplit_once('@').map_or(host_port, |(_, h)| h);
-    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
-    if host.is_empty() {
-        "unknown-host".to_string()
-    } else {
-        host.to_ascii_lowercase()
-    }
+    // Delegate to the shared transport extractor — it handles
+    // IPv6 brackets correctly. Pre-fix the local naive
+    // rsplit_once(':') split `[::1]` on the LAST `:` of the
+    // address itself, yielding `[:` instead of `[::1]`. Report
+    // aggregation against an IPv6-target scan was effectively
+    // broken (host-keyed buckets used the mangled string).
+    wafrift_transport::host_from_url(target).unwrap_or_else(|| "unknown-host".to_string())
 }
 
 /// Parse a `wafrift scan --format json` blob into the same host-keyed
@@ -537,7 +534,11 @@ fn render_markdown(
             out.push_str(&format!(
                 "**Bypass payloads ({} variant{}):**\n\n",
                 hs.bypass_findings.len(),
-                if hs.bypass_findings.len() == 1 { "" } else { "s" }
+                if hs.bypass_findings.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             ));
             for f in &hs.bypass_findings {
                 out.push_str(&format!(
@@ -946,12 +947,18 @@ mod tests {
     #[test]
     fn host_from_target_extracts_host_from_full_url() {
         assert_eq!(host_from_target("http://example.com/api"), "example.com");
-        assert_eq!(host_from_target("https://api.example.com/"), "api.example.com");
+        assert_eq!(
+            host_from_target("https://api.example.com/"),
+            "api.example.com"
+        );
     }
 
     #[test]
     fn host_from_target_strips_port() {
-        assert_eq!(host_from_target("http://example.com:8080/api"), "example.com");
+        assert_eq!(
+            host_from_target("http://example.com:8080/api"),
+            "example.com"
+        );
         assert_eq!(host_from_target("https://example.com:443/"), "example.com");
     }
 
@@ -1136,7 +1143,10 @@ mod tests {
         assert!(out.starts_with("curl -i "), "got: {out}");
         // URL is single-quoted (via shell_single_quote) and carries
         // the query.
-        assert!(out.contains("'https://example.com/api?q=test'"), "got: {out}");
+        assert!(
+            out.contains("'https://example.com/api?q=test'"),
+            "got: {out}"
+        );
         // No body flag for GET.
         assert!(!out.contains("--data-binary"), "got: {out}");
     }
@@ -1229,8 +1239,14 @@ mod tests {
             format: "markdown".into(),
         };
         let md = render_markdown(&bank, &hosts, &args);
-        assert!(md.contains("Reproduce via wafrift replay"), "missing replay heading");
-        assert!(md.contains("Reproduce via raw curl"), "missing curl heading");
+        assert!(
+            md.contains("Reproduce via wafrift replay"),
+            "missing replay heading"
+        );
+        assert!(
+            md.contains("Reproduce via raw curl"),
+            "missing curl heading"
+        );
         // Curl invocation must appear inside the markdown.
         assert!(md.contains("curl -i "), "curl block missing: {md}");
     }
@@ -1300,7 +1316,10 @@ mod tests {
         assert_eq!(state.bypass_findings.len(), 2);
         assert_eq!(state.bypass_findings[0].variant, 1);
         assert_eq!(state.bypass_findings[0].payload, "%27%20OR%201%3D1--");
-        assert_eq!(state.bypass_findings[0].techniques, vec!["url", "case_swap"]);
+        assert_eq!(
+            state.bypass_findings[0].techniques,
+            vec!["url", "case_swap"]
+        );
         assert!(state.bypass_findings[0].repro_curl.is_some());
         assert!(state.bypass_findings[0].minimal_payload.is_none());
         // The distilled payload of the second finding must round-
@@ -1427,7 +1446,9 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&body).expect("parse");
         let findings = v["findings"].as_array().expect("findings array");
         assert_eq!(findings.len(), 1);
-        let bf = findings[0]["bypass_findings"].as_array().expect("bypass_findings array");
+        let bf = findings[0]["bypass_findings"]
+            .as_array()
+            .expect("bypass_findings array");
         assert_eq!(bf.len(), 2);
         assert_eq!(bf[0]["payload"], "%27%20OR%201%3D1--");
         assert_eq!(bf[1]["payload"], "/**/UNION/**/SELECT");

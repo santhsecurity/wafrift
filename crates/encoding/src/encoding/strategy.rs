@@ -1,5 +1,10 @@
 //! Strategy enum and main encode() dispatcher.
 
+use super::invisible::{
+    circled_letter_encode, ligature_encode, parenthesized_letter_encode, soft_hyphen_inject,
+    tag_char_encode, variation_selector_pad, variation_selector_supplementary_pad,
+    word_joiner_wrap,
+};
 use super::keyword::{
     between_obfuscate, case_alternate, mysql_versioned_comment, percentage_prefix,
     random_case_alternate, space_to_comment, space_to_dash, space_to_hash, space_to_plus,
@@ -19,12 +24,29 @@ use crate::error::EncodeError;
 /// Maximum input payload size to prevent OOM on adversarial input.
 pub const MAX_PAYLOAD_SIZE: usize = 8 * 1024 * 1024;
 
+/// Default chunk size for `Strategy::ChunkedSplit`.
+///
+/// 1 KiB chunks are large enough to avoid excessive chunk-count overhead
+/// on typical SQLi payloads (< 1 KB) while small enough that a WAF
+/// scanning only the first chunk misses the rest. Callers needing a
+/// different split granularity can call `structural::chunked_split` directly.
+pub const CHUNKED_SPLIT_DEFAULT_CHUNK_SIZE: usize = 1024;
+
+/// MySQL version number used in `/*!VERSIONKEYWORD*/` versioned comments.
+///
+/// `50000` = MySQL 5.0.0, the baseline for the `/*!...*/` conditional-
+/// execution syntax. Any MySQL 5.0+ instance will execute the wrapped
+/// keyword; WAFs that don't implement the MySQL comment parser will skip it.
+/// Virtually every production MySQL installation targeted by Cloudflare
+/// CumulusFire runs >= 5.0.0.
+pub const MYSQL_VERSIONED_COMMENT_VERSION: u32 = 50_000;
+
 /// Available encoding strategies.
 ///
 /// # Context hints
 /// Many strategies are only semantically correct in specific parser contexts.
 /// Use [`Strategy::contexts`] to query the applicable contexts for a strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Strategy {
     /// Standard URL encoding (%XX) — preserves unreserved chars per RFC 3986.
@@ -132,6 +154,43 @@ pub enum Strategy {
     /// Homoglyph substitution — visually identical Unicode chars for `'`, `"`, `<`, `>`, `=`.
     /// Context: byte-level WAFs with Unicode-tolerant backends.
     HomoglyphEncode,
+    /// Plan 9 tag-character encoding — every ASCII byte becomes
+    /// `U+E0000 + byte`. Renders invisible; LLM-WAF tokenizers
+    /// frequently still decode them, defeating keyword filters.
+    /// Context: any (codepoint-level transforms).
+    TagCharEncode,
+    /// Append U+FE0F VARIATION SELECTOR-16 after every codepoint.
+    /// Some normalizers strip it; many WAFs don't.
+    /// Context: any.
+    VariationSelectorPad,
+    /// Same as `VariationSelectorPad` but rotates through the
+    /// supplementary range U+E0100..=U+E01EF (per-position selector).
+    /// Defeats filters that strip the basic VS range only.
+    /// Context: any.
+    VariationSelectorSupplementaryPad,
+    /// Replace `ff`/`fi`/`fl`/`ffi`/`ffl`/`st`/`ſt` with their
+    /// precomposed stylistic ligature codepoints (U+FB00..=U+FB06).
+    /// NFKC decomposes back; pre-NFKC WAFs see opaque codepoints.
+    /// Context: nfkc (origins that NFKC-fold).
+    LigatureEncode,
+    /// Replace ASCII letters with U+24B6..=U+24E9 circled forms.
+    /// NFKC-equivalent to ASCII letters.
+    /// Context: nfkc.
+    CircledLetterEncode,
+    /// Replace ASCII letters with U+1F110..=U+1F12B (upper) /
+    /// U+249C..=U+24B5 (lower) parenthesized forms.
+    /// NFKC-equivalent to ASCII letters. Rotation partner for
+    /// `FullwidthEncode` / `CircledLetterEncode`.
+    /// Context: nfkc.
+    ParenthesizedLetterEncode,
+    /// Inject U+00AD SOFT HYPHEN between every pair of codepoints.
+    /// Visually invisible; some backends strip during normalization.
+    /// Context: any.
+    SoftHyphenInject,
+    /// Wrap each codepoint in U+2060 WORD JOINER.
+    /// Zero-width, NFC-stable, NFKC strips it.
+    /// Context: any.
+    WordJoinerWrap,
 }
 
 impl Strategy {
@@ -174,6 +233,14 @@ impl Strategy {
             Self::UnmagicQuotes => "UnmagicQuotes",
             Self::FullwidthEncode => "FullwidthEncode",
             Self::HomoglyphEncode => "HomoglyphEncode",
+            Self::TagCharEncode => "TagCharEncode",
+            Self::VariationSelectorPad => "VariationSelectorPad",
+            Self::VariationSelectorSupplementaryPad => "VariationSelectorSupplementaryPad",
+            Self::LigatureEncode => "LigatureEncode",
+            Self::CircledLetterEncode => "CircledLetterEncode",
+            Self::ParenthesizedLetterEncode => "ParenthesizedLetterEncode",
+            Self::SoftHyphenInject => "SoftHyphenInject",
+            Self::WordJoinerWrap => "WordJoinerWrap",
         }
     }
 
@@ -213,6 +280,13 @@ impl Strategy {
             Self::UnmagicQuotes => &["php", "gbk", "big5", "shift-jis"],
             Self::FullwidthEncode => &["nfkc", "java", "dotnet", "python3", "postgresql"],
             Self::HomoglyphEncode => &[],
+            Self::TagCharEncode | Self::VariationSelectorPad
+            | Self::VariationSelectorSupplementaryPad
+            | Self::SoftHyphenInject
+            | Self::WordJoinerWrap => &[],
+            Self::LigatureEncode
+            | Self::CircledLetterEncode
+            | Self::ParenthesizedLetterEncode => &["nfkc"],
         }
     }
 }
@@ -286,13 +360,13 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
         }
         Strategy::MysqlVersionedComment => {
             let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
-            Ok(mysql_versioned_comment(text, 50_000))
+            Ok(mysql_versioned_comment(text, MYSQL_VERSIONED_COMMENT_VERSION))
         }
         Strategy::NullByte => Ok(null_byte_inject(payload)?),
         Strategy::OverlongUtf8 => Ok(overlong_utf8(payload)?),
         Strategy::OverlongUtf8More => Ok(overlong_utf8_more(payload)?),
         Strategy::ChunkedSplit => {
-            let body = chunked_split(payload, 1024)?.body;
+            let body = chunked_split(payload, CHUNKED_SPLIT_DEFAULT_CHUNK_SIZE)?.body;
             String::from_utf8(body).map_err(|_| EncodeError::InvalidUtf8)
         }
         Strategy::ParameterPollution => Ok(parameter_pollute(payload)?),
@@ -342,6 +416,38 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
             let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
             Ok(homoglyph_encode(text))
         }
+        Strategy::TagCharEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(tag_char_encode(text))
+        }
+        Strategy::VariationSelectorPad => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(variation_selector_pad(text, '\u{FE0F}'))
+        }
+        Strategy::VariationSelectorSupplementaryPad => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(variation_selector_supplementary_pad(text))
+        }
+        Strategy::LigatureEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(ligature_encode(text))
+        }
+        Strategy::CircledLetterEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(circled_letter_encode(text))
+        }
+        Strategy::ParenthesizedLetterEncode => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(parenthesized_letter_encode(text))
+        }
+        Strategy::SoftHyphenInject => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(soft_hyphen_inject(text))
+        }
+        Strategy::WordJoinerWrap => {
+            let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
+            Ok(word_joiner_wrap(text))
+        }
     }
 }
 
@@ -383,6 +489,14 @@ static ALL_STRATEGIES: std::sync::LazyLock<Vec<Strategy>> = std::sync::LazyLock:
         Strategy::HomoglyphEncode,
         Strategy::GzipEncode,
         Strategy::DeflateEncode,
+        Strategy::TagCharEncode,
+        Strategy::VariationSelectorPad,
+        Strategy::VariationSelectorSupplementaryPad,
+        Strategy::LigatureEncode,
+        Strategy::CircledLetterEncode,
+        Strategy::ParenthesizedLetterEncode,
+        Strategy::SoftHyphenInject,
+        Strategy::WordJoinerWrap,
     ];
     strategies.sort_by(|a, b| {
         super::layered::aggressiveness(*a)
@@ -443,7 +557,15 @@ mod tests {
 
     #[test]
     fn encode_json() {
-        assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "\"A<\"");
+        // F67: encoder now produces escaped CONTENT only, no
+        // surrounding quotes — the variant builder substitutes
+        // into an existing JSON string field.
+        assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "A<");
+        // Real escape: backslash + control char.
+        assert_eq!(
+            encode("a\\\nb", Strategy::JsonEncode).unwrap(),
+            "a\\\\\\nb"
+        );
     }
 
     #[test]

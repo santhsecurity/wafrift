@@ -50,6 +50,15 @@ pub fn strategy_path(strategy: Strategy) -> &'static str {
         Strategy::Utf7Encode => "encoding/utf7",
         Strategy::GzipEncode => "encoding/compression/gzip",
         Strategy::DeflateEncode => "encoding/compression/deflate",
+        // Invisible / zero-width Unicode evasion family.
+        Strategy::TagCharEncode => "encoding/invisible/tag-char",
+        Strategy::VariationSelectorPad => "encoding/invisible/variation-selector",
+        Strategy::VariationSelectorSupplementaryPad => "encoding/invisible/variation-selector-supplementary",
+        Strategy::LigatureEncode => "encoding/invisible/ligature",
+        Strategy::CircledLetterEncode => "encoding/invisible/circled-letter",
+        Strategy::ParenthesizedLetterEncode => "encoding/invisible/parenthesized-letter",
+        Strategy::SoftHyphenInject => "encoding/invisible/soft-hyphen",
+        Strategy::WordJoinerWrap => "encoding/invisible/word-joiner",
         // `Strategy` is `#[non_exhaustive]`. New variants flag this sentinel
         // and the `every_strategy_is_mapped` test fails until a path is added.
         _ => "encoding/_unmapped",
@@ -92,16 +101,17 @@ impl TechniqueFilter {
                 bad.join(", ")
             ));
         }
-        // Contradiction guard (dogfood B7): a selector appearing in
-        // Reject contradictory selectors: only an EXACT match in both --only
-        // and --exclude is contradictory (nothing selected). A sub-path pair
-        // like --only encoding/url + --exclude encoding/url/triple is valid —
-        // it means "allow url-encoding family except triple".
+        // Contradiction guard (dogfood B7): a real contradiction is
+        // when an `--exclude` selector COVERS (is ancestor of or
+        // equal to) an `--only` selector — that drowns the only
+        // and yields zero variants. `--only encoding/url
+        // --exclude encoding/url/triple` is NOT a contradiction:
+        // only is the ancestor, exclude just trims one leaf.
+        // Previously we caught both directions, which rejected the
+        // legitimate "include this subtree EXCEPT one leaf" compose
+        // pattern.
         let overlap: Vec<_> = only
             .iter()
-            // matches(e, o) = e is an ancestor of (covers) o; reject when
-            // exclude covers only (exclude is more general). When only covers exclude,
-            // that is the valid "allow family except leaf" case -- allow it.
             .filter(|o| exclude.iter().any(|e| matches(e, o)))
             .cloned()
             .collect();
@@ -206,7 +216,14 @@ fn tamper_path_static(name: &'static str) -> &'static str {
         std::sync::Mutex<std::collections::HashMap<&'static str, &'static str>>,
     > = OnceLock::new();
     let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    let mut guard = cache.lock().expect("tamper-path cache poisoned");
+    // PoisonError recovery: a prior panic while holding this lock
+    // shouldn't permanently brick `TechniqueFilter::parse` for the
+    // rest of the process. The critical section just inserts into
+    // a HashMap, so resuming with the (consistent) inner state is
+    // safe. Matches the rest of the codebase's poison policy.
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(&path) = guard.get(name) {
         return path;
     }
@@ -295,6 +312,22 @@ mod tests {
     }
 
     #[test]
+    fn exclude_swallowing_only_still_errors() {
+        // --only encoding/url/double + --exclude encoding/url should
+        // still fail: exclude is the ancestor and drowns only.
+        let err = TechniqueFilter::parse(&["encoding/url/double".into()], &["encoding/url".into()])
+            .expect_err("rejected");
+        assert!(err.contains("contradictory"), "got: {err}");
+    }
+
+    #[test]
+    fn exact_match_in_both_lists_still_errors() {
+        let err = TechniqueFilter::parse(&["encoding/url".into()], &["encoding/url".into()])
+            .expect_err("rejected");
+        assert!(err.contains("contradictory"), "got: {err}");
+    }
+
+    #[test]
     fn unknown_selector_fails_fast() {
         let err =
             TechniqueFilter::parse(&["encoding/totally-bogus".into()], &[]).expect_err("rejected");
@@ -356,7 +389,7 @@ mod tests {
         // selector that must validate.
         for &name in wafrift_encoding::tamper::all_tamper_names() {
             let selector = format!("tamper/{name}");
-            let f = TechniqueFilter::parse(&[selector.clone()], &[])
+            let f = TechniqueFilter::parse(std::slice::from_ref(&selector), &[])
                 .unwrap_or_else(|e| panic!("tamper selector `{selector}` rejected: {e}"));
             assert!(!f.is_default(), "filter must register the selector");
         }
@@ -373,7 +406,10 @@ mod tests {
     #[test]
     fn render_tree_includes_tamper_section() {
         let out = render_tree();
-        assert!(out.contains("tamper"), "render_tree must include tamper family header");
+        assert!(
+            out.contains("tamper"),
+            "render_tree must include tamper family header"
+        );
         // Every registered tamper must appear in the rendered output.
         for &name in wafrift_encoding::tamper::all_tamper_names() {
             let needle = format!("tamper/{name}");
@@ -421,7 +457,7 @@ mod tests {
             "bell_separator",
         ] {
             let selector = format!("tamper/{name}");
-            let f = TechniqueFilter::parse(&[selector.clone()], &[]);
+            let f = TechniqueFilter::parse(std::slice::from_ref(&selector), &[]);
             assert!(
                 f.is_ok(),
                 "frontier 2026 tamper `{selector}` is no longer registered"

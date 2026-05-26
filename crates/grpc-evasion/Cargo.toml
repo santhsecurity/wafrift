@@ -1,0 +1,29 @@
+[package]
+name = "wafrift-grpc-evasion"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "gRPC/protobuf opaque-payload bypass — embeds SQLi/XSS/cmdi into protobuf wire format so WAFs that treat the gRPC body as opaque binary skip all signature rules."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "grpc", "protobuf", "evasion", "bypass"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+# prost is used only for decode round-trip in tests; the encoder is hand-written
+# to avoid a protoc build-script dependency (which would require the protobuf
+# compiler on every CI host).  prost's decode functions are stable and
+# version-locked here.
+prost = "0.12"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+prost = "0.12"
+proptest = { workspace = true }
+
+[lints]
+workspace = true

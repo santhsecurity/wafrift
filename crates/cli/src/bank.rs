@@ -364,13 +364,15 @@ fn run_export(args: BankExportArgs) -> ExitCode {
         && !parent.as_os_str().is_empty()
         && let Err(e) = fs::create_dir_all(parent)
     {
-        eprintln!(
-            "error: create output dir {}: {e}",
-            parent.display()
-        );
+        eprintln!("error: create output dir {}: {e}", parent.display());
         return ExitCode::from(1);
     }
-    if let Err(e) = fs::write(&args.output, &json) {
+    // Atomic write: tmp file → fsync → rename → parent fsync. Pre-fix
+    // a power loss / signal mid-`fs::write` left the destination
+    // truncated and the JSON invalid — silently destroying the only
+    // off-host backup of the gene bank. seed.rs already uses this
+    // helper for the same reason; keep behaviour consistent.
+    if let Err(e) = wafrift_types::loaders::write_atomic(&args.output, json.as_bytes()) {
         eprintln!("error: write {}: {e}", args.output.display());
         return ExitCode::from(1);
     }
@@ -470,10 +472,7 @@ fn run_import(args: BankImportArgs) -> ExitCode {
         && !parent.as_os_str().is_empty()
         && let Err(e) = fs::create_dir_all(parent)
     {
-        eprintln!(
-            "error: create proxy-bank dir {}: {e}",
-            parent.display()
-        );
+        eprintln!("error: create proxy-bank dir {}: {e}", parent.display());
         return ExitCode::from(1);
     }
     let proxy_json = match serde_json::to_string_pretty(&current) {
@@ -490,10 +489,7 @@ fn run_import(args: BankImportArgs) -> ExitCode {
 
     // ── Per-WAF genome merge ────────────────────────────────────────
     if let Err(e) = fs::create_dir_all(&genome_dir) {
-        eprintln!(
-            "error: create genome dir {}: {e}",
-            genome_dir.display()
-        );
+        eprintln!("error: create genome dir {}: {e}", genome_dir.display());
         return ExitCode::from(1);
     }
     let mut wafs_written = 0usize;

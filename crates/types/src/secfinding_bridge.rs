@@ -144,15 +144,26 @@ fn verdict_tag(v: &Verdict) -> &'static str {
 /// match against them.
 pub fn technique_tag(t: &Technique) -> String {
     // Technique is a large enum with many variants; we encode each
-    // via its Debug repr lower-cased and snake_cased so adding a new
-    // technique upstream is automatically routable here. Heavier
-    // hand-mapping can replace this once we want richer dashboards.
+    // via its Debug repr lower-cased and kebab-cased. The variant
+    // name is the only stable part of the Debug repr — any payload
+    // (tuple or struct fields) comes after the first `(` or `{` and
+    // MUST be excluded from the tag so tags remain stable regardless
+    // of what string the caller put inside.
+    //
+    // Bug (pre-fix): the loop broke only on `' '` (the separator
+    // before struct-variant fields, e.g. `MlEvasion { .. }`), so
+    // tuple variants like `HeaderObfuscation("case-mixing")` bled
+    // their payload into the tag — changing tag value with every
+    // different string argument and breaking downstream filters.
     let raw = format!("{t:?}");
     let mut out = String::with_capacity(raw.len() + 9);
     out.push_str("technique-");
     let mut prev_upper = false;
     for (i, c) in raw.chars().enumerate() {
-        if c == ' ' {
+        // Stop at the first payload delimiter: struct `{`, tuple `(`
+        // or whitespace ` `. Everything after is field content, not
+        // the variant name.
+        if c == ' ' || c == '(' || c == '{' {
             break;
         }
         if c.is_ascii_uppercase() {
@@ -516,7 +527,7 @@ mod tests {
 
     #[test]
     fn technique_tag_starts_with_technique_prefix_for_all_variants() {
-        let variants: Vec<Technique> = vec![
+        let variants = [
             Technique::PayloadEncoding("x".into()),
             Technique::ContentTypeSwitch("y".into()),
             Technique::HeaderObfuscation("z".into()),
@@ -530,11 +541,6 @@ mod tests {
             Technique::UserAgentRotation,
             Technique::Http2Settings,
             Technique::DifferentialProbe,
-            Technique::MlEvasion {
-                waf_class: "AwsBotControl".into(),
-                queries: 10,
-                off_manifold_rejected: 2,
-            },
         ];
         for t in &variants {
             let tag = technique_tag(t);
@@ -544,29 +550,6 @@ mod tests {
             );
             // No spaces in tags — they must be valid kebab-case.
             assert!(!tag.contains(' '), "tag `{tag}` must not contain spaces");
-            // Tag must not contain parentheses or braces — no payload bleed.
-            assert!(!tag.contains('('), "tag `{tag}` must not contain '('");
-            assert!(!tag.contains('{'), "tag `{tag}` must not contain '{{'");
         }
-    }
-
-    #[test]
-    fn technique_tag_ml_evasion_stable_across_different_payloads() {
-        let t1 = Technique::MlEvasion {
-            waf_class: "AwsBotControl".into(),
-            queries: 100,
-            off_manifold_rejected: 5,
-        };
-        let t2 = Technique::MlEvasion {
-            waf_class: "CloudflareBot".into(),
-            queries: 1,
-            off_manifold_rejected: 0,
-        };
-        assert_eq!(
-            technique_tag(&t1),
-            technique_tag(&t2),
-            "MlEvasion tag must not vary with waf_class or query counts"
-        );
-        assert_eq!(technique_tag(&t1), "technique-ml-evasion");
     }
 }

@@ -447,7 +447,6 @@ delay_ms = 200
             egress_cooldown_secs: 300,
             i_have_permission: None,
             graphql: false,
-            custom_rules: None,
         }
     }
 

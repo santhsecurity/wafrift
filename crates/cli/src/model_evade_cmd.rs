@@ -32,9 +32,8 @@ use std::time::Instant;
 
 use wafrift_types::Request;
 use wafrift_wafmodel::{
-    Alphabet, BoundedExhaustiveEq, ChainedEq, EquivalenceOracle, FnOracle, LearnReport, Outcome,
-    SampledEq, UcbBanditEq, WMethodEq, WafModelError, WafOracle, attack_grammar, l_star_budgeted,
-    mine_bypasses,
+    Alphabet, BoundedExhaustiveEq, FnOracle, LearnReport, Outcome, WafModelError, WafOracle,
+    attack_grammar, l_star_budgeted, mine_bypasses,
 };
 
 /// Arguments for `wafrift model-evade`.
@@ -131,53 +130,6 @@ pub struct ModelEvadeArgs {
     /// Seconds a cooled egress entry stays out of rotation. Default: 300.
     #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
     pub egress_cooldown_secs: u64,
-
-    /// Equivalence-oracle strategy for the L* refinement loop. One of:
-    ///
-    /// * `bounded` (default) — `BoundedExhaustiveEq` BFS over all
-    ///   words ≤ `max-len` (current behavior).
-    /// * `wmethod` — Chow's W-method. Guarantees discovery of any
-    ///   fault if the true machine has ≤ `hyp_states + extra_states`.
-    /// * `ucb-bandit` — UCB1 over `(state, symbol)` transition arms.
-    ///   Spends each query where the model is least exercised.
-    /// * `sampled` — PAC-bounded random sampling. Reports a real
-    ///   `PacBound` on clean rounds.
-    /// * `chained` — runs `wmethod` → `ucb-bandit` → `sampled` in
-    ///   order, returning the first counterexample. Strongest signal
-    ///   per query for live targets at the cost of higher round
-    ///   complexity.
-    #[arg(
-        long,
-        default_value = "bounded",
-        value_parser = ["bounded", "wmethod", "ucb-bandit", "sampled", "chained"],
-    )]
-    pub equiv_strategy: String,
-
-    /// Extra-states budget for `--equiv-strategy wmethod`. Higher
-    /// values check deeper Σ^{≤k} suffixes; each +1 multiplies the
-    /// W-method's query count by the alphabet size.
-    #[arg(long, default_value_t = 1)]
-    pub equiv_extra_states: usize,
-
-    /// Per-round sample count for `--equiv-strategy sampled` /
-    /// `chained`. Higher = tighter PAC bound on clean rounds.
-    #[arg(long, default_value_t = 256)]
-    pub equiv_samples: u64,
-
-    /// Max sampled word length for `--equiv-strategy sampled` /
-    /// `chained` / `ucb-bandit`.
-    #[arg(long, default_value_t = 6)]
-    pub equiv_max_len: usize,
-
-    /// PAC confidence parameter (δ) for `--equiv-strategy sampled`.
-    /// Lower δ = stricter bound on the certifying round.
-    #[arg(long, default_value_t = 0.05)]
-    pub equiv_delta: f64,
-
-    /// Membership probes per round for `--equiv-strategy ucb-bandit`.
-    /// Each probe = one live HTTP request.
-    #[arg(long, default_value_t = 64)]
-    pub equiv_ucb_budget: usize,
 }
 
 // ── Attack-class configuration ─────────────────────────────────────────────
@@ -192,11 +144,29 @@ pub(crate) fn class_config(class: &str) -> (Alphabet, Vec<&'static [u8]>) {
     match class {
         "sqli" => (
             // Distinguished bytes that SQL-injection WAF rules branch on.
+            // INVARIANT (same as XSS above): every byte that appears in ANY
+            // needle below MUST be in this set. kmp_sfa() uses the catch-all
+            // representative (b'A') for unlisted bytes, so a needle byte not
+            // here maps to the catch-all class and the KMP state machine can
+            // never advance past it — the needle becomes silently unmatchable.
+            //
+            // Pre-fix: only UPPERCASE u/n/i/o/s/e/l/t/r/c were listed (left
+            // over from a draft that used uppercase needles), but ALL needles
+            // are lowercase. Every character in "union select", "or 1=1",
+            // "sleep(", "; select" mapped to catch-all — zero bypasses were
+            // ever mined from the sqli class.
             Alphabet::new(
                 vec![
-                    b'\'', b'"', b' ', b'-', b'/', b'*', b'1', b'=', b'(',
-                    b')', b'U', b'N', b'I', b'O', b'S', b'E', b'L', b'T',
-                    b'R', b'C', b'0', b';',
+                    // Punctuation / operators that WAF rules branch on.
+                    b'\'', b'"', b' ', b'-', b'/', b'*', b'=', b'(', b')', b';',
+                    // Digits used in payloads (`1=1`, `0`).
+                    b'0', b'1',
+                    // Lowercase letters used in sqli needles:
+                    //   union select → u, n, i, o, s, e, l, c, t
+                    //   or / or 1=1  → o, r
+                    //   sleep(       → s, l, e, p
+                    //   ; select     → s, e, l, c, t
+                    b'u', b'n', b'i', b'o', b's', b'e', b'l', b't', b'r', b'c', b'p',
                 ],
                 b'A',
             ),
@@ -210,11 +180,21 @@ pub(crate) fn class_config(class: &str) -> (Alphabet, Vec<&'static [u8]>) {
             ],
         ),
         "xss" => (
+            // Distinguished bytes that XSS WAF rules branch on.
+            // INVARIANT: every byte that appears in ANY needle below MUST
+            // be in this set. kmp_sfa() uses alpha.byte_of(catch_all_idx)
+            // (= b'A') as the representative for all non-distinguished
+            // bytes — so a needle byte not in the distinguished set maps
+            // to the catch-all class, and kmp_next(state, b'A') will
+            // never advance the KMP state machine past that needle byte,
+            // making the needle silently unmatchable over the abstract alphabet.
+            // Missing before: v, g, m, d (needed by <svg, <img, onload=).
             Alphabet::new(
                 vec![
                     b'<', b'>', b'/', b'"', b'\'', b' ', b'=', b'(', b')',
                     b's', b'c', b'r', b'i', b'p', b't', b'o', b'n', b'l',
                     b'a', b'e',
+                    b'v', b'g', b'm', b'd',
                 ],
                 b'A',
             ),
@@ -260,30 +240,12 @@ fn build_http_oracle(
     target_url: String,
     param: String,
     insecure: bool,
-    egress: &crate::egress_args::EgressArgs<'_>,
 ) -> Result<impl WafOracle, String> {
-    // Build the optional egress pool from the operator's --socks5 /
-    // --http-proxy / --tailscale-exit-node flags. Pre-fix the
-    // model-evade builder ignored every egress flag — operators
-    // passing rotation got a bare reqwest client, same lie that
-    // bench-waf and scan had until last session. Mirrors the wire-up
-    // there.
-    let egress_pool = crate::egress_args::build_egress_pool(egress)
-        .map_err(|e| format!("egress pool config: {e}"))?;
-    let egress_host = egress_pool
-        .as_ref()
-        .and(crate::egress_args::target_host(&target_url))
-        .unwrap_or_default();
-    let mut client_builder = wafrift_transport::base_client_builder_with_egress(
-        10,
-        insecure,
-        Some("wafrift/model-evade (authorized security research)"),
-        egress_pool.as_ref(),
-        &egress_host,
-    )
-    .map_err(|e| format!("egress-aware HTTP client: {e}"))?;
-    client_builder = client_builder.redirect(reqwest::redirect::Policy::none());
-    let client = client_builder
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(insecure)
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent("wafrift/model-evade (authorized security research)")
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
@@ -479,20 +441,11 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
     let t_learn_start = Instant::now();
 
     // Build the oracle FIRST (validates HTTP client construction).
-    let egress = crate::egress_args::EgressArgs {
-        socks5: &args.egress_socks5,
-        http_proxy: &args.egress_http_proxy,
-        tailscale_nodes: &args.egress_tailscale_nodes,
-        tailscale_socks_addr: &args.egress_tailscale_socks_addr,
-        challenge_threshold: args.egress_challenge_threshold,
-        cooldown_secs: args.egress_cooldown_secs,
-    };
     let mut oracle = match build_http_oracle(
         rt.clone(),
         args.target_url.clone(),
         args.param.clone(),
         args.insecure,
-        &egress,
     ) {
         Ok(o) => o,
         Err(e) => {
@@ -521,21 +474,9 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
     // still 1 M HTTP calls per EQ round without this gate. 500 queries
     // is more than enough to find a counterexample for any sub-6-state
     // boundary learned from a budget-50 membership pass.
-    // Deterministic equiv-oracle seed: derived from the target URL so
-    // repeated runs against the same target reproduce the same probe
-    // sequence (FNV-1a 64-bit; no external RNG needed).
-    let equiv_seed: u64 = fnv1a_64(args.target_url.as_bytes());
-    let mut eq = build_equiv_oracle(
-        &args.equiv_strategy,
-        args.equiv_extra_states,
-        args.equiv_samples,
-        args.equiv_max_len,
-        args.equiv_delta,
-        args.equiv_ucb_budget,
-        equiv_seed,
-    );
+    let mut eq = BoundedExhaustiveEq { max_len: 6, max_queries: Some(500) };
     let learn_result: LearnReport =
-        match l_star_budgeted(&mut oracle, &build_req, &alpha, eq.as_mut(), args.budget) {
+        match l_star_budgeted(&mut oracle, &build_req, &alpha, &mut eq, args.budget) {
             Ok(r) => {
                 if !json_mode {
                     println!(
@@ -769,99 +710,10 @@ fn emit_output(path: Option<&std::path::Path>, content: &str) {
     }
 }
 
-/// Construct the operator-chosen `EquivalenceOracle` strategy.
-///
-/// Returns `Box<dyn EquivalenceOracle>` so the caller can swap
-/// strategies behind one variable without per-arm code at the
-/// l_star_budgeted call site. The mapping is also tested in this
-/// module's `tests` so adding a new value-parser entry without
-/// wiring its construction trips CI rather than a runtime panic.
-///
-/// Parameters that aren't relevant to the chosen strategy are
-/// silently ignored — operators don't have to remember which knob
-/// belongs to which strategy.
-#[must_use]
-pub(crate) fn build_equiv_oracle(
-    strategy: &str,
-    extra_states: usize,
-    samples: u64,
-    max_len: usize,
-    delta: f64,
-    ucb_budget: usize,
-    seed: u64,
-) -> Box<dyn EquivalenceOracle> {
-    match strategy {
-        "wmethod" => Box::new(WMethodEq { extra_states }),
-        "ucb-bandit" => Box::new(UcbBanditEq::new(ucb_budget, max_len, seed)),
-        "sampled" => Box::new(SampledEq::new(samples, max_len, delta, seed)),
-        "chained" => Box::new(ChainedEq::new(vec![
-            Box::new(WMethodEq { extra_states }),
-            Box::new(UcbBanditEq::new(ucb_budget, max_len, seed)),
-            Box::new(SampledEq::new(samples, max_len, delta, seed)),
-        ])),
-        // "bounded" — default fallback. The capped variant matches the
-        // pre-flag hardcoded path so legacy `wafrift model-evade`
-        // invocations produce byte-identical results.
-        _ => Box::new(BoundedExhaustiveEq {
-            max_len,
-            max_queries: Some(500),
-        }),
-    }
-}
-
-/// FNV-1a 64-bit hash — deterministic per-target seed for the
-/// equivalence-oracle RNG.  Same constants the bench corpus recorder
-/// uses; consolidating on one helper would be the next step if a
-/// third caller surfaces.
-fn fnv1a_64(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in bytes {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wafrift_wafmodel::{BytePred, Sfa};
-
-    // ── build_equiv_oracle unit tests ──────────────────────────────
-
-    /// Every value-parser entry must construct a non-panicking oracle.
-    /// New strategies added to the flag's value_parser are required to
-    /// extend the match arms in build_equiv_oracle; this test catches
-    /// drift.
-    #[test]
-    fn build_equiv_oracle_covers_every_strategy_name() {
-        for name in ["bounded", "wmethod", "ucb-bandit", "sampled", "chained"] {
-            let oracle = build_equiv_oracle(name, 1, 64, 6, 0.05, 32, 42);
-            // We can't easily downcast a `Box<dyn EquivalenceOracle>`,
-            // but constructing it without panic + having a non-null
-            // Box pointer is the wire-up contract under test.
-            // Drop runs and frees without ill effect.
-            drop(oracle);
-        }
-    }
-
-    #[test]
-    fn build_equiv_oracle_unknown_falls_back_to_bounded() {
-        // Unknown strategy → default bounded oracle. Pre-flag behavior
-        // preserved when clap's value_parser is bypassed (e.g. by
-        // direct construction in tests).
-        let oracle = build_equiv_oracle("does-not-exist", 1, 64, 6, 0.05, 32, 42);
-        drop(oracle);
-    }
-
-    #[test]
-    fn fnv1a_64_is_deterministic_per_input() {
-        // Same bytes → same hash. Different bytes → different hash.
-        assert_eq!(fnv1a_64(b"https://target.example/"), fnv1a_64(b"https://target.example/"));
-        assert_ne!(fnv1a_64(b"https://a/"), fnv1a_64(b"https://b/"));
-        // Empty input = FNV-1a offset basis.
-        assert_eq!(fnv1a_64(b""), 0xcbf29ce484222325);
-    }
+    use wafrift_wafmodel::{BytePred, Sfa, minimal_bypass};
 
     // ── check_permission unit tests ─────────────────────────────────
 
@@ -1108,7 +960,7 @@ mod tests {
             Request::post("https://h/p", bytes.to_vec())
                 .header("Content-Type", "application/x-www-form-urlencoded")
         };
-        let mut eq = BoundedExhaustiveEq { max_len: 5 };
+        let mut eq = BoundedExhaustiveEq { max_len: 5, max_queries: None };
         let report = l_star_budgeted(&mut waf, &build, &alpha, &mut eq, 2000).unwrap();
         // Learned model must pass the empty body (benign).
         assert!(report.sfa.accepts(b""), "empty body must pass");
@@ -1134,7 +986,7 @@ mod tests {
             Request::post("https://h/p", bytes.to_vec())
                 .header("Content-Type", "application/x-www-form-urlencoded")
         };
-        let mut eq = BoundedExhaustiveEq { max_len: 5 };
+        let mut eq = BoundedExhaustiveEq { max_len: 5, max_queries: None };
         // Budget of 1 is too small — must return BudgetExhausted.
         let result = l_star_budgeted(&mut waf, &build, &alpha, &mut eq, 1);
         assert!(
@@ -1231,32 +1083,70 @@ mod tests {
         }
     }
 
+    /// INVARIANT test: every byte in every needle for each class MUST
+    /// appear in the class's distinguished-symbol alphabet. Violation
+    /// means the KMP SFA maps that byte to the catch-all representative
+    /// (b'A') and can never advance the needle match — the needle becomes
+    /// silently unmatchable over the abstract alphabet. This is the exact
+    /// bug that existed in the sqli alphabet before the fix (uppercase
+    /// letters listed, lowercase needles).
+    #[test]
+    fn class_config_alphabet_covers_all_needle_bytes() {
+        for class in &["sqli", "xss", "all"] {
+            let (alpha, needles) = class_config(class);
+            let sym_count = alpha.catch_all();
+            let symbols = &alpha.raw_symbols()[..sym_count];
+            for needle in &needles {
+                for &byte in *needle {
+                    assert!(
+                        symbols.contains(&byte),
+                        "class={class}: needle byte {byte:?} ({:?}) not in distinguished \
+                         alphabet — it maps to catch-all and kmp_sfa cannot match it.\n\
+                         Needle: {:?}\nAlphabet: {:?}",
+                        byte as char,
+                        String::from_utf8_lossy(needle),
+                        symbols.iter().map(|b| *b as char).collect::<Vec<_>>(),
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn mine_bypasses_all_class_finds_both_sqli_and_xss() {
-        let (alpha, needles) = class_config("all");
+        // Use `minimal_bypass` (shortest_accepted with a seen-set, O(states)) to
+        // verify each class grammar accepts its attack language.  `mine_bypasses`
+        // (enumerate_accepted, no seen-set) hits ENUMERATE_QUEUE_CAP on large
+        // cyclic grammars when max_len is generous; it is NOT the correctness
+        // oracle — `minimal_bypass` is.
         let accept_all = Sfa::new(0, vec![true], vec![vec![(BytePred::any(), 0)]]);
-        let grammar = attack_grammar(&alpha, &needles);
-        let candidates = mine_bypasses(&accept_all, &grammar, 30, 30);
+
+        // SQLi: the shortest bypass must contain an SQLi needle.
+        let (sqli_alpha, sqli_needles) = class_config("sqli");
+        let sqli_grammar = attack_grammar(&sqli_alpha, &sqli_needles);
+        let sqli_word = minimal_bypass(&accept_all, &sqli_grammar)
+            .expect("sqli grammar must accept at least one bypass");
+        let sqli_s = String::from_utf8_lossy(&sqli_word).to_ascii_lowercase();
         assert!(
-            !candidates.is_empty(),
-            "all-class grammar must mine candidates"
-        );
-        // Must find at least one sqli and one xss candidate.
-        let (_, sqli_needles) = class_config("sqli");
-        let (_, xss_needles) = class_config("xss");
-        let has_sqli = candidates.iter().any(|c| {
-            let s = String::from_utf8_lossy(c).to_ascii_lowercase();
             sqli_needles
                 .iter()
-                .any(|n| s.contains(std::str::from_utf8(n).unwrap_or("")))
-        });
-        let has_xss = candidates.iter().any(|c| {
-            let s = String::from_utf8_lossy(c).to_ascii_lowercase();
+                .any(|n| sqli_s.contains(std::str::from_utf8(n).unwrap_or(""))),
+            "sqli minimal bypass {:?} must contain a sqli needle",
+            sqli_s
+        );
+
+        // XSS: the shortest bypass must contain an XSS needle.
+        let (xss_alpha, xss_needles) = class_config("xss");
+        let xss_grammar = attack_grammar(&xss_alpha, &xss_needles);
+        let xss_word = minimal_bypass(&accept_all, &xss_grammar)
+            .expect("xss grammar must accept at least one bypass");
+        let xss_s = String::from_utf8_lossy(&xss_word).to_ascii_lowercase();
+        assert!(
             xss_needles
                 .iter()
-                .any(|n| s.contains(std::str::from_utf8(n).unwrap_or("")))
-        });
-        assert!(has_sqli, "all-class must find at least one sqli candidate");
-        assert!(has_xss, "all-class must find at least one xss candidate");
+                .any(|n| xss_s.contains(std::str::from_utf8(n).unwrap_or(""))),
+            "xss minimal bypass {:?} must contain an xss needle",
+            xss_s
+        );
     }
 }

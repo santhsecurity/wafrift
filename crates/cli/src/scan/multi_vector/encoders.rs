@@ -158,7 +158,10 @@ mod tests {
 
     #[test]
     fn xml_text_escape_escapes_the_five_xml_chars() {
-        assert_eq!(xml_text_escape("<a&b\"c'd>"), "&lt;a&amp;b&quot;c&apos;d&gt;");
+        assert_eq!(
+            xml_text_escape("<a&b\"c'd>"),
+            "&lt;a&amp;b&quot;c&apos;d&gt;"
+        );
     }
 
     #[test]

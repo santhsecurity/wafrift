@@ -8,18 +8,53 @@
 //!
 //! # Symbol inventory (everything the tests actually use)
 //!
-//! | Re-export path                      | Used by                             |
-//! |-------------------------------------|-------------------------------------|
-//! | wafrift_types::*                    | all tests (Request, Technique, ...) |
-//! | content_type                        | adversarial, failure_tests          |
-//! | encoding                            | all tests                           |
-//! | fingerprint                         | adversarial                         |
-//! | grammar                             | pipeline_integration                |
-//! | smuggling, h2_evasion               | pipeline_integration                |
-//! | waf_detect                          | adversarial, pipeline_integration   |
-//! | host_state, strategy                | all tests                           |
-//! | HostState, EscalationLevel          | strategy_adversarial, failure_tests |
-//! | EvasionConfig, CalibrationResult    | strategy_adversarial, failure_tests |
+//! Use the umbrella to drive a payload through three subsystems
+//! without depending on each subcrate by name:
+//!
+//! ```
+//! use wafrift_core::{encoding, grammar};
+//!
+//! // Classify, mutate, encode — three lego-blocks, one façade.
+//! let p = "' OR 1=1 --";
+//! assert_eq!(grammar::classify(p), grammar::PayloadType::Sql);
+//!
+//! let mutations = grammar::mutate(p, 3);
+//! assert!(!mutations.is_empty());
+//!
+//! let encoded = encoding::encode(p, encoding::Strategy::UrlEncode).unwrap();
+//! assert!(encoded.contains("%27"));
+//! ```
+//!
+//! Use the re-exported types to build a request without naming
+//! `wafrift_types`:
+//!
+//! ```
+//! use wafrift_core::{Method, Request};
+//!
+//! let r = Request::get("https://example.com").header("X-Test", "1");
+//! assert_eq!(r.method(), &Method::Get);
+//! assert_eq!(r.headers().len(), 1);
+//! ```
+//!
+//! # Crate structure
+//!
+//! | Crate                        | Purpose                                             |
+//! |------------------------------|-----------------------------------------------------|
+//! | `wafrift-types`              | Core types: Request, Technique, EvasionResult       |
+//! | `wafrift-encoding`           | Payload encoding + header obfuscation               |
+//! | `wafrift-grammar`            | Grammar-aware payload mutations                     |
+//! | `wafrift-content-type`       | WAFFLED Content-Type switching                      |
+//! | `wafrift-smuggling`          | HTTP smuggling + HTTP/2 frame-level evasion         |
+//! | `wafrift-fingerprint`        | Browser + TLS JA3/JA4 fingerprint profiles          |
+//! | `wafrift-detect`             | WAF detection (HTTP headers, DNS CNAME, BGP ASN)    |
+//! | `wafrift-evolution`          | Genetic algorithm + MCTS + differential + advisor   |
+//! | `wafrift-wafmodel`           | L* WAF decompiler + offline SFA bypass mining       |
+//! | `wafrift-oracle`             | Payload validity oracles (SQL, XSS, SSTI, …)        |
+//! | `wafrift-strategy`           | Evasion pipeline + gene bank + adaptive host state  |
+//! | `wafrift-transport`          | Evasion-aware HTTP client + stealth profiles         |
+//! | `wafrift-pool`               | Round-robin HTTP/SOCKS5 proxy pool                  |
+//! | `wafrift-recon`              | Origin discovery via CT logs + DNS history           |
+//! | `wafrift-genome-registry`    | ed25519 genome signing + trust-list management      |
 
 // -- Foundation types (Request, Technique, Method, EvasionResult, config::*, ...) --
 pub use wafrift_types::*;

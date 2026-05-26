@@ -1,0 +1,31 @@
+version: "3.8"
+
+# wafrift bench/juice-shop — OWASP Juice Shop dogfood target.
+#
+# Bring up:    docker compose -f bench/juice-shop/docker-compose.yml up -d
+# Tear down:   docker compose -f bench/juice-shop/docker-compose.yml down
+# Open:        http://localhost:3000
+#
+# Isolation invariants (this app is INTENTIONALLY VULNERABLE):
+#   - Bound to 127.0.0.1 ONLY — never exposed on 0.0.0.0.
+#     If you need a teammate to hit it, use cloudflared tunnel,
+#     not a port-forward.
+#   - No volumes — every restart starts with a fresh DB so an
+#     accidental real-credential entry can't persist.
+#   - Resource caps: cpus=1, memory=512m — bounded blast radius
+#     if a wafrift payload triggers something CPU-heavy.
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:v17.1.1
+    container_name: wafrift-juice-shop
+    ports:
+      - "127.0.0.1:3000:3000"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    restart: "no"
+    environment:
+      - NODE_ENV=unsafe

@@ -15,7 +15,29 @@ pub struct UpstreamPolicy {
 /// Re-export the workspace-canonical bogon classifier.
 pub use wafrift_types::ip_addr_is_bogon;
 
-/// Block forwarding when the URL host is a literal bogon IP.
+/// True when this IP should never be the target of a proxy-initiated
+/// outbound connection.
+///
+/// Extends [`ip_addr_is_bogon`] with IPv4 multicast (`224.0.0.0/4`).
+/// The bogon crate intentionally leaves IPv4 multicast allowed because
+/// scanner workloads legitimately probe multicast addresses; the proxy
+/// forward/CONNECT path has no such use case and must refuse them to
+/// prevent SSRF via multicast-capable LAN services.
+#[must_use]
+pub fn proxy_ip_is_forbidden(ip: IpAddr) -> bool {
+    if ip_addr_is_bogon(ip) {
+        return true;
+    }
+    // IPv4 multicast: 224.0.0.0/4 (first octet 224–239).
+    if let IpAddr::V4(v4) = ip {
+        if v4.is_multicast() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Block forwarding when the URL host is a literal forbidden IP.
 #[must_use]
 pub fn upstream_literal_ip_forbidden(url: &str) -> bool {
     let Ok(u) = reqwest::Url::parse(url) else {
@@ -27,7 +49,7 @@ pub fn upstream_literal_ip_forbidden(url: &str) -> bool {
     let Ok(ip) = host.parse::<IpAddr>() else {
         return false;
     };
-    ip_addr_is_bogon(ip)
+    proxy_ip_is_forbidden(ip)
 }
 
 async fn resolve_host_all_public(host: &str, port: u16) -> Result<(), String> {
@@ -37,7 +59,7 @@ async fn resolve_host_all_public(host: &str, port: u16) -> Result<(), String> {
         .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
     for sa in sa_iter {
         any = true;
-        if ip_addr_is_bogon(sa.ip()) {
+        if proxy_ip_is_forbidden(sa.ip()) {
             return Err(format!(
                 "refusing upstream: DNS for {host} includes non-public address {}",
                 sa.ip()
@@ -88,7 +110,9 @@ pub async fn resolve_forward_url_pinned(
 ) -> Result<Vec<SocketAddr>, String> {
     if policy.insecure_open_upstream || policy.allow_private_upstream {
         let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
-        let host = u.host_str().ok_or_else(|| "upstream URL has no host".to_string())?;
+        let host = u
+            .host_str()
+            .ok_or_else(|| "upstream URL has no host".to_string())?;
         let port = u.port_or_known_default().unwrap_or(80);
         if let Ok(ip) = host.parse::<IpAddr>() {
             return Ok(vec![SocketAddr::new(ip, port)]);
@@ -108,7 +132,9 @@ pub async fn resolve_forward_url_pinned(
         ));
     }
     let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
-    let host = u.host_str().ok_or_else(|| "upstream URL has no host".to_string())?;
+    let host = u
+        .host_str()
+        .ok_or_else(|| "upstream URL has no host".to_string())?;
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(vec![SocketAddr::new(
             ip,
@@ -121,7 +147,7 @@ pub async fn resolve_forward_url_pinned(
         .await
         .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
     for sa in lookups {
-        if ip_addr_is_bogon(sa.ip()) {
+        if proxy_ip_is_forbidden(sa.ip()) {
             return Err(format!(
                 "refusing upstream: DNS for {host} includes non-public address {}",
                 sa.ip()
@@ -173,7 +199,7 @@ pub async fn resolve_connect_target_allowed(
     }
 
     if let Ok(ip) = host.parse::<IpAddr>() {
-        if ip_addr_is_bogon(ip) {
+        if proxy_ip_is_forbidden(ip) {
             return Err(format!(
                 "refusing CONNECT to non-public literal IP {ip}. \
                  If you're targeting a localhost or RFC1918 lab service, \
@@ -188,7 +214,7 @@ pub async fn resolve_connect_target_allowed(
         .await
         .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
     for sa in lookups {
-        if ip_addr_is_bogon(sa.ip()) {
+        if proxy_ip_is_forbidden(sa.ip()) {
             return Err(format!(
                 "refusing upstream: DNS for {host} includes non-public address {}",
                 sa.ip()
@@ -228,7 +254,7 @@ impl reqwest::dns::Resolve for BogonFilteringResolver {
             let allow_private = policy.allow_private_upstream || policy.insecure_open_upstream;
             let filtered: Vec<SocketAddr> = lookups
                 .into_iter()
-                .filter(|sa| allow_private || !ip_addr_is_bogon(sa.ip()))
+                .filter(|sa| allow_private || !proxy_ip_is_forbidden(sa.ip()))
                 .collect();
             if filtered.is_empty() {
                 return Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
@@ -375,6 +401,51 @@ mod tests {
     #[test]
     fn public_v4_ok() {
         assert!(!ip_addr_is_bogon("8.8.8.8".parse().unwrap()));
+    }
+
+    // ── proxy_ip_is_forbidden: extends bogon with IPv4 multicast ────────────
+
+    #[test]
+    fn proxy_forbidden_blocks_multicast_224() {
+        // 224.0.0.0/4 is IPv4 multicast. ip_addr_is_bogon allows it
+        // (scanner workloads need it); the proxy layer adds the check.
+        for a in [224u8, 225, 239] {
+            let ip: IpAddr = format!("{a}.0.0.1").parse().unwrap();
+            assert!(
+                proxy_ip_is_forbidden(ip),
+                "{ip} in 224–239 multicast must be forbidden by proxy policy"
+            );
+        }
+    }
+
+    #[test]
+    fn proxy_forbidden_passes_public_not_multicast() {
+        for addr in ["8.8.8.8", "1.1.1.1", "2001:4860:4860::8888"] {
+            let ip: IpAddr = addr.parse().unwrap();
+            assert!(
+                !proxy_ip_is_forbidden(ip),
+                "{ip} is public and must not be blocked by proxy policy"
+            );
+        }
+    }
+
+    #[test]
+    fn proxy_forbidden_inherits_all_bogon_ranges() {
+        // Spot-check that proxy_ip_is_forbidden is at least as strict as
+        // ip_addr_is_bogon for the ranges that matter most to the proxy.
+        for addr in [
+            "127.0.0.1",
+            "169.254.169.254",
+            "10.0.0.1",
+            "192.168.1.1",
+            "::1",
+        ] {
+            let ip: IpAddr = addr.parse().unwrap();
+            assert!(
+                proxy_ip_is_forbidden(ip),
+                "{ip} must be blocked by proxy policy (inherited from bogon)"
+            );
+        }
     }
 
     #[test]

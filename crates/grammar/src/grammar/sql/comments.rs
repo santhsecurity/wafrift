@@ -22,8 +22,14 @@ pub(crate) fn mysql_conditional_comment(keyword: &str) -> String {
 ///
 /// `SELECT` → `S/**/E/**/L/**/E/**/C/**/T`
 ///
-/// This defeats regex-based keyword detection while being valid SQL
-/// in `MySQL` (inline comments are whitespace) and most other engines.
+/// **MySQL / MariaDB ONLY.** Inline comments are treated as
+/// whitespace IN THE MIDDLE OF AN IDENTIFIER on those engines.
+/// PostgreSQL, MSSQL, Oracle, and SQLite all treat
+/// `S/**/E/**/L/**/E/**/C/**/T` as six separate identifiers — the
+/// keyword `SELECT` no longer parses and the query 500s. The
+/// `mutate()` caller MUST gate this transform on a MySQL/MariaDB
+/// dialect tag; firing it against any other backend produces a
+/// payload that fails server-side rather than bypassing the WAF.
 pub(crate) fn inline_comment_split(keyword: &str) -> String {
     keyword
         .chars()
@@ -43,7 +49,23 @@ pub(crate) fn null_comment_split(keyword: &str) -> String {
         .join("/*%00*/")
 }
 
-/// Build `MySQL` keyword comment mutations for the payload.
+/// Build `MySQL`-dialect keyword comment mutations for the payload.
+///
+/// **DIALECT CONTRACT.** Every output of this function is MySQL /
+/// MariaDB ONLY. Both strategies it emits — `mysql_conditional_comment`
+/// (`/*!keyword*/`) and `inline_comment_split` (`S/**/E/**/L/**/E/**/C/**/T`)
+/// — are MySQL-specific syntax. PostgreSQL, MSSQL, Oracle, and
+/// SQLite REJECT the output: the conditional comment is treated
+/// as a regular comment (entire keyword stripped) on non-MySQL
+/// and the inline split parses as multiple separate identifiers.
+///
+/// Callers MUST gate on detected dialect. The pipeline currently
+/// doesn't always have a dialect — when it doesn't, prefer
+/// dialect-agnostic mutations (case-mixing, encoding) over this
+/// family. Firing this against a non-MySQL target produces a
+/// payload that fails server-side rather than bypassing the WAF
+/// — bench numbers look worse than they should AND the operator
+/// gets a `Verdict::Blocked` that's actually a `Verdict::Errored`.
 pub(crate) fn keyword_comment_mutations(
     payload: &str,
     max_mutations: usize,
@@ -145,8 +167,25 @@ pub(crate) fn nested_comment_mutations(
         if let Some(position) = lower.find(&keyword.to_ascii_lowercase()) {
             let original = &payload[position..position + keyword.len()];
 
-            // Nested comment: if WAF strips outer comments, keyword survives
-            let nested = format!("/*/**/*/{keyword}/*/**/ */");
+            // Nested comment via MySQL conditional + inner empty-
+            // comment padding: `/*!/**/{keyword}/**/*/`.
+            //
+            // Pre-fix this used `/*/**/*/{keyword}/*/**/ */` which
+            // SQL parsers read as:
+            //   /*/**/  — first comment (body `/`), closes at
+            //             the first `*/`
+            //   */      — ORPHAN close token, SQL syntax error
+            //   ...     — rest of payload
+            // Engines 400 on the orphan `*/`, the WAF never saw
+            // the keyword, and the bypass-rate counter recorded
+            // a phantom block.
+            //
+            // The new form is MySQL-specific (`/*!...*/` is a
+            // MySQL conditional-comment extension) — caller
+            // already gates this whole family behind the
+            // dialect contract documented on
+            // `keyword_comment_mutations`.
+            let nested = format!("/*!/**/{keyword}/**/*/");
             let mutated = payload.replacen(original, &nested, 1);
             if mutated != payload {
                 results.push((mutated, format!("Nested comment: {keyword} → {nested}")));

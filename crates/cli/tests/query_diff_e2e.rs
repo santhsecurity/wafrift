@@ -1,7 +1,6 @@
 //! End-to-end test for `wafrift query-diff`.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -33,7 +32,23 @@ async fn spawn_query_aware_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -72,8 +87,7 @@ fn query_diff_finds_divergences_against_query_aware_mock() {
     ]);
     assert_eq!(code, 0, "query-diff should exit 0 — stderr:\n{stderr}");
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     assert_eq!(parsed["baseline_status"], 200);
     let results = parsed["results"].as_array().expect("results array");
     assert!(!results.is_empty(), "results must be non-empty");
@@ -103,7 +117,10 @@ fn query_diff_against_unreachable_target_exits_1() {
         "--timeout-secs",
         "2",
     ]);
-    assert_eq!(code, 1, "unreachable target must exit 1 — stderr:\n{stderr}");
+    assert_eq!(
+        code, 1,
+        "unreachable target must exit 1 — stderr:\n{stderr}"
+    );
 }
 
 #[test]

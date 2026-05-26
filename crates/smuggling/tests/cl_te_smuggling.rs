@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{BodyFraming, WireParseError, parse_http_requests, parse_http_requests_no_tail};
+use common::{BodyFraming, parse_http_requests, parse_http_requests_no_tail};
 use wafrift_smuggling::smuggling::{cl_te, cl_te_precedence_test};
 
 const HOST: &str = "127.0.0.1";
@@ -23,11 +23,32 @@ fn cl_te_rfc7230_upstream_two_requests() {
 
 #[test]
 fn cl_te_content_length_only_front_single_logical_body() {
+    // A CL-only front-end reads exactly Content-Length bytes from the body and
+    // stops there.  Since cl_te() now correctly sets CL = len(chunk_terminator +
+    // smuggled_prefix), the CL-only parser consumes ALL body bytes in one shot —
+    // the smuggled request is treated as opaque body data, never as a second
+    // HTTP message.  This is the correct desync property: the CL-following front
+    // end sees one clean request; the TE-following back end splits it into two.
     let p = cl_te(HOST, smuggled_inner()).expect("cl_te");
-    let err = parse_http_requests(&p.raw_bytes, BodyFraming::ContentLengthOnly).expect_err("parse");
-    assert!(
-        matches!(err, WireParseError::Httparse(_)),
-        "Fix: CL-only framing consumes zero octets; leftover chunked bytes must not parse as a second HTTP message — got {err}"
+    let reqs = parse_http_requests(&p.raw_bytes, BodyFraming::ContentLengthOnly)
+        .expect("CL-only framing must succeed with exactly one request");
+    assert_eq!(
+        reqs.len(),
+        1,
+        "CL-only framing must see exactly 1 request; smuggled bytes are opaque body"
+    );
+    assert_eq!(reqs[0].method, "POST");
+    // The body must be exactly Content-Length bytes (smuggled chunk included).
+    let cl = reqs[0]
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+        .expect("Content-Length header must be present");
+    assert_eq!(
+        reqs[0].body.len(),
+        cl,
+        "body consumed must equal the declared Content-Length"
     );
 }
 

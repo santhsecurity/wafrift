@@ -4,6 +4,7 @@
 //! - `transport/src/jwt.rs` — `manipulate()` had ZERO tests
 //! - `transport/src/session.rs` — `load_jar`, `save_jar`, `extract_csrf`, `inject_csrf` had ZERO tests
 
+use authjar::{AuthSession, SessionStore};
 use base64::Engine;
 use std::io::Write;
 
@@ -152,8 +153,9 @@ fn tmp_path(suffix: &str) -> std::path::PathBuf {
 #[test]
 fn session_load_jar_missing_file_returns_empty() {
     let path = tmp_path("missing_jar.txt");
-    let jar = wafrift_transport::session::load_jar(&path);
-    assert!(jar.is_ok());
+    let store = wafrift_transport::session::load_jar(&path);
+    assert!(store.is_ok());
+    assert!(store.unwrap().is_empty());
 }
 
 #[test]
@@ -191,17 +193,22 @@ fn session_load_jar_valid_line() {
     }
     let result = wafrift_transport::session::load_jar(&path);
     assert!(result.is_ok());
+    let store = result.unwrap();
+    let session = store.get("default").unwrap();
+    let header = session.cookie_header("example.com", &authjar::SessionSettings::default());
+    assert!(header.contains("sessionid=abc123"));
     let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn session_save_jar_creates_file() {
-    let path = tmp_path("save_jar.txt");
-    let jar = reqwest::cookie::Jar::default();
-    let result = wafrift_transport::session::save_jar(&jar, &path);
+    let path = tmp_path("save_jar.json");
+    let mut store = SessionStore::new();
+    store.add(AuthSession::new("default"));
+    let result = wafrift_transport::session::save_jar(&store, &path);
     assert!(result.is_ok());
     let contents = std::fs::read_to_string(&path).unwrap();
-    assert!(contents.contains("wafrift cookie jar"));
+    assert!(contents.contains("default"));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -236,7 +243,8 @@ fn session_inject_csrf_header() {
         &mut req,
         "tok123",
         wafrift_types::session::CsrfInjectionLocation::Header,
-    );
+    )
+    .unwrap();
     assert!(
         req.headers
             .iter()
@@ -251,7 +259,8 @@ fn session_inject_csrf_query() {
         &mut req,
         "tok123",
         wafrift_types::session::CsrfInjectionLocation::Query,
-    );
+    )
+    .unwrap();
     assert!(req.url.contains("csrf_token=tok123"));
 }
 
@@ -262,7 +271,8 @@ fn session_inject_csrf_query_appends() {
         &mut req,
         "tok123",
         wafrift_types::session::CsrfInjectionLocation::Query,
-    );
+    )
+    .unwrap();
     assert!(req.url.contains("existing=1"));
     assert!(req.url.contains("csrf_token=tok123"));
     assert!(req.url.contains('&'));
@@ -271,11 +281,16 @@ fn session_inject_csrf_query_appends() {
 #[test]
 fn session_inject_csrf_body() {
     let mut req = wafrift_types::Request::post("https://example.com/", b"original");
+    req.headers.push((
+        "Content-Type".into(),
+        "application/x-www-form-urlencoded".into(),
+    ));
     wafrift_transport::session::inject_csrf(
         &mut req,
         "tok123",
         wafrift_types::session::CsrfInjectionLocation::Body,
-    );
+    )
+    .unwrap();
     let body = req.body.unwrap();
     let body_str = String::from_utf8(body).unwrap();
     assert!(body_str.contains("csrf_token=tok123"));

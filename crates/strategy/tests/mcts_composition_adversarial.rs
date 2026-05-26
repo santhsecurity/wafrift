@@ -20,10 +20,7 @@ mod helpers {
     pub fn tiny_sqli_requests() -> Vec<Request> {
         vec![
             Request::get("https://target.example/search?q=1"),
-            Request::post(
-                "https://target.example/api",
-                b"id=1".to_vec(),
-            ),
+            Request::post("https://target.example/api", b"id=1".to_vec()),
         ]
     }
 }

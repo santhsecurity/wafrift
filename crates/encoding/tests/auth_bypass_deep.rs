@@ -167,9 +167,9 @@ fn lws_smuggle_family_actually_contains_malformed_headers() {
         .iter()
         .filter(|p| p.label == "header-smuggle-lws")
         .any(|p| {
-            p.header.chars().any(|c| {
-                !(c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c))
-            })
+            p.header
+                .chars()
+                .any(|c| !(c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c)))
         });
     assert!(
         any_malformed,
@@ -346,8 +346,9 @@ fn path_with_special_chars_does_not_break_probe_gen() {
 fn x_forwarded_for_localhost_present() {
     let ps = probes();
     assert!(
-        ps.iter().any(|p| p.header.eq_ignore_ascii_case("X-Forwarded-For")
-            && p.value.contains("127.0.0.1")),
+        ps.iter()
+            .any(|p| p.header.eq_ignore_ascii_case("X-Forwarded-For")
+                && p.value.contains("127.0.0.1")),
         "X-Forwarded-For 127.0.0.1 probe missing"
     );
 }
@@ -356,7 +357,8 @@ fn x_forwarded_for_localhost_present() {
 fn x_real_ip_present() {
     let ps = probes();
     assert!(
-        ps.iter().any(|p| p.header.eq_ignore_ascii_case("X-Real-IP")),
+        ps.iter()
+            .any(|p| p.header.eq_ignore_ascii_case("X-Real-IP")),
         "X-Real-IP probe missing"
     );
 }
@@ -365,7 +367,8 @@ fn x_real_ip_present() {
 fn x_original_url_present() {
     let ps = probes();
     assert!(
-        ps.iter().any(|p| p.header.eq_ignore_ascii_case("X-Original-URL")),
+        ps.iter()
+            .any(|p| p.header.eq_ignore_ascii_case("X-Original-URL")),
         "X-Original-URL probe missing"
     );
 }
@@ -388,10 +391,7 @@ fn x_http_method_override_present() {
 
 #[test]
 fn at_least_30_distinct_header_names_present() {
-    let names: HashSet<String> = probes()
-        .iter()
-        .map(|p| p.header.to_lowercase())
-        .collect();
+    let names: HashSet<String> = probes().iter().map(|p| p.header.to_lowercase()).collect();
     assert!(
         names.len() >= 30,
         "only {} distinct headers (expected >= 30)",
@@ -414,8 +414,7 @@ fn exactly_7_distinct_labels_present() {
 
 #[test]
 fn no_header_dominates_more_than_50_pct() {
-    let mut counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for p in &probes() {
         *counts.entry(p.header.to_lowercase()).or_default() += 1;
     }

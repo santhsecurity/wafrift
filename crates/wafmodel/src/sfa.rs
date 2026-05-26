@@ -250,16 +250,18 @@ impl Sfa {
                 return *t;
             }
         }
-        debug_assert!(
-            false,
+        // F99: pre-fix this returned `s` (self-loop) in release
+        // builds, silently corrupting `accepts()` results — a word
+        // that should have reached an accepting state stayed in a
+        // non-accepting one. The SFA is constructed totality-checked,
+        // so reaching this branch means a programmer error in
+        // `Sfa::minimize` or `Sfa::import`. Panic loudly instead of
+        // silently producing wrong acceptance — a wrong "accepts"
+        // verdict is a false-negative bypass (the model "missed" a
+        // hole) and is worse than crashing.
+        panic!(
             "SFA totality invariant broken: no transition for byte {b} in state {s}"
         );
-        tracing::error!(
-            state = s,
-            byte = b,
-            "SFA missing transition; treating as non-progress (reject path)"
-        );
-        s
     }
 
     /// Does the automaton accept `word`?
@@ -381,6 +383,18 @@ impl Sfa {
     /// lexicographically-smallest first, none longer than `max_len`.
     /// Deterministic (transitions expanded by ascending witness byte).
     /// This is the bypass miner's harvest primitive.
+    ///
+    /// A `seen[state]` set CANNOT be applied here the way it can in
+    /// `shortest_accepted` — we WANT to find multiple distinct words
+    /// that end at the same state (`out.len() == max_words` is the
+    /// only stopping rule). So instead the queue is hard-capped at
+    /// [`Self::ENUMERATE_QUEUE_CAP`]; when it would overflow, we
+    /// return whatever words have already been collected.
+    ///
+    /// Pre-cap, intersecting a learned automaton with a cyclic
+    /// attack automaton could exponentially explode the BFS queue
+    /// before `max_words` was reached — `mine_bypasses` would OOM
+    /// on real WAF rule sets long before producing usable output.
     #[must_use]
     pub fn enumerate_accepted(&self, max_words: usize, max_len: usize) -> Vec<Vec<u8>> {
         use std::collections::VecDeque;
@@ -399,6 +413,12 @@ impl Sfa {
             if w.len() >= max_len {
                 continue;
             }
+            // Queue-size guard: stop EXPANDING (but keep draining
+            // already-enqueued states) once we cross the cap. This
+            // bounds memory at O(ENUMERATE_QUEUE_CAP × max_len) bytes.
+            if q.len() >= Self::ENUMERATE_QUEUE_CAP {
+                continue;
+            }
             let mut edges: Vec<(u8, StateId)> = self.delta[s]
                 .iter()
                 .filter_map(|(g, t)| g.witness().map(|b| (b, *t)))
@@ -412,6 +432,13 @@ impl Sfa {
         }
         out
     }
+
+    /// Hard upper bound on the `enumerate_accepted` BFS queue.
+    /// 1M entries × max_len bytes each ≈ ~32 MiB at max_len=32,
+    /// which fits a developer laptop. Past this the function
+    /// returns the words it has collected instead of attempting
+    /// to keep growing the frontier.
+    const ENUMERATE_QUEUE_CAP: usize = 1_000_000;
 
     /// The shortest word accepted by exactly one of the two automata,
     /// or `None` iff they recognise the *same* language. This is the

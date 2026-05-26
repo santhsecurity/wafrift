@@ -148,10 +148,20 @@ fn seed_host(
 ) -> ExitCode {
     let path = match custom_path {
         Some(p) => p.to_path_buf(),
-        None => match std::env::var_os("HOME") {
+        None => match std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+        {
+            // F110: pre-fix consulted `$HOME` only — on Windows that's
+            // typically unset and the operator got "$HOME unset" with
+            // no hint that `--proxy-bank` was the unblock path. Fall
+            // back to `%USERPROFILE%` (matches gene_bank_io.rs F98 /
+            // trust.rs idiom); error message names both vars.
             Some(home) => PathBuf::from(home).join(".wafrift").join("gene-bank.json"),
             None => {
-                eprintln!("error: $HOME unset; pass --proxy-bank explicitly");
+                eprintln!(
+                    "error: $HOME and %USERPROFILE% both unset; \
+                     pass --proxy-bank explicitly"
+                );
                 return ExitCode::from(1);
             }
         },
@@ -201,10 +211,7 @@ fn seed_host(
         && !parent.as_os_str().is_empty()
         && let Err(e) = fs::create_dir_all(parent)
     {
-        eprintln!(
-            "error: create seed-bank dir {}: {e}",
-            parent.display()
-        );
+        eprintln!("error: create seed-bank dir {}: {e}", parent.display());
         return ExitCode::from(1);
     }
     let json = match serde_json::to_string_pretty(&bank) {
@@ -423,7 +430,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let bank_path = dir.join("gene-bank.json");
-        seed_host("api.a.com", &["EncodingUrl".into()], Some(&bank_path), false);
+        seed_host(
+            "api.a.com",
+            &["EncodingUrl".into()],
+            Some(&bank_path),
+            false,
+        );
         seed_host(
             "api.b.com",
             &["GrammarTautology".into()],

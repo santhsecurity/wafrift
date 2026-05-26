@@ -3,15 +3,15 @@
 //! Active when `wafrift-proxy --tui` is passed. Runs in a dedicated
 //! tokio task, draws via ratatui + crossterm. The module is split:
 //!
-//! - [`state`]            — counters, request ring, filter state, toast queue
-//! - [`format`](mod@format) — palette + truncation helpers
-//! - [`keymap`]           — keystroke dispatch (Normal + `FilterEdit` modes)
-//! - [`yank`]             — render selected request as `curl` + clipboard set
-//! - [`render_chrome`]    — header bar, tab strip, footer key-help
-//! - [`render_flow`]      — Flow tab: live stream + sparklines + detail pane
-//! - [`render_overview`]  — Overview tab: counters, percentiles, status mix
-//! - [`render_hosts`]     — Hosts tab: per-host bypass leaderboard
-//! - [`render_techniques`]— Techniques tab: per-evasion-key leaderboard
+//! - `state`              — counters, request ring, filter state, toast queue
+//! - `format`             — palette + truncation helpers
+//! - `keymap`             — keystroke dispatch (Normal + `FilterEdit` modes)
+//! - `yank`               — render selected request as `curl` + clipboard set
+//! - `render_chrome`      — header bar, tab strip, footer key-help
+//! - `render_flow`        — Flow tab: live stream + sparklines + detail pane
+//! - `render_overview`    — Overview tab: counters, percentiles, status mix
+//! - `render_hosts`       — Hosts tab: per-host bypass leaderboard
+//! - `render_techniques`  — Techniques tab: per-evasion-key leaderboard
 //!
 //! # Layout
 //!
@@ -53,6 +53,7 @@ pub mod render_techniques;
 pub mod state;
 #[cfg(test)]
 mod state_coverage;
+pub mod style;
 pub mod yank;
 
 pub use state::{Event, MAX_BODY_EXCERPT};

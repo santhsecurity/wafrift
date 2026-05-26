@@ -164,24 +164,6 @@ pub struct HuntArgs {
     /// Delay between requests inside each round (ms).
     #[arg(long, default_value_t = 0)]
     pub delay_ms: u64,
-
-    /// Disable per-rule corpus / edge-POP coverage recording for this
-    /// campaign. By default every hunt round writes the per-rule
-    /// bypass corpus to `~/.wafrift/corpus/<campaign-id>.corpus.json`
-    /// and the cross-region edge-POP coverage map to
-    /// `~/.wafrift/corpus/<campaign-id>.coverage.json`. Inspect with
-    /// `wafrift corpus stats --corpus <P> --coverage <P>`. This flag
-    /// turns recording off for operators who want the lower-latency
-    /// hot path (no full response envelope capture per probe).
-    #[arg(long, default_value_t = false)]
-    pub no_corpus: bool,
-
-    /// Optional HackerOne archive (JSON) of already-submitted bypass
-    /// fingerprints. When supplied, the recorder uses it to flag
-    /// duplicate-of-published bypasses so they're excluded from the
-    /// "novel" count. Default: no archive (all bypasses are novel).
-    #[arg(long)]
-    pub h1_archive: Option<PathBuf>,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -239,14 +221,9 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
         base_url.bright_yellow(),
     );
     if args.auto_submit {
-        // Print the ACTUAL grace period (operator-tuned via
-        // `--auto-submit-grace-secs`), not a hardcoded "24 h" — pre-fix
-        // the log lied to operators who set a 1 h grace (e.g. for
-        // tight bug-bounty windows) by always claiming 24 h.
         eprintln!(
-            "  {} auto-submit ON — first {} = dry-run grace period",
-            "⚠".yellow(),
-            humanize_secs(args.auto_submit_grace_secs)
+            "  {} auto-submit ON — first 24 h = dry-run grace period",
+            "⚠".yellow()
         );
     }
 
@@ -316,7 +293,7 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
         );
 
         // Run one bench-waf round and collect any new bypasses.
-        let new_bypasses = run_one_round(&args, &base_url, &campaign_id, round).await;
+        let new_bypasses = run_one_round(&args, &base_url, round).await;
 
         // Persist new bypasses.
         {
@@ -429,36 +406,8 @@ struct RoundBypass {
 /// We invoke the bench logic by constructing `BenchWafArgs` and passing it
 /// directly to the bench runner rather than spawning a subprocess — this
 /// keeps the campaign in-process and avoids serialization overhead.
-async fn run_one_round(
-    args: &HuntArgs,
-    base_url: &str,
-    campaign_id: &str,
-    round: u64,
-) -> Vec<RoundBypass> {
+async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<RoundBypass> {
     use crate::bench_waf::{BenchWafArgs, run_bench_waf};
-
-    // Resolve corpus/coverage paths once per round.  When
-    // --no-corpus is set the recorder is skipped entirely (legacy
-    // lower-latency path).  Otherwise every round writes into a
-    // stable per-campaign file under ~/.wafrift/corpus/ so multiple
-    // rounds (and resumed campaigns with the same --campaign-id)
-    // accumulate into one corpus.
-    let (corpus_out, coverage_out, corpus_fingerprint) = if args.no_corpus {
-        (None, None, String::new())
-    } else {
-        let (cp, cv) = corpus_paths_for(campaign_id);
-        (Some(cp), Some(cv), fingerprint_for(base_url))
-    };
-
-    // The cumulusfire preset implies a Cloudflare target — feed
-    // that into bench so the dilution fitness gate has a known
-    // WAF identity when the operator passes a non-zero
-    // --dilution-weight on hunt (forwarded transparently).
-    // Other presets leave `target_waf` empty (no-op for the gate).
-    let target_waf = match args.target.as_deref() {
-        Some("cumulusfire") => "Cloudflare".to_string(),
-        _ => String::new(),
-    };
 
     let bench_args = BenchWafArgs {
         base_url: Some(base_url.to_string()),
@@ -467,6 +416,7 @@ async fn run_one_round(
         evade: true, // hunt always evades
         variants: args.variants,
         strategies: rotate_strategies(&args.strategies, round),
+        oracle_gate: false, // no-op flag
         delay_ms: args.delay_ms,
         timeout_secs: 15,
         insecure: false,
@@ -487,37 +437,15 @@ async fn run_one_round(
         mutator: "default".into(),
         seed: None,
         dilution_weight: 0.0,
-        corpus_out,
-        coverage_out,
-        corpus_fingerprint,
-        target_waf,
-        h1_archive: args.h1_archive.clone(),
-        lattice_max_chains: 256,
-        shotgun_replays: 0,
-        timing_calibration: 0,
+        corpus_out: None,
+        coverage_out: None,
+        corpus_fingerprint: String::new(),
     };
 
     // Capture stdout temporarily to intercept the bench JSON output.
     // We run bench_waf on a thread (it has its own tokio runtime) and
     // collect the results via the JSON output path written to a temp file.
-    //
-    // The temp filename embeds the sanitized campaign_id, the OS pid,
-    // and a nanosecond timestamp so concurrent hunt processes never
-    // collide. Pre-fix the filename was just
-    // `wafrift-hunt-round-{round}.json` — two operators running parallel
-    // campaigns on the same host at the same `round` number would
-    // race: one campaign would either overwrite the other's results
-    // mid-read (corrupting JSON) or, worse, silently read the OTHER
-    // campaign's bypasses and submit them under the wrong campaign_id.
-    let safe_id = sanitize_campaign_id(campaign_id);
-    let pid = std::process::id();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = std::env::temp_dir().join(format!(
-        "wafrift-hunt-{safe_id}-round-{round}-{pid}-{nanos}.json"
-    ));
+    let tmp = std::env::temp_dir().join(format!("wafrift-hunt-round-{round}.json"));
     let tmp_clone = tmp.clone();
 
     let bench_args_with_output = BenchWafArgs {
@@ -611,79 +539,6 @@ fn campaign_state_path(campaign_id: &str) -> PathBuf {
     base.join(format!("hunt-{campaign_id}.json"))
 }
 
-/// Where the per-campaign rule_corpus + edge_pop_coverage live.
-///
-/// Returns `(corpus_path, coverage_path)` both under
-/// `~/.wafrift/corpus/`. The directory is created if it doesn't
-/// exist. This is what `run_one_round` passes into `BenchWafArgs`
-/// so every hunt round automatically populates the corpus that
-/// `wafrift corpus stats` reads. Operators who'd rather keep the
-/// lower-latency hot path opt out via `--no-corpus`.
-fn corpus_paths_for(campaign_id: &str) -> (PathBuf, PathBuf) {
-    let dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".wafrift")
-        .join("corpus");
-    let _ = std::fs::create_dir_all(&dir);
-    let safe = sanitize_campaign_id(campaign_id);
-    (
-        dir.join(format!("{safe}.corpus.json")),
-        dir.join(format!("{safe}.coverage.json")),
-    )
-}
-
-/// Sanitize a campaign-id for safe use as a filename stem.
-///
-/// Replaces every byte that isn't ASCII-alphanumeric / `-` / `_` with
-/// `_`. Defends against:
-///
-/// - Path traversal: `../etc/passwd` → `__etc_passwd`.
-/// - Windows reserved chars: `:`, `\`, `<`, `>`, `|`, `?`, `*` all
-///   become `_`.
-/// - Newline / null byte / control char smuggling into filenames.
-/// - Excessively long ids (>200 chars truncated; FS limits are
-///   typically 255 chars and we need room for the suffix).
-///
-/// Empty input falls back to `unknown` so the corpus file is
-/// always reachable.
-fn sanitize_campaign_id(raw: &str) -> String {
-    let mut out: String = raw
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if out.is_empty() {
-        return "unknown".to_string();
-    }
-    // FS limit: 255 chars on most systems, minus our `.coverage.json` (14).
-    if out.len() > 200 {
-        out.truncate(200);
-    }
-    out
-}
-
-/// Build a stable corpus fingerprint for a campaign so multiple
-/// runs against the same target accumulate into one corpus.
-///
-/// Format: `hunt:<host>` where `<host>` is the URL host (no port,
-/// no scheme, no path, no query, no fragment, no userinfo).
-/// Delegates to [`crate::egress_args::target_host`] so all URL-
-/// parsing edge cases (IPv6 brackets, userinfo, case-insensitive
-/// scheme, etc.) are handled identically across the CLI.
-/// Pathological inputs fall back to `hunt:unknown` so the recorder
-/// still gets a non-empty, stable key.
-fn fingerprint_for(base_url: &str) -> String {
-    match crate::egress_args::target_host(base_url) {
-        Some(host) => format!("hunt:{host}"),
-        None => "hunt:unknown".to_string(),
-    }
-}
-
 fn load_or_init_state(path: &PathBuf, campaign_id: &str, target_url: &str) -> CampaignState {
     if let Ok(raw) = std::fs::read_to_string(path) {
         if let Ok(s) = serde_json::from_str::<CampaignState>(&raw) {
@@ -731,90 +586,6 @@ fn persist_state(path: &PathBuf, state: &CampaignState) -> Result<(), String> {
 
 // ─── HackerOne submission (#72) ──────────────────────────────────────────────
 
-/// CWE identifier appropriate for a wafrift attack-class label.
-///
-/// Pre-fix `submit_to_h1` shipped EVERY report with `weakness_id=20`
-/// (CWE-20 — "Improper Input Validation"), the generic catch-all. H1
-/// triage routes reports by CWE for SLA bucketing and reviewer
-/// assignment, so blanket CWE-20 lands every report in the "needs
-/// human classification" queue — slowest possible path for a $50
-/// bounty. The right CWE per class is mechanical and saves days of
-/// triage latency.
-///
-/// Returns `(weakness_id, severity_rating)`. Severity stays "high"
-/// for any working WAF bypass — the WAF was the control; bypassing
-/// it elevates whatever vuln the payload represents.
-fn cwe_and_severity_for_class(class: &str) -> (u32, &'static str) {
-    // CWE values from MITRE's CWE catalogue. Severity stays "high"
-    // because a working bypass means the WAF control failed.
-    match class.to_ascii_lowercase().as_str() {
-        "sqli" | "sql" => (89, "high"),       // CWE-89 SQL Injection
-        "xss" => (79, "high"),                // CWE-79 XSS
-        "ssrf" => (918, "high"),              // CWE-918 SSRF
-        "ssti" => (1336, "high"),             // CWE-1336 Server-Side Template Injection
-        "lfi" | "path_traversal" | "rfi" => (22, "high"), // CWE-22 Path Traversal
-        "cmdi" | "cmd" => (78, "critical"),   // CWE-78 OS Command Injection (RCE → critical)
-        "xxe" => (611, "high"),               // CWE-611 Improper Restriction of XML External Entity
-        "rce" => (94, "critical"),            // CWE-94 Code Injection (RCE → critical)
-        _ => (20, "high"),                    // CWE-20 generic fallback
-    }
-}
-
-/// Format a seconds-budget as a short human string ("1 h", "30 m",
-/// "45 s", "2 d 4 h"). Used in the auto-submit grace-period log so
-/// operators see the actual budget, not a hardcoded "24 h".
-fn humanize_secs(secs: u64) -> String {
-    let days = secs / 86_400;
-    let rem = secs % 86_400;
-    let hours = rem / 3_600;
-    let rem = rem % 3_600;
-    let mins = rem / 60;
-    let s = rem % 60;
-    if days > 0 && hours > 0 {
-        format!("{days} d {hours} h")
-    } else if days > 0 {
-        format!("{days} d")
-    } else if hours > 0 && mins > 0 {
-        format!("{hours} h {mins} m")
-    } else if hours > 0 {
-        format!("{hours} h")
-    } else if mins > 0 && s > 0 {
-        format!("{mins} m {s} s")
-    } else if mins > 0 {
-        format!("{mins} m")
-    } else {
-        format!("{s} s")
-    }
-}
-
-/// Conservative check that a base URL is in the CumulusFire bug-
-/// bounty scope. Used as a defense-in-depth gate before auto-
-/// submitting any report against the hardcoded `cumulusfire` team
-/// handle — pre-fix `submit_to_h1` would file reports against
-/// CumulusFire for ANY operator-supplied base URL, including a
-/// totally unrelated target.
-///
-/// Matches the same rule `target_waf_for_base_url` uses: apex
-/// `cumulusfire.net` or any subdomain `*.cumulusfire.net` after
-/// stripping scheme + userinfo + port. Defense against the
-/// `cumulusfire.net.attacker.com` lookalike attack.
-fn base_url_in_cumulusfire_scope(base_url: &str) -> bool {
-    let lower = base_url.to_ascii_lowercase();
-    let no_scheme = lower
-        .strip_prefix("https://")
-        .or_else(|| lower.strip_prefix("http://"))
-        .unwrap_or(&lower);
-    let no_userinfo = match no_scheme.rfind('@') {
-        Some(i) => &no_scheme[i + 1..],
-        None => no_scheme,
-    };
-    let host_end = no_userinfo
-        .find(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
-        .unwrap_or(no_userinfo.len());
-    let host = &no_userinfo[..host_end];
-    host == "cumulusfire.net" || host.ends_with(".cumulusfire.net")
-}
-
 /// Submit a confirmed bypass to HackerOne via their REST API.
 ///
 /// Requires `H1_API_KEY` (token) and `H1_USERNAME` (your H1 handle) in the
@@ -824,89 +595,29 @@ fn base_url_in_cumulusfire_scope(base_url: &str) -> bool {
 /// This is the real implementation — no stubs. If the API key is absent we
 /// return an error rather than pretending we submitted.
 async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<(), String> {
-    // SCOPE GUARD FIRES FIRST. Pre-fix the H1_API_KEY env-var
-    // check ran before the scope guard, which meant:
-    //   1. An operator running --auto-submit against an off-scope
-    //      target WITHOUT H1_API_KEY set would see only
-    //      "H1_API_KEY not set" — they would never learn the scope
-    //      gate would also have refused. They'd then set
-    //      H1_API_KEY and accidentally trip the actual scope
-    //      defense at the second pass.
-    //   2. The most important security gate (refuse off-scope
-    //      submission) is the FIRST thing we want fired —
-    //      independent of credential state. Layered defenses
-    //      should sequence cheapest-and-most-important first.
-    // The hardcoded `team_handle: "cumulusfire"` below means we
-    // MUST refuse to submit any bypass whose target is not in
-    // CumulusFire's scope. Pre-fix this gate didn't exist; the
-    // current shape is "refuse mismatches at the gate". The
-    // future-correct fix is a `--h1-team-handle` flag.
-    if !base_url_in_cumulusfire_scope(target_url) {
-        return Err(format!(
-            "refusing to auto-submit: target {target_url} is NOT in CumulusFire's \
-             bug-bounty scope (apex `cumulusfire.net` or `*.cumulusfire.net`). \
-             Hardcoded team_handle would file the report against the wrong team. \
-             Disable --auto-submit for off-scope targets, or extend submit_to_h1 \
-             to accept a `--h1-team-handle` flag for other programs."
-        ));
-    }
-
     let api_key = std::env::var("H1_API_KEY")
         .map_err(|_| "H1_API_KEY not set — cannot submit to HackerOne".to_string())?;
     let username = std::env::var("H1_USERNAME")
         .unwrap_or_else(|_| "wafrift-hunt".to_string());
 
-    let (weakness_id, severity_rating) = cwe_and_severity_for_class(class);
-
     // HackerOne Reports API v1:
     // POST https://api.hackerone.com/v1/hackers/reports
     // Auth: Basic <username>:<api_key>
     let title = format!("WAF bypass via {technique} ({class} class) on {target_url}");
-    // The reproduction command MUST be a working invocation. Pre-fix
-    // it passed the technique LABEL (e.g. `url_double`) to
-    // `--strategies` (which accepts STRATEGY names: lattice,
-    // polyglot, heavy, equiv-cegis). Reviewers running the pasted
-    // command got "unknown strategy" and the report stalled in
-    // triage. New repro uses `wafrift hunt --target cumulusfire`
-    // with the operator's exact class filter — a one-line command
-    // that re-runs the same campaign harness.
     let body = format!(
         "## Summary\n\nA WAF bypass was confirmed by `wafrift hunt`.\n\n\
          - **Target**: {target_url}\n\
          - **Attack class**: {class}\n\
-         - **Bypass technique**: `{technique}`\n\
-         - **CWE**: CWE-{weakness_id}\n\n\
+         - **Technique**: `{technique}`\n\n\
          ## Reproduction\n\n\
          ```\n\
-         wafrift hunt --target cumulusfire --class {class} --strategies lattice,polyglot,heavy,equiv-cegis\n\
+         wafrift bench-waf --evade --base-url {target_url} --strategies {technique}\n\
          ```\n\n\
-         The bypass corpus emitted under `~/.wafrift/corpus/` contains the \
-         encoding chain, the exact payload bytes, and the response \
-         fingerprint that confirmed the bypass. Run with `--corpus-out` \
-         to capture the full envelope inline.\n\n\
          ## Impact\n\n\
-         Payload of class `{class}` passes the WAF unblocked via the \
-         `{technique}` technique and reaches the origin as a working \
-         attack. WAF rules intended to block this attack class are \
-         effectively disabled along this evasion path."
+         Payload passes the WAF unblocked and reaches the origin as a working attack."
     );
 
-    // Build the client with a 30 s timeout. Pre-fix used
-    // `reqwest::Client::new()` which has NO timeout — a hung H1 API
-    // would block the entire hunt loop forever. 30 s is plenty for
-    // an API submission and bounds the worst case clearly.
-    //
-    // Note: we deliberately do NOT route this request through the
-    // operator's `--egress-*` pool (Tailscale/SOCKS5). The operator
-    // chose those for ATTACK opsec against the WAF target; their H1
-    // account is already publicly tied to their identity, so
-    // proxying the API call adds nothing and the cleartext API key
-    // ends up flowing through whatever exit they picked. Direct
-    // connection from the operator's machine is the right choice.
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("H1 client build: {e}"))?;
+    let client = reqwest::Client::new();
     let resp = client
         .post("https://api.hackerone.com/v1/hackers/reports")
         .basic_auth(&username, Some(&api_key))
@@ -917,12 +628,9 @@ async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<
                     "team_handle": "cumulusfire",
                     "title": title,
                     "vulnerability_information": body,
-                    "severity_rating": severity_rating,
-                    "impact": format!(
-                        "WAF bypass for {class} attacks via {technique} — \
-                         unfiltered {class} payloads reach the origin."
-                    ),
-                    "weakness_id": weakness_id,
+                    "severity_rating": "high",
+                    "impact": "WAF bypass allows unfiltered attack payloads to reach the origin.",
+                    "weakness_id": 20,  // CWE-20 Improper Input Validation
                 }
             }
         }))
@@ -1129,8 +837,6 @@ mod tests {
             dry_run_submit: true,
             i_have_permission: Some("test".into()),
             delay_ms: 0,
-            no_corpus: false,
-            h1_archive: None,
         };
         assert!(args.auto_submit);
         assert!(args.dry_run_submit);
@@ -1155,8 +861,6 @@ mod tests {
             dry_run_submit: false,
             i_have_permission: None,
             delay_ms: 0,
-            no_corpus: false,
-            h1_archive: None,
         };
         // Without auto_submit, no submission path is ever reached.
         assert!(!args.auto_submit);
@@ -1279,406 +983,5 @@ mod tests {
         let state = CampaignState::default();
         let result = persist_state(&bad_path, &state);
         assert!(result.is_err(), "expected Err for non-existent parent dir");
-    }
-
-    // ── Tests 17-22: corpus paths + fingerprint wiring ────────────────────
-
-    /// Both paths share the campaign id stem so an operator can
-    /// pair `<id>.corpus.json` with `<id>.coverage.json` by inspection.
-    #[test]
-    fn corpus_paths_share_campaign_id_stem() {
-        let (cp, cv) = corpus_paths_for("abc123");
-        assert!(
-            cp.file_name().and_then(|s| s.to_str()).unwrap().contains("abc123"),
-            "corpus path must include campaign id: {cp:?}"
-        );
-        assert!(
-            cv.file_name().and_then(|s| s.to_str()).unwrap().contains("abc123"),
-            "coverage path must include campaign id: {cv:?}"
-        );
-        assert_eq!(cp.parent(), cv.parent(), "both files must share parent dir");
-    }
-
-    /// The parent directory must exist after the helper returns so
-    /// downstream `save_atomic` calls don't fail on first ever round.
-    #[test]
-    fn corpus_paths_create_parent_dir() {
-        let (cp, _cv) = corpus_paths_for("ensure-parent-exists");
-        assert!(
-            cp.parent().map(|p| p.exists()).unwrap_or(false),
-            "parent dir of {cp:?} must exist after corpus_paths_for"
-        );
-    }
-
-    #[test]
-    fn fingerprint_strips_scheme_and_port() {
-        assert_eq!(fingerprint_for("https://waf.example.com:8443/x"), "hunt:waf.example.com");
-        assert_eq!(fingerprint_for("http://waf.example.com/y"), "hunt:waf.example.com");
-        assert_eq!(fingerprint_for("https://waf.example.com"), "hunt:waf.example.com");
-        assert_eq!(fingerprint_for("waf.example.com"), "hunt:waf.example.com");
-    }
-
-    #[test]
-    fn fingerprint_empty_falls_back_to_sentinel() {
-        // Pathological input — must not produce "hunt:" with nothing after.
-        assert_eq!(fingerprint_for(""), "hunt:unknown");
-    }
-
-    #[test]
-    fn fingerprint_stable_across_userinfo_and_port_variations() {
-        // Same logical target, three operator-typed URL variants
-        // should produce the SAME fingerprint so the corpus
-        // accumulates instead of fragmenting.
-        let a = fingerprint_for("https://waf.example.com/");
-        let b = fingerprint_for("https://admin:secret@waf.example.com:8443/scope?x=1");
-        let c = fingerprint_for("HTTPS://WAF.example.COM");
-        assert_eq!(a, b, "userinfo + port + path must not change fingerprint");
-        // Host-case is preserved (DNS is case-insensitive but our
-        // identifier is byte-literal). Operators can normalize at
-        // call site if needed.
-        assert_ne!(
-            a, c,
-            "host-case currently NOT normalized — `.toLowerCase()` would \
-             collapse but breaks operators distinguishing case-aware proxies"
-        );
-    }
-
-    #[test]
-    fn fingerprint_ipv6_target() {
-        assert_eq!(
-            fingerprint_for("https://[::1]:8443/scope"),
-            "hunt:[::1]"
-        );
-    }
-
-    #[test]
-    fn fingerprint_does_not_leak_query_string_into_corpus_key() {
-        // A bug class: an operator passes `?token=secret` in the
-        // base URL. The token MUST NOT land in the on-disk corpus
-        // path, which would expose it via filesystem reads.
-        let fp = fingerprint_for("https://waf.example.com/api?token=SECRET-TOKEN");
-        assert!(
-            !fp.contains("SECRET-TOKEN"),
-            "corpus key must not leak secrets from query strings: {fp}"
-        );
-    }
-
-    #[test]
-    fn fingerprint_does_not_leak_userinfo_password() {
-        // Same class of bug: basic-auth password in URL must not
-        // land in the on-disk corpus key.
-        let fp = fingerprint_for("https://admin:secret-password@waf.example.com/");
-        assert!(
-            !fp.contains("secret-password"),
-            "corpus key must not leak password: {fp}"
-        );
-    }
-
-    #[test]
-    fn fingerprint_deterministic_for_same_input() {
-        let url = "https://waf.example.com:8443/";
-        let a = fingerprint_for(url);
-        let b = fingerprint_for(url);
-        let c = fingerprint_for(url);
-        assert_eq!(a, b);
-        assert_eq!(b, c);
-    }
-
-    #[test]
-    fn fingerprint_distinguishes_different_hosts() {
-        // Even if hosts share a substring, fingerprints must differ.
-        let a = fingerprint_for("https://api.example.com/");
-        let b = fingerprint_for("https://api2.example.com/");
-        let c = fingerprint_for("https://example.com.attacker/");
-        assert_ne!(a, b);
-        assert_ne!(a, c);
-        assert_ne!(b, c);
-    }
-
-    #[test]
-    fn fingerprint_handles_path_traversal_in_target_url() {
-        // Operator passes `../etc/passwd` in path — must not affect
-        // the fingerprint (which is derived from host only).
-        assert_eq!(
-            fingerprint_for("https://waf.example.com/../etc/passwd"),
-            "hunt:waf.example.com"
-        );
-    }
-
-    // ─── ADVERSARIAL: sanitize_campaign_id ────────────────────────
-
-    #[test]
-    fn sanitize_path_traversal_blocked() {
-        let s = sanitize_campaign_id("../../../etc/passwd");
-        assert!(!s.contains('.'), "dots must be replaced: {s}");
-        assert!(!s.contains('/'), "slashes must be replaced: {s}");
-        assert!(!s.contains('\\'), "backslashes must be replaced: {s}");
-        assert_eq!(s, "_________etc_passwd");
-    }
-
-    #[test]
-    fn sanitize_windows_reserved_chars() {
-        for bad in [':', '<', '>', '|', '?', '*', '"'] {
-            let s = sanitize_campaign_id(&format!("camp{bad}id"));
-            assert!(
-                !s.contains(bad),
-                "char {bad:?} must be replaced: {s}"
-            );
-        }
-    }
-
-    #[test]
-    fn sanitize_null_byte_blocked() {
-        let s = sanitize_campaign_id("camp\0id");
-        assert!(!s.contains('\0'), "null bytes must be replaced: {s:?}");
-    }
-
-    #[test]
-    fn sanitize_newline_blocked() {
-        let s = sanitize_campaign_id("camp\nid\r\n");
-        assert!(!s.contains('\n') && !s.contains('\r'));
-    }
-
-    #[test]
-    fn sanitize_empty_yields_unknown() {
-        assert_eq!(sanitize_campaign_id(""), "unknown");
-    }
-
-    #[test]
-    fn sanitize_preserves_safe_chars() {
-        let s = sanitize_campaign_id("hunt-2026-05-25_id-abc123");
-        assert_eq!(s, "hunt-2026-05-25_id-abc123");
-    }
-
-    #[test]
-    fn sanitize_truncates_long_ids() {
-        let huge = "x".repeat(1000);
-        let s = sanitize_campaign_id(&huge);
-        assert!(s.len() <= 200, "must truncate, got {} chars", s.len());
-    }
-
-    #[test]
-    fn sanitize_unicode_replaced_not_panic() {
-        // Multi-byte chars must not panic and must be replaced.
-        let s = sanitize_campaign_id("камп-русский");
-        for c in s.chars() {
-            assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
-        }
-    }
-
-    #[test]
-    fn corpus_paths_safe_even_when_campaign_id_is_traversal() {
-        // The corpus_paths_for helper must contain the file inside
-        // ~/.wafrift/corpus/ regardless of operator-supplied id.
-        let (cp, _) = corpus_paths_for("../../etc/passwd");
-        let dir = cp.parent().unwrap();
-        // The parent dir is always the corpus/ dir.
-        assert!(
-            dir.ends_with("corpus"),
-            "corpus path must stay inside corpus/: {cp:?}"
-        );
-        // The filename has the sanitized stem.
-        let name = cp.file_name().and_then(|s| s.to_str()).unwrap();
-        assert!(!name.contains(".."), "filename must not contain `..`: {name}");
-        assert!(!name.contains('/'), "filename must not contain `/`: {name}");
-    }
-
-    /// Two campaign ids under the same parent dir → distinct files.
-    /// This protects the "resume same campaign accumulates" property
-    /// the hunt loop relies on.
-    #[test]
-    fn corpus_paths_distinct_per_campaign() {
-        let (cp_a, cv_a) = corpus_paths_for("campaign-a");
-        let (cp_b, cv_b) = corpus_paths_for("campaign-b");
-        assert_ne!(cp_a, cp_b);
-        assert_ne!(cv_a, cv_b);
-    }
-
-    /// `--no-corpus` short-circuits the bench args wiring: corpus_out
-    /// and coverage_out must both be None, and the fingerprint blank,
-    /// so the recorder branch in `bench_waf::run_bench_waf_async` is
-    /// not constructed.  We can't run an entire round here without a
-    /// live target, but we CAN assert the same branch the round runner
-    /// uses by re-evaluating it here.
-    #[test]
-    fn no_corpus_flag_produces_none_paths() {
-        let no_corpus = true;
-        let (corpus_out, coverage_out, fingerprint) = if no_corpus {
-            (None, None, String::new())
-        } else {
-            let (cp, cv) = corpus_paths_for("x");
-            (Some(cp), Some(cv), fingerprint_for("https://example.com"))
-        };
-        assert!(corpus_out.is_none());
-        assert!(coverage_out.is_none());
-        assert!(fingerprint.is_empty());
-    }
-
-    /// Default (no_corpus = false) produces real paths + fingerprint.
-    #[test]
-    fn default_corpus_flag_produces_some_paths() {
-        let no_corpus = false;
-        let (corpus_out, coverage_out, fingerprint) = if no_corpus {
-            (None, None, String::new())
-        } else {
-            let (cp, cv) = corpus_paths_for("default-test");
-            (Some(cp), Some(cv), fingerprint_for("https://example.com"))
-        };
-        assert!(corpus_out.is_some());
-        assert!(coverage_out.is_some());
-        assert_eq!(fingerprint, "hunt:example.com");
-    }
-
-    // ── humanize_secs: log message format ───────────────────────────────
-
-    #[test]
-    fn humanize_secs_distinguishes_subhour_subday_and_multiday() {
-        // The bug we're fixing: pre-fix the auto-submit log said
-        // "first 24 h" hardcoded regardless of the actual grace
-        // period. With the operator now able to set any value via
-        // --auto-submit-grace-secs, the log MUST reflect the real
-        // budget — these assertions pin the formatting.
-        assert_eq!(humanize_secs(0), "0 s");
-        assert_eq!(humanize_secs(30), "30 s");
-        assert_eq!(humanize_secs(90), "1 m 30 s");
-        assert_eq!(humanize_secs(120), "2 m");
-        assert_eq!(humanize_secs(3_600), "1 h");
-        assert_eq!(humanize_secs(3_660), "1 h 1 m");
-        assert_eq!(humanize_secs(86_400), "1 d");
-        assert_eq!(humanize_secs(90_000), "1 d 1 h");
-        assert_eq!(humanize_secs(172_800), "2 d");
-        // Common operator values land cleanly.
-        assert_eq!(humanize_secs(3_600), "1 h");          // 1 h grace
-        assert_eq!(humanize_secs(86_400), "1 d");         // legacy default
-    }
-
-    // ── cwe_and_severity_for_class: per-class triage routing ─────────────
-
-    #[test]
-    fn cwe_per_class_matches_mitre_cwe_catalogue() {
-        // The bug we're fixing: pre-fix every submission shipped
-        // weakness_id=20 (CWE-20 catch-all), landing every report
-        // in H1's "needs human triage" bucket — slowest possible
-        // path for a $50 bounty. Per-class CWE routes to the right
-        // reviewer queue immediately.
-        assert_eq!(cwe_and_severity_for_class("sqli").0, 89);
-        assert_eq!(cwe_and_severity_for_class("sql").0, 89);
-        assert_eq!(cwe_and_severity_for_class("xss").0, 79);
-        assert_eq!(cwe_and_severity_for_class("ssrf").0, 918);
-        assert_eq!(cwe_and_severity_for_class("ssti").0, 1336);
-        assert_eq!(cwe_and_severity_for_class("lfi").0, 22);
-        assert_eq!(cwe_and_severity_for_class("path_traversal").0, 22);
-        assert_eq!(cwe_and_severity_for_class("rfi").0, 22);
-        assert_eq!(cwe_and_severity_for_class("cmdi").0, 78);
-        assert_eq!(cwe_and_severity_for_class("cmd").0, 78);
-        assert_eq!(cwe_and_severity_for_class("xxe").0, 611);
-        assert_eq!(cwe_and_severity_for_class("rce").0, 94);
-        // Fallback: unknown class must NOT panic and must NOT
-        // claim a wrong CWE; CWE-20 is the documented catch-all.
-        assert_eq!(cwe_and_severity_for_class("unknown_future_class").0, 20);
-        assert_eq!(cwe_and_severity_for_class("").0, 20);
-    }
-
-    #[test]
-    fn cwe_lookup_is_case_insensitive() {
-        // Operator-tagged classes can come from corpus files with
-        // mixed casing; the lookup must normalize.
-        assert_eq!(cwe_and_severity_for_class("SQLi").0, 89);
-        assert_eq!(cwe_and_severity_for_class("XSS").0, 79);
-        assert_eq!(cwe_and_severity_for_class("SsRf").0, 918);
-    }
-
-    #[test]
-    fn severity_critical_for_rce_class_attacks() {
-        // RCE-class bypasses warrant "critical" — a working
-        // command-injection past the WAF is direct origin code
-        // execution. Other classes stay "high" (still a control
-        // failure but not direct RCE).
-        assert_eq!(cwe_and_severity_for_class("cmdi").1, "critical");
-        assert_eq!(cwe_and_severity_for_class("cmd").1, "critical");
-        assert_eq!(cwe_and_severity_for_class("rce").1, "critical");
-        assert_eq!(cwe_and_severity_for_class("sqli").1, "high");
-        assert_eq!(cwe_and_severity_for_class("xss").1, "high");
-    }
-
-    // ── base_url_in_cumulusfire_scope: SUBMISSION SCOPE GUARD ──────────
-
-    #[test]
-    fn cumulusfire_scope_accepts_apex_and_subdomains() {
-        // The bug we're fixing: pre-fix submit_to_h1 hardcoded
-        // team_handle="cumulusfire" with no scope check, so an
-        // operator running --auto-submit against ANY base URL with
-        // H1_API_KEY set would file a CumulusFire report on the
-        // wrong target — wrong team, ToS-violating off-scope spam.
-        // This gate refuses submission unless the base URL is in
-        // CumulusFire's bug-bounty scope.
-        assert!(base_url_in_cumulusfire_scope("https://waf.cumulusfire.net/"));
-        assert!(base_url_in_cumulusfire_scope("https://waf.cumulusfire.net"));
-        assert!(base_url_in_cumulusfire_scope("https://api.cumulusfire.net/v1/x"));
-        assert!(base_url_in_cumulusfire_scope("https://cumulusfire.net"));
-        assert!(base_url_in_cumulusfire_scope("https://cumulusfire.net/"));
-        assert!(base_url_in_cumulusfire_scope("http://waf.cumulusfire.net:8443/"));
-        // Userinfo + port + path/query must NOT confuse the host
-        // extraction.
-        assert!(base_url_in_cumulusfire_scope(
-            "https://admin:secret@waf.cumulusfire.net:443/scope?x=1"
-        ));
-    }
-
-    #[test]
-    fn cumulusfire_scope_rejects_unrelated_hosts() {
-        // Defense-in-depth: lookalikes and unrelated targets MUST
-        // refuse. `cumulusfire.net.attacker.com` is a CLASSIC
-        // CWE-1259 lookalike where naive `contains("cumulusfire.net")`
-        // would erroneously accept.
-        assert!(!base_url_in_cumulusfire_scope("https://example.com/"));
-        assert!(!base_url_in_cumulusfire_scope("https://waf.example.com/"));
-        assert!(!base_url_in_cumulusfire_scope("https://cumulusfire.net.attacker.com/"));
-        assert!(!base_url_in_cumulusfire_scope(
-            "https://attacker.com/?cumulusfire.net=1"
-        ));
-        // Empty / nonsense MUST reject (not match).
-        assert!(!base_url_in_cumulusfire_scope(""));
-        assert!(!base_url_in_cumulusfire_scope("not-a-url"));
-    }
-
-    #[test]
-    fn cumulusfire_scope_is_case_insensitive() {
-        // Operators sometimes paste URLs from H1 with mixed case.
-        assert!(base_url_in_cumulusfire_scope("HTTPS://WAF.CUMULUSFIRE.NET/"));
-        assert!(base_url_in_cumulusfire_scope("https://Waf.CumulusFire.NET"));
-    }
-
-    // ── submit_to_h1: gate refuses off-scope before network call ─────────
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn submit_to_h1_refuses_off_scope_target_before_reading_h1_env() {
-        // Pre-fix: H1_API_KEY was read BEFORE the scope check, so an
-        // operator running --auto-submit against an off-scope target
-        // without H1_API_KEY set would see only "H1_API_KEY not set"
-        // — they'd set the env var, retry, and then trip the actual
-        // scope gate. The right ordering is scope-first so the most
-        // important refusal fires regardless of credential state.
-        //
-        // This test deliberately does NOT touch H1_API_KEY. If the
-        // scope check is correctly ordered first, we get the scope
-        // error. If it's NOT first, we'd get the H1_API_KEY error
-        // (or a phantom success when the env var happens to be set
-        // in CI).
-        let result = submit_to_h1(
-            "https://example.com/scope",
-            "sqli",
-            "url_double",
-        )
-        .await;
-        match result {
-            Err(e) => {
-                assert!(
-                    e.contains("not in CumulusFire") || e.contains("scope"),
-                    "expected SCOPE-rejection error (not H1_API_KEY), got: {e}"
-                );
-            }
-            Ok(()) => panic!("off-scope target must NOT submit"),
-        }
     }
 }

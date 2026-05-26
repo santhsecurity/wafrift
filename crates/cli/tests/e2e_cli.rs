@@ -141,7 +141,9 @@ fn evade_encoding_only() {
     assert_eq!(code, 0, "evade --encoding-only should succeed");
     let v: serde_json::Value = serde_json::from_str(stdout.trim())
         .unwrap_or_else(|e| panic!("evade --format json must parse as JSON: {e}\n{stdout}"));
-    let variants = v.get("variants").and_then(serde_json::Value::as_array)
+    let variants = v
+        .get("variants")
+        .and_then(serde_json::Value::as_array)
         .unwrap_or_else(|| panic!("missing variants array: {v}"));
     assert!(
         !variants.is_empty(),
@@ -207,9 +209,21 @@ fn evade_all_levels() {
     // Monotone: heavy ≥ medium ≥ light. If a refactor collapses two
     // levels to the same pool, exactly one comparison fires. If all
     // three collapse, both fire.
-    let light = variant_counts.iter().find(|(l, _)| *l == "light").map(|x| x.1).unwrap_or(0);
-    let medium = variant_counts.iter().find(|(l, _)| *l == "medium").map(|x| x.1).unwrap_or(0);
-    let heavy = variant_counts.iter().find(|(l, _)| *l == "heavy").map(|x| x.1).unwrap_or(0);
+    let light = variant_counts
+        .iter()
+        .find(|(l, _)| *l == "light")
+        .map(|x| x.1)
+        .unwrap_or(0);
+    let medium = variant_counts
+        .iter()
+        .find(|(l, _)| *l == "medium")
+        .map(|x| x.1)
+        .unwrap_or(0);
+    let heavy = variant_counts
+        .iter()
+        .find(|(l, _)| *l == "heavy")
+        .map(|x| x.1)
+        .unwrap_or(0);
     assert!(
         medium >= light,
         "evade --level medium ({medium} variants) must produce >= light ({light}); \
@@ -469,9 +483,10 @@ fn evade_ct_starvation_tamper_is_idempotent_under_header_context() {
         "ct_starvation idempotent under header context must exit 0: stderr={stderr}"
     );
     // The explain trace must surface why nothing fired.
-    let combined = format!("{stderr}");
+    let combined = stderr.to_string();
     assert!(
-        combined.contains("Idempotent") || combined.contains("no transform")
+        combined.contains("Idempotent")
+            || combined.contains("no transform")
             || combined.contains("No variants"),
         "explain must say why ct_starvation didn't fire:\n{combined}"
     );
@@ -526,7 +541,10 @@ fn evade_empty_variants_writes_error_to_output_file() {
     // Empty-variants is a legitimate outcome (CI pipelines treating
     // non-zero as error mustn't break). The JSON blob with the
     // `note` field + explain trace still has to land in --output.
-    assert_eq!(code, 0, "no-variants path must exit 0 — empty is a legitimate outcome");
+    assert_eq!(
+        code, 0,
+        "no-variants path must exit 0 — empty is a legitimate outcome"
+    );
     let body =
         fs::read_to_string(&tmp).expect("output file should be written even on empty-variants");
     assert!(

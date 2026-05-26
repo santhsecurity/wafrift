@@ -57,7 +57,7 @@ pub fn manipulate(
             Ok(format!("{new_header_b64}.{payload_b64}."))
         }
         JwtManipulation::Hs256WithKey => {
-            let _ = key.ok_or(JwtError::MissingKey)?;
+            let key_bytes = key.ok_or(JwtError::MissingKey)?;
             if header["alg"].as_str() == Some("none") {
                 return Err(JwtError::UnsupportedAlgorithm { alg: "none".into() });
             }
@@ -67,12 +67,39 @@ pub fn manipulate(
             })?;
             let new_header_b64 =
                 base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_bytes);
-            // Fake signature for now since we don't have HMAC library in this file
-            let sig_b64 = "fakesignature";
+            // Real HMAC-SHA256 over `header.payload` per RFC 7515 §3.1.
+            // Pre-fix this returned the literal string "fakesignature"
+            // (LAW 1 stub) — the resulting token had a valid alg
+            // header but a signature no server would accept. The
+            // jwt-diff probe couldn't exercise the "server accepts
+            // HS256 with a guessed key" attack class.
+            use hmac::{Hmac, Mac};
+            use sha2::Sha256;
+            type HmacSha256 = Hmac<Sha256>;
+            let signing_input = format!("{new_header_b64}.{payload_b64}");
+            let mut mac = HmacSha256::new_from_slice(key_bytes).map_err(|e| {
+                JwtError::InvalidToken {
+                    reason: format!("HMAC key init failed: {e}"),
+                }
+            })?;
+            mac.update(signing_input.as_bytes());
+            let sig = mac.finalize().into_bytes();
+            let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig);
             Ok(format!("{new_header_b64}.{payload_b64}.{sig_b64}"))
         }
         JwtManipulation::JwkEmbed { jwk } => {
-            header["jwk"] = serde_json::from_str(jwk).unwrap_or(serde_json::Value::Null);
+            // F129: pre-fix swallowed JWK parse errors via
+            // `unwrap_or(Value::Null)` — operator passes a malformed
+            // JWK string, gets back a token with `"jwk": null` and an
+            // Ok result. The "test if server validates jwk claim
+            // correctly" probe was rendered meaningless because the
+            // header carried null instead of the intended JWK. Surface
+            // the parse error as InvalidToken so the operator knows
+            // their JWK input was bad before sending the request.
+            let jwk_value = serde_json::from_str(jwk).map_err(|e| JwtError::InvalidToken {
+                reason: format!("--jwk is not valid JSON: {e}"),
+            })?;
+            header["jwk"] = jwk_value;
             let header_bytes = serde_json::to_vec(&header).map_err(|e| JwtError::InvalidToken {
                 reason: format!("header serialization failed: {e}"),
             })?;
@@ -141,6 +168,54 @@ mod tests {
     }
 
     #[test]
+    fn hs256_with_key_produces_real_hmac_signature() {
+        // Regression for the "fakesignature" stub: the output must
+        // be a base64url-encoded 32-byte HMAC-SHA256 over the
+        // signing input, not the literal string "fakesignature".
+        let out = manipulate(
+            &valid_token(),
+            &JwtManipulation::Hs256WithKey,
+            Some(b"my-secret-key"),
+        )
+        .unwrap();
+        let parts: Vec<&str> = out.split('.').collect();
+        assert_eq!(parts.len(), 3);
+        assert_ne!(parts[2], "fakesignature", "must not be the stub literal");
+        // Decode base64url → 32 bytes (SHA-256 output).
+        let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[2])
+            .expect("sig must be valid base64url");
+        assert_eq!(sig_bytes.len(), 32, "HMAC-SHA256 produces 32 bytes");
+
+        // Independently compute the expected signature to prove it's
+        // a REAL HMAC over the right input.
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let signing_input = format!("{}.{}", parts[0], parts[1]);
+        let mut mac = HmacSha256::new_from_slice(b"my-secret-key").unwrap();
+        mac.update(signing_input.as_bytes());
+        let expected = mac.finalize().into_bytes();
+        assert_eq!(sig_bytes.as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn hs256_signature_is_deterministic_for_same_key_and_payload() {
+        let a = manipulate(&valid_token(), &JwtManipulation::Hs256WithKey, Some(b"k")).unwrap();
+        let b = manipulate(&valid_token(), &JwtManipulation::Hs256WithKey, Some(b"k")).unwrap();
+        assert_eq!(a, b, "HMAC is deterministic");
+    }
+
+    #[test]
+    fn hs256_signature_differs_per_key() {
+        let a = manipulate(&valid_token(), &JwtManipulation::Hs256WithKey, Some(b"k1")).unwrap();
+        let b = manipulate(&valid_token(), &JwtManipulation::Hs256WithKey, Some(b"k2")).unwrap();
+        let sig_a = a.split('.').nth(2).unwrap();
+        let sig_b = b.split('.').nth(2).unwrap();
+        assert_ne!(sig_a, sig_b, "different keys must produce different sigs");
+    }
+
+    #[test]
     fn hs256_rejects_none_alg() {
         let none_token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjMifQ.dummy";
         let result = manipulate(none_token, &JwtManipulation::Hs256WithKey, Some(b"secret"));
@@ -164,13 +239,61 @@ mod tests {
         assert_eq!(header["jwk"]["kty"], "RSA");
     }
 
+    // F129 regression: malformed JWK input MUST surface as Err, not
+    // silently substitute `null`. Pre-fix the helper used
+    // `unwrap_or(Value::Null)` and the resulting token had `"jwk":
+    // null` in its header — operator probing whether the server
+    // validates the `jwk` claim got a meaningless probe because the
+    // claim was missing the actual key material.
     #[test]
-    fn jwk_embed_invalid_json_becomes_null() {
-        let out = manipulate(
+    fn jwk_embed_invalid_json_returns_err() {
+        let err = manipulate(
             &valid_token(),
             &JwtManipulation::JwkEmbed {
                 jwk: "not json".into(),
             },
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, JwtError::InvalidToken { ref reason } if reason.contains("--jwk")),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn jwk_embed_empty_string_returns_err() {
+        let err = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed { jwk: "".into() },
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, JwtError::InvalidToken { .. }));
+    }
+
+    #[test]
+    fn jwk_embed_partial_json_returns_err() {
+        // Half-quoted, missing closing brace — common operator typo.
+        let err = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed {
+                jwk: r#"{"kty":"RSA""#.into(),
+            },
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, JwtError::InvalidToken { .. }));
+    }
+
+    #[test]
+    fn jwk_embed_valid_jwk_string_with_unicode_escapes_preserved() {
+        // Anti-rig: a valid JWK with non-ASCII escapes must round-trip
+        // intact through the header, not get re-encoded by serde.
+        let jwk = r#"{"kty":"oct","k":"é"}"#;
+        let out = manipulate(
+            &valid_token(),
+            &JwtManipulation::JwkEmbed { jwk: jwk.into() },
             None,
         )
         .unwrap();
@@ -179,6 +302,7 @@ mod tests {
             .decode(parts[0])
             .unwrap();
         let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
-        assert!(header["jwk"].is_null());
+        // The unicode escape decodes to é (U+00E9).
+        assert_eq!(header["jwk"]["k"], "é");
     }
 }

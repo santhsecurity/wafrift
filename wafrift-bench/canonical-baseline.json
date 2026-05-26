@@ -1,0 +1,8 @@
+{
+  "oracle_valid_rate": 0.089,
+  "corpus_size": 920,
+  "strategies": ["heavy", "equiv-cegis"],
+  "variants_per_case": 5,
+  "waf": "modsec-crs-pl4-202604040104",
+  "date": "2026-05-25"
+}

@@ -113,10 +113,10 @@ fn sound_oracle_and_passive_both_recover_the_exact_language() {
 
     // (2) BoundedExhaustiveEq is complete to its depth ⇒ L* & KV exact.
     let mut w1 = waf(PAT);
-    let mut e1 = BoundedExhaustiveEq { max_len: 8 };
+    let mut e1 = BoundedExhaustiveEq { max_len: 8, max_queries: None };
     let la = l_star(&mut w1, &jb, &alpha, &mut e1).unwrap().sfa;
     let mut w2 = waf(PAT);
-    let mut e2 = BoundedExhaustiveEq { max_len: 8 };
+    let mut e2 = BoundedExhaustiveEq { max_len: 8, max_queries: None };
     let kv = kv_learn(&mut w2, &jb, &alpha, &mut e2).unwrap().sfa;
 
     // (3) passive_learn uses NO equivalence oracle — a fixed complete

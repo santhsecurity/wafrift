@@ -291,9 +291,7 @@ mod imp {
                     .map_err(|e| {
                         StealthError::Transport(format!("DNS resolution failed for {host}: {e}"))
                     })?;
-                let v: Vec<_> = lookups
-                    .filter(|sa| !ip_addr_is_bogon(sa.ip()))
-                    .collect();
+                let v: Vec<_> = lookups.filter(|sa| !ip_addr_is_bogon(sa.ip())).collect();
                 if v.is_empty() {
                     return Err(StealthError::Transport(format!(
                         "stealth refused {host}: every resolved address is in the bogon set \
@@ -446,7 +444,15 @@ impl StealthClient {
     }
 
     pub fn profile(&self) -> ImpersonateProfile {
-        ImpersonateProfile::Chrome131
+        // F87: `StealthClient::new()` (above) always returns Err in
+        // this stub, so no `&self` instance is ever constructed. If
+        // we ever reach here, the type-system invariant is broken
+        // upstream — better to panic loudly than to silently mis-tag
+        // a TLS fingerprint as Chrome131 in findings telemetry.
+        unreachable!(
+            "stub StealthClient cannot be instantiated; \
+             rebuild with `--features tls-impersonate`"
+        )
     }
 
     pub async fn send(
@@ -457,7 +463,8 @@ impl StealthClient {
         body: Option<&[u8]>,
         max_body: usize,
     ) -> Result<StealthResponse, StealthError> {
-        self.send_pinned(method, url, headers, body, max_body, None).await
+        self.send_pinned(method, url, headers, body, max_body, None)
+            .await
     }
 
     pub async fn send_pinned(
@@ -475,11 +482,6 @@ impl StealthClient {
     }
 }
 
-// Ensure unused-import warnings don't fire on the `Instant` / `Duration`
-// imports when the feature is off.
-#[cfg(not(feature = "tls-impersonate"))]
-#[allow(dead_code)]
-fn _unused_imports(_: std::time::Instant, _: Duration) {}
 
 #[cfg(test)]
 mod tests {

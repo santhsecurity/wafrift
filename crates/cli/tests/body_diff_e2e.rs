@@ -7,7 +7,6 @@
 //! verifies divergent probes are reported with curl reproducers.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -42,7 +41,28 @@ async fn spawn_body_aware_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    // Probe-until-ready: don't sleep a fixed interval — actually connect
+    // to the listener to verify it is accepting. Under heavy parallel test
+    // load (1352+ tests) a fixed 200ms sleep can still race on Windows;
+    // polling confirms readiness deterministically. 30s deadline handles
+    // worst-case Windows loopback latency under high concurrency.
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -78,6 +98,8 @@ fn body_diff_finds_divergences_against_body_aware_mock() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--timeout-secs",
+        "15",
     ]);
     assert_eq!(code, 0, "body-diff should exit 0 — stderr:\n{stderr}");
 
@@ -89,9 +111,9 @@ fn body_diff_finds_divergences_against_body_aware_mock() {
     assert!(!results.is_empty(), "must have at least one probe result");
 
     // The token-carrying probes should diverge from baseline.
-    let any_diverged = results
-        .iter()
-        .any(|r| r["severity"].as_str() == Some("medium") || r["severity"].as_str() == Some("high"));
+    let any_diverged = results.iter().any(|r| {
+        r["severity"].as_str() == Some("medium") || r["severity"].as_str() == Some("high")
+    });
     assert!(
         any_diverged,
         "at least one probe must diverge against a body-aware mock: {parsed}"
@@ -100,10 +122,7 @@ fn body_diff_finds_divergences_against_body_aware_mock() {
     // Every probe must carry a curl reproducer of shape `curl -i -X POST …`.
     for r in results {
         let curl = r["curl_cmd"].as_str().expect("curl_cmd string");
-        assert!(
-            curl.starts_with("curl -i -X POST "),
-            "got: {curl}"
-        );
+        assert!(curl.starts_with("curl -i -X POST "), "got: {curl}");
         assert!(curl.contains("Content-Type"), "got: {curl}");
         assert!(curl.contains("--data-binary"), "got: {curl}");
     }
@@ -120,7 +139,10 @@ fn body_diff_against_unreachable_target_exits_1() {
         "--timeout-secs",
         "2",
     ]);
-    assert_eq!(code, 1, "unreachable target must exit 1 — stderr:\n{stderr}");
+    assert_eq!(
+        code, 1,
+        "unreachable target must exit 1 — stderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -160,6 +182,8 @@ fn body_diff_json_results_carry_content_type_field_per_probe() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--timeout-secs",
+        "15",
     ]);
     assert_eq!(code, 0);
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();

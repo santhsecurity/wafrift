@@ -174,6 +174,48 @@ pub struct BenchWafArgs {
     #[arg(long)]
     pub lineage_output: Option<PathBuf>,
 
+    // ─── Egress rotation (multi-IP evasion of bot-reputation engines) ────────
+
+    /// SOCKS5 proxy URL for egress rotation (repeatable).
+    /// Example: `--socks5 socks5://user:pass@10.8.0.1:1080`
+    #[arg(long = "socks5", value_name = "URL", num_args = 0..)]
+    pub egress_socks5: Vec<String>,
+
+    /// HTTP proxy URL for egress rotation (repeatable).
+    /// Example: `--http-proxy http://burp.internal:8080`
+    #[arg(long = "http-proxy", value_name = "URL", num_args = 0..)]
+    pub egress_http_proxy: Vec<String>,
+
+    /// Tailscale exit-node name for egress rotation (repeatable).
+    #[arg(long = "tailscale-exit-node", value_name = "NODE", num_args = 0..)]
+    pub egress_tailscale_nodes: Vec<String>,
+
+    /// Tailscale SOCKS listener address. Default: `127.0.0.1:1055`.
+    #[arg(long = "tailscale-socks-addr", value_name = "ADDR", default_value = "127.0.0.1:1055")]
+    pub egress_tailscale_socks_addr: String,
+
+    /// Consecutive challenges before cooling an egress entry. Default: 3.
+    #[arg(long = "egress-challenge-threshold", default_value_t = 3u32)]
+    pub egress_challenge_threshold: u32,
+
+    /// Seconds a cooled egress entry stays out of rotation. Default: 300.
+    #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
+    pub egress_cooldown_secs: u64,
+
+    /// Pin the evolution-strategy mutator to a specific algorithm for ablation.
+    /// `default` uses the strategy name (hill-climb, sim-anneal, etc.).
+    /// `ast-mcts` forces AST Monte-Carlo Tree Search for every evolution case.
+    #[arg(long, default_value = "default", value_parser = ["default", "ast-mcts"])]
+    pub mutator: String,
+
+    /// Global RNG seed for reproducible runs. When set, User-Agent selection
+    /// and evolution-strategy RNGs are seeded deterministically so that
+    /// `bench-waf --seed <N> … > run1.json` and a second identical invocation
+    /// produce byte-identical JSON. Without this flag the bench is
+    /// non-deterministic (random UA, random evolution trajectories).
+    #[arg(long)]
+    pub seed: Option<u64>,
+
     /// Weight for ensemble-dilution score in evolutionary fitness (0.0–1.0).
     ///
     /// When targeting a multi-rule-group ensemble WAF (Cloudflare Managed
@@ -189,6 +231,30 @@ pub struct BenchWafArgs {
     /// Has no effect when targeting rule-based or ML-backed WAFs.
     #[arg(long, default_value_t = 0.0, value_parser = parse_dilution_weight)]
     pub dilution_weight: f64,
+
+    /// Path to write the per-rule bypass corpus on completion.
+    /// When set, the bench captures full response envelopes for
+    /// confirmed bypasses (via `send_with_envelope`), routes them
+    /// through `parse_cf_block` to derive the CF rule attribution
+    /// + edge POP, and persists to this path. Combine with
+    /// `--coverage-out` for the cross-region POP coverage map.
+    /// Omitting both flags keeps the legacy hot-path send() that
+    /// drops headers/body for slightly lower per-probe latency.
+    #[arg(long)]
+    pub corpus_out: Option<std::path::PathBuf>,
+
+    /// Path to write the edge-POP coverage map on completion.
+    /// See `--corpus-out`.
+    #[arg(long)]
+    pub coverage_out: Option<std::path::PathBuf>,
+
+    /// Target fingerprint string the corpus is keyed under.
+    /// Defaults to `bench:<base_url>` so each target gets a stable
+    /// per-target corpus. Operators recording against CumulusFire
+    /// can pass an explicit `cf:cumulusfire:<host>` so multiple
+    /// runs accumulate into one file.
+    #[arg(long, default_value = "")]
+    pub corpus_fingerprint: String,
 }
 
 fn parse_dilution_weight(s: &str) -> std::result::Result<f64, String> {
@@ -245,7 +311,6 @@ struct CaseResult {
     description: String,
     raw_blocked: bool,
     raw_status: u16,
-    raw_latency_ms: f64,
     evaded: Option<EvadeResult>,
 }
 
@@ -358,7 +423,7 @@ const KNOWN_CLASSES: &[&str] = &[
     "graphql",
 ];
 
-fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
+fn validate_corpus_and_exit(cases: &[BenchCase], format: &str) -> Result<ExitCode, String> {
     use std::collections::{BTreeMap, HashSet};
     let mut seen: HashSet<&str> = HashSet::new();
     let mut by_class: BTreeMap<&str, usize> = BTreeMap::new();
@@ -378,19 +443,38 @@ fn validate_corpus_and_exit(cases: &[BenchCase]) -> Result<ExitCode, String> {
         }
         *by_class.entry(case.class.as_str()).or_insert(0) += 1;
     }
-    println!("corpus integrity:");
-    println!("  total cases: {}", cases.len());
-    for (cls, n) in &by_class {
-        println!("  {cls:>10}: {n}");
+    let ok = errors.is_empty();
+    if format == "json" {
+        let by_class_json: BTreeMap<&str, usize> = by_class.clone();
+        let payload = serde_json::json!({
+            "ok": ok,
+            "total_cases": cases.len(),
+            "by_class": by_class_json,
+            "errors": errors,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload)
+                .unwrap_or_else(|_| r#"{"ok":false,"error":"serialization failed"}"#.into())
+        );
+    } else {
+        println!("corpus integrity:");
+        println!("  total cases: {}", cases.len());
+        for (cls, n) in &by_class {
+            println!("  {cls:>10}: {n}");
+        }
+        if ok {
+            println!("OK ({} cases)", cases.len());
+        } else {
+            for e in &errors {
+                eprintln!("  ERROR: {e}");
+            }
+            eprintln!("{} corpus error(s)", errors.len());
+        }
     }
-    if errors.is_empty() {
-        println!("OK ({} cases)", cases.len());
+    if ok {
         Ok(ExitCode::SUCCESS)
     } else {
-        for e in &errors {
-            eprintln!("  ERROR: {e}");
-        }
-        eprintln!("{} corpus error(s)", errors.len());
         Ok(ExitCode::from(4))
     }
 }
@@ -498,9 +582,15 @@ fn walk_corpus(path: &Path, out: &mut Vec<BenchCase>) -> Result<(), String> {
         return load_one(path, out);
     }
     let entries = fs::read_dir(path).map_err(|e| format!("read_dir {}: {e}", path.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let p = entry.path();
+    // Collect + sort so corpus order is deterministic across OS/FS.
+    // `fs::read_dir` returns entries in arbitrary filesystem order; two runs
+    // on the same seed would process cases in a different order → different
+    // JSON output even when nothing changed. Sort lexicographically by path.
+    let mut sorted: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    sorted.sort();
+    for p in sorted {
         if p.is_dir() {
             walk_corpus(&p, out)?;
         } else if p.extension().and_then(|s| s.to_str()) == Some("toml") {
@@ -660,13 +750,19 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
     // --validate-only: run corpus integrity checks then exit. Doesn't
     // need a live WAF target; intended for CI gating on corpus PRs.
     if args.validate_only {
-        return validate_corpus_and_exit(&cases);
+        return validate_corpus_and_exit(&cases, &args.format);
     }
 
-    // Pick a randomized real-browser User-Agent (vs. the obvious
-    // wafrift-bench/0.1 marker) so the WAF doesn't have a free signal.
-    let ua = wafrift_fingerprint::fingerprint::random_profile()
-        .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string());
+    // Pick a real-browser User-Agent so the WAF doesn't have a free signal.
+    // With --seed the selection is deterministic (seeded_profile); without it
+    // we fall back to the global thread RNG (random_profile) so non-seeded
+    // runs still get UA variety.
+    let ua = match args.seed {
+        Some(s) => wafrift_fingerprint::fingerprint::seeded_profile(s)
+            .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string()),
+        None => wafrift_fingerprint::fingerprint::random_profile()
+            .map_or_else(|| "Mozilla/5.0".into(), |p| p.user_agent.to_string()),
+    };
 
     // Build the optional egress pool from --egress-* flags before
     // the http client. Empty inputs short-circuit to None so the
@@ -821,7 +917,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
                     fingerprint,
                     corpus_path,
                     coverage_path,
-                    args.h1_archive.clone(),
+                    None,
                 ),
             )))
         } else {
@@ -838,7 +934,7 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
             }
         }
         let req = build_request(&base_url, case);
-        let (raw_status, raw_blocked, raw_latency_ms) = match send(&client, &req, args.timeout_secs)
+        let (raw_status, raw_blocked, _raw_latency_ms) = match send(&client, &req, args.timeout_secs)
             .await
         {
             Ok(t) => {
@@ -864,7 +960,17 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
         };
 
         let evaded = if args.evade {
-            Some(run_evade(&client, case, &base_url, &args, &mut bypass_corpus).await?)
+            Some(
+                run_evade(
+                    &client,
+                    case,
+                    &base_url,
+                    &args,
+                    &mut bypass_corpus,
+                    recorder.as_ref(),
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -875,7 +981,6 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
             description: case.description.clone(),
             raw_blocked,
             raw_status,
-            raw_latency_ms,
             evaded,
         });
     }
@@ -894,6 +999,26 @@ async fn run_bench_waf_async(mut args: BenchWafArgs) -> Result<ExitCode, String>
                 corpus.entries.len(),
                 path.display()
             );
+        }
+    }
+
+    // Persist the per-rule bypass corpus + edge-POP coverage map if the
+    // operator asked for them via --corpus-out / --coverage-out. Same
+    // single-atomic-write pattern as the lineage corpus above.
+    if let Some(rec) = recorder.as_ref() {
+        match rec.lock() {
+            Ok(guard) => {
+                if let Err(e) = guard.flush() {
+                    eprintln!("warn: corpus flush failed: {e}");
+                } else {
+                    eprintln!(
+                        "wrote {} probes ({} novel bypasses) to corpus + coverage files",
+                        guard.probe_count(),
+                        guard.novel_bypass_count(),
+                    );
+                }
+            }
+            Err(e) => eprintln!("warn: corpus recorder poisoned: {e}"),
         }
     }
 
@@ -922,6 +1047,7 @@ async fn run_evade(
     base_url: &str,
     args: &BenchWafArgs,
     bypass_corpus: &mut Option<BypassCorpus>,
+    recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
 ) -> Result<EvadeResult, String> {
     let mut by_strategy: BTreeMap<String, StrategyStat> = BTreeMap::new();
     let mut total = 0;
@@ -943,6 +1069,7 @@ async fn run_evade(
                     &mut total,
                     &mut bypassed,
                     &mut bypass_techs,
+                    recorder,
                 )
                 .await
             }
@@ -1151,6 +1278,7 @@ async fn run_payload_strategy(
     total: &mut usize,
     bypassed: &mut usize,
     bypass_techs: &mut Vec<String>,
+    recorder: Option<&std::sync::Arc<std::sync::Mutex<crate::corpus_recorder::CorpusRecorder>>>,
 ) -> StrategyStat {
     let mut stat = StrategyStat::default();
     let Some(level) = pick_level(strat) else {
@@ -1175,8 +1303,68 @@ async fn run_payload_strategy(
         let req = build_request_for_payload(base_url, &case.mode, &variant.payload);
         stat.variants += 1;
         *total += 1;
-        match send(client, &req, args.timeout_secs).await {
-            Ok((status, blocked, _l)) => {
+        // When a recorder is wired, capture the full envelope so we can
+        // route headers + body through parse_cf_block → rule_corpus +
+        // edge_pop_coverage + h1_dedup. Without a recorder, drop straight
+        // to the legacy hot-path send() that throws headers away.
+        let probe_result = if let Some(rec) = recorder {
+            match crate::equiv_engine::send_with_envelope(client, &req, args.timeout_secs).await {
+                Ok(env) => {
+                    let is_bypass = verified_bypass(
+                        &case.class,
+                        &case.payload,
+                        &variant.payload,
+                        env.blocked,
+                        env.status,
+                    );
+                    let outcome = if is_bypass {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                    } else if env.blocked {
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    } else {
+                        // Unverified-not-blocked: don't record — the oracle
+                        // wasn't certain and corpus dedup would treat this
+                        // as noise.
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Ambiguous
+                    };
+                    if matches!(
+                        outcome,
+                        wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Bypass
+                            | wafrift_evolution::hunt_corpus_bridge::ProbeOutcome::Block
+                    ) {
+                        let chain: Vec<String> = variant
+                            .techniques
+                            .iter()
+                            .map(std::string::ToString::to_string)
+                            .collect();
+                        let class = wafrift_evolution::coverage_feedback::PayloadClass::new(
+                            &case.class,
+                        );
+                        if let Ok(mut guard) = rec.lock() {
+                            let _ = guard.record(
+                                &env,
+                                &variant.payload,
+                                class,
+                                chain,
+                                "direct",
+                                base_url,
+                                outcome,
+                            );
+                        }
+                    }
+                    Ok((env.status, env.blocked))
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            match send(client, &req, args.timeout_secs).await {
+                Ok((status, blocked, _l)) => Ok((status, blocked)),
+                Err(e) => Err(e),
+            }
+        };
+
+        match probe_result {
+            Ok((status, blocked)) => {
                 if verified_bypass(
                     &case.class,
                     &case.payload,
@@ -1455,7 +1643,26 @@ async fn run_evolution_strategy(
         }
     };
     let payload_type = class_to_payload_type(&case.class);
-    let rng = StdRng::seed_from_u64(0xC0FFEE);
+    // Derive a per-(case, strategy) seed so different cases produce
+    // independent RNG streams while still being reproducible when a
+    // global --seed is provided. Without --seed, fall back to the
+    // historical hardcoded constant so existing (non-seeded) behaviour
+    // is unchanged.
+    let base_seed: u64 = args.seed.unwrap_or(0xC0FFEE);
+    // FNV-1a mix of the case id into the base seed gives each case its
+    // own stream; XOR with the strategy name hash ensures hill-climb and
+    // sim-anneal on the same case explore different trajectories.
+    let mut case_mix: u64 = base_seed ^ 0xcbf2_9ce4_8422_2325;
+    for byte in case.id.bytes() {
+        case_mix ^= u64::from(byte);
+        case_mix = case_mix.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let mut strat_mix: u64 = case_mix;
+    for byte in strat.bytes() {
+        strat_mix ^= u64::from(byte);
+        strat_mix = strat_mix.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let rng = StdRng::seed_from_u64(strat_mix);
     let gene_pool = GenePool::default_wafrift();
     let budget = Budget {
         max_requests: args.variants.saturating_mul(4),
@@ -1479,21 +1686,6 @@ async fn run_evolution_strategy(
         ]);
         engine.seed_population(vec![seed]);
     }
-
-    // Ensemble sub-score dilution fitness gate. See
-    // `dilution_gate_active` for the activation predicate. When
-    // active, each variant gets a dilution-plausibility score in
-    // `[0.0, 1.0]`; variants scoring below `dilution_weight` are
-    // pruned before the wire round-trip AND the engine receives a
-    // negative feedback so the genetic search doesn't keep producing
-    // near-clones of an implausible genome. Estimator is
-    // fresh-default per (case, strategy) — bench has no historical
-    // observations to seed from.
-    let dilution_estimator = if dilution_gate_active(&args.target_waf, args.dilution_weight) {
-        Some(wafrift_evolution::dilution::default_estimator())
-    } else {
-        None
-    };
 
     for _ in 0..args.variants {
         if *total > 0 && args.delay_ms > 0 {

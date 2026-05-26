@@ -64,11 +64,19 @@ pub struct SmuggleArgs {
     pub action: SmuggleAction,
 }
 
+#[derive(Args, Debug)]
+pub struct ListArgs {
+    /// Output format: `text` (default, human-readable table) or `json`
+    /// (structured array of variant objects — suitable for scripting).
+    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    pub format: String,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SmuggleAction {
     /// Enumerate the smuggling variants the engine ships, with
     /// their safety tier.
-    List,
+    List(ListArgs),
 
     /// Render the raw wire bytes of a smuggling payload without
     /// sending anything.
@@ -93,7 +101,9 @@ pub struct DryRunArgs {
     pub variant: VariantSelector,
 
     /// Host the payload claims to target (goes into the `Host:` header).
-    #[arg(long)]
+    /// Accepts either a bare hostname (`example.com`) or a full URL
+    /// (`https://example.com`) — the scheme and path are stripped.
+    #[arg(long, alias = "target", value_parser = parse_host_or_url)]
     pub host: String,
 
     /// Optional smuggled request prefix (for CL.TE / TE.CL / etc.).
@@ -246,6 +256,27 @@ pub struct VariantSelector {
     pub info: &'static VariantInfo,
 }
 
+/// Accept either a bare hostname or a full URL; strip scheme + path so
+/// `--host example.com` and `--target https://example.com/path` both
+/// produce the same `Host:` header value (`example.com`).
+fn parse_host_or_url(s: &str) -> Result<String, String> {
+    // If it looks like a URL (contains "://"), parse and extract the host.
+    if let Some(rest) = s.strip_prefix("http://").or_else(|| s.strip_prefix("https://")) {
+        // rest is "host/path?query" — take up to the first '/' or '?'
+        let host = rest
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or(rest);
+        if host.is_empty() {
+            return Err(format!("no host found in URL `{s}`"));
+        }
+        Ok(host.to_string())
+    } else {
+        // Bare hostname (or host:port) — pass through as-is.
+        Ok(s.to_string())
+    }
+}
+
 fn parse_variant_name(s: &str) -> Result<VariantSelector, String> {
     let key = s.to_ascii_lowercase();
     for v in VARIANTS {
@@ -313,7 +344,9 @@ fn build_payload(
         "cl-0" => cl_zero(host, smuggled_prefix).map_err(|e| format!("{e}")),
         "dual-cl" => dual_cl(host, smuggled_prefix, 6, 5).map_err(|e| format!("{e}")),
         "multi-cl" => multi_value_cl(host, smuggled_prefix).map_err(|e| format!("{e}")),
-        other => Err(format!("variant `{other}` is in the catalogue but has no builder")),
+        other => Err(format!(
+            "variant `{other}` is in the catalogue but has no builder"
+        )),
     }
 }
 
@@ -345,7 +378,16 @@ async fn time_first_byte(
     let mut stream = match timeout(Duration::from_secs(timeout_secs), stream_fut).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => return Err(format!("tcp connect: {e}")),
-        Err(_) => return Ok(timeout_secs * 1000),
+        // F126: pre-fix returned `Ok(timeout_secs * 1000)` on CONNECT
+        // timeout, conflating "host unreachable" with "back-end hung
+        // on the response." If the connect timed out at 8 s but the
+        // benign baseline connects fast (200 ms), the delta was
+        // 7800 ms — false DESYNC inferred. The READ timeout below
+        // is the genuine "back-end is hanging" signal we want; the
+        // CONNECT timeout means the network never got us in. Surface
+        // it as Err so the caller aborts the probe and the operator
+        // gets "connect timeout" instead of a phantom desync.
+        Err(_) => return Err(format!("tcp connect: timed out after {timeout_secs}s")),
     };
     if let Err(e) = stream.write_all(bytes).await {
         return Err(format!("tcp write: {e}"));
@@ -358,6 +400,9 @@ async fn time_first_byte(
     match timeout(Duration::from_secs(timeout_secs), read_fut).await {
         Ok(Ok(_)) => Ok(start.elapsed().as_millis() as u64),
         Ok(Err(_)) => Ok(start.elapsed().as_millis() as u64),
+        // Read timeout IS the desync signal — back-end accepted the
+        // request and is hanging on the truncated chunked body. Bin
+        // it at the budget for the delta calculation.
         Err(_) => Ok(timeout_secs * 1000),
     }
 }
@@ -374,9 +419,7 @@ async fn measure_baseline(
     if samples == 0 {
         return Ok(0);
     }
-    let benign = format!(
-        "GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
-    );
+    let benign = format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
     let mut measurements = Vec::with_capacity(samples as usize);
     for _ in 0..samples {
         let ms = time_first_byte(host, port, benign.as_bytes(), timeout_secs).await?;
@@ -451,20 +494,16 @@ async fn run_detect(args: DetectSmuggleArgs) -> ExitCode {
                 return ExitCode::from(1);
             }
         };
-        let elapsed = match time_first_byte(
-            &args.host,
-            args.port,
-            &payload.raw_bytes,
-            args.timeout_secs,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("{} fire {variant_key}: {e}", "error:".red());
-                return ExitCode::from(1);
-            }
-        };
+        let elapsed =
+            match time_first_byte(&args.host, args.port, &payload.raw_bytes, args.timeout_secs)
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("{} fire {variant_key}: {e}", "error:".red());
+                    return ExitCode::from(1);
+                }
+            };
         let mut f = classify_detection(elapsed, baseline_ms, args.threshold_ms);
         f.variant = variant_key.to_string();
         // TRACING: per-probe classification result — the key decision point.
@@ -561,7 +600,10 @@ fn run_list(format: &str) -> ExitCode {
         println!("{}", serde_json::to_string_pretty(&arr).unwrap_or_default());
         return ExitCode::SUCCESS;
     }
-    println!("{}", "── wafrift smuggle: variant catalogue ──".cyan().bold());
+    println!(
+        "{}",
+        "── wafrift smuggle: variant catalogue ──".cyan().bold()
+    );
     for v in VARIANTS {
         let tag = match v.tier {
             SafetyTier::Detection => "[detection]".green(),
@@ -601,7 +643,13 @@ fn run_dry(args: DryRunArgs) -> ExitCode {
                 .join(" ");
             let ascii: String = chunk
                 .iter()
-                .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' })
+                .map(|&b| {
+                    if (0x20..0x7f).contains(&b) {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
                 .collect();
             println!("{hex:<48}  {ascii}");
         }
@@ -615,13 +663,37 @@ fn run_dry(args: DryRunArgs) -> ExitCode {
             }
         }
     }
-    eprintln!(
-        "\n{} variant={} canary={} bytes={}",
-        "── meta ──".bright_black(),
+    // F79: meta line routing.
+    // Pre-fix this was unconditionally eprintln! regardless of
+    // --format. PowerShell treats any native-cmd stderr write as
+    // NativeCommandError and surfaces it even when exit code is
+    // 0; bash/zsh pipelines also can't grep the canary out of
+    // stdout because it lives on stderr.
+    //
+    // For --format raw or --format hex, the meta belongs on
+    // STDOUT (in a comment-style prefix so it doesn't corrupt
+    // hex/raw parsing). For --format json (if ever added), we
+    // skip the meta entirely — the JSON envelope carries the
+    // canary already.
+    let meta = format!(
+        "── meta ── variant={} canary={} bytes={}",
         args.variant.info.key,
         payload.canary.token,
         payload.raw_bytes.len()
     );
+    match args.format.as_str() {
+        "hex" => {
+            // hex output is line-oriented; meta as a leading
+            // `#` comment doesn't break hexdump-style parsers.
+            println!("# {meta}");
+        }
+        _ => {
+            // raw / text: append meta as a trailing comment line
+            // on stdout so curl-pasting + scripting both work.
+            println!();
+            println!("# {meta}");
+        }
+    }
     ExitCode::SUCCESS
 }
 
@@ -778,7 +850,7 @@ async fn run_probe(args: ProbeSmuggleArgs) -> ExitCode {
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_smuggle(args: SmuggleArgs) -> ExitCode {
     match args.action {
-        SmuggleAction::List => run_list("text"),
+        SmuggleAction::List(a) => run_list(&a.format),
         SmuggleAction::DryRun(a) => run_dry(a),
         SmuggleAction::Detect(a) => {
             let rt = match tokio::runtime::Builder::new_current_thread()
@@ -897,6 +969,48 @@ mod tests {
         assert!(msg.contains("cl-te"));
     }
 
+    // ── parse_host_or_url ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_host_or_url_bare_hostname_passes_through() {
+        assert_eq!(parse_host_or_url("example.com").unwrap(), "example.com");
+    }
+
+    #[test]
+    fn parse_host_or_url_host_with_port_passes_through() {
+        assert_eq!(parse_host_or_url("example.com:8080").unwrap(), "example.com:8080");
+    }
+
+    #[test]
+    fn parse_host_or_url_https_url_extracts_host() {
+        assert_eq!(
+            parse_host_or_url("https://example.com/path?q=1").unwrap(),
+            "example.com"
+        );
+    }
+
+    #[test]
+    fn parse_host_or_url_http_url_extracts_host() {
+        assert_eq!(
+            parse_host_or_url("http://example.com").unwrap(),
+            "example.com"
+        );
+    }
+
+    #[test]
+    fn parse_host_or_url_url_with_port_keeps_port() {
+        assert_eq!(
+            parse_host_or_url("https://example.com:443/").unwrap(),
+            "example.com:443"
+        );
+    }
+
+    #[test]
+    fn parse_host_or_url_url_with_empty_host_errors() {
+        let r = parse_host_or_url("https:///path");
+        assert!(r.is_err(), "empty host should error: {r:?}");
+    }
+
     #[test]
     fn build_payload_for_every_catalogue_variant_succeeds() {
         // Anti-rig: every key in VARIANTS must have a working
@@ -991,7 +1105,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn time_first_byte_returns_timeout_value_when_server_silent() {
         // Spawn a TcpListener that accepts the connection and
         // does NOTHING — never writes a response. Confirms our
@@ -1000,29 +1114,45 @@ mod tests {
         // bound to `_sock` (not `_`) on purpose — `let _ = ...`
         // drops immediately and would close the connection,
         // making `read` return Ok(0) instantly instead of hanging.
+        //
+        // timeout_secs=3 rather than 1: on Windows under heavy
+        // parallel test load the loopback TCP connect can take up to
+        // ~1s itself (OS stack loaded by other tests). A 1s budget
+        // was too narrow — the connect timeout fired before the server
+        // could accept, returning Err instead of Ok(elapsed). 3s gives
+        // headroom for the connect while still proving the READ timeout
+        // fires before the server holds the socket open (10s).
+        let timeout_secs: u64 = 3;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             if let Ok((_sock, _peer)) = listener.accept().await {
                 // Hold the socket open without writing anything
-                // for 5s — longer than our 1s probe timeout below.
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                // for 10s — longer than the probe timeout.
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
         let elapsed = time_first_byte(
             &addr.ip().to_string(),
             addr.port(),
             b"GET / HTTP/1.1\r\nHost: x\r\n\r\n",
-            1,
+            timeout_secs,
         )
         .await
         .unwrap();
-        assert!(elapsed >= 900, "should have hung ~1s, got {elapsed}");
-        assert!(elapsed < 2500, "should not exceed timeout+margin, got {elapsed}");
+        let expected_ms = timeout_secs * 1000;
+        assert!(
+            elapsed >= expected_ms - 100,
+            "should have hung ~{expected_ms}ms, got {elapsed}"
+        );
+        assert!(
+            elapsed < expected_ms + 1500,
+            "should not exceed timeout+margin, got {elapsed}"
+        );
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn time_first_byte_returns_quickly_when_server_responds() {
         // `#[serial_test::serial]` — binds a fresh `127.0.0.1:0`
         // listener; under Windows parallel test runs the ephemeral-
@@ -1051,7 +1181,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(elapsed < 4000, "honest server should respond fast, got {elapsed}");
+        assert!(
+            elapsed < 4000,
+            "honest server should respond fast, got {elapsed}"
+        );
     }
 
     #[test]
@@ -1062,6 +1195,15 @@ mod tests {
         let code = run_list("text");
         // Can't easily compare ExitCode to a literal in stable
         // Rust without Termination plumbing; the smoke is enough.
+        let _ = code;
+    }
+
+    #[test]
+    fn list_json_format_is_accepted_by_run_list() {
+        // Pre-fix: `wafrift smuggle list` had a hardcoded "text" and
+        // did not accept --format. Adding ListArgs enables JSON. This
+        // test pins the run_list("json") path doesn't panic.
+        let code = run_list("json");
         let _ = code;
     }
 
@@ -1239,6 +1381,36 @@ mod tests {
             wire.contains("/smuggled-marker"),
             "smuggled prefix MUST reach the wire"
         );
+    }
+
+    // F126 regression: TCP connect timeout (unreachable host, blocked
+    // port) must surface as Err, NOT as a phantom-elapsed measurement
+    // that gets compared against the baseline and produces a false
+    // DESYNC. Aim at port 1 on localhost — Windows + most Linux
+    // configs refuse it, but the connect should ERROR fast rather
+    // than hang. Either way we want Err out of time_first_byte, not
+    // a giant phantom Ok value.
+    #[tokio::test]
+    async fn time_first_byte_unreachable_returns_err_not_phantom_elapsed() {
+        // Use a port reserved for "no host should listen here":
+        // 1 = TCP-port-multiplexer, not in use on stock systems.
+        let result = time_first_byte("127.0.0.1", 1, b"GET / HTTP/1.1\r\n\r\n", 2).await;
+        match result {
+            Err(msg) => {
+                // Either "tcp connect: <connection refused>" (refusal)
+                // OR "tcp connect: timed out after 2s" (filtered).
+                // Both are the desired Err surface.
+                assert!(
+                    msg.starts_with("tcp connect:"),
+                    "expected tcp connect error, got: {msg}"
+                );
+            }
+            Ok(elapsed_ms) => panic!(
+                "unreachable host returned phantom Ok({elapsed_ms}) ms — \
+                 F126 regression: would feed into delta calculation and \
+                 false-flag DESYNC"
+            ),
+        }
     }
 
     #[test]

@@ -38,8 +38,7 @@ use wafrift_proxy::mitm::{CertificateAuthority, tls_server_name_from_authority};
 use wafrift_proxy::rate_limit::RateLimiter;
 use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
-    PinningResolver, UpstreamPolicy, assert_forward_url_allowed,
-    pin_url_to_first_addr, resolve_forward_url_pinned,
+    BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed, resolve_forward_url_pinned,
 };
 use wafrift_strategy::gene_bank::GeneBank;
 use wafrift_strategy::strategy::{evade, evade_smart};
@@ -489,7 +488,15 @@ fn stealth() -> Option<&'static wafrift_transport::stealth::StealthClient> {
 use crate::warn_throttle::WarnThrottle;
 
 /// Mutable proxy state shared across connections.
-#[derive(Default)]
+///
+/// `Clone` is derived so the periodic-flush + shutdown + TUI-quit
+/// paths can snapshot the state under the async lock, drop the
+/// guard, and then run the synchronous `save_gene_bank` (which
+/// performs an fsync + atomic rename) WITHOUT holding the lock
+/// across the disk I/O. Pre-fix every concurrent forwarded
+/// request stalled for the full fsync window — easy to provoke
+/// on a slow disk or NFS mount.
+#[derive(Default, Clone)]
 pub(crate) struct ProxyState {
     /// Per-host evasion state.
     pub(crate) hosts: HashMap<String, HostState>,
@@ -983,7 +990,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
     )
     .redirect(reqwest::redirect::Policy::none())
-    .dns_resolver(Arc::new(PinningResolver::new(policy.clone())));
+    .dns_resolver(Arc::new(BogonFilteringResolver {
+        policy: policy.clone(),
+    }));
     if args.no_conn_reuse {
         // Force a fresh TCP connection per request. Kernel chooses a
         // new ephemeral source port each time, defeating per-source-
@@ -1101,13 +1110,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tick.tick().await; // skip the immediate first tick
                 loop {
                     tick.tick().await;
-                    // `lock().await` + `save_gene_bank` both run on the
-                    // tokio task; wrap the synchronous save in a
-                    // panic-catching closure. `lock()` can panic only
-                    // on poison, also captured here.
+                    // Snapshot under the lock, drop the guard, THEN
+                    // run save_gene_bank (synchronous fsync). The
+                    // lock is held only for the clone — every
+                    // concurrent forwarded request that hits
+                    // shared_state can proceed during the actual
+                    // disk write. Pre-fix the fsync stalled every
+                    // concurrent request for tens to hundreds of
+                    // milliseconds on slow disks.
+                    let snapshot = { flush_state.lock().await.clone() };
                     let result = std::panic::AssertUnwindSafe(async {
-                        let st = flush_state.lock().await;
-                        save_gene_bank(&st, &flush_path)
+                        save_gene_bank(&snapshot, &flush_path)
                     });
                     use futures_util::FutureExt;
                     match result.catch_unwind().await {
@@ -1180,8 +1193,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("received Ctrl-C");
         }
         if let Some(path) = &shutdown_path {
-            let st = shutdown_state.lock().await;
-            match save_gene_bank(&st, path) {
+            // Same snapshot-then-drop pattern as the periodic
+            // flush — hold the lock only for the clone, never
+            // across the fsync.
+            let snapshot = { shutdown_state.lock().await.clone() };
+            match save_gene_bank(&snapshot, path) {
                 Ok(()) => info!(path = %path.display(), "gene bank flushed on shutdown"),
                 Err(e) => {
                     warn!(path = %path.display(), error = %e, "gene bank flush on shutdown failed");
@@ -1233,8 +1249,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             bg_tasks.spawn(async move {
                 if quit_rx.await.is_ok() {
                     if let Some(path) = &quit_path {
-                        let st = quit_state.lock().await;
-                        if let Err(e) = save_gene_bank(&st, path) {
+                        // Snapshot-then-drop — never fsync under the lock.
+                        let snapshot = { quit_state.lock().await.clone() };
+                        if let Err(e) = save_gene_bank(&snapshot, path) {
                             warn!(path = %path.display(), error = %e, "gene bank flush from TUI quit failed");
                         }
                     }
@@ -1408,6 +1425,21 @@ async fn forward_wafrift_request(
     // landed each bypass instead of permanently showing 0.
     attempt_idx: u32,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    // F81 observability: emit an info-level log per forwarded
+    // request so the proxy is observable in non-TUI / headless
+    // mode (CI runs, log scrapers). Pre-fix the only stdout
+    // signal beyond startup was the TUI dashboard, so an
+    // operator running `wafrift-proxy --listen ...` without
+    // --tui saw zero per-request output and had no way to
+    // confirm the proxy was even processing traffic.
+    info!(
+        target: "wafrift::proxy::forward",
+        method = %wafrift_req.method,
+        host = %host,
+        path = %request_log_uri,
+        attempt = attempt_idx,
+        "forwarding request"
+    );
     // Snapshot the state needed for evasion, then DROP the lock before
     // running evade() / evade_smart() — those calls do regex-heavy
     // mutations that can take seconds on large request bodies, and
@@ -1911,7 +1943,66 @@ async fn forward_wafrift_request(
         })
         .unwrap_or_default();
     let signal = response_profiles.classify(status_code, &header_pairs, &buf);
-    let is_block = signal.classification.is_blocked();
+    // ── Multi-signal oracle gate (#76) ─────────────────────────────
+    // The response-profiles classifier identifies known WAF fingerprints
+    // (block pages loaded from rules/responses/*.toml). It is accurate for
+    // hard blocks (403/406) but cannot detect "200-cosplay" — WAFs that
+    // serve a cached error page, a soft challenge, or a JS challenge as HTTP
+    // 200 to defeat binary-status rate-limiting. The ResponseOracle runs a
+    // second, independent classification pass using multi-signal analysis
+    // (status code, body markers, response time, connection behaviour) and
+    // upgrades `is_block` when the oracle sees a challenge or an ambiguous
+    // signal pattern that the profile-based classifier missed.
+    //
+    // This closes the SSRF/oracle-false-positive gap audited as #76: without
+    // this gate a Cloudflare JS challenge served as 200 + HTML body would be
+    // counted as a "bypass", inflating the bench bypass rate and misleading
+    // the MCTS feedback loop into rewarding evasion techniques that actually
+    // landed on a challenge page, not the real app.
+    let is_block = {
+        let profile_blocked = signal.classification.is_blocked();
+        // Only run the oracle on 2xx responses — for 403/406/5xx the
+        // profile classifier is authoritative. For 200-class responses
+        // the oracle's body-marker and challenge detection is the only
+        // signal that distinguishes "real bypass" from "soft block".
+        if !profile_blocked && status_code >= 200 && status_code < 300 {
+            use wafrift_oracle::response_oracle::{ResponseContext, ResponseOracle};
+            let oracle = ResponseOracle::new();
+            let is_gzip = header_pairs.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("content-encoding")
+                    && v.to_ascii_lowercase().contains("gzip")
+            });
+            let ctx = ResponseContext {
+                status: status_code,
+                headers: header_pairs.clone(),
+                body: buf.clone(),
+                response_time_ms: 0, // not measured per-request in proxy mode
+                connection_behavior: None,
+                h2_goaway: None,
+                is_gzipped: is_gzip,
+            };
+            let verdict = oracle.classify(&ctx);
+            // Count as a block when the oracle signals:
+            //   - ChallengeRequired: JS/CAPTCHA challenge served as 200
+            //   - Ambiguous: conflicting status vs body (200 + block-page body)
+            //   - Blocked: oracle independently classified it as blocked
+            let oracle_block = verdict.is_blocked()
+                || verdict.is_challenge()
+                || verdict.is_ambiguous();
+            if oracle_block && !profile_blocked {
+                info!(
+                    host = %host,
+                    status = status_code,
+                    oracle_verdict = ?verdict,
+                    "oracle gate: response looks like a soft block or challenge (200-cosplay) — \
+                     upgrading is_block to true to prevent false bypass credit"
+                );
+            }
+            oracle_block
+        } else {
+            profile_blocked
+        }
+    };
 
     // ── Managed-challenge handling (#115) ───────────────────────────
     // Two passes:

@@ -8,8 +8,8 @@
 //! exfil channel for a misused proxy. `MAX_TUNNEL_BYTES_PER_DIRECTION`
 //! is the hard ceiling.
 
-use hyper_util::rt::TokioIo;
 use hyper::upgrade::Upgraded;
+use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 
@@ -136,6 +136,11 @@ mod tests {
     fn max_tunnel_bytes_per_direction_is_under_u64_max() {
         // Sanity: cap is far below u64::MAX so the saturating_add
         // in the read loop never wraps anywhere near the limit.
-        assert!(MAX_TUNNEL_BYTES_PER_DIRECTION < u64::MAX / 1000);
+        // Constant assertion is intentional — build-time regression
+        // gate, not a runtime check.
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(MAX_TUNNEL_BYTES_PER_DIRECTION < u64::MAX / 1000);
+        }
     }
 }

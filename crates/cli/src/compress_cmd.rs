@@ -234,15 +234,15 @@ fn emit_text(
     match &args.output {
         Some(path) => match std::fs::write(path, &blob.body) {
             Ok(()) => {
-                eprintln!(
-                    "  wrote {} bytes to {}",
-                    blob.body.len(),
-                    path.display()
-                );
+                eprintln!("  wrote {} bytes to {}", blob.body.len(), path.display());
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("{} write {}: {e}", "I/O error:".red().bold(), path.display());
+                eprintln!(
+                    "{} write {}: {e}",
+                    "I/O error:".red().bold(),
+                    path.display()
+                );
                 ExitCode::from(1)
             }
         },
@@ -279,7 +279,11 @@ fn emit_json(
         Some(path) => match std::fs::write(path, line.as_bytes()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("{} write {}: {e}", "I/O error:".red().bold(), path.display());
+                eprintln!(
+                    "{} write {}: {e}",
+                    "I/O error:".red().bold(),
+                    path.display()
+                );
                 ExitCode::from(1)
             }
         },
@@ -313,7 +317,15 @@ mod tests {
             "identity".to_string(),
         ])
         .expect("all canonical tokens");
-        assert_eq!(parsed, vec![Algorithm::Gzip, Algorithm::Deflate, Algorithm::Brotli, Algorithm::Identity]);
+        assert_eq!(
+            parsed,
+            vec![
+                Algorithm::Gzip,
+                Algorithm::Deflate,
+                Algorithm::Brotli,
+                Algorithm::Identity
+            ]
+        );
     }
 
     #[test]
@@ -324,7 +336,10 @@ mod tests {
             "  identity  ".to_string(),
         ])
         .expect("case-insensitive + trim");
-        assert_eq!(parsed, vec![Algorithm::Gzip, Algorithm::Brotli, Algorithm::Identity]);
+        assert_eq!(
+            parsed,
+            vec![Algorithm::Gzip, Algorithm::Brotli, Algorithm::Identity]
+        );
     }
 
     #[test]
@@ -381,7 +396,7 @@ mod tests {
     #[test]
     fn read_bounded_file_errors_when_file_exceeds_cap() {
         let tmp = std::env::temp_dir().join(format!("wafrift-cb-big-{}.bin", std::process::id()));
-        std::fs::write(&tmp, &vec![b'A'; 4096]).unwrap();
+        std::fs::write(&tmp, vec![b'A'; 4096]).unwrap();
         let err = read_bounded_file(&tmp, 100).expect_err("must overrun");
         assert!(err.contains("100-byte cap"));
         assert!(err.contains(&tmp.display().to_string()));

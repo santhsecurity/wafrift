@@ -56,7 +56,7 @@ fn bom_prefix(raw: &[u8]) -> Vec<u8> {
 
 /// Build a `{"p":"x","p":<json-value>}` dup-key JSON body — the
 /// benign value first, the attack value second. Used by
-/// [`POST-json-dupkey`] and the BOM-prefix compound variant.
+/// `POST-json-dupkey` and the BOM-prefix compound variant.
 fn json_dupkey_body(param: &str, payload: &str) -> String {
     format!(
         "{{\"{p}\":\"x\",\"{p}\":{v}}}",
@@ -321,7 +321,10 @@ pub(super) fn build_request_for_vector(
             } else {
                 http.patch(target)
             };
-            Some(req.header("Content-Type", ct).body(json_body(param, payload)))
+            Some(
+                req.header("Content-Type", ct)
+                    .body(json_body(param, payload)),
+            )
         }
         "PUT-form" => Some(
             http.put(target)
@@ -336,7 +339,11 @@ pub(super) fn build_request_for_vector(
             // gates by request-line method continues to apply its
             // POST rule-set (often weaker on these methods than on
             // POST).
-            let masquerade = if vector.name.ends_with("GET") { "GET" } else { "PUT" };
+            let masquerade = if vector.name.ends_with("GET") {
+                "GET"
+            } else {
+                "PUT"
+            };
             Some(
                 http.post(target)
                     .header("Content-Type", ct)
@@ -521,35 +528,26 @@ pub(super) fn build_request_for_vector(
             // segment. URL bytes percent-encoded so the header
             // value stays single-line.
             let encoded = urlencoding::encode(payload);
-            Some(
-                http.get(target)
-                    .header(header_name, format!("/{encoded}")),
-            )
+            Some(http.get(target).header(header_name, format!("/{encoded}")))
         }
 
         // ──────── HEADER CARRIERS ────────────────────────────────
-        "cookie" => Some(
-            http.get(target)
-                .header("Cookie", format!("{param}={}", urlencoding::encode(payload))),
-        ),
+        "cookie" => Some(http.get(target).header(
+            "Cookie",
+            format!("{param}={}", urlencoding::encode(payload)),
+        )),
         "cookie-hpp" => {
             // Two pairs, same name. RFC 6265 §5.4 lets a UA send
             // multiples; servers and WAFs disagree on which wins.
             let encoded = urlencoding::encode(payload);
             Some(
                 http.get(target)
-                    .header(
-                        "Cookie",
-                        format!("{param}=harmless; {param}={encoded}"),
-                    ),
+                    .header("Cookie", format!("{param}=harmless; {param}={encoded}")),
             )
         }
         "x-forwarded-for" => {
-            let url = crate::scan::scan_url_with_param(
-                target,
-                param,
-                &urlencoding::encode(payload),
-            );
+            let url =
+                crate::scan::scan_url_with_param(target, param, &urlencoding::encode(payload));
             Some(http.get(&url).header("X-Forwarded-For", payload))
         }
         "forwarded" => {
@@ -564,11 +562,8 @@ pub(super) fn build_request_for_vector(
             )
         }
         "referer" => {
-            let url = crate::scan::scan_url_with_param(
-                target,
-                param,
-                &urlencoding::encode(payload),
-            );
+            let url =
+                crate::scan::scan_url_with_param(target, param, &urlencoding::encode(payload));
             Some(
                 http.get(&url)
                     .header("Referer", format!("https://example.com/?{payload}")),
@@ -588,10 +583,7 @@ pub(super) fn build_request_for_vector(
             // exact RFC 9110 syntax — the point is to fire a
             // header value past the WAF; backend reflection /
             // logging is what lands the attack.
-            Some(
-                http.get(target)
-                    .header("Range", format!("bytes={payload}")),
-            )
+            Some(http.get(target).header("Range", format!("bytes={payload}")))
         }
         "from" => {
             // From: <payload>@wafrift.example shape. Apps that
@@ -619,11 +611,8 @@ pub(super) fn build_request_for_vector(
             use base64::Engine as _;
             let basic = format!("{payload}:wafrift-probe");
             let encoded = base64::engine::general_purpose::STANDARD.encode(basic.as_bytes());
-            let url = crate::scan::scan_url_with_param(
-                target,
-                param,
-                &urlencoding::encode(payload),
-            );
+            let url =
+                crate::scan::scan_url_with_param(target, param, &urlencoding::encode(payload));
             Some(
                 http.get(&url)
                     .header("Authorization", format!("Basic {encoded}")),

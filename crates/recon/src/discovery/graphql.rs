@@ -48,18 +48,52 @@ pub async fn from_graphql(
         .map_err(|_| DiscoveryError::GraphQlEndpointNotFound {
             url: endpoint.to_string(),
         })?;
-    if !resp.status().is_success() {
-        return Err(DiscoveryError::GraphQlEndpointNotFound {
+    // F128: Many GraphQL servers reject introspection with a 4xx (often
+    // 400 or 403) AND `{"errors":[{"message":"introspection is not
+    // allowed"}]}` in the body. Pre-fix any non-2xx mapped to
+    // GraphQlEndpointNotFound — operator saw "wrong URL" when the URL
+    // was correct and only introspection was off. Peek at the body for
+    // an `errors` array before deciding which classification to return.
+    let status_ok = resp.status().is_success();
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|_| DiscoveryError::GraphQlEndpointNotFound {
             url: endpoint.to_string(),
-        });
+        })?;
+    if !status_ok {
+        return Err(classify_non_success_response(&bytes, endpoint));
     }
     let json_resp: Value =
-        resp.json()
-            .await
-            .map_err(|_| DiscoveryError::GraphQlEndpointNotFound {
-                url: endpoint.to_string(),
-            })?;
+        serde_json::from_slice(&bytes).map_err(|_| DiscoveryError::GraphQlEndpointNotFound {
+            url: endpoint.to_string(),
+        })?;
     parse_introspection_response(&json_resp, endpoint)
+}
+
+/// Classify a non-2xx GraphQL response. Body is the response bytes
+/// (may or may not be valid JSON). Returns the appropriate
+/// `DiscoveryError` — `IntrospectionDisabled` when the body parses as
+/// JSON containing the standard `errors` array (the introspection-off
+/// pattern), `GraphQlEndpointNotFound` otherwise. Pure / testable.
+pub fn classify_non_success_response(
+    body: &[u8],
+    endpoint: &str,
+) -> DiscoveryError {
+    let Ok(json) = serde_json::from_slice::<Value>(body) else {
+        return DiscoveryError::GraphQlEndpointNotFound {
+            url: endpoint.to_string(),
+        };
+    };
+    if json.get("errors").and_then(Value::as_array).is_some() {
+        DiscoveryError::IntrospectionDisabled {
+            url: endpoint.to_string(),
+        }
+    } else {
+        DiscoveryError::GraphQlEndpointNotFound {
+            url: endpoint.to_string(),
+        }
+    }
 }
 
 /// Pure parsing helper — split out so unit tests don't need a live server.
@@ -87,6 +121,17 @@ pub fn parse_introspection_response(
             };
             let mut points = Vec::new();
             if let Some(args) = field.get("args").and_then(Value::as_array) {
+                // Cap defends against an adversarial introspection
+                // response that lists a million args per operation —
+                // each would allocate an InjectionPoint (~120 bytes)
+                // and OOM the process well before any real probe.
+                if args.len() > super::openapi::MAX_GRAPHQL_ARGS_PER_FIELD {
+                    return Err(super::openapi::DiscoveryError::InputCapExceeded {
+                        what: "graphql.field.args",
+                        got: args.len(),
+                        cap: super::openapi::MAX_GRAPHQL_ARGS_PER_FIELD,
+                    });
+                }
                 for arg in args {
                     let Some(arg_name) = arg.get("name").and_then(Value::as_str) else {
                         continue;
@@ -229,6 +274,79 @@ mod tests {
         let eps = parse_introspection_response(&resp, "https://x").unwrap();
         assert_eq!(eps.len(), 1);
         assert!(eps[0].url.ends_with("valid"));
+    }
+
+    // F128 regression: a 4xx response with `{"errors":[...]}` is the
+    // introspection-disabled pattern (most GraphQL servers reject the
+    // request with 400 or 403 + the standard errors body). Pre-fix
+    // mapped every non-2xx to GraphQlEndpointNotFound — operator
+    // chasing a "wrong URL" they actually had correct.
+    #[test]
+    fn classify_400_with_errors_body_is_introspection_disabled() {
+        let body =
+            br#"{"errors":[{"message":"GraphQL introspection is not allowed"}]}"#;
+        let err = classify_non_success_response(body, "https://api.example.com/graphql");
+        assert!(matches!(err, DiscoveryError::IntrospectionDisabled { .. }));
+    }
+
+    #[test]
+    fn classify_403_with_errors_body_is_introspection_disabled() {
+        let body = br#"{"errors":[{"message":"forbidden"}]}"#;
+        let err = classify_non_success_response(body, "https://x/graphql");
+        assert!(matches!(err, DiscoveryError::IntrospectionDisabled { .. }));
+    }
+
+    #[test]
+    fn classify_html_404_body_is_endpoint_not_found() {
+        // A 404 with an HTML body (not JSON) means the URL is wrong.
+        let body = b"<html><body>404 Not Found</body></html>";
+        let err = classify_non_success_response(body, "https://x/wrong");
+        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+    }
+
+    #[test]
+    fn classify_json_without_errors_field_is_endpoint_not_found() {
+        // 500 with a JSON body that doesn't carry the standard
+        // GraphQL `errors` shape — could be anything; treat as
+        // wrong-URL rather than incorrectly claiming introspection
+        // was the issue.
+        let body = br#"{"message":"server error"}"#;
+        let err = classify_non_success_response(body, "https://x/graphql");
+        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+    }
+
+    #[test]
+    fn classify_errors_present_but_not_array_is_endpoint_not_found() {
+        // GraphQL spec requires `errors` to be an array. A scalar at
+        // that key is malformed and not the introspection-off signal.
+        let body = br#"{"errors":"oops"}"#;
+        let err = classify_non_success_response(body, "https://x/graphql");
+        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+    }
+
+    #[test]
+    fn classify_empty_body_is_endpoint_not_found() {
+        let err = classify_non_success_response(b"", "https://x/graphql");
+        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+    }
+
+    #[test]
+    fn classify_url_is_echoed_in_either_error_variant() {
+        let intro =
+            classify_non_success_response(br#"{"errors":[]}"#, "https://t/intro-off");
+        match intro {
+            DiscoveryError::IntrospectionDisabled { url } => {
+                assert_eq!(url, "https://t/intro-off");
+            }
+            _ => panic!("wrong variant"),
+        }
+        let notfound = classify_non_success_response(b"<html/>", "https://t/wrong-url");
+        match notfound {
+            DiscoveryError::GraphQlEndpointNotFound { url } => {
+                assert_eq!(url, "https://t/wrong-url");
+            }
+            _ => panic!("wrong variant"),
+        }
     }
 
     #[test]

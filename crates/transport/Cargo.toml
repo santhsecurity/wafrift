@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "reqwest middleware for automatic WAF evasion — drop-in replacement for reqwest::Client"
+description = "reqwest middleware for automatic WAF evasion, drop-in replacement for reqwest Client"
 readme = "README.md"
 repository.workspace = true
 keywords = ["waf", "transport", "reqwest", "http", "evasion"]
@@ -18,12 +18,13 @@ base64 = { workspace = true }
 wafrift-types = { workspace = true }
 wafrift-strategy = { workspace = true }
 # Per-host browser-profile coherence (HeaderOrder + H2Profile +
-# SessionPool) — used by the wire-time header reorder step so
+# SessionPool) -- used by the wire-time header reorder step so
 # `--tls-impersonate chrome131` ALSO emits headers in Chrome's
 # canonical insertion order, not whichever order callers happened
 # to push them. The fingerprint crate is dep-light (no TLS, no h2),
 # so this isn't a build-cost penalty.
 wafrift-fingerprint = { workspace = true }
+authjar = { path = "../../../../libs/runtime/authjar" }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -32,8 +33,13 @@ bytes = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
 urlencoding = { workspace = true }
+url = { workspace = true }
 psl = "2"
-url = "2"
+# JWT HS256 (jwt.rs Hs256WithKey manipulation) -- small, no extra
+# compile-time cost. RustCrypto's HMAC + SHA-256.
+hmac = "0.12"
+sha2 = "0.10"
+wafrift-pool = { workspace = true, optional = true }
 rquest = { workspace = true, optional = true }
 # Companion crate carrying the actual browser-emulation profiles
 # (Chrome131, Firefox133, etc.) split out of rquest in 5.x. Gated
@@ -44,6 +50,7 @@ rquest-util = { workspace = true, optional = true }
 # explicit declaration doesn't bloat anything.
 futures-util = { workspace = true, optional = true }
 rand = { workspace = true }
+# gossan-origin = { path = "../../../gossan/crates/origin", optional = true }
 
 [features]
 proxy-pool = []

@@ -20,7 +20,10 @@ wafrift-smuggling = { workspace = true }
 wafrift-fingerprint = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
+wafrift-graphql = { workspace = true }
+wafrift-grpc-evasion = { workspace = true }
 wafrift-oracle = { workspace = true }
+wafrift-wafmodel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 dirs = { workspace = true }
@@ -31,6 +34,7 @@ fs4 = { workspace = true }
 lru = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+wafrift-plugin-api = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

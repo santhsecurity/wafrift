@@ -179,10 +179,28 @@ pub trait EquivalenceOracle {
 /// equivalence oracle the exact-correctness truth-suite uses (no
 /// sampling, no PAC). The query-economical sampling/W-method oracles
 /// live in `equiv_query` (P1 #18).
+///
+/// # Query budget
+///
+/// `max_queries` bounds the total number of membership calls the EQ
+/// oracle issues across all depths.  When the limit is reached the
+/// oracle returns `None` ("no counterexample found within the
+/// budget") — the search is best-effort, not complete.  Set to
+/// `None` (or `u64::MAX`) for unbounded exhaustive search (the
+/// default for the offline truth-suite, where every call is a cheap
+/// in-memory operation).  Against a *live HTTP oracle* always set a
+/// small cap (e.g. `Some(500)`) so a 22-symbol alphabet at depth 6
+/// (22⁶ ≈ 51 M frontier entries, capped to 1 M by `FRONTIER_CAP`)
+/// cannot issue millions of HTTP round-trips before the learner
+/// raises its budget error.
 #[derive(Debug, Clone, Copy)]
 pub struct BoundedExhaustiveEq {
     /// Maximum word length to certify.
     pub max_len: usize,
+    /// Optional hard cap on total `mq` calls inside one EQ round.
+    /// `None` = unlimited (exact search).  `Some(n)` = stop after
+    /// `n` queries and return `None` (no counterexample found).
+    pub max_queries: Option<u64>,
 }
 
 impl EquivalenceOracle for BoundedExhaustiveEq {
@@ -193,13 +211,37 @@ impl EquivalenceOracle for BoundedExhaustiveEq {
         mq: &mut dyn FnMut(&[usize]) -> Result<bool>,
     ) -> Result<Option<Vec<usize>>> {
         let k = alpha.len();
+        let query_cap = self.max_queries.unwrap_or(u64::MAX);
+        let mut queries_used: u64 = 0;
         let mut frontier: Vec<Vec<usize>> = vec![Vec::new()];
         for _len in 0..=self.max_len {
             let mut next = Vec::new();
             for w in &frontier {
+                // Hard query cap: stop and declare "no counterexample"
+                // when the oracle has spent its EQ-round budget. This
+                // prevents a live HTTP oracle from issuing millions of
+                // round-trips when the alphabet is large (e.g. the
+                // 22-symbol sqli alphabet produces 22⁶ ≈ 51 M frontier
+                // entries at max_len=6, capped to 1 M by FRONTIER_CAP
+                // — still 1 M HTTP calls per EQ round without this gate).
+                if queries_used >= query_cap {
+                    return Ok(None);
+                }
+                queries_used += 1;
                 let truth = mq(w)?;
                 if hyp.accepts(&alpha.concretize(w)) != truth {
                     return Ok(Some(w.clone()));
+                }
+                // Stop EXPANDING (but keep evaluating the current
+                // depth) once the next frontier crosses the cap.
+                // Without this guard the frontier grows as k^len,
+                // so a 256-symbol alphabet at max_len=10 would
+                // allocate ~10^24 entries — instant OOM before any
+                // counterexample is checked. With the cap the
+                // search returns whatever it found within the
+                // memory budget.
+                if next.len() >= Self::FRONTIER_CAP {
+                    continue;
                 }
                 for sym in 0..k {
                     let mut e = w.clone();
@@ -212,6 +254,23 @@ impl EquivalenceOracle for BoundedExhaustiveEq {
         Ok(None)
     }
 }
+
+impl BoundedExhaustiveEq {
+    /// Hard upper bound on the BFS frontier size between depth
+    /// levels. ~1M entries × max_len bytes per entry caps memory
+    /// at tens of MiB on a realistic max_len. Past this we stop
+    /// expanding and return whatever we found — the oracle is
+    /// best-effort by design.
+    pub const FRONTIER_CAP: usize = 1_000_000;
+}
+
+/// Hard cap on the number of states `passive_learn` materialises.
+/// Defends against a non-regular / flaky oracle that yields a novel
+/// row at every depth and would otherwise grow up to Σ k^i states
+/// (1.1B at depth=10 over a 10-symbol alphabet). Past the cap the
+/// learner folds the post-cap rows to existing states — the model
+/// is less precise but bounded.
+pub const PASSIVE_LEARN_MAX_STATES: usize = 100_000;
 
 /// What a learning run produced and what it cost.
 #[derive(Debug)]
@@ -380,13 +439,31 @@ where
                 match id_of.entry(r.clone()) {
                     Entry::Occupied(e) => *e.get(),
                     Entry::Vacant(e) => {
-                        let id = access.len();
-                        e.insert(id);
-                        access.push(pa.clone());
-                        accept.push(r[0]);
-                        delta.push(Vec::new());
-                        work.push(id);
-                        id
+                        // State-count cap: defends against a non-
+                        // regular / flaky oracle that yields a
+                        // novel row at every depth and would
+                        // otherwise materialise Σ_{i=0}^{depth} k^i
+                        // states (1.1B at depth=10, k=10). Past the
+                        // cap, fold to the start state (0) — the same
+                        // conservative fallback used past the depth
+                        // horizon. The prior code called
+                        // `id_of.get(&r).unwrap_or(&0)` here, but we
+                        // are inside the Vacant branch so `id_of`
+                        // provably does NOT contain `r`; the get always
+                        // returned None and the result was always 0. The
+                        // dead lookup is removed; the fallback is now
+                        // explicit and documented.
+                        if access.len() >= PASSIVE_LEARN_MAX_STATES {
+                            0
+                        } else {
+                            let id = access.len();
+                            e.insert(id);
+                            access.push(pa.clone());
+                            accept.push(r[0]);
+                            delta.push(Vec::new());
+                            work.push(id);
+                            id
+                        }
                     }
                 }
             } else {
@@ -517,7 +594,11 @@ where
         // membership queries are spent. If the distinct-query count has
         // passed the cap, stop honestly with the spend rather than
         // continue or return a partial hypothesis as if complete.
-        if mqx.cache.len() as u64 > budget {
+        // F94: was `>` — at exactly `budget` queries the learner
+        // still entered the next inner close/consistency cycle,
+        // which can spend O(|S| * |alpha| + |E|) more queries before
+        // the next gate check. Tighten to `>=` so we stop at the cap.
+        if mqx.cache.len() as u64 >= budget {
             return Err(crate::error::WafModelError::BudgetExhausted {
                 queries: mqx.cache.len() as u64,
             });
@@ -738,6 +819,17 @@ where
         // on the residual c[i..]. That yields a new state and a
         // distinguishing suffix that splits an existing leaf.
         let n = c.len();
+        // F92: an `EquivalenceOracle` returning `Some(vec![])` —
+        // "the empty word is a counterexample" — would slice `c[1..]`
+        // on an empty Vec and panic. The Rivest–Schapire decomposition
+        // is undefined for an empty counterexample (γ0 == γn
+        // trivially), so bail with a clear error instead of crashing.
+        if n == 0 {
+            return Err(crate::error::WafModelError::Oracle(
+                "equivalence oracle returned an empty counterexample — \
+                 Rivest–Schapire decomposition is undefined for ε".into(),
+            ));
+        }
         let state_word = |k: usize, kv: &mut Kv<B>| -> Result<Vec<usize>> {
             // Access string of the hypothesis state reached on c[..k].
             let id = {

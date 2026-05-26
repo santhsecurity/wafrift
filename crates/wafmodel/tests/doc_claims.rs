@@ -37,9 +37,13 @@ struct Claim {
 fn manifest() -> String {
     env!("CARGO_MANIFEST_DIR").to_string()
 }
+/// Read `rel` relative to the manifest dir and normalise line endings
+/// to LF so claim substrings written with `\n` match consistently across
+/// platforms (Windows git checkouts use CRLF for text files by default).
 fn read(rel: &str) -> String {
     fs::read_to_string(format!("{}/{}", manifest(), rel))
         .unwrap_or_else(|e| panic!("cannot read {rel}: {e}"))
+        .replace("\r\n", "\n")
 }
 
 /// Names of every `fn` defined anywhere under `tests/`.

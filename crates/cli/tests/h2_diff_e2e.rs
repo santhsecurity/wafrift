@@ -5,7 +5,6 @@
 //! — informational, not a build failure.
 
 use std::process::Command;
-use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -31,7 +30,23 @@ async fn spawn_h1_mock() -> std::net::SocketAddr {
             });
         }
     });
-    tokio::time::sleep(Duration::from_millis(40)).await;
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100),
+            ) {
+                Ok(_) => break,
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("mock server at {addr} never became ready within 30s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
     addr
 }
 
@@ -65,19 +80,22 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
         "--delay-ms",
         "0",
         "--timeout-secs",
-        "3",
+        "30",
     ]);
-    assert_eq!(code, 0, "h2-diff exit 0 even on H1-only target — stderr:\n{stderr}");
-    let p: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    // F78: when every H2 probe fails (H1-only mock), h2-diff exits 6
+    // (inconclusive). Pre-fix the command exited 0 with no divergences,
+    // silently hiding the fact that the H2 leg was never measured.
+    // Callers must handle exit 6 as "did not cleanly measure H1/H2 diff".
+    assert_eq!(
+        code, 6,
+        "h2-diff must exit 6 (inconclusive) on H1-only target — stderr:\n{stderr}"
+    );
+    let p: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let results = p["results"].as_array().expect("results");
     assert!(!results.is_empty(), "must have probe results");
     // Mock is H1-only → every probe should record an h2_error.
     let h2_errs = p["h2_errors"].as_u64().unwrap_or(0);
-    assert!(
-        h2_errs > 0,
-        "H1-only mock must produce h2_errors > 0: {p}"
-    );
+    assert!(h2_errs > 0, "H1-only mock must produce h2_errors > 0: {p}");
     // Every probe row has BOTH H1 and H2 curl reproducers.
     for r in results {
         let h1c = r["h1_curl_cmd"].as_str().expect("h1_curl_cmd");
@@ -88,7 +106,7 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
 }
 
 #[test]
-fn h2_diff_against_unreachable_target_still_exits_cleanly() {
+fn h2_diff_against_unreachable_target_exits_inconclusive() {
     let (code, _stdout, _stderr) = wafrift(&[
         "h2-diff",
         "http://127.0.0.1:1/",
@@ -98,8 +116,15 @@ fn h2_diff_against_unreachable_target_still_exits_cleanly() {
         "--timeout-secs",
         "1",
     ]);
-    // Informational tool — exits 0 even when both H1 and H2 fail.
-    assert_eq!(code, 0, "h2-diff is informational; should exit 0 even on transport failure");
+    // F78: when every H2 probe fails (unreachable target → all H1+H2
+    // probes error), h2-diff exits 6 to signal "inconclusive — not a
+    // clean differential measurement." Callers must not treat exit 6 as
+    // "no H1/H2 divergence found"; they must treat it as "we could not
+    // measure." Exit 0 means "cleanly measured, no divergence."
+    assert_eq!(
+        code, 6,
+        "h2-diff must exit 6 (inconclusive) on unreachable target"
+    );
 }
 
 #[test]

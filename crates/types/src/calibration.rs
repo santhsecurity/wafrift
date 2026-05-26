@@ -16,6 +16,16 @@ pub const CALIBRATION_PAYLOADS: &[&str] = &[
     "; cat /etc/passwd",
 ];
 
+// F90: enforce non-empty at compile time. `calibration_request` does
+// `CALIBRATION_PAYLOADS[0]` which would panic at runtime on the first
+// probe if a future refactor empties the array. Promote the invariant
+// to a const assertion so the build breaks instead.
+const _: () = assert!(
+    !CALIBRATION_PAYLOADS.is_empty(),
+    "CALIBRATION_PAYLOADS must contain at least one payload — \
+     calibration_request indexes [0]"
+);
+
 /// Result of WAF calibration check.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]

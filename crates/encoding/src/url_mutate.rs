@@ -21,7 +21,6 @@
 //! mutation should round-trip through `wafrift_strategy::evade` with
 //! the parameter value lifted into the request body.
 
-
 /// Knobs for [`mutate_url`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UrlMutateConfig {

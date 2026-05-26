@@ -67,7 +67,7 @@ pub fn draw(f: &mut Frame, area: Rect, state: &State) {
     let table = Table::new(rows, widths).header(header).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_style(crate::tui::style::DIM)
             .title(Span::styled(
                 " Per-Host (top 20 by volume) ",
                 Style::default().fg(Color::LightCyan),
@@ -175,11 +175,16 @@ mod tests {
     fn render_shows_table_headers() {
         let s = State::new();
         let buf = render(140, 12, &s);
-        for header in ["HOST", "WAF", "SENT", "BLOCKED", "BYPASSED", "BYPASS%", "TOP TECHNIQUE"] {
-            assert!(
-                buf.contains(header),
-                "expected header `{header}` in: {buf}"
-            );
+        for header in [
+            "HOST",
+            "WAF",
+            "SENT",
+            "BLOCKED",
+            "BYPASSED",
+            "BYPASS%",
+            "TOP TECHNIQUE",
+        ] {
+            assert!(buf.contains(header), "expected header `{header}` in: {buf}");
         }
     }
 

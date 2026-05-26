@@ -82,11 +82,7 @@ pub async fn run(
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
-    let body_bytes = baseline_response
-        .bytes()
-        .await
-        .unwrap_or_default()
-        .to_vec();
+    let body_bytes = baseline_response.bytes().await.unwrap_or_default().to_vec();
 
     let mut detected = waf_detect::detect(baseline_status, &headers_vec, &body_bytes);
     // Layer custom rules on top. Their result is wrapped as a DetectedWaf
@@ -300,7 +296,10 @@ mod tests {
         // Either Cloudflare lands by name, or it lands as Unknown
         // (depending on threshold tuning). The PRESENCE of CF-Ray
         // in the captured headers is the load-bearing invariant.
-        let cf_ray = outcome.headers_vec.iter().any(|(k, _)| k.eq_ignore_ascii_case("cf-ray"));
+        let cf_ray = outcome
+            .headers_vec
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("cf-ray"));
         assert!(cf_ray, "CF-Ray should be in the captured headers");
     }
 

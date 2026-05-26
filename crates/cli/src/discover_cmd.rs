@@ -141,33 +141,10 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
 
         if let Some(spec_path) = &args.spec {
             sources.push("openapi");
-            // Pre-fix this was `std::fs::read_to_string(spec_path)`
-            // which is unbounded — an operator typo
-            // (`--spec /dev/zero`), a hostile symlink, or a 10 GB
-            // OpenAPI doc would OOM the tool. 32 MiB is generous
-            // even for kitchen-sink specs (Stripe, GitHub, Kubernetes)
-            // while bounding pathological input.
-            const OPENAPI_SPEC_MAX_BYTES: usize = 32 * 1024 * 1024;
-            let raw = match crate::safe_body::read_bounded_text_file(
-                spec_path,
-                OPENAPI_SPEC_MAX_BYTES,
-            ) {
+            let raw = match std::fs::read_to_string(spec_path) {
                 Ok(s) => s,
-                Err(crate::safe_body::ReadError::Transport(msg)) => {
-                    eprintln!("error: read {}: {msg}", spec_path.display());
-                    return ExitCode::from(1);
-                }
-                Err(crate::safe_body::ReadError::Overrun {
-                    cap_bytes,
-                    observed_bytes,
-                }) => {
-                    eprintln!(
-                        "error: OpenAPI spec {} exceeds {} MiB cap ({} bytes observed) \
-                         — pre-shrink the spec or split into per-tag files",
-                        spec_path.display(),
-                        cap_bytes / (1024 * 1024),
-                        observed_bytes
-                    );
+                Err(e) => {
+                    eprintln!("error: read {}: {e}", spec_path.display());
                     return ExitCode::from(1);
                 }
             };
@@ -221,36 +198,15 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
                     eprintln!("error: --wordlist is required for --mine-params");
                     return ExitCode::from(1);
                 };
-                // Pre-fix this was `std::fs::read_to_string(words_path)`
-                // — unbounded read. SecLists wordlists run from KB to
-                // ~250 MB (rockyou.txt). 512 MiB cap accommodates the
-                // largest legitimate wordlists while still catching
-                // a `--wordlist /dev/zero` typo before OOM.
-                const WORDLIST_MAX_BYTES: usize = 512 * 1024 * 1024;
-                let words = match crate::safe_body::read_bounded_text_file(
-                    words_path,
-                    WORDLIST_MAX_BYTES,
-                ) {
+                let words = match std::fs::read_to_string(words_path) {
                     Ok(s) => s
                         .lines()
                         .map(str::trim)
                         .filter(|l| !l.is_empty() && !l.starts_with('#'))
                         .map(str::to_string)
                         .collect::<Vec<_>>(),
-                    Err(crate::safe_body::ReadError::Transport(msg)) => {
-                        eprintln!("error: read wordlist {}: {msg}", words_path.display());
-                        return ExitCode::from(1);
-                    }
-                    Err(crate::safe_body::ReadError::Overrun {
-                        cap_bytes,
-                        observed_bytes,
-                    }) => {
-                        eprintln!(
-                            "error: wordlist {} exceeds {} MiB cap ({} bytes observed)",
-                            words_path.display(),
-                            cap_bytes / (1024 * 1024),
-                            observed_bytes
-                        );
+                    Err(e) => {
+                        eprintln!("error: read wordlist {}: {e}", words_path.display());
                         return ExitCode::from(1);
                     }
                 };

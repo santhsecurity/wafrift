@@ -29,6 +29,49 @@
 
 Built so each crate is usable standalone: [`wafrift-encoding`](https://docs.rs/wafrift-encoding), [`wafrift-grammar`](https://docs.rs/wafrift-grammar), [`wafrift-detect`](https://docs.rs/wafrift-detect), [`wafrift-smuggling`](https://docs.rs/wafrift-smuggling), [`wafrift-evolution`](https://docs.rs/wafrift-evolution), [`wafrift-oracle`](https://docs.rs/wafrift-oracle), [`wafrift-strategy`](https://docs.rs/wafrift-strategy). No façade required.
 
+## Subcommand reference
+
+| Subcommand | Family | One-line role |
+|---|---|---|
+| `evade` | Offline mutation | Transform a payload with encoding + grammar strategies; no target required |
+| `scan` | Scan | Fire evasion variants at a live target; report bypass chains |
+| `detect` | Recon | Fingerprint WAF/CDN/origin (HTTP headers, DNS CNAME, reverse-DNS, BGP ASN) |
+| `discover` | Recon | Parse OpenAPI / GraphQL introspection / mine parameters into injection points |
+| `recon` | Recon | Origin discovery via CT logs (crt.sh) + DNS history |
+| `bypass-probe` | Scan | 230 auth-bypass header probes + path/method variants (Tsai-class) |
+| `attack` | Scan | Unified orchestrator — all seven parser-diff probes run concurrently |
+| `parser-diff` | Parser diff | URL-path shape variants vs WAF/origin disagreement |
+| `header-diff` | Parser diff | Request header block variants (dup-header, XFF spoofing, LWS) |
+| `body-diff` | Parser diff | Body format variants (JSON dup-key, UTF-7, BOM, multipart collision) |
+| `query-diff` | Parser diff | Query-string variants (HPP, bracket notation, semicolon separator) |
+| `cache-diff` | Parser diff | Cache-key confusion surface (Host case, param order, fragment leak) |
+| `h2-diff` | Parser diff | HTTP/1.1 vs HTTP/2 differential (WAF H2 downgrade bugs) |
+| `method-diff` | Parser diff | HTTP method variants (WebDAV, lowercase, H2 preface) |
+| `gql-diff` | Parser diff | GraphQL parser disagreements (alias bomb, op-name spoof, introspection) |
+| `jwt-diff` | Parser diff | JWT validation scanner (alg:none, kid injection, role elevation) |
+| `cors-diff` | Parser diff | CORS misconfiguration scanner (10 origin-validation pitfalls) |
+| `trailer-diff` | Parser diff | HTTP chunked-trailer injection (WAF misses trailing headers) |
+| `ja3-diff` | Parser diff | TLS fingerprint differential (requires `--features tls-impersonate`) |
+| `smuggle` | Smuggling | HTTP request smuggling CLI (CL.TE / TE.CL / CL.0 / detect / dry-run) |
+| `compress` | Mutation | Wrap a body in gzip / deflate / brotli chains |
+| `distill` | Analysis | Adversarial ddmin — find the minimal bypass payload (Zeller) |
+| `model-evade` | Advanced | L*-active-learning WAF decompiler + offline SFA bypass mining |
+| `audit` | Defender | X-ray a CRS ruleset; report bypassable holes |
+| `harden` | Defender | Synthesize closure rules; proves zero benign false positives |
+| `replay` | Utility | Deterministic re-fire of a saved bypass (exits 0 bypass / 2 block) |
+| `import-curl` | Utility | Parse a Burp "Copy as cURL" capture and run scan against it |
+| `bank` | Utility | Gene-bank management: list / export / import / sign / trust / pull |
+| `seed` | Utility | Pre-load a gene-bank with known-working techniques |
+| `report` | Utility | Generate a markdown pentest writeup from the proxy gene-bank |
+| `legendary` | Demo | One-shot: detect + fingerprint + bypass-probe + polished markdown report |
+| `listener` | OOB | Callback receiver for blind SQLi / stored XSS / SSRF / OOB cmdi |
+| `techniques` | Meta | List / explain `--only`/`--exclude` technique selectors |
+| `init` | Meta | Scaffold a `.wafrift.toml` in the current directory |
+| `completion` | Meta | Generate shell completions (bash / zsh / fish / PowerShell) |
+| `man` | Meta | Generate troff man page |
+| `bench-waf` | Bench | Measure raw WAF block rate + wafrift bypass rate against a corpus |
+| `bench-diff` | Bench | Gate on regression between two `bench-waf` JSON blobs |
+
 ## Install
 
 ```bash
@@ -333,6 +376,17 @@ wafrift bank export --output bundle.json    # share with teammate
 wafrift bank import bundle.json             # on teammate's machine
 ```
 
+**Community genome registry.** Bundles can be signed (ed25519) and pulled from a community registry — the trust list lives at `~/.wafrift/trust.toml` (per-host publisher allowlist), so an untrusted bundle is rejected on `wafrift bank pull` before it ever lands on disk:
+
+```bash
+wafrift bank sign --bundle bundle.json --key signing.key --output bundle.signed.json
+wafrift bank trust add --pubkey <ed25519-hex> --label "alice@example"
+wafrift bank pull --url https://registry.example/bundles/cloudflare-2026q2.signed.json
+wafrift bank submit --url https://registry.example/upload --bundle bundle.signed.json
+```
+
+The signing + trust primitives live in the `wafrift-genome-registry` crate; the HTTP pull/submit transport is wired in `wafrift bank pull` / `wafrift bank submit`. There is **no central wafrift-hosted registry** today — operators run their own (a single static-file HTTP server is enough for pull; submit needs a tiny POST endpoint). See `crates/genome-registry/README.md` for the bundle wire format.
+
 Replay any saved finding deterministically:
 
 ```bash
@@ -366,7 +420,7 @@ Unknown selectors fail fast — no silent drops.
 
 ### Differential bypass probing (`wafrift bypass-probe`)
 
-For Tsai-class boundary-mismatch vulns (admin panel gated by WAF header rule, `X-Original-URL` rewrite, ProxyShell-style routing disagreement, IP-trust spoofing), point bypass-probe at the resource and let it fire the full 136-probe auth-bypass set plus path/method variants:
+For Tsai-class boundary-mismatch vulns (admin panel gated by WAF header rule, `X-Original-URL` rewrite, ProxyShell-style routing disagreement, IP-trust spoofing), point bypass-probe at the resource and let it fire the full 230-probe auth-bypass set plus path/method variants:
 
 ```bash
 # Single URL
@@ -545,21 +599,29 @@ WafRift is the evasion layer you add when sqlmap / Burp / ffuf are blocked by a 
 ```
 wafrift
 ├── crates/
-│   ├── types          # Core types: Request, Technique, EvasionResult
-│   ├── encoding       # 15+ encoding strategies (URL, Unicode, HTML entity, chunked, …)
-│   ├── grammar        # Grammar-aware mutations (SQLi, XSS, CMD, SSTI, SSRF, LDAPi, path)
-│   ├── content-type   # JSON / XML / multipart switching
-│   ├── smuggling      # CL.TE / TE.CL / H2 desync
-│   ├── fingerprint    # UA / TLS / header-order rotation
-│   ├── detect         # WAF fingerprinting (160+ WAFs via TOML rules)
-│   ├── evolution      # GA + MCTS + differential probing
-│   ├── oracle         # Multi-signal verdict classification
-│   ├── strategy       # Pipeline + gene bank + adaptive host state
-│   ├── transport      # Evasion-aware HTTP client with auto-retry
-│   ├── proxy          # Forward proxy with per-host adaptive evasion
-│   ├── pool           # Proxy pool rotation (HTTP/SOCKS5)
-│   ├── recon          # Origin discovery via OSINT (CT logs, DNS history)
-│   └── cli            # CLI + TUI (scan / evade / detect / probe / report / replay)
+│   ├── types               # Core types: Request, Technique, EvasionResult
+│   ├── encoding            # 15+ encoding strategies (URL, Unicode, HTML entity, chunked, …)
+│   ├── grammar             # Grammar-aware mutations (SQLi, XSS, CMD, SSTI, SSRF, LDAPi, path)
+│   ├── content-type        # JSON / XML / multipart switching (WAFFLED)
+│   ├── smuggling           # CL.TE / TE.CL / TE.TE / CL.0 / H2 desync
+│   ├── fingerprint         # UA / TLS JA3-JA4 / header-order rotation
+│   ├── detect              # WAF fingerprinting (160+ WAFs via TOML rules, DNS CNAME, BGP ASN)
+│   ├── evolution           # GA + MCTS + differential probing + body-padding
+│   ├── wafmodel            # Active-learning WAF decompiler (L* / SFA / bypass mining)
+│   ├── oracle              # Payload validity oracles (SQL, XSS, SSTI, CMDI, path, LDAP, SSRF)
+│   ├── strategy            # Pipeline + gene bank + adaptive host state + ML-WAF evasion
+│   ├── transport           # Evasion-aware HTTP client with auto-retry + stealth profiles
+│   ├── proxy               # Forward proxy with per-host adaptive evasion + TUI
+│   ├── pool                # Proxy pool rotation (HTTP/SOCKS5)
+│   ├── recon               # Origin discovery via OSINT (CT logs, DNS history)
+│   ├── genome-registry     # ed25519 genome signing + trust-list management
+│   ├── graphql             # GraphQL-specific evasion payloads (alias bomb, op-name mismatch)
+│   ├── http3-evasion       # HTTP/3 + QUIC protocol evasion (QPACK desync, 0-RTT, CID rotation)
+│   ├── grpc-evasion        # gRPC/protobuf opaque-payload bypass
+│   ├── plugin-api          # TOML + WASM external tamper plugin system
+│   ├── captchaforge-bridge # Headless Chromium adapter for managed challenge solving
+│   ├── core                # Façade re-exporting all crates under one namespace
+│   └── cli                 # CLI + TUI (scan / evade / detect / attack / bypass-probe / …)
 ```
 
 The proxy continuously learns: **discover → rotate (winners) → drift-detect → re-discover**. After ≥60% winners are found it stops rolling dice and round-robins the known-good chain; if a winner gets blocked 2× consecutively it's evicted; when all winners are evicted, full discovery restarts. Per-WAF state is persisted to `~/.wafrift/genomes/<waf>.json`:

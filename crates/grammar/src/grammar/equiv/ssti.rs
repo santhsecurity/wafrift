@@ -12,7 +12,17 @@ use super::{DeliveryShape, Dialect, EquivConfig, EquivPayload, Rng};
 use crate::grammar::template::is_structured_ssti;
 
 /// Pull the inner expression out of the first delimiter pair.
-fn inner_expr(payload: &str) -> Option<(String, String, String)> {
+/// Returns `(pre, expr, post, open, close)` so callers that
+/// re-wrap the expression can preserve the SAME delimiters they
+/// found. F103: pre-fix this returned only `(pre, expr, post)`,
+/// and every rewriter (`rw_inner_ws`, `rw_attr_subscript`,
+/// `rw_string_split`) hardcoded `{{` `}}` in the output —
+/// silently rewriting a FreeMarker `${…}` payload into Jinja
+/// `{{ … }}` (different engine, the rewritten variant is a no-op
+/// on the target). Now the original delimiters round-trip.
+fn inner_expr(
+    payload: &str,
+) -> Option<(String, String, String, &'static str, &'static str)> {
     for (o, c) in [
         ("{{", "}}"),
         ("{%", "%}"),
@@ -31,6 +41,8 @@ fn inner_expr(payload: &str) -> Option<(String, String, String)> {
                         payload[..a].to_string(),
                         expr,
                         payload[a + o.len() + b + c.len()..].to_string(),
+                        o,
+                        c,
                     ));
                 }
             }
@@ -55,10 +67,10 @@ pub fn still_evaluates(original: &str, cand: &str) -> bool {
     if cand.trim().is_empty() {
         return false;
     }
-    let Some((_, oe, _)) = inner_expr(original) else {
+    let Some((_, oe, _, _, _)) = inner_expr(original) else {
         return false;
     };
-    let Some((_, ce, _)) = inner_expr(cand) else {
+    let Some((_, ce, _, _, _)) = inner_expr(cand) else {
         return false;
     };
     if is_structured_ssti(original) {
@@ -83,7 +95,7 @@ pub fn still_evaluates(original: &str, cand: &str) -> bool {
 /// Intra-expression whitespace is ignored by Jinja/Twig/Freemarker/
 /// Velocity expression parsers: `{{7*7}}` ≡ `{{ 7 * 7 }}`.
 fn rw_inner_ws(payload: &str, rng: &mut Rng) -> Option<String> {
-    let (pre, e, post) = inner_expr(payload)?;
+    let (pre, e, post, open, close) = inner_expr(payload)?;
     let mut spaced = String::with_capacity(e.len() * 2);
     for ch in e.chars() {
         if matches!(
@@ -99,10 +111,12 @@ fn rw_inner_ws(payload: &str, rng: &mut Rng) -> Option<String> {
         }
     }
     let pad = |r: &mut Rng| if r.chance(1, 2) { " " } else { "" };
-    // Preserve `post` — dropping the tail after `}}` silently mutates
-    // the payload (loses any trailing template context).
+    // Preserve `post` — dropping the tail after the closing
+    // delimiter silently mutates the payload (loses any trailing
+    // template context). F103: re-wrap with the SAME delimiters
+    // (`open`/`close`) we extracted, not a hardcoded `{{` `}}`.
     Some(format!(
-        "{pre}{{{{{}{spaced}{}}}}}{post}",
+        "{pre}{open}{}{spaced}{}{close}{post}",
         pad(rng),
         pad(rng)
     ))
@@ -111,7 +125,7 @@ fn rw_inner_ws(payload: &str, rng: &mut Rng) -> Option<String> {
 /// `obj.attr` ≡ `obj['attr']` — identical attribute resolution in
 /// Jinja/Twig/Python templating.
 fn rw_attr_subscript(payload: &str, rng: &mut Rng) -> Option<String> {
-    let (pre, e, post) = inner_expr(payload)?;
+    let (pre, e, post, open, close) = inner_expr(payload)?;
     let b: Vec<char> = e.chars().collect();
     let mut out = String::with_capacity(e.len() + 8);
     let mut i = 0;
@@ -138,22 +152,30 @@ fn rw_attr_subscript(payload: &str, rng: &mut Rng) -> Option<String> {
     if !changed {
         return None;
     }
-    Some(format!("{pre}{{{{{out}}}}}{post}"))
+    // F103: re-wrap with the captured delimiters.
+    Some(format!("{pre}{open}{out}{close}{post}"))
 }
 
 /// Re-wrap the SAME expression in another engine's delimiters (for
 /// targets whose engine accepts it). Carries the expression verbatim
 /// → the chokepoint always passes.
 fn rw_delim_swap(payload: &str, rng: &mut Rng) -> Option<String> {
-    let (pre, e, post) = inner_expr(payload)?;
-    let wrap = rng.pick(&["{{ {E} }}", "${{E}}", "#{{E}}", "<%= {E} %>", "{{{E}}}"]);
+    let (pre, e, post, _, _) = inner_expr(payload)?;
+    // F105: dropped `{{{E}}}` from the wrap candidates. Triple-brace
+    // is Handlebars/Mustache RAW-HTML syntax — NOT an alias for
+    // `{{E}}` in Jinja2 / Twig / FreeMarker / Velocity (wafrift's
+    // SSTI target engines). `still_evaluates` couldn't catch the
+    // mistake because `inner_expr` matches the inner `{{` of
+    // `{{{…}}}` and treats it as a normal expression, falsely
+    // greenlighting variants the target engine ignores.
+    let wrap = rng.pick(&["{{ {E} }}", "${{E}}", "#{{E}}", "<%= {E} %>"]);
     Some(format!("{pre}{}{post}", wrap.replace("{E}", &e)))
 }
 
 /// String-literal equivalence: `'os'` ≡ `'o''s'`? no — use the safe
 /// Jinja/Python concat `('o'+'s')` and quote swap. Value-identical.
 fn rw_string_split(payload: &str, rng: &mut Rng) -> Option<String> {
-    let (pre, e, post) = inner_expr(payload)?;
+    let (pre, e, post, open, close) = inner_expr(payload)?;
     // find a single-quoted literal of length >= 2 and split it.
     let bytes = e.as_bytes();
     let mut i = 0;
@@ -164,7 +186,11 @@ fn rw_string_split(payload: &str, rng: &mut Rng) -> Option<String> {
             while j < bytes.len() && bytes[j] != b'\'' {
                 j += 1;
             }
-            if j < bytes.len() && j - st >= 2 && rng.chance(1, 1) {
+            // F106: was `chance(1, 1)` — always-true gate, the rewrite
+            // fired deterministically on the first quoted literal,
+            // collapsing diversity. Match the 50/50 cadence used in
+            // sibling rewriters.
+            if j < bytes.len() && j - st >= 2 && rng.chance(1, 2) {
                 let lit = &e[st..j];
                 // Split on a CHAR boundary, never a byte midpoint —
                 // `lit` may hold multibyte content and `split_at(byte)`
@@ -182,7 +208,8 @@ fn rw_string_split(payload: &str, rng: &mut Rng) -> Option<String> {
                 out.push_str(&e[..st - 1]);
                 out.push_str(&repl);
                 out.push_str(&e[j + 1..]);
-                return Some(format!("{pre}{{{{{out}}}}}{post}"));
+                // F103: re-wrap with captured delimiters.
+                return Some(format!("{pre}{open}{out}{close}{post}"));
             }
             i = j + 1;
             continue;

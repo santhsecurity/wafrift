@@ -100,11 +100,16 @@ pub fn still_resolves(original: &str, cand: &str) -> bool {
 fn enc_slash(rng: &mut Rng) -> &'static str {
     // Index (not `*rng.pick`) so there is no explicit deref for clippy
     // to flag; identical RNG draw (`pick` is `below(len)` internally).
-    const OPTS: [&str; 6] = ["/", "%2f", "%252f", "%c0%af", "%5c", "/"];
+    // F108: pre-fix array was `["/", "%2f", "%252f", "%c0%af", "%5c", "/"]`
+    // — `/` appeared at index 0 AND index 5, biasing the identity form
+    // to 33% (intended ~17%). Same applies to enc_dot below where `.`
+    // appeared twice (50% identity instead of 25%). Both duplicates
+    // are unintended over-representations of the identity form.
+    const OPTS: [&str; 5] = ["/", "%2f", "%252f", "%c0%af", "%5c"];
     OPTS[rng.below(OPTS.len())]
 }
 fn enc_dot(rng: &mut Rng) -> &'static str {
-    const OPTS: [&str; 4] = [".", "%2e", "%252e", "."];
+    const OPTS: [&str; 3] = [".", "%2e", "%252e"];
     OPTS[rng.below(OPTS.len())]
 }
 fn enc_dotdot(rng: &mut Rng) -> String {

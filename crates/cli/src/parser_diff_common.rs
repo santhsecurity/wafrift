@@ -31,6 +31,7 @@
 //! e.g. the redirect limit in one file but not the others.
 
 use std::process::ExitCode;
+#[cfg(test)]
 use std::time::Duration;
 
 use colored::{ColoredString, Colorize};
@@ -54,14 +55,27 @@ pub fn severity_badge(severity: &str) -> ColoredString {
 /// Test-harness settle delay — the time tests sleep between
 /// spawning a mock TCP listener + invoking the wafrift binary so
 /// the listener is reliably accepting before the first probe.
-/// Hardcoded as `Duration::from_millis(40)` in 17 cli test sites
-/// pre-extract; lifting the constant means tuning it (e.g. for
-/// slower CI runners) is one edit instead of 17.
+/// Previously 40ms; bumped to 200ms after observing Windows loopback
+/// TCP accept latency spikes under heavy parallel test load (1352+
+/// tests) causing flaky baseline-probe failures in the e2e suite.
+/// 200ms matches the retry backoff used in listener_cmd tests.
 ///
 /// Gated `#[cfg(test)]` because every caller is in a test block;
 /// without the gate the bin compilation flags this as dead code.
 #[cfg(test)]
-pub const TEST_SETTLE: Duration = Duration::from_millis(40);
+pub const TEST_SETTLE: Duration = Duration::from_millis(200);
+
+/// Print `value` to stdout as 2-space-indented JSON, or on
+/// serialisation failure print a `JSON error: {e}` line to stderr
+/// (matching the contract every parser-diff `--format json` arm
+/// shipped pre-extract). Lifting the 4-line match means a future
+/// `--no-color` / structured-error policy lives in one place.
+pub fn print_pretty_json(value: &serde_json::Value) {
+    match serde_json::to_string_pretty(value) {
+        Ok(s) => println!("{s}"),
+        Err(e) => eprintln!("JSON error: {e}"),
+    }
+}
 
 use crate::scan::pentest_client;
 
@@ -83,22 +97,87 @@ pub fn build_diff_http_client(
     proxy: Option<&str>,
     headers: &[String],
 ) -> Result<Client, ExitCode> {
-    let mut builder = Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .danger_accept_invalid_certs(insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(crate::config::shared_user_agent());
-    builder = match pentest_client::apply_pentest_flags(builder, proxy, headers, None) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("  {} {e}", "✗ pentest flag invalid:".red().bold());
-            return Err(ExitCode::from(1));
-        }
-    };
+    let ua = crate::config::shared_user_agent();
+    let mut builder = wafrift_transport::base_client_builder(timeout_secs, insecure, Some(&ua))
+        .redirect(reqwest::redirect::Policy::limited(5));
+    builder = pentest_client::apply_pentest_flags_or_print(builder, proxy, headers, None)?;
     builder.build().map_err(|e| {
         eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
     })
+}
+
+/// Read-only view of the HTTP-client knobs every parser-diff cmd
+/// already exposes on its Args struct: `--timeout-secs`,
+/// `--insecure`, `--proxy`, `-H/--header`. Lifting this lets every
+/// cmd build its client with a single call —
+/// `build_diff_http_client_for(&args)?` — instead of repeating
+/// the 4-arg unpack at every site. A new diff cmd just adds a
+/// one-liner `impl_parser_diff_http_args!(NewDiffArgs);` (or
+/// hand-rolls the impl) and inherits the client wiring for free.
+pub trait ParserDiffHttpArgs {
+    fn timeout_secs(&self) -> u64;
+    fn insecure(&self) -> bool;
+    fn proxy(&self) -> Option<&str>;
+    fn headers(&self) -> &[String];
+}
+
+/// Fire a single GET, return `(status, body_len)`. The minimal
+/// shape every parser-diff cmd needs from an HTTP probe — body
+/// content is irrelevant when the question is "did the WAF
+/// shape this response differently?". Lifted from identical
+/// definitions in `h2_diff_cmd` and `query_diff_cmd`. Errors
+/// surface the reqwest error verbatim so a caller's `eprintln!`
+/// can name the failing URL.
+pub async fn fire_get_status_len(
+    http: &Client,
+    url: &str,
+) -> std::result::Result<(u16, usize), String> {
+    let resp = http.get(url).send().await.map_err(|e| format!("{e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    Ok((status, body.len()))
+}
+
+/// Build the canonical parser-diff client straight from any
+/// [`ParserDiffHttpArgs`] view. Equivalent to spelling out the
+/// 4 accessors at the call site — see [`build_diff_http_client`].
+pub fn build_diff_http_client_for(args: &impl ParserDiffHttpArgs) -> Result<Client, ExitCode> {
+    build_diff_http_client(
+        args.timeout_secs(),
+        args.insecure(),
+        args.proxy(),
+        args.headers(),
+    )
+}
+
+/// Implement [`ParserDiffHttpArgs`] for any struct whose field
+/// shape matches `pub timeout_secs: u64`, `pub insecure: bool`,
+/// `pub proxy: Option<String>`, `pub header: Vec<String>` — i.e.
+/// every existing parser-diff Args struct. One macro call per
+/// struct replaces the 8-line `build_http_client` wrapper.
+#[macro_export]
+macro_rules! impl_parser_diff_http_args {
+    ($ty:ty) => {
+        impl $crate::parser_diff_common::ParserDiffHttpArgs for $ty {
+            #[inline]
+            fn timeout_secs(&self) -> u64 {
+                self.timeout_secs
+            }
+            #[inline]
+            fn insecure(&self) -> bool {
+                self.insecure
+            }
+            #[inline]
+            fn proxy(&self) -> Option<&str> {
+                self.proxy.as_deref()
+            }
+            #[inline]
+            fn headers(&self) -> &[String] {
+                &self.header
+            }
+        }
+    };
 }
 
 /// `(probe_len - baseline_len) / max(baseline_len, 1)` as a signed
@@ -202,6 +281,143 @@ fn size_pair_for_pct(pct: f64) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ParserDiffHttpArgs trait ──────────────────────────────
+
+    struct FakeArgs {
+        timeout_secs: u64,
+        insecure: bool,
+        proxy: Option<String>,
+        header: Vec<String>,
+    }
+    crate::impl_parser_diff_http_args!(FakeArgs);
+
+    #[test]
+    fn trait_view_returns_each_field() {
+        let a = FakeArgs {
+            timeout_secs: 17,
+            insecure: true,
+            proxy: Some("http://127.0.0.1:8080".into()),
+            header: vec!["X: 1".into()],
+        };
+        assert_eq!(a.timeout_secs(), 17);
+        assert!(a.insecure());
+        assert_eq!(a.proxy(), Some("http://127.0.0.1:8080"));
+        assert_eq!(a.headers(), &["X: 1".to_string()]);
+    }
+
+    #[test]
+    fn trait_view_handles_none_proxy_and_empty_headers() {
+        let a = FakeArgs {
+            timeout_secs: 8,
+            insecure: false,
+            proxy: None,
+            header: vec![],
+        };
+        assert_eq!(a.proxy(), None);
+        assert!(a.headers().is_empty());
+    }
+
+    #[test]
+    fn build_diff_http_client_for_compiles_and_returns_ok() {
+        let a = FakeArgs {
+            timeout_secs: 8,
+            insecure: false,
+            proxy: None,
+            header: vec![],
+        };
+        let client = build_diff_http_client_for(&a);
+        assert!(client.is_ok());
+    }
+
+    // ── fire_get_status_len ───────────────────────────────────
+
+    /// Spawn a one-shot HTTP/1.1 mock that responds with `status` +
+    /// a body of exactly `body_len` `'x'` bytes. Returns the bound
+    /// address so the test can build a URL.
+    async fn spawn_oneshot_mock(status: u16, body_len: usize) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                // Drain the request — minimum is one read; we
+                // don't care about the bytes.
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let body = "x".repeat(body_len);
+                let reason = match status {
+                    200 => "OK",
+                    403 => "Forbidden",
+                    500 => "Internal Server Error",
+                    _ => "STATUS",
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Length: {body_len}\r\n\r\n{body}"
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_returns_200_and_body_length() {
+        let addr = spawn_oneshot_mock(200, 7).await;
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let (status, len) = fire_get_status_len(&client, &url)
+            .await
+            .expect("mock responded");
+        assert_eq!(status, 200);
+        assert_eq!(len, 7);
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_surfaces_non_2xx_status_as_value_not_error() {
+        // Contract: HTTP-level errors (403, 500, etc.) are NOT
+        // reqwest errors — they're values the caller classifies.
+        // The fn must return Ok((status, len)) even for 5xx so
+        // the parser-diff classifier sees the real status.
+        let addr = spawn_oneshot_mock(500, 0).await;
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let (status, len) = fire_get_status_len(&client, &url)
+            .await
+            .expect("HTTP 500 is still Ok at the reqwest level");
+        assert_eq!(status, 500);
+        assert_eq!(len, 0);
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_errors_on_connection_refused() {
+        // Port 1 reliably refuses connections on every test
+        // platform. The reqwest error surfaces as Err(String) per
+        // the fn's contract.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .expect("build client");
+        let err = fire_get_status_len(&client, "http://127.0.0.1:1/")
+            .await
+            .expect_err("connection-refused must surface as Err");
+        assert!(
+            !err.is_empty(),
+            "error message must carry the underlying reason"
+        );
+    }
+
+    #[tokio::test]
+    async fn fire_get_status_len_errors_on_malformed_url() {
+        let client = reqwest::Client::new();
+        let err = fire_get_status_len(&client, "not a url at all")
+            .await
+            .expect_err("invalid URL must Err, not panic");
+        assert!(!err.is_empty());
+    }
 
     // ── body_delta_pct ────────────────────────────────────────
 

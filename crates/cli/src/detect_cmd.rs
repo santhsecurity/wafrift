@@ -490,18 +490,18 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // change — both forms produce `None` for the `args.differential
     // == false || resolved_url.is_none()` cases.
     let differential_evidence: Option<DifferentialEvidence> =
-        if args.differential {
-            if let Some(url) = resolved_url.as_deref() {
-                match fetch_differential(url, args.timeout_secs, args.insecure) {
-                    Ok(ev) => ev,
-                    Err(e) => {
-                        if !quiet {
-                            eprintln!(
-                                "{} differential probe error (continuing without): {e}",
-                                "warn:".yellow()
-                            );
-                        }
-                        None
+        if args.differential && resolved_url.is_some() {
+            let url = resolved_url
+                .as_deref()
+                .expect("differential gated on Some(url)");
+            match fetch_differential(url, args.timeout_secs, args.insecure) {
+                Ok(ev) => ev,
+                Err(e) => {
+                    if !quiet {
+                        eprintln!(
+                            "{} differential probe error (continuing without): {e}",
+                            "warn:".yellow()
+                        );
                     }
                 }
             } else {

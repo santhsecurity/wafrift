@@ -197,7 +197,7 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                         .clone(),
                 );
             }
-            "-d" | "--data" | "--data-raw" | "--data-binary" | "--data-urlencode" => {
+            "-d" | "--data" | "--data-raw" | "--data-binary" => {
                 i += 1;
                 let v = tokens
                     .get(i)
@@ -208,6 +208,46 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                 }
                 body.push_str(v);
             }
+            // F125: `--data-urlencode` differs from `--data` — curl
+            // URL-encodes the value (or the value half of `key=value`)
+            // before sending. Folding it into the raw `-d` arm
+            // produced bodies that diverged from what curl would
+            // actually send, breaking import-curl parity (the whole
+            // point of this command).
+            "--data-urlencode" => {
+                i += 1;
+                let v = tokens
+                    .get(i)
+                    .ok_or_else(|| format!("{tok} needs a value"))?;
+                // curl's `@file` forms require disk access on the
+                // operator's box; we don't model that. The two real
+                // file forms are bare `@file` and `name=@file`. A
+                // legitimate value like `email=foo@bar.com` is fine —
+                // the `@` is in the middle, not at the start of the
+                // bare value or the post-`=` value.
+                let is_file_form = match v.split_once('=') {
+                    None => v.starts_with('@'),
+                    Some((_, val)) => val.starts_with('@'),
+                };
+                if is_file_form {
+                    return Err(format!(
+                        "--data-urlencode @file form is not supported \
+                         in import-curl (would require filesystem access \
+                         on the operator's box); inline the file contents \
+                         into the pasted command (got {v:?})"
+                    ));
+                }
+                let encoded = if let Some((k, val)) = v.split_once('=') {
+                    format!("{k}={}", urlencoding::encode(val))
+                } else {
+                    urlencoding::encode(v).into_owned()
+                };
+                let body = p.body.get_or_insert_with(String::new);
+                if !body.is_empty() {
+                    body.push('&');
+                }
+                body.push_str(&encoded);
+            }
             // Common no-op flags from Burp's "Copy as cURL" — accept and ignore.
             "-i" | "--include" | "-k" | "--insecure" | "--compressed" | "-s" | "--silent"
             | "-v" | "--verbose" | "-L" | "--location" | "-o" | "--output" | "-O"
@@ -216,10 +256,36 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
                     i += 1; // skip the file argument too
                 }
             }
+            // Common value-taking flags from Burp / Chrome / mitmproxy
+            // "Copy as cURL" output. Each consumes the next token as
+            // its argument. Without this whitelist, an invocation like
+            // `curl --url https://target` would route into the long-
+            // option heuristic below, which would correctly skip
+            // `https://target` as the flag value — and the URL would
+            // never be recorded. Listed explicitly so the right
+            // behaviour stays right when the heuristic changes.
+            "--url" | "--max-time" | "--connect-timeout" | "--cacert" | "--cert" | "--key"
+            | "--user" | "-u" | "--proxy-user" | "--resolve" | "--unix-socket" | "--referer"
+            | "-e" => {
+                let v = tokens
+                    .get(i + 1)
+                    .ok_or_else(|| format!("{tok} needs a value"))?
+                    .clone();
+                // `--url <URL>` is the only one where we capture
+                // the value — every other flag's value is operator-
+                // facing config we don't model.
+                if tok == "--url" && p.url.is_none() {
+                    p.url = Some(v);
+                }
+                i += 1;
+            }
             other if other.starts_with("--") => {
                 // Long option: skip the option AND its argument if it
                 // looks like one (heuristic: next token doesn't start
                 // with -). Keeps unknown options from misparsing.
+                // This is the LAST resort — extend the explicit
+                // whitelist above whenever an operator hits a flag
+                // that breaks here so the misparse can't recur.
                 if i + 1 < tokens.len() && !tokens[i + 1].starts_with('-') {
                     i += 1;
                 }
@@ -236,7 +302,13 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
         i += 1;
     }
     if p.url.is_none() {
-        return Err("no URL found in curl invocation".to_string());
+        return Err(
+            "no URL found in curl invocation — possibly an unrecognised \
+             curl flag consumed the URL token. If a `--longflag value` \
+             pattern is being mistaken for a flag-then-URL pair, add \
+             the flag to the explicit whitelist in parse_curl."
+                .to_string(),
+        );
     }
     Ok(p)
 }
@@ -429,7 +501,6 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         egress_tailscale_socks_addr: "127.0.0.1:1055".to_string(),
         egress_challenge_threshold: 3,
         egress_cooldown_secs: 300,
-        custom_rules: None,
     };
 
     let cancel = tokio_util::sync::CancellationToken::new();
@@ -445,12 +516,8 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
 /// promotion behaviour as `wafrift detect`, so the no-payload import-
 /// curl flow doesn't silently miss WAFs that strip vendor markers.
 async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool) -> ExitCode {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+    let builder = wafrift_transport::base_client_builder(15, insecure, None)
         .redirect(reqwest::redirect::Policy::none());
-    if insecure {
-        builder = builder.danger_accept_invalid_certs(true);
-    }
     let client = match builder.build() {
         Ok(c) => c,
         Err(e) => {
@@ -464,14 +531,13 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
         .unwrap_or(if parsed.body.is_some() { "POST" } else { "GET" });
 
     // Benign probe — fires the parsed request verbatim.
-    let (status, headers, body) =
-        match send_parsed(&client, method, target, parsed).await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("error: request to {target} failed: {e}");
-                return ExitCode::from(1);
-            }
-        };
+    let (status, headers, body) = match send_parsed(&client, method, target, parsed).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: request to {target} failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
     eprintln!(
         "probe: {method} {target} → HTTP {status} ({} headers)",
         headers.len()
@@ -533,12 +599,8 @@ async fn detect_parsed_target(target: &str, parsed: &ParsedCurl, insecure: bool)
         Err(e) => {
             // Don't fail the whole detect just because the second
             // probe couldn't fire; surface the static result alone.
-            eprintln!(
-                "warn: differential probe failed: {e} — falling back to static-only verdict"
-            );
-            println!(
-                "No WAF confidently detected on the parsed request (HTTP {status})."
-            );
+            eprintln!("warn: differential probe failed: {e} — falling back to static-only verdict");
+            println!("No WAF confidently detected on the parsed request (HTTP {status}).");
         }
     }
     ExitCode::SUCCESS
@@ -605,6 +667,58 @@ mod tests {
     fn tokenize_simple_curl() {
         let toks = shell_tokenize("curl https://example.com").unwrap();
         assert_eq!(toks, vec!["curl", "https://example.com"]);
+    }
+
+    // F125 regression suite: --data-urlencode must URL-encode the value
+    // half (or the whole bare value), matching curl's wire behaviour.
+    #[test]
+    fn data_urlencode_encodes_value_only_for_kv_pair() {
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode 'q=hello world'").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("q=hello%20world"));
+    }
+
+    #[test]
+    fn data_urlencode_encodes_whole_value_for_bare_string() {
+        let toks = shell_tokenize("curl https://t/ --data-urlencode 'a b&c'").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("a%20b%26c"));
+    }
+
+    #[test]
+    fn data_urlencode_at_file_form_is_rejected_loudly() {
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode '@/etc/passwd'").unwrap();
+        let err = parse_curl(&toks).unwrap_err();
+        assert!(err.contains("@file"), "got: {err}");
+    }
+
+    #[test]
+    fn data_urlencode_kv_at_file_form_rejected() {
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode 'name=@/etc/passwd'").unwrap();
+        let err = parse_curl(&toks).unwrap_err();
+        assert!(err.contains("@file"), "got: {err}");
+    }
+
+    #[test]
+    fn data_urlencode_legitimate_at_in_value_not_rejected() {
+        // Anti-rig: email-like values must NOT trigger the @file guard.
+        let toks =
+            shell_tokenize("curl https://t/ --data-urlencode 'email=foo@bar.com'").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("email=foo%40bar.com"));
+    }
+
+    #[test]
+    fn data_urlencode_and_plain_data_concat_with_ampersand() {
+        let toks = shell_tokenize(
+            "curl https://t/ -d 'a=1' --data-urlencode 'b=hello world'",
+        )
+        .unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.body.as_deref(), Some("a=1&b=hello%20world"));
     }
 
     #[test]
@@ -711,6 +825,60 @@ mod tests {
         assert!(err.contains("malformed header"));
     }
 
+    // ── Value-taking long-flag whitelist ─────────────────────────
+
+    #[test]
+    fn parse_url_flag_captures_url() {
+        // `curl --url https://target` — the URL is the value of
+        // --url, not a positional token. Pre-fix, the long-option
+        // heuristic skipped `https://target` and we returned
+        // "no URL found".
+        let toks = shell_tokenize("curl --url https://target/api").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/api"));
+    }
+
+    #[test]
+    fn parse_max_time_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl --max-time 30 https://target/api").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/api"));
+    }
+
+    #[test]
+    fn parse_user_flag_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl --user admin:pw https://target/").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/"));
+    }
+
+    #[test]
+    fn parse_referer_flag_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl -e https://ref/ https://target/").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/"));
+    }
+
+    #[test]
+    fn parse_resolve_flag_does_not_eat_following_url() {
+        let toks = shell_tokenize("curl --resolve target:443:10.0.0.1 https://target/api").unwrap();
+        let p = parse_curl(&toks).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://target/api"));
+    }
+
+    #[test]
+    fn parse_no_url_error_message_hints_at_flag_consumption() {
+        let toks = shell_tokenize("curl -H 'A: 1'").unwrap();
+        let err = parse_curl(&toks).unwrap_err();
+        // The hint should mention the flag-consumption scenario so
+        // the operator knows where to look — pre-fix the bare
+        // "no URL found" gave no diagnostic at all.
+        assert!(
+            err.to_lowercase().contains("flag"),
+            "error must hint at flag-consumption: {err}"
+        );
+    }
+
     // ── Differential auto-promote on no-payload path ─────────────
     //
     // detect_parsed_target hits the network (it's an async function
@@ -754,7 +922,7 @@ mod tests {
     }
 
     #[serial_test::serial]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_parsed_applies_headers_cookie_and_user_agent() {
         // Stands up a one-shot localhost server that echoes back the
         // headers it received. Verifies send_parsed pushes
@@ -794,7 +962,9 @@ mod tests {
             cookie: Some("sess=abc".into()),
             body: None,
         };
-        let (status, _hdrs, _body) = send_parsed(&client, "GET", &url, &parsed).await.expect("send");
+        let (status, _hdrs, _body) = send_parsed(&client, "GET", &url, &parsed)
+            .await
+            .expect("send");
         assert_eq!(status, 200);
         let captured = server.join().expect("server thread").to_ascii_lowercase();
         // The captured request must contain every parsed-curl header.

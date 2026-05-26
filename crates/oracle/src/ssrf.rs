@@ -170,6 +170,20 @@ fn host_is_complete_token(payload: &str, host: &str) -> bool {
     false
 }
 
+/// Extract the authority (host[:port][@userinfo]) from a
+/// `scheme://...` URL. Returns the authority slice without the
+/// surrounding URL plumbing. None when the payload doesn't have a
+/// `://` separator — caller decides the fallback.
+fn extract_authority(payload: &str) -> Option<&str> {
+    let scheme_end = payload.find("://")?;
+    let auth_start = scheme_end + 3;
+    let rest = payload.get(auth_start..)?;
+    let end = rest
+        .find(|c: char| matches!(c, '/' | '?' | '#'))
+        .unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
 /// Checks whether a payload contains SSRF URL structure.
 fn has_ssrf_structure(payload: &str) -> bool {
     // Protocol-relative URLs are valid SSRF shapes; no need to scan megabyte bodies for indicators.
@@ -186,27 +200,41 @@ fn has_ssrf_structure(payload: &str) -> bool {
         return false;
     }
 
+    // F130: indicator host + private-IP checks were previously run
+    // against the WHOLE payload via substring match. That turns
+    // `http://example.com/api/v10.txt` into a false-positive SSRF
+    // (because `10.` matches the private prefix list anywhere in the
+    // URL), and worse, anti-rigs the bypass count by accepting
+    // mutations whose host became public but whose path happened to
+    // include an indicator-shaped substring. Extract the URL
+    // authority first and run host/IP-prefix checks against THAT.
+    // Fall back to the whole payload if extraction fails (preserves
+    // behavior for non-standard URL shapes).
+    let authority = extract_authority(payload).unwrap_or(payload);
+
     // Check for SSRF indicator hosts. Single-character indicator
     // tokens (the legitimate "0" → "0.0.0.0" shorthand) MUST be
     // matched as a complete host token, not a substring — otherwise
     // any URL containing the digit '0' (e.g. /page?id=100) trips
-    // the indicator. Multi-character indicators are still substring
-    // matched for compatibility with the existing rule shapes.
+    // the indicator. Multi-character indicators are substring
+    // matched against the AUTHORITY only.
     let has_indicator_host = ssrf_indicator_hosts().iter().any(|host| {
         if host.len() <= 2 {
-            host_is_complete_token(payload, host)
+            host_is_complete_token(authority, host)
         } else {
-            contains_ascii_insensitive(payload, host)
+            contains_ascii_insensitive(authority, host)
         }
     });
 
-    // Check for private IP prefixes
+    // Private IP prefixes likewise scan the authority only — a `10.`
+    // sitting in the path is not a private-IP indicator.
     let has_private_ip = private_ip_prefixes().iter().any(|prefix| {
-        contains_ascii_insensitive(payload, prefix)
-            || contains_ascii_insensitive(payload, &prefix.replace('.', "_"))
+        contains_ascii_insensitive(authority, prefix)
+            || contains_ascii_insensitive(authority, &prefix.replace('.', "_"))
     });
 
-    // Check for internal path indicators
+    // Internal-path indicators DO scan the full payload — they are
+    // path patterns by definition (`/api/`, `/admin/`, etc.).
     let has_internal_path = internal_path_indicators()
         .iter()
         .any(|path| contains_ascii_insensitive(payload, path));
@@ -644,5 +672,123 @@ mod tests {
     fn ftp_scheme_private_ip_valid() {
         let oracle = SsrfOracle;
         assert!(oracle.is_semantically_valid("ftp://192.168.1.1/", "ftp://192.168.1.1/",));
+    }
+
+    // F130 regression suite: indicator-host + private-IP scans must
+    // run against the URL authority, NOT the whole payload. Pre-fix
+    // a public URL with a `10.` or `127.` substring anywhere in the
+    // path/query falsely matched a private indicator — anti-rigging
+    // the bypass count for SSRF mutations that became public.
+
+    #[test]
+    fn extract_authority_basic_host() {
+        assert_eq!(extract_authority("http://example.com/"), Some("example.com"));
+        assert_eq!(
+            extract_authority("http://example.com/path?q=1"),
+            Some("example.com")
+        );
+        assert_eq!(extract_authority("http://example.com"), Some("example.com"));
+    }
+
+    #[test]
+    fn extract_authority_with_port_and_userinfo() {
+        assert_eq!(
+            extract_authority("http://user:pass@127.0.0.1:8080/admin"),
+            Some("user:pass@127.0.0.1:8080")
+        );
+    }
+
+    #[test]
+    fn extract_authority_no_scheme_returns_none() {
+        assert_eq!(extract_authority("not-a-url"), None);
+        assert_eq!(extract_authority("/path/only"), None);
+    }
+
+    #[test]
+    fn extract_authority_fragment_terminates_authority() {
+        assert_eq!(
+            extract_authority("http://example.com#frag"),
+            Some("example.com")
+        );
+    }
+
+    #[test]
+    fn public_url_with_private_prefix_in_path_rejected() {
+        // Pre-fix: substring `10.` matched private prefix list
+        // anywhere in payload → false-positive SSRF. Avoid `/api/`
+        // in this test URL because internal_path indicators ALSO
+        // scan full payload (separate concern from F130).
+        let oracle = SsrfOracle;
+        assert!(
+            !oracle.is_semantically_valid(
+                "http://127.0.0.1/wiki",
+                "http://example.com/wiki/v10.txt",
+            ),
+            "F130: public host with '10.' in path is NOT SSRF"
+        );
+    }
+
+    #[test]
+    fn public_url_with_loopback_in_query_rejected() {
+        // `127.0.0.1` substring in a query string does not make the
+        // request go to localhost.
+        let oracle = SsrfOracle;
+        assert!(
+            !oracle.is_semantically_valid(
+                "http://127.0.0.1/",
+                "http://example.com/?ref=127.0.0.1",
+            ),
+            "F130: public host with '127.0.0.1' in query is NOT SSRF"
+        );
+    }
+
+    #[test]
+    fn public_url_with_metadata_hostname_in_path_rejected() {
+        let oracle = SsrfOracle;
+        assert!(
+            !oracle.is_semantically_valid(
+                "http://169.254.169.254/",
+                "http://example.com/wiki/169.254.169.254",
+            ),
+            "F130: public host with metadata IP in path is NOT SSRF"
+        );
+    }
+
+    #[test]
+    fn public_url_with_localhost_in_query_rejected() {
+        let oracle = SsrfOracle;
+        assert!(
+            !oracle.is_semantically_valid(
+                "http://localhost/",
+                "http://example.com/?host=localhost",
+            ),
+            "F130: public host with 'localhost' in query is NOT SSRF"
+        );
+    }
+
+    #[test]
+    fn anti_rig_public_url_with_router_ip_substring_rejected() {
+        // `172.16.` is a private prefix — must match only in authority.
+        let oracle = SsrfOracle;
+        assert!(
+            !oracle.is_semantically_valid(
+                "http://172.16.0.1/",
+                "http://news.example.com/172.16.0.1-router-review",
+            ),
+            "F130: blog about routers should not be flagged as SSRF"
+        );
+    }
+
+    #[test]
+    fn private_ip_in_authority_still_accepted() {
+        // Regression-guard: the F130 fix must NOT loosen the real
+        // positive case where the private IP IS the authority.
+        let oracle = SsrfOracle;
+        assert!(oracle.is_semantically_valid("http://10.0.0.5/", "http://10.0.0.5/"));
+        assert!(oracle.is_semantically_valid("http://172.16.0.1/api", "http://172.16.0.1/api"));
+        assert!(oracle.is_semantically_valid(
+            "http://169.254.169.254/latest/",
+            "http://169.254.169.254/latest/"
+        ));
     }
 }

@@ -78,6 +78,18 @@ pub async fn mine_params(
     if wordlist.is_empty() {
         return Err(DiscoveryError::WordlistEmpty);
     }
+    // Cap defends against an operator typo
+    // (`--wordlist /dev/urandom`) or a hostile-source wordlist:
+    // one tokio::spawn task per entry would queue tens of millions
+    // of futures BEFORE the Semaphore-limited concurrency lets any
+    // actual probe land, OOMing the process.
+    if wordlist.len() > super::openapi::MAX_PARAM_WORDLIST {
+        return Err(super::openapi::DiscoveryError::InputCapExceeded {
+            what: "param_miner.wordlist",
+            got: wordlist.len(),
+            cap: super::openapi::MAX_PARAM_WORDLIST,
+        });
+    }
 
     let baseline = collect_baseline(target, client, config.baseline_requests.max(1)).await?;
 
@@ -177,7 +189,16 @@ async fn collect_baseline(
 
 async fn probe_one(target: &str, word: &str, client: &reqwest::Client) -> Option<ProbeResult> {
     let sep = if target.contains('?') { "&" } else { "?" };
-    let url = format!("{target}{sep}{word}={CANARY}");
+    // F96: pre-fix `word` was interpolated raw. A wordlist entry
+    // containing `&`, `=`, `#`, or whitespace silently injected
+    // unintended params or fragments — turning `&inject=1` into
+    // `?&inject=1=wafrift_canary_x9k2`, which probes the wrong
+    // parameter and never registers as a hit. Percent-encode the
+    // word so any byte sequence is parsed as a single param name.
+    let url = format!(
+        "{target}{sep}{}={CANARY}",
+        urlencoding::encode(word)
+    );
     let start = Instant::now();
     let resp = client.get(&url).send().await.ok()?;
     let status = resp.status().as_u16();
@@ -238,14 +259,24 @@ fn is_hit(probe: &ProbeResult, baseline: &BaselineEnvelope, config: &MiningConfi
     false
 }
 
+/// Return the most-frequent status code in `statuses`.
+///
+/// Tie-breaking is deterministic: when two codes have the same count, the
+/// **lower** numeric code wins (e.g. 200 beats 404). Without a stable
+/// tiebreaker, `HashMap::into_iter().max_by_key()` has non-deterministic
+/// ordering across runs (HashMap uses a random seed), which meant the
+/// baseline envelope could report different modal statuses across identical
+/// baseline bursts when, say, 200 and 404 both appeared twice — flipping
+/// is_hit's status-change branch unpredictably.
 fn mode_status(statuses: &[u16]) -> u16 {
     let mut counts = std::collections::HashMap::new();
     for s in statuses {
         *counts.entry(*s).or_insert(0u32) += 1;
     }
+    // Stable: prefer highest count; on tie, prefer lowest status code.
     counts
         .into_iter()
-        .max_by_key(|(_, c)| *c)
+        .max_by(|(s_a, c_a), (s_b, c_b)| c_a.cmp(c_b).then(s_b.cmp(s_a)))
         .map_or(0, |(s, _)| s)
 }
 
@@ -336,5 +367,55 @@ mod tests {
     #[test]
     fn mode_status_empty_returns_zero() {
         assert_eq!(mode_status(&[]), 0);
+    }
+
+    // ── mode_status determinism fix (2026-05-25) ──────────────────────────────
+
+    /// When two status codes appear equally often, `mode_status` must
+    /// deterministically return the *lower* one. Pre-fix used
+    /// `HashMap::into_iter().max_by_key(|(_, c)| *c)` which has
+    /// non-deterministic tie-breaking (HashMap uses a random seed), causing
+    /// is_hit's status-change branch to flip unpredictably between runs.
+    #[test]
+    fn mode_status_tie_broken_by_lower_code() {
+        // 200 and 404 each appear once — must always return 200.
+        assert_eq!(mode_status(&[200, 404]), 200);
+        // Same tie, reversed order of elements — must still return 200.
+        assert_eq!(mode_status(&[404, 200]), 200);
+        // Three-way tie: 200, 301, 500 each appear once.
+        assert_eq!(mode_status(&[500, 301, 200]), 200);
+    }
+
+    #[test]
+    fn mode_status_majority_beats_lower_code() {
+        // 404 appears more than 200 — majority wins even though 200 is lower.
+        assert_eq!(mode_status(&[200, 404, 404, 404]), 404);
+    }
+
+    #[test]
+    fn mode_status_single_element() {
+        assert_eq!(mode_status(&[503]), 503);
+    }
+
+    #[test]
+    fn mode_status_tie_between_200_and_200() {
+        // All identical — trivially 200.
+        assert_eq!(mode_status(&[200, 200, 200]), 200);
+    }
+
+    #[test]
+    fn mode_status_is_stable_across_repeated_calls() {
+        // Run the same call 1000 times and confirm the result never changes.
+        // This catches HashMap random-seed non-determinism — if the old code
+        // were still in use, this would flake across process runs (each
+        // invocation in the same process uses the same seed, so intra-run
+        // it might always agree, but the test is documentation of the
+        // expectation).
+        let statuses = [200u16, 404, 200, 404]; // tie: 200 must win
+        let first = mode_status(&statuses);
+        assert_eq!(first, 200, "lower code must win on tie");
+        for _ in 0..999 {
+            assert_eq!(mode_status(&statuses), first, "mode_status must be deterministic");
+        }
     }
 }

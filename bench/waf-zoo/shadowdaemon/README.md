@@ -12,70 +12,66 @@ ModSec/Coraza/Naxsi:
   parameter map to the daemon for scoring.
 - **Daemon** (`shadowd`) — scores the parsed parameters against a signature
   database and returns a block/allow decision.
-- **Database** (PostgreSQL) — stores profiles, rules, and request logs.
+- **Dashboard** — web UI for rule management (not needed for bench purposes).
 
 Because the connector runs _after_ HTTP parsing, transport-layer evasion
 techniques (chunked encoding, multipart boundary manipulation, HTTP/2 smuggling)
 are neutralised by the PHP SAPI before shadowd ever sees the parameters. The
 relevant bypass surface is at the **parameter grammar** level: SQL/XSS/CMDI
-patterns that the shadowd signature engine scores below its block threshold.
+patterns that the shadowd token engine scores below its block threshold.
 
-## Stack components
-
-| Container | Image | Role |
-|---|---|---|
-| `wafrift-zoo-shadowd` | `zecure/shadowd` (pinned SHA) | Scoring daemon |
-| `wafrift-zoo-shadowd-db` | `postgres:16-alpine` | Rule/profile state |
-| `wafrift-zoo-shadowd-php` | Built from `Dockerfile` | nginx + PHP-FPM + connector |
-
-The PHP app (`echo.php`) reflects all GET/POST parameters back as JSON on allow,
-and the connector calls `exit(403)` on block before echo.php runs.
+This stack uses the official `shadowd` daemon image + `shadowd_php` demo app
+(nginx + PHP with the connector installed). The bench sends payloads to the PHP
+app's parameter endpoint.
 
 ## Port
 
 `18105` — does not conflict with any other waf-zoo or wafrift-bench/targets stack.
 
-## First-run setup required
+## Important: different backend
 
-shadowd needs a profile and ruleset before it starts scoring. On first start:
+This stack does NOT use httpbin. It uses `zecure/shadowd_php`, a PHP echo
+application with the shadowd connector pre-installed. The block detection
+logic differs:
+
+- **Block**: HTTP 403, or HTTP 200 with body containing `Forbidden`
+- **Bypass**: HTTP 200 with the submitted parameter echoed in the response body
+
+## How to run
 
 ```bash
-# 1. Start the stack (first run builds the PHP app ~2 min)
-docker compose -f bench/waf-zoo/shadowdaemon/docker-compose.yml up -d --build
+# 1. Start the stack
+docker compose -f bench/waf-zoo/shadowdaemon/docker-compose.yml up -d
 
-# 2. Wait for the DB and shadowd to initialise (~15s)
+# 2. Wait for shadowd to be ready (~10s on first start)
 docker logs wafrift-zoo-shadowd 2>&1 | tail -5
 
-# 3. Import the default Shadow Daemon blacklist rules via the CLI
-#    (shadowd ships a database migration + default rule import script)
-docker exec wafrift-zoo-shadowd shadowd --import-rules
-
-# 4. Smoke test
+# 3. Smoke test — expect 200 OK from the PHP demo app
 curl -si http://127.0.0.1:18105/ | head -2
-# Expected: HTTP/1.1 200
 
-# 5. Verify block on SQLi
-curl -si -X POST http://127.0.0.1:18105/ -d "q=1' OR '1'='1" | head -2
-# Expected: HTTP/1.1 403
-```
+# 4. Verify WAF blocks a raw SQLi payload submitted as a POST parameter
+curl -si -X POST http://127.0.0.1:18105/ -d "q=1' OR '1'='1" | head -4
+# Expected: HTTP/1.1 403  (or 200 with "Forbidden" body)
 
-## How to run the bench
-
-```bash
+# 5. Run the bench
 bench/waf-zoo/shadowdaemon/wafrift-bench.sh
-```
 
-## Stopping
-
-```bash
+# 6. Stop
 docker compose -f bench/waf-zoo/shadowdaemon/docker-compose.yml down -v
 ```
+
+## Container names
+
+| Service | Container name |
+|---|---|
+| Shadow Daemon daemon | `wafrift-zoo-shadowd` |
+| PHP connector app | `wafrift-zoo-shadowd-php` |
 
 ## Licensing
 
 `zecure/shadowd` — GPLv2 (https://github.com/zecure/shadowd/blob/master/LICENSE).
-`shadowd/php_connector` — LGPLv2.1.
-`postgres:16-alpine` — PostgreSQL License (permissive).
+`zecure/shadowd_php` — LGPLv2.1 connector, Apache 2.0 demo app.
+`kennethreitz/httpbin` — not used in this stack.
 No commercial or trial licenses required.
 
 **GPLv2 note**: `shadowd` is GPLv2. This bench stack runs it as an unmodified

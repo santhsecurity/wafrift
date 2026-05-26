@@ -43,9 +43,14 @@
 mod content_type;
 
 pub use content_type::{
-    ContentTypeTechnique, ContentTypeVariant, generate_variants, generate_variants_from_body,
-    parse_form_body, unique_boundary, xml_safe_name,
+    ContentTypeError, ContentTypeTechnique, ContentTypeVariant, generate_variants,
+    generate_variants_from_body, parse_form_body, unique_boundary, xml_safe_name,
 };
+// Re-export the deprecated compat shim so callers that import via the crate root
+// still compile; the #[deprecated] attribute on the item itself is enough to
+// warn them to migrate.
+#[allow(deprecated)]
+pub use content_type::parse_form_body_lossy;
 
 pub mod formats;
 pub mod multipart_enhanced;
