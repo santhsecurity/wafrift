@@ -3,6 +3,7 @@
 [![CI](https://github.com/santhsecurity/wafrift/actions/workflows/ci.yml/badge.svg)](https://github.com/santhsecurity/wafrift/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Crates.io](https://img.shields.io/crates/v/wafrift-cli)](https://crates.io/crates/wafrift-cli)
+[![GitHub stars](https://img.shields.io/github/stars/santhsecurity/wafrift?style=flat&color=yellow&label=stars)](https://star-history.com/#santhsecurity/wafrift&Date)
 
 ![WafRift Demo](wafrift-demo.gif)
 
