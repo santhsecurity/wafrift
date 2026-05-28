@@ -7,7 +7,7 @@
 
 ![WafRift Demo](wafrift-demo.gif)
 
-> Part of the [Santh](https://santh.dev) security research ecosystem.
+> Part of the [Santh](https://santh.dev) security research ecosystem. Follow [@SanthProject](https://x.com/SanthProject) on X.
 
 **A programmable WAF-evasion engine.** Encoding × grammar-aware mutation × HTTP smuggling × content-type confusion × TLS fingerprint rotation — every layer addressable, every winning combination cached. Point it at a WAF and an evolutionary loop (hill-climb / SA / tabu / novelty / MAP-Elites) discovers what bypasses that exact stack, then persists the winners to a per-WAF gene bank so the next scan starts with zero discovery.
 
