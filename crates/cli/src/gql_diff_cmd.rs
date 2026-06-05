@@ -31,11 +31,10 @@ use reqwest::Client;
 use serde_json::json;
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
 use crate::parser_diff_common::{body_delta_pct, severity_of};
 
 #[derive(Args, Debug)]
-pub struct GqlDiffArgs {
+pub(crate) struct GqlDiffArgs {
     /// Target GraphQL endpoint URL (typically `https://target/graphql`).
     pub url: String,
 
@@ -74,19 +73,26 @@ pub struct GqlDiffArgs {
 
 /// One GraphQL parser-disagreement probe.
 #[derive(Debug, Clone)]
-pub struct GqlProbe {
+pub(crate) struct GqlProbe {
     pub kind: &'static str,
     pub description: &'static str,
     /// The full request body to POST (JSON-encoded GraphQL operation).
+    /// When [`Self::http_get`] is set, this instead holds the raw GraphQL
+    /// query string sent via `?query=` (no JSON wrapper, no POST body).
     pub body: String,
     /// Override Content-Type if non-default needed (e.g. GET-with-query
     /// uses application/graphql); blank string means
-    /// `application/json`.
+    /// `application/json`. Ignored when [`Self::http_get`] is set.
     pub content_type: &'static str,
+    /// Fire this probe as an HTTP GET with the query in the `?query=`
+    /// string instead of a POST body. Used by `get-shaped-query` so the
+    /// live fire genuinely exercises GraphQL-over-GET (the technique the
+    /// description claims), not a POST look-alike.
+    pub http_get: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct GqlDiffResult {
+pub(crate) struct GqlDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub probe_status: u16,
@@ -100,7 +106,7 @@ pub struct GqlDiffResult {
 
 /// The curated GraphQL probe set. Pure function, deterministic.
 #[must_use]
-pub fn generate_gql_variants() -> Vec<GqlProbe> {
+pub(crate) fn generate_gql_variants() -> Vec<GqlProbe> {
     vec![
         // ── Introspection leak ──
         GqlProbe {
@@ -110,6 +116,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  doesn't block `__schema` queries (common misconfiguration)",
             body: r#"{"query":"{ __schema { types { name fields { name } } } }"}"#.into(),
             content_type: "",
+            http_get: false,
         },
         GqlProbe {
             kind: "introspection-type",
@@ -118,6 +125,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  WAFs that match the literal `__schema` keyword miss this",
             body: r#"{"query":"{ __type(name:\"Query\") { fields { name type { name } } } }"}"#.into(),
             content_type: "",
+            http_get: false,
         },
         // ── Alias bombing ──
         GqlProbe {
@@ -127,6 +135,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  unique field references; rate-limited by op count, not field count",
             body: r#"{"query":"{ a:__typename b:__typename c:__typename d:__typename e:__typename f:__typename }"}"#.into(),
             content_type: "",
+            http_get: false,
         },
         // ── Batched operations ──
         GqlProbe {
@@ -136,6 +145,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  request, many origin operations. Breaks per-request rate limits.",
             body: r#"[{"query":"{ __typename }"},{"query":"{ __typename }"}]"#.into(),
             content_type: "",
+            http_get: false,
         },
         // ── Operation type confusion ──
         GqlProbe {
@@ -146,6 +156,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  declared type and misses the actual op",
             body: r#"{"query":"mutation { __typename }","operationName":null}"#.into(),
             content_type: "",
+            http_get: false,
         },
         // ── Field duplication ──
         GqlProbe {
@@ -155,6 +166,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  dedup silently; WAF sees two field references",
             body: r#"{"query":"{ __typename __typename }"}"#.into(),
             content_type: "",
+            http_get: false,
         },
         // ── Deeply nested fragments ──
         GqlProbe {
@@ -164,6 +176,7 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  limits; WAFs without cost analysis pass through",
             body: r#"{"query":"{ ... on Query { ... on Query { ... on Query { __typename } } } }"}"#.into(),
             content_type: "",
+            http_get: false,
         },
         // ── application/graphql Content-Type ──
         GqlProbe {
@@ -174,20 +187,22 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  see nothing; origins that support the alt CT execute normally.",
             body: "{ __typename }".into(),
             content_type: "application/graphql",
+            http_get: false,
         },
-        // ── GET-with-query (some servers support) ──
+        // ── GraphQL-over-GET (genuine body-parse bypass) ──
         GqlProbe {
             kind: "get-shaped-query",
             description:
-                "Same query but via the URL query string (?query=…). Not all \
-                 GraphQL servers honour GET; for those that do, WAF body-parse \
-                 rules don't fire.",
-            // Note: probe runs as POST with body containing the URL-encoded form.
-            // The actual GET-shape probe is generated by render_curl for the
-            // reproducer; the live fire still uses POST. Trade-off: keeping
-            // the prober single-method-aware for simplicity.
-            body: r#"{"query":"{ __typename }"}"#.into(),
+                "Same operation sent via HTTP GET with the query in the `?query=` \
+                 string instead of a POST body — WAF rules that inspect only POST \
+                 bodies never see it; GraphQL servers that honour GET (Apollo, \
+                 graphql-yoga with GET enabled) still execute it.",
+            // `http_get` makes the live fire a real GET ?query=<raw query>, so the
+            // probe exercises the technique its description claims (not a POST
+            // look-alike). `body` holds the raw query string (no JSON wrapper).
+            body: "{ __typename }".into(),
             content_type: "",
+            http_get: true,
         },
         // ── Operation-name spoofing ──
         GqlProbe {
@@ -198,11 +213,12 @@ pub fn generate_gql_variants() -> Vec<GqlProbe> {
                  actual op being executed",
             body: r#"{"query":"query SafeOp { __typename } query AdminOp { __typename }","operationName":"AdminOp"}"#.into(),
             content_type: "",
+            http_get: false,
         },
     ]
 }
 
-pub async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
+pub(crate) async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
@@ -248,7 +264,11 @@ pub async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = sem.clone().acquire_owned().await.unwrap();
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let url = url_arc.clone();
         let counter = counter.clone();
@@ -263,7 +283,13 @@ pub async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
             } else {
                 v.content_type
             };
-            let result = fire_gql(&http, &url, ct, &v.body).await;
+            let result = if v.http_get {
+                // Genuine GraphQL-over-GET: query rides the URL, no POST body.
+                let get_url = gql_get_url(&url, &v.body);
+                crate::parser_diff_common::fire_get_status_len(&http, &get_url).await
+            } else {
+                fire_gql(&http, &url, ct, &v.body).await
+            };
             counter.fetch_add(1, Ordering::SeqCst);
             (v, ct, result)
         }));
@@ -279,6 +305,7 @@ pub async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
                     description: "tokio join failed",
                     body: String::new(),
                     content_type: "",
+                    http_get: false,
                 },
                 "application/json",
                 Err(format!("{e}")),
@@ -288,7 +315,14 @@ pub async fn run_gql_diff(mut args: GqlDiffArgs) -> ExitCode {
             Ok((probe_status, probe_body_len)) => {
                 let body_delta = body_delta_pct(baseline_body_len, probe_body_len);
                 let severity = severity_of(baseline_status, probe_status, body_delta);
-                let curl_cmd = render_curl(&args.url, ct, &variant.body);
+                let curl_cmd = if variant.http_get {
+                    format!(
+                        "curl -i {}",
+                        crate::helpers::shell_single_quote(&gql_get_url(&args.url, &variant.body))
+                    )
+                } else {
+                    render_curl(&args.url, ct, &variant.body)
+                };
                 results.push(GqlDiffResult {
                     kind: variant.kind,
                     description: variant.description,
@@ -323,19 +357,50 @@ async fn fire_gql(
         .await
         .map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    // §15 OOM / decompression-bomb: cap the body read.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok((status, body.len()))
 }
 
 crate::impl_parser_diff_http_args!(GqlDiffArgs);
 
 fn render_curl(url: &str, content_type: &str, body: &str) -> String {
-    format!(
-        "curl -i -X POST -H {} --data {} {}",
-        shell_single_quote(&format!("Content-Type: {content_type}")),
-        shell_single_quote(body),
-        shell_single_quote(url)
+    crate::helpers::render_simple_curl(
+        Some("POST"),
+        url,
+        &[],
+        Some((content_type, body.as_bytes())),
     )
+}
+
+/// Build a GraphQL-over-GET URL: `base?query=<percent-encoded raw query>`.
+/// Uses `Url::query_pairs_mut` so the query value is correctly encoded and
+/// survives to the wire. `base` is always parseable here (the runner
+/// normalises it first); the fallback percent-encodes the RFC 3986
+/// unreserved set for the (unreachable) unparseable case rather than
+/// emitting an invalid URL.
+fn gql_get_url(base: &str, raw_query: &str) -> String {
+    match reqwest::Url::parse(base) {
+        Ok(mut u) => {
+            u.query_pairs_mut().clear().append_pair("query", raw_query);
+            u.to_string()
+        }
+        Err(_) => {
+            let trimmed = base.split_once('?').map_or(base, |(b, _)| b);
+            let mut enc = String::with_capacity(raw_query.len() * 3);
+            for b in raw_query.bytes() {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                        enc.push(b as char);
+                    }
+                    _ => enc.push_str(&format!("%{b:02X}")),
+                }
+            }
+            format!("{trimmed}?query={enc}")
+        }
+    }
 }
 
 fn emit_output(
@@ -345,8 +410,7 @@ fn emit_output(
     baseline_body_len: usize,
     errors: u32,
 ) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
@@ -355,10 +419,7 @@ fn emit_output(
             "baseline_body_len": baseline_body_len,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high":   high.len(),
-                "medium": medium.len(),
-            },
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -366,14 +427,12 @@ fn emit_output(
     }
 
     if !args.quiet {
-        println!();
-        println!(
-            "  {} {} divergence(s) — {} high, {} medium · {} error(s)",
-            "[wafrift gql-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
-            errors
+        crate::parser_diff_common::print_text_summary(
+            "gql-diff",
+            "divergence(s)",
+            high,
+            medium,
+            errors,
         );
     }
 
@@ -381,14 +440,12 @@ fn emit_output(
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
         println!("  [{badge}] {} — {}", r.kind.bold(), r.description);
-        println!(
-            "    {} baseline HTTP {} ({} bytes) → probe HTTP {} ({} bytes, Δ {:+.1}%)",
-            "↘".bright_black(),
+        crate::parser_diff_common::print_baseline_probe_arrow(
             r.baseline_status,
             r.baseline_body_len,
             r.probe_status,
             r.probe_body_len,
-            r.body_delta_pct
+            r.body_delta_pct,
         );
         println!("    {}", r.curl_cmd);
     }
@@ -397,6 +454,74 @@ fn emit_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §5/§10/§11 regression: `get-shaped-query` must be a REAL GraphQL-over-GET
+    /// probe (the technique its description claims), not a POST look-alike. Pre-fix
+    /// it fired a POST with body `{"query":"{ __typename }"}` — identical to the
+    /// baseline — yet the operator-facing text promised a `?query=` GET test.
+    #[test]
+    fn get_shaped_query_is_a_real_get_with_raw_query_body() {
+        let probe = generate_gql_variants()
+            .into_iter()
+            .find(|p| p.kind == "get-shaped-query")
+            .expect("get-shaped-query probe present");
+        assert!(
+            probe.http_get,
+            "must be marked http_get so the live fire is a GET"
+        );
+        // Body is the RAW query string (no JSON wrapper) — it rides ?query=.
+        assert_eq!(probe.body, "{ __typename }");
+        assert!(
+            !probe.body.contains("\"query\""),
+            "GET probe body must be the raw query, not a JSON-wrapped POST body: {:?}",
+            probe.body
+        );
+    }
+
+    /// Every other probe stays a POST (only the GET-shaped one flips the flag),
+    /// so the change is surgical and the rest of the family is unaffected.
+    #[test]
+    fn only_get_shaped_query_uses_http_get() {
+        for p in generate_gql_variants() {
+            assert_eq!(
+                p.http_get,
+                p.kind == "get-shaped-query",
+                "only get-shaped-query may be http_get; {} had http_get={}",
+                p.kind,
+                p.http_get
+            );
+        }
+    }
+
+    #[test]
+    fn gql_get_url_encodes_query_into_the_query_string() {
+        let url = gql_get_url("https://api.test/graphql", "{ __typename }");
+        assert!(
+            url.starts_with("https://api.test/graphql?query="),
+            "got {url}"
+        );
+        // Braces percent-encoded, space form-encoded ('+' or %20) — never raw.
+        assert!(
+            !url.contains('{') && !url.contains('}'),
+            "braces must be encoded: {url}"
+        );
+        assert!(url.contains("__typename"));
+    }
+
+    #[test]
+    fn gql_get_url_replaces_any_pre_existing_query() {
+        // `clear()` must drop a stale query so we don't double-up ?query=.
+        let url = gql_get_url("https://api.test/graphql?foo=bar", "{ __typename }");
+        assert!(
+            !url.contains("foo=bar"),
+            "pre-existing query must be cleared: {url}"
+        );
+        assert_eq!(
+            url.matches("query=").count(),
+            1,
+            "exactly one query= param: {url}"
+        );
+    }
 
     #[test]
     fn generate_gql_variants_returns_non_empty_curated_set() {
@@ -474,7 +599,9 @@ mod tests {
             out.contains("'Content-Type: application/json'"),
             "got: {out}"
         );
-        assert!(out.contains("--data '{\"q\":1}'"), "got: {out}");
+        // render_simple_curl always uses --data-binary so binary bodies
+        // don't get NL-stripped by curl's --data processing.
+        assert!(out.contains("--data-binary '{\"q\":1}'"), "got: {out}");
     }
 
     async fn spawn_gql_mock() -> std::net::SocketAddr {
@@ -520,7 +647,7 @@ mod tests {
             delay_ms: 0,
             concurrency: 4,
             // 30s: Windows loopback + starved current_thread runtime.
-            timeout_secs: 30,
+            timeout_secs: wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             insecure: false,
             proxy: None,
             header: Vec::new(),

@@ -78,10 +78,8 @@ base64 = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "stream", "json", "system-proxy"] }
 # Dev-only — used by tests/bogon_scanclient_parity.rs to assert
 # wafrift_types::bogon and scanclient::bogon agree byte-for-byte on
-# every IP they classify. Twin implementations live in both crates
-# because forcing scanclient (reqwest tree) into wafrift-types
-# would balloon every wafrift compile. Drift fails CI here.
-scanclient = { path = "../../../../libs/scanner/scanclient" }
+# every IP they classify. Drift fails CI here.
+scanclient = { workspace = true }
 
 [features]
 default = ["clipboard"]

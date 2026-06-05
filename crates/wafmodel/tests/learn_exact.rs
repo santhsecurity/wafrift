@@ -229,7 +229,7 @@ fn alphabet_accessors_are_exact() {
     let a = Alphabet::new(vec![b'b', b'a', b'b'], b'Z');
     assert_eq!(
         a.raw_symbols(),
-        &[b'a', b'b', b'Z'][..],
+        *b"abZ",
         "raw_symbols must be the exact sorted+dedup table then catch-all"
     );
     assert!(!a.is_empty(), "a constructed alphabet is never empty");

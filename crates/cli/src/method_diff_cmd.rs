@@ -27,11 +27,10 @@ use reqwest::{Client, Method};
 use serde_json::json;
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
 use crate::parser_diff_common::{body_delta_pct, severity_of};
 
 #[derive(Args, Debug)]
-pub struct MethodDiffArgs {
+pub(crate) struct MethodDiffArgs {
     /// Target URL.
     pub url: String,
 
@@ -73,14 +72,14 @@ pub struct MethodDiffArgs {
 /// others are WebDAV (RFC 4918, RFC 3253); a couple are intentionally
 /// non-standard to catch parsers that accept any token.
 #[derive(Debug, Clone)]
-pub struct MethodProbe {
+pub(crate) struct MethodProbe {
     pub kind: &'static str,
     pub description: &'static str,
     pub method: &'static str,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct MethodDiffResult {
+pub(crate) struct MethodDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub method: &'static str,
@@ -96,7 +95,7 @@ pub struct MethodDiffResult {
 /// Curated method-variant set. Order is stable across runs (operators
 /// pin by index).
 #[must_use]
-pub fn generate_method_variants() -> Vec<MethodProbe> {
+pub(crate) fn generate_method_variants() -> Vec<MethodProbe> {
     vec![
         // ── Standard RFC 7231 verbs (other than baseline GET) ──
         MethodProbe {
@@ -187,7 +186,7 @@ pub fn generate_method_variants() -> Vec<MethodProbe> {
     ]
 }
 
-pub async fn run_method_diff(mut args: MethodDiffArgs) -> ExitCode {
+pub(crate) async fn run_method_diff(mut args: MethodDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
@@ -231,7 +230,11 @@ pub async fn run_method_diff(mut args: MethodDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = sem.clone().acquire_owned().await.unwrap();
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let url = url_arc.clone();
         let counter = counter.clone();
@@ -299,14 +302,17 @@ async fn fire_with_method(
         .await
         .map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    // §15 OOM / decompression-bomb: cap the body read.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok((status, body.len()))
 }
 
 crate::impl_parser_diff_http_args!(MethodDiffArgs);
 
 fn render_curl(method: &str, url: &str) -> String {
-    format!("curl -i -X {method} {}", shell_single_quote(url))
+    crate::helpers::render_simple_curl(Some(method), url, &[], None)
 }
 
 fn emit_output(
@@ -316,8 +322,7 @@ fn emit_output(
     baseline_body_len: usize,
     errors: u32,
 ) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
@@ -326,10 +331,7 @@ fn emit_output(
             "baseline_body_len": baseline_body_len,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high": high.len(),
-                "medium": medium.len(),
-            },
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -337,14 +339,12 @@ fn emit_output(
     }
 
     if !args.quiet {
-        println!();
-        println!(
-            "  {} {} divergence(s) — {} high, {} medium · {} error(s)",
-            "[wafrift method-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
-            errors
+        crate::parser_diff_common::print_text_summary(
+            "method-diff",
+            "divergence(s)",
+            high,
+            medium,
+            errors,
         );
     }
 

@@ -4,7 +4,7 @@
 //! ML evader output preserves payload semantics, backwards-compat
 //! (existing strategy paths untouched).
 
-use wafrift_strategy::{DEFAULT_ML_BUDGET, apply_ml_evasion_if_applicable, evade_ml_backed};
+use wafrift_strategy::{DEFAULT_ML_BUDGET, apply_ml_evasion_if_applicable};
 use wafrift_types::{EvasionConfig, Request, Technique, WafClass};
 
 // ── Test 1: AwsBotControl fingerprint routes through evade_ml ─────────────────
@@ -19,17 +19,17 @@ fn aws_bot_control_routes_through_ml_evasion() {
     )
     .header("Content-Type", "application/x-www-form-urlencoded");
 
-    // With budget=1 there may not be a bypass — we're checking routing, not outcome.
-    let result = evade_ml_backed(&req, "AWS Bot Control", 64, 1);
+    // Routing check (not outcome): an ML-backed WAF either yields techniques
+    // (carrying MlEvasion) or none — never panics.
+    let (_mutated, techniques) = apply_ml_evasion_if_applicable(&req, "AWS Bot Control", 64, 1);
 
-    // If Some, must carry MlEvasion technique.
-    if let Some(evasion_result) = result {
+    if !techniques.is_empty() {
         assert!(
-            evasion_result.techniques.iter().any(|t| matches!(t, Technique::MlEvasion { .. })),
+            techniques.iter().any(|t| matches!(t, Technique::MlEvasion { .. })),
             "ML evasion result must carry MlEvasion technique"
         );
     }
-    // None is also correct (conservative oracle may not find a bypass in budget).
+    // Empty is also correct (manifold rejected all mutations in budget).
 }
 
 // ── Test 2: PlainModSec does NOT route through evade_ml ───────────────────────
@@ -39,9 +39,10 @@ fn plain_modsec_does_not_route_through_ml() {
     let req = Request::post("https://example.com/", b"q=' OR 1=1--".to_vec())
         .header("Content-Type", "application/x-www-form-urlencoded");
 
-    let result = evade_ml_backed(&req, "ModSecurity", DEFAULT_ML_BUDGET, 0);
+    let (_mutated, techniques) =
+        apply_ml_evasion_if_applicable(&req, "ModSecurity", DEFAULT_ML_BUDGET, 0);
     assert!(
-        result.is_none(),
+        techniques.is_empty(),
         "PlainModSec must not route through ML evasion"
     );
 }
@@ -98,15 +99,27 @@ fn ml_evasion_technique_carries_metadata() {
     let req = Request::post("https://example.com/", b"q=<script>alert(1)</script>".to_vec())
         .header("Content-Type", "application/x-www-form-urlencoded");
 
-    let result = evade_ml_backed(&req, "Cloudflare Bot Management", 64, 77);
+    // ML-backed + an on-manifold payload ⇒ a structural mutation is produced.
+    let (_mutated, techniques) =
+        apply_ml_evasion_if_applicable(&req, "Cloudflare Bot Management", 256, 77);
+    assert!(!techniques.is_empty(), "ML-backed + on-manifold payload must mutate");
 
-    if let Some(evasion_result) = result {
-        for tech in &evasion_result.techniques {
-            if let Technique::MlEvasion { queries, .. } = tech {
-                assert!(*queries > 0, "queries counter must be > 0 when evasion ran");
-            }
-        }
-    }
+    let queries = techniques
+        .iter()
+        .find_map(|t| match t {
+            Technique::MlEvasion { queries, .. } => Some(*queries),
+            _ => None,
+        })
+        .expect("result must carry an MlEvasion technique");
+
+    // Contract: the strategy layer is I/O-free, so it queries NO live oracle —
+    // `queries` is 0 by design (the live queries belong to the scan/bench
+    // layer that fires the mutated candidate). Pins the new semantics and
+    // guards against a regression to the old fake-oracle query counter.
+    assert_eq!(
+        queries, 0,
+        "the I/O-free strategy layer must report 0 live oracle queries"
+    );
 }
 
 // ── Test 6: Akamai Bot Manager routes through ML evasion ─────────────────────
@@ -122,7 +135,7 @@ fn akamai_bot_manager_is_ml_backed() {
         .header("Content-Type", "application/x-www-form-urlencoded");
 
     // Must not panic regardless of outcome.
-    let _ = evade_ml_backed(&req, "Akamai Bot Manager", 32, 55);
+    let _ = apply_ml_evasion_if_applicable(&req, "Akamai Bot Manager", 32, 55);
 }
 
 // ── Test 7: No body → ML evasion is a no-op ──────────────────────────────────

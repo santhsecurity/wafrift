@@ -9,20 +9,8 @@
 //!
 //! No mocks, no external connections — all tests exit before any I/O.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // import-curl
@@ -42,10 +30,22 @@ fn import_curl_appears_in_main_help() {
 fn import_curl_help_exits_0_and_documents_flags() {
     let (code, stdout, _) = wafrift(&["import-curl", "--help"]);
     assert_eq!(code, 0, "import-curl --help must exit 0");
-    assert!(stdout.contains("--curl-file"), "must document --curl-file: {stdout}");
-    assert!(stdout.contains("--from-stdin"), "must document --from-stdin: {stdout}");
-    assert!(stdout.contains("--payload"), "must document --payload: {stdout}");
-    assert!(stdout.contains("--format"), "must document --format: {stdout}");
+    assert!(
+        stdout.contains("--curl-file"),
+        "must document --curl-file: {stdout}"
+    );
+    assert!(
+        stdout.contains("--from-stdin"),
+        "must document --from-stdin: {stdout}"
+    );
+    assert!(
+        stdout.contains("--payload"),
+        "must document --payload: {stdout}"
+    );
+    assert!(
+        stdout.contains("--format"),
+        "must document --format: {stdout}"
+    );
 }
 
 #[test]
@@ -57,12 +57,8 @@ fn import_curl_from_stdin_and_curl_file_are_mutually_exclusive() {
         std::fs::write(&p, "curl https://example.com/").unwrap_or(());
         p.to_str().unwrap().to_string()
     };
-    let (code, _stdout, stderr) = wafrift(&[
-        "import-curl",
-        "--from-stdin",
-        "--curl-file",
-        &fake_file,
-    ]);
+    let (code, _stdout, stderr) =
+        wafrift(&["import-curl", "--from-stdin", "--curl-file", &fake_file]);
     assert_eq!(
         code, 2,
         "--from-stdin and --curl-file must be mutually exclusive (exit 2); stderr: {stderr}"
@@ -71,11 +67,8 @@ fn import_curl_from_stdin_and_curl_file_are_mutually_exclusive() {
 
 #[test]
 fn import_curl_positional_and_from_stdin_are_mutually_exclusive() {
-    let (code, _stdout, _stderr) = wafrift(&[
-        "import-curl",
-        "curl https://example.com/",
-        "--from-stdin",
-    ]);
+    let (code, _stdout, _stderr) =
+        wafrift(&["import-curl", "curl https://example.com/", "--from-stdin"]);
     assert_eq!(
         code, 2,
         "positional curl arg and --from-stdin must be mutually exclusive (exit 2)"
@@ -88,8 +81,14 @@ fn import_curl_nonexistent_curl_file_exits_nonzero() {
     p.push("wafrift_import_curl_e2e_nonexistent.txt");
     let _ = std::fs::remove_file(&p);
     let (code, _stdout, stderr) = wafrift(&["import-curl", "--curl-file", p.to_str().unwrap()]);
-    assert_ne!(code, 0, "nonexistent --curl-file must exit non-zero; stderr: {stderr}");
-    assert!(!stderr.is_empty(), "missing curl file must emit error message");
+    assert_ne!(
+        code, 0,
+        "nonexistent --curl-file must exit non-zero; stderr: {stderr}"
+    );
+    assert!(
+        !stderr.is_empty(),
+        "missing curl file must emit error message"
+    );
 }
 
 #[test]
@@ -151,7 +150,6 @@ fn origin_hints_help_exits_0() {
 #[test]
 fn origin_hints_invalid_format_exits_nonzero() {
     // Clap value_parser rejects invalid format strings.
-    let (code, _stdout, _stderr) =
-        wafrift(&["origin-hints", "example.com", "--format", "toml"]);
+    let (code, _stdout, _stderr) = wafrift(&["origin-hints", "example.com", "--format", "toml"]);
     assert_ne!(code, 0, "--format toml must exit non-zero (invalid value)");
 }

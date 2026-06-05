@@ -31,12 +31,20 @@ pub fn deserialize(bytes: &[u8]) -> String {
     if bytes.len() < 5 {
         return String::new();
     }
-    // Skip compression flag (1 byte) and length (4 bytes)
+    // Skip compression flag (1 byte) and length (4 bytes). `len` is a u32
+    // so `5 + len` cannot overflow on a 64-bit usize, but a 32-bit target
+    // would wrap (u32::MAX + 5 > usize::MAX) and slip a bogus range past the
+    // bound check into the inner slice. `checked_add` fails closed, matching
+    // the protobuf and messagepack sibling decoders so the whole format
+    // family handles a hostile length field identically.
     let len = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
-    if bytes.len() < 5 + len {
+    let Some(end) = 5usize.checked_add(len) else {
+        return String::new();
+    };
+    if bytes.len() < end {
         return String::new();
     }
-    super::protobuf::deserialize(&bytes[5..5 + len])
+    super::protobuf::deserialize(&bytes[5..end])
 }
 
 #[cfg(test)]
@@ -83,6 +91,17 @@ mod tests {
         // Header claims 100 bytes but only 5 bytes total.
         let mut b = vec![0x00u8, 0x00, 0x00, 0x00, 100];
         b.extend_from_slice(b"hi");
+        assert_eq!(deserialize(&b), "");
+    }
+
+    #[test]
+    fn deserialize_max_u32_length_fails_closed_no_panic() {
+        // Adversarial: a frame whose 4-byte length field is u32::MAX. On a
+        // 32-bit target `5 + len` would wrap and slip past the bound check
+        // into a bogus inner slice; the `checked_add` guard fails closed on
+        // every target. Must return empty, never panic. (Decoder-family
+        // parity with protobuf/messagepack's hostile-length handling.)
+        let b = vec![0x00u8, 0xFF, 0xFF, 0xFF, 0xFF, b'x', b'y'];
         assert_eq!(deserialize(&b), "");
     }
 

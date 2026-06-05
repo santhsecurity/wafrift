@@ -597,4 +597,275 @@ mod tests {
         let fields = decode_string_fields(proto_body).expect("fields");
         assert_eq!(String::from_utf8(fields[0].1.clone()).unwrap(), payload);
     }
+
+    // ── Anti-rig: pin the gRPC frame header constants ───────────────────
+
+    /// Anti-rig: the compression flag byte MUST be 0 (uncompressed).
+    /// Any change that starts emitting 1 here is a silent protocol
+    /// compatibility break — the origin's gRPC stub will try to
+    /// decompress the body and produce garbage.
+    #[test]
+    fn wrap_in_grpc_frame_compression_flag_is_always_zero() {
+        for size in [0, 1, 100, 1024] {
+            let payload: Vec<u8> = (0u8..=255).cycle().take(size).collect();
+            let frame = wrap_in_grpc_frame(&payload);
+            assert_eq!(
+                frame[0], 0,
+                "compression flag must be 0 for size={size}"
+            );
+        }
+    }
+
+    /// Anti-rig: frame header is exactly 5 bytes (RFC gRPC spec §5.1).
+    /// If someone grows or shrinks it, every downstream decoder breaks.
+    #[test]
+    fn grpc_frame_header_length_is_exactly_5() {
+        let frame = wrap_in_grpc_frame(&[]);
+        assert_eq!(frame.len(), 5, "empty payload frame must be exactly 5 bytes");
+    }
+
+    // ── varint encode/decode edge cases ─────────────────────────────────
+
+    #[test]
+    fn varint_zero_encodes_to_single_byte() {
+        let encoded = encode_varint(0);
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0], 0x00);
+        let (decoded, offset) = decode_varint(&encoded, 0).unwrap();
+        assert_eq!(decoded, 0);
+        assert_eq!(offset, 1);
+    }
+
+    #[test]
+    fn varint_127_fits_in_one_byte() {
+        let encoded = encode_varint(127);
+        assert_eq!(encoded.len(), 1, "127 must fit in one varint byte");
+        assert_eq!(encoded[0], 0x7F);
+    }
+
+    #[test]
+    fn varint_128_requires_two_bytes() {
+        let encoded = encode_varint(128);
+        assert_eq!(encoded.len(), 2, "128 requires 2 varint bytes");
+        // First byte: 0x80 (continuation bit set, value bits = 0)
+        assert_eq!(encoded[0] & 0x80, 0x80);
+    }
+
+    #[test]
+    fn varint_u64_max_encodes_and_decodes() {
+        let v = u64::MAX;
+        let encoded = encode_varint(v);
+        // u64::MAX needs 10 bytes in varint encoding.
+        assert_eq!(encoded.len(), 10);
+        let (decoded, _) = decode_varint(&encoded, 0).unwrap();
+        assert_eq!(decoded, v);
+    }
+
+    #[test]
+    fn varint_decode_empty_returns_none() {
+        assert!(decode_varint(&[], 0).is_none());
+    }
+
+    #[test]
+    fn varint_decode_past_end_returns_none() {
+        let encoded = encode_varint(300);
+        // Starting offset past the end.
+        assert!(decode_varint(&encoded, 999).is_none());
+    }
+
+    // ── field_tag correctness ────────────────────────────────────────────
+
+    /// Anti-rig: field 1, wire type 2 tag must be exactly 0x0A.
+    /// This is the standard protobuf field-1 string tag — thousands of
+    /// generated protobuf clients expect it. Changing it silently breaks
+    /// interop.
+    #[test]
+    fn field_tag_field1_wiretype2_is_0x0a() {
+        let tag = field_tag(1, 2);
+        assert_eq!(tag, vec![0x0Au8], "field 1 wire-type 2 must encode as 0x0A");
+    }
+
+    #[test]
+    fn field_tag_field2_wiretype2_is_0x12() {
+        let tag = field_tag(2, 2);
+        assert_eq!(tag, vec![0x12u8]);
+    }
+
+    #[test]
+    fn field_tag_field15_wiretype2_single_byte() {
+        // Field 15 fits in 1-byte tag: (15 << 3) | 2 = 122 = 0x7A
+        let tag = field_tag(15, 2);
+        assert_eq!(tag, vec![0x7Au8]);
+    }
+
+    #[test]
+    fn field_tag_field16_wiretype2_two_bytes() {
+        // Field 16: (16 << 3) | 2 = 130 → needs 2 varint bytes
+        let tag = field_tag(16, 2);
+        assert_eq!(tag.len(), 2);
+    }
+
+    // ── decode_grpc_frame error variants ─────────────────────────────────
+
+    #[test]
+    fn decode_grpc_frame_empty_returns_too_short() {
+        let err = decode_grpc_frame(&[]).unwrap_err();
+        assert!(matches!(err, GrpcFrameError::FrameTooShort { got: 0, need: 5 }));
+    }
+
+    #[test]
+    fn decode_grpc_frame_4_bytes_returns_too_short() {
+        let err = decode_grpc_frame(&[0, 0, 0, 0]).unwrap_err();
+        assert!(matches!(err, GrpcFrameError::FrameTooShort { got: 4, need: 5 }));
+    }
+
+    #[test]
+    fn decode_grpc_frame_exact_5_bytes_with_zero_len_succeeds() {
+        // Header only, declared length 0 → empty payload slice.
+        let frame = [0u8, 0, 0, 0, 0];
+        let (compression, len, body) = decode_grpc_frame(&frame).expect("must succeed");
+        assert_eq!(compression, 0);
+        assert_eq!(len, 0);
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn grpc_frame_error_display_mentions_byte_counts() {
+        let err = GrpcFrameError::FrameTooShort { got: 3, need: 5 };
+        let msg = err.to_string();
+        assert!(msg.contains('3'), "got count missing from error message: {msg}");
+        assert!(msg.contains('5'), "need count missing from error message: {msg}");
+    }
+
+    #[test]
+    fn grpc_frame_error_length_mismatch_display() {
+        let err = GrpcFrameError::LengthMismatch { declared: 999, available: 4 };
+        let msg = err.to_string();
+        assert!(msg.contains("999"), "declared length missing: {msg}");
+        assert!(msg.contains('4'), "available length missing: {msg}");
+    }
+
+    // ── decode_string_fields edge cases ─────────────────────────────────
+
+    #[test]
+    fn decode_string_fields_empty_buffer_returns_empty_vec() {
+        let fields = decode_string_fields(&[]).unwrap();
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn decode_string_fields_rejects_truncated_varint() {
+        // A single 0x80 byte means "continuation" but there's no next byte.
+        let result = decode_string_fields(&[0x80]);
+        assert!(result.is_none(), "truncated varint must return None");
+    }
+
+    #[test]
+    fn decode_string_fields_rejects_declared_len_beyond_buffer() {
+        // Field 1, wire type 2, declared length 100, but only 3 bytes of payload.
+        let mut buf = vec![0x0Au8]; // tag: field 1, wire 2
+        buf.extend_from_slice(&encode_varint(100)); // claims 100 bytes
+        buf.extend_from_slice(b"abc"); // only 3
+        let result = decode_string_fields(&buf);
+        assert!(result.is_none());
+    }
+
+    // ── split_attack_across_fields edge cases ────────────────────────────
+
+    #[test]
+    fn split_255_fields_covers_all_field_numbers() {
+        // 255 is max u8, but field numbers go to 2^29; use a small payload
+        // so we don't OOM on tiny per-field bytes.
+        let payload = "x".repeat(255);
+        let frame = split_attack_across_fields(&payload, 255);
+        let (_, _, proto_body) = decode_grpc_frame(&frame).expect("decode");
+        let fields = decode_string_fields(proto_body).expect("fields");
+        assert_eq!(fields.len(), 255);
+        let reconstructed: String = fields
+            .iter()
+            .map(|(_, b)| String::from_utf8(b.clone()).unwrap())
+            .collect();
+        assert_eq!(reconstructed, payload);
+    }
+
+    #[test]
+    fn split_payload_shorter_than_field_count_pads_with_empty_last_fields() {
+        // 2-byte payload split across 5 fields — 3 fields must be empty.
+        let payload = "ab";
+        let frame = split_attack_across_fields(payload, 5);
+        let (_, _, proto_body) = decode_grpc_frame(&frame).expect("decode");
+        let fields = decode_string_fields(proto_body).expect("fields");
+        let reconstructed: String = fields
+            .iter()
+            .map(|(_, b)| String::from_utf8(b.clone()).unwrap())
+            .collect();
+        assert_eq!(reconstructed, payload, "payload not preserved when shorter than field count");
+    }
+
+    // ── embed_attack_in_nested depth boundaries ──────────────────────────
+
+    #[test]
+    fn nested_depth_255_valid_frame_and_no_panic() {
+        let payload = "test";
+        // 255 nesting levels is adversarial — must not panic or OOM.
+        let frame = embed_attack_in_nested(payload, 255);
+        let result = decode_grpc_frame(&frame);
+        assert!(result.is_ok(), "depth-255 frame must decode without error");
+    }
+
+    #[test]
+    fn nested_depth_increases_monotonically_with_depth() {
+        let payload = "attack payload";
+        let sizes: Vec<usize> = (0..=10u8).map(|d| embed_attack_in_nested(payload, d).len()).collect();
+        for i in 1..sizes.len() {
+            assert!(
+                sizes[i] > sizes[i - 1],
+                "depth {i} frame ({}) must be larger than depth {} frame ({})",
+                sizes[i], i - 1, sizes[i - 1]
+            );
+        }
+    }
+
+    // ── Concurrent encoding safety ───────────────────────────────────────
+
+    /// All encoding functions are pure — they must produce identical output
+    /// when called from multiple threads on the same input simultaneously.
+    #[test]
+    fn concurrent_embed_attack_is_deterministic() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let payload = "UNION SELECT 1,2,3--".to_string();
+        let reference = embed_attack_in_message(&payload);
+        let reference = Arc::new(reference);
+        let barrier = Arc::new(Barrier::new(8));
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let p = payload.clone();
+                let r = reference.clone();
+                let b = barrier.clone();
+                thread::spawn(move || {
+                    b.wait();
+                    let result = embed_attack_in_message(&p);
+                    assert_eq!(result, *r, "concurrent call produced different output");
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().expect("thread must not panic");
+        }
+    }
+
+    /// Boundary: empty payload encodes and decodes back to empty.
+    #[test]
+    fn embed_attack_empty_payload_round_trips() {
+        let frame = embed_attack_in_message("");
+        let (_, _, proto_body) = decode_grpc_frame(&frame).expect("decode");
+        let fields = decode_string_fields(proto_body).expect("fields");
+        // Field 1 exists with empty value.
+        assert_eq!(fields.len(), 1);
+        assert!(fields[0].1.is_empty());
+    }
 }

@@ -15,20 +15,8 @@
 //! 8. `techniques list --help` exits 0.
 //! 9. `techniques explain --help` exits 0.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ── Help surface ──────────────────────────────────────────────────────────
 
@@ -99,11 +87,7 @@ fn techniques_list_contains_known_encoding_selectors() {
     let (code, stdout, stderr) = wafrift(&["techniques", "list"]);
     assert_eq!(code, 0, "techniques list must exit 0; stderr: {stderr}");
     // A few canonical selectors must be present in the catalogue.
-    for selector in [
-        "encoding/url",
-        "encoding/base64",
-        "encoding/html",
-    ] {
+    for selector in ["encoding/url", "encoding/base64", "encoding/html"] {
         assert!(
             stdout.contains(selector),
             "technique tree must contain '{selector}': {stdout}"
@@ -115,9 +99,11 @@ fn techniques_list_contains_known_encoding_selectors() {
 
 #[test]
 fn techniques_explain_valid_selector_exits_0() {
-    let (code, stdout, stderr) =
-        wafrift(&["techniques", "explain", "encoding/url/single"]);
-    assert_eq!(code, 0, "techniques explain valid selector must exit 0; stderr: {stderr}");
+    let (code, stdout, stderr) = wafrift(&["techniques", "explain", "encoding/url/single"]);
+    assert_eq!(
+        code, 0,
+        "techniques explain valid selector must exit 0; stderr: {stderr}"
+    );
     assert!(
         !stdout.trim().is_empty(),
         "explain must produce output for a valid selector: {stderr}"
@@ -131,12 +117,8 @@ fn techniques_explain_valid_selector_exits_0() {
 
 #[test]
 fn techniques_explain_invalid_prefix_exits_2() {
-    let (code, _stdout, stderr) =
-        wafrift(&["techniques", "explain", "notaprefix/something"]);
-    assert_eq!(
-        code, 2,
-        "invalid prefix must exit 2; stderr: {stderr}"
-    );
+    let (code, _stdout, stderr) = wafrift(&["techniques", "explain", "notaprefix/something"]);
+    assert_eq!(code, 2, "invalid prefix must exit 2; stderr: {stderr}");
     assert!(
         stderr.contains("selector") || stderr.contains("tamper") || stderr.contains("encoding"),
         "error must hint at valid prefixes; stderr: {stderr}"

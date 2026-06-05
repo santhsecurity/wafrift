@@ -13,20 +13,8 @@
 //! 7. `man --sub nonexistent` exits non-zero with an error.
 //! 8. `man --output <temp-file>` writes the page to a file.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 fn unique_temp_path(suffix: &str) -> std::path::PathBuf {
     let mut p = std::env::temp_dir();
@@ -149,5 +137,8 @@ fn man_output_to_file_writes_troff_content() {
         "man --output file must not be empty"
     );
     let is_troff = content.contains(".TH ") || content.contains(".ie ") || content.contains(".SH ");
-    assert!(is_troff, "man --output file must be troff format: {content}");
+    assert!(
+        is_troff,
+        "man --output file must be troff format: {content}"
+    );
 }

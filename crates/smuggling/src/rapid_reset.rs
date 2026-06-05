@@ -82,17 +82,10 @@ fn hpack_string_length(len: usize) -> Vec<u8> {
 }
 
 fn minimal_headers_payload(authority: &str) -> Vec<u8> {
-    let mut buf = Vec::new();
-    // :method: GET  — static table index 2, fully indexed (0x82)
-    buf.push(0x82);
-    // :path: /      — static table index 4 (0x84)
-    buf.push(0x84);
-    // :scheme: https — static table index 7 (0x87)
-    buf.push(0x87);
-    // :authority — static table index 1 is name-only entry ":authority".
-    // Literal header field never indexed (0x10), name index = 1 (0x01).
-    buf.push(0x10); // never-indexed literal, name = static index
-    buf.push(0x01); // static index 1 = :authority
+    // Static-table indexed entries: :method GET (0x82), :path / (0x84),
+    // :scheme https (0x87). Then a literal-never-indexed (0x10) with
+    // name index 1 (0x01 = :authority), value follows below.
+    let mut buf = vec![0x82, 0x84, 0x87, 0x10, 0x01];
     // Value length encoded as HPACK 7-bit prefix varint (RFC 7541 §5.2).
     // Pre-fix: `auth_bytes.len() as u8` truncated silently for authority
     // strings > 255 bytes, producing a corrupt HPACK block — the length

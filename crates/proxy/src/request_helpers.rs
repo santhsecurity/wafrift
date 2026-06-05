@@ -142,4 +142,57 @@ mod tests {
         // fallback path which produces "internal error").
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
+
+    // -- §12 boundary tests -------------------------------------------------
+
+    #[test]
+    fn split_url_query_string_without_path_returns_none() {
+        // A URL like `https://host?query` has no `/` in the authority
+        // portion — there is nothing to split the path at.
+        assert_eq!(split_url_for_mutation("https://host?query"), None);
+    }
+
+    #[test]
+    fn split_url_path_with_fragment_included_in_path_segment() {
+        // Fragment is part of the path-and-query component from the
+        // mutation perspective; the split must not lose it.
+        let (origin, path) =
+            split_url_for_mutation("https://example.com/page#section").expect("split ok");
+        assert_eq!(origin, "https://example.com");
+        assert_eq!(path, "/page#section");
+    }
+
+    #[test]
+    fn split_url_deep_path_preserves_all_segments() {
+        let (origin, path) =
+            split_url_for_mutation("https://api.example.com/v1/users/42/profile?fmt=json")
+                .expect("split ok");
+        assert_eq!(origin, "https://api.example.com");
+        assert_eq!(path, "/v1/users/42/profile?fmt=json");
+    }
+
+    #[test]
+    fn header_value_to_string_ascii_only() {
+        let v = HeaderValue::from_static("gzip, deflate");
+        let s = header_value_to_string("accept-encoding", &v);
+        assert_eq!(s, "gzip, deflate");
+    }
+
+    #[test]
+    fn header_value_to_string_empty_value() {
+        let v = HeaderValue::from_static("");
+        let s = header_value_to_string("x-empty", &v);
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn error_response_all_standard_4xx_codes() {
+        // Ensure the builder doesn't panic on any 4xx code we're likely
+        // to emit.
+        for code in [400u16, 401, 403, 404, 405, 408, 413, 429, 499] {
+            let sc = StatusCode::from_u16(code).expect("valid code");
+            let r = error_response(sc, "test");
+            assert_eq!(r.status().as_u16(), code, "status {code} must round-trip");
+        }
+    }
 }

@@ -8,88 +8,16 @@ use std::net::IpAddr;
 /// True if this IP should be blocked when private/upstream lab access is disallowed.
 #[must_use]
 pub fn ip_addr_is_bogon(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v) => {
-            if v.is_private()
-                || v.is_loopback()
-                || v.is_link_local()
-                || v.is_broadcast()
-                || v.is_documentation()
-                || v.is_unspecified()
-            {
-                return true;
-            }
-            let octets = v.octets();
-            if octets[0] == 100 && (octets[1] & 0xc0) == 0x40 {
-                return true; // 100.64.0.0/10 CGN
-            }
-            if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
-                return true; // 192.0.0.0/24
-            }
-            if octets[0] == 198 && (octets[1] & 0xfe) == 18 {
-                return true; // 198.18.0.0/15
-            }
-            // Link-local + metadata (IMDS) — explicit for stealth parity with proxy audits.
-            if octets[0] == 169 && octets[1] == 254 {
-                return true;
-            }
-            false
-        }
-        IpAddr::V6(v) => {
-            // Check native IPv6 properties FIRST so that special addresses
-            // like ::1 (loopback) are handled correctly before the
-            // IPv4-compat extraction below.
-            //
-            // Bug: the old ordering put to_ipv4() BEFORE v.is_loopback().
-            // ::1 has to_ipv4() == Some(0.0.0.1), which is NOT a bogon in
-            // the IPv4 branch, so ip_addr_is_bogon(::1) returned false —
-            // a silent SSRF bypass for IPv6 loopback. Fix: gate
-            // IPv6-native checks first.
-            if v.is_loopback()
-                || v.is_multicast()
-                || v.is_unspecified()
-                || v.is_unique_local()
-                || v.is_unicast_link_local()
-            {
-                return true;
-            }
-            // IPv4-mapped (::ffff:x.x.x.x): classify by the embedded v4.
-            if let Some(mapped) = v.to_ipv4_mapped() {
-                return ip_addr_is_bogon(IpAddr::V4(mapped));
-            }
-            // IPv4-compatible (::x.x.x.x, deprecated RFC 4291 §2.5.5.1):
-            // classify by the embedded v4, but only after the native checks
-            // so that ::1 (loopback) is already caught above.
-            if let Some(compat) = v.to_ipv4() {
-                return ip_addr_is_bogon(IpAddr::V4(compat));
-            }
-            let segs = v.segments();
-            if segs[0] == 0x2002 {
-                let v4 = std::net::Ipv4Addr::new(
-                    (segs[1] >> 8) as u8,
-                    (segs[1] & 0xff) as u8,
-                    (segs[2] >> 8) as u8,
-                    (segs[2] & 0xff) as u8,
-                );
-                if ip_addr_is_bogon(IpAddr::V4(v4)) {
-                    return true;
-                }
-            }
-            if segs[0] == 0x2001 && segs[1] == 0x0db8 {
-                return true;
-            }
-            if segs[0] == 0x2001 && segs[1] == 0x0000 {
-                return true; // Teredo
-            }
-            if segs[0] == 0x2001 && (segs[1] & 0xfff0) == 0x0020 {
-                return true; // ORCHIDv2
-            }
-            if segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 {
-                return true; // 100::/64 discard
-            }
-            false
-        }
-    }
+    // Delegates to the canonical `bogon` crate (libs/scanner/bogon) — the
+    // single source of truth for SSRF bogon classification shared with
+    // gossan and keyhog. wafrift previously carried a copy of this logic
+    // that had drifted: it lacked the NAT64 well-known-prefix coverage
+    // (64:ff9b::/96 + 64:ff9b:1::/48) that lets a DNS64 resolver returning
+    // `64:ff9b::169.254.169.254` reach cloud IMDS past a naive guard.
+    // Delegating means that fix — and every future bogon fix — lands here
+    // automatically. The tests below stay as the wafrift-side contract
+    // pinning the behaviour we rely on (including the inherited NAT64 case).
+    ::bogon::ip_addr_is_bogon(ip)
 }
 
 #[cfg(test)]
@@ -169,5 +97,22 @@ mod tests {
         // not accidentally block legitimate traffic.
         let compat: Ipv6Addr = "::8.8.8.8".parse().unwrap();
         assert!(!ip_addr_is_bogon(IpAddr::V6(compat)));
+    }
+
+    #[test]
+    fn nat64_wellknown_prefix_embedding_imds_is_bogon() {
+        // 64:ff9b::169.254.169.254 — a DNS64 resolver embeds the cloud IMDS
+        // IPv4 in the NAT64 well-known prefix. `to_ipv4()` does NOT decode
+        // this prefix, so wafrift's old fork let it past the guard; the
+        // canonical `bogon` crate (which this fn now delegates to) catches
+        // it. This pins that we inherited the NAT64 fix via consolidation.
+        let nat64: Ipv6Addr = "64:ff9b::a9fe:a9fe".parse().unwrap();
+        assert!(ip_addr_is_bogon(IpAddr::V6(nat64)));
+        // RFC 8215 local-use /48 is wholly operator-controlled → always bogon.
+        let local_use: Ipv6Addr = "64:ff9b:1::1".parse().unwrap();
+        assert!(ip_addr_is_bogon(IpAddr::V6(local_use)));
+        // A NAT64-embedded PUBLIC v4 (8.8.8.8) must stay allowed.
+        let nat64_public: Ipv6Addr = "64:ff9b::808:808".parse().unwrap();
+        assert!(!ip_addr_is_bogon(IpAddr::V6(nat64_public)));
     }
 }

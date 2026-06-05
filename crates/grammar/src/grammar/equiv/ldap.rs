@@ -125,7 +125,11 @@ pub fn still_matches(original: &str, cand: &str) -> bool {
     if want.is_empty() {
         return !nc.is_empty();
     }
-    want.iter().all(|t| nc.contains(t.as_str()))
+    // §7 DEDUP + §14: whole-token survival via the shared boundary-aware
+    // matcher. The prior `nc.contains(t)` substring check let an assertion
+    // attribute/value survive buried in a larger identifier (`uid` in `uuid`,
+    // `admin` in `administrator`) — a different LDAP filter, not the original.
+    want.iter().all(|t| super::contains_token(&nc, t))
 }
 
 // ── rewrites (LDAP-equivalent) ─────────────────────────────────────
@@ -383,7 +387,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_matches(payload, payload) {
         return out;
@@ -405,10 +409,10 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut s = payload.to_string();
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
         // ── structural layer (token-preserving, applied first) ──
         if rng.chance(2, 5)
             && let Some(n) = rw_filter_commute(&s, &mut rng)
@@ -484,14 +488,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 40,
-            verify: true,
-            vary_delivery: true,
-            param: "q".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 40, "q")
     }
 
     #[test]

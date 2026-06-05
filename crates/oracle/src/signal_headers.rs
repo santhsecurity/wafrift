@@ -116,4 +116,58 @@ mod tests {
         });
         assert!(has_allow, "should detect AWS WAF allow action");
     }
+
+    // -- §12 boundary tests -------------------------------------------------
+
+    #[test]
+    fn empty_header_list_produces_no_signals() {
+        let signals = classify_headers(&[]);
+        assert!(signals.is_empty(), "empty header list must produce no signals");
+    }
+
+    #[test]
+    fn multiple_waf_headers_all_detected() {
+        // A response carrying both cf-ray and x-iinfo must produce a signal
+        // for each -- no early-exit on first match.
+        let headers = vec![
+            ("cf-ray".to_string(), "abc".to_string()),
+            ("x-iinfo".to_string(), "xyz".to_string()),
+        ];
+        let signals = classify_headers(&headers);
+        assert!(
+            signals.len() >= 2,
+            "both WAF headers must produce signals, got: {signals:?}"
+        );
+    }
+
+    #[test]
+    fn header_value_uppercase_matched_case_insensitively() {
+        // Header value matching must be case-insensitive.
+        let headers = vec![("x-amzn-waf-action".to_string(), "BLOCK".to_string())];
+        let signals = classify_headers(&headers);
+        assert!(
+            !signals.is_empty(),
+            "uppercase BLOCK must be matched case-insensitively"
+        );
+    }
+
+    #[test]
+    fn block_header_value_long_does_not_panic() {
+        // A hostile server sending a 100-char header value must not panic
+        // or produce a signal with unbounded length.
+        let long_value = "x".repeat(200);
+        let headers = vec![("x-amzn-waf-action".to_string(), long_value)];
+        // Must not panic.
+        let signals = classify_headers(&headers);
+        // Check that any BodyMarker signals have reasonably bounded length.
+        for s in &signals {
+            if let Signal::BodyMarker(m) = s {
+                assert!(
+                    m.len() <= 512,
+                    "signal string should not be unbounded: len={} sig={m}",
+                    m.len()
+                );
+            }
+        }
+    }
 }

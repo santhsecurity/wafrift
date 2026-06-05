@@ -1,0 +1,25 @@
+[package]
+name = "wafrift-sanitizer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Client-side sanitizer decompiler: recover the sanitizer from a JS source map, extract its allow/deny model, then L*/SFA-mine inputs that survive it. The DOM-XSS dual of the WAF decompiler."
+readme = "README.md"
+repository.workspace = true
+keywords = ["xss", "sanitizer", "dompurify", "sourcemap", "security"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+toml = { workspace = true }
+regex = { workspace = true }
+wafrift-types = { workspace = true }
+wafrift-wafmodel = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

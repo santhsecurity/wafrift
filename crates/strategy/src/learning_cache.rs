@@ -7,6 +7,7 @@ use crate::pipeline::EvasionPipeline;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Cache key: WAF fingerprint + payload type.
@@ -99,12 +100,21 @@ impl LearningCache {
             // (multi-GB file) or stack (deeply nested arrays). Cap the
             // file at MAX_CACHE_FILE_BYTES; the JSON parser then has
             // a bounded heap and stack via that bound.
+            //
+            // Audit (2026-05-27): the previous fix used metadata().len()
+            // followed by read_to_string() — a TOCTOU window where a
+            // symlink swap or file growth between the two calls could
+            // bypass the cap. Use File::open() + take(cap+1) instead:
+            // the cap is enforced DURING the read on the same open
+            // descriptor, closing the race.
             const MAX_CACHE_FILE_BYTES: u64 = 16 * 1024 * 1024;
-            let metadata = fs::metadata(path).map_err(LearningCacheError::Io)?;
-            if metadata.len() > MAX_CACHE_FILE_BYTES {
+            let f = fs::File::open(path).map_err(LearningCacheError::Io)?;
+            let mut limited = f.take(MAX_CACHE_FILE_BYTES + 1);
+            let mut raw = Vec::new();
+            limited.read_to_end(&mut raw).map_err(LearningCacheError::Io)?;
+            if raw.len() as u64 > MAX_CACHE_FILE_BYTES {
                 tracing::warn!(
                     path = %path.display(),
-                    bytes = metadata.len(),
                     cap = MAX_CACHE_FILE_BYTES,
                     "learning cache file exceeds size cap; moving aside and starting fresh"
                 );
@@ -115,7 +125,12 @@ impl LearningCache {
                     entries: HashMap::new(),
                 });
             }
-            let contents = fs::read_to_string(path).map_err(LearningCacheError::Io)?;
+            let contents = String::from_utf8(raw).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{}: learning cache is not valid UTF-8: {e}", path.display()),
+                )
+            }).map_err(LearningCacheError::Io)?;
             match serde_json::from_str::<LearningCache>(&contents) {
                 Ok(mut cache) => {
                     cache.path = Some(path.to_path_buf());
@@ -392,5 +407,59 @@ mod tests {
         let entry = cache.get(&key).unwrap();
         assert_eq!(entry.pipeline.name, "SECOND");
         assert_eq!(entry.successes, 2);
+    }
+
+    /// Anti-regression: a cache file exceeding the size cap must be moved aside
+    /// and a fresh empty cache returned, not OOM-crash the process.
+    /// Also validates that the cap is enforced during the read (not via a
+    /// pre-check metadata() call that a file swap could race).
+    #[test]
+    fn oversized_cache_file_is_moved_aside_and_returns_empty_cache() {
+        use std::io::Write;
+
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift_learning_cache_oversize_{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&tmp);
+
+        // Write a file larger than the 16 MiB cap (17 MiB of spaces, which is
+        // valid UTF-8 but exceeds the limit before JSON parsing even starts).
+        {
+            let mut f = fs::File::create(&tmp).unwrap();
+            let chunk = vec![b' '; 64 * 1024];
+            for _ in 0..(17 * 1024 * 1024 / chunk.len()) {
+                f.write_all(&chunk).unwrap();
+            }
+            f.sync_all().unwrap();
+        }
+
+        // Must not panic; returns an empty cache.
+        let cache = LearningCache::open(&tmp).expect("open must succeed (not Err) for oversize");
+        assert!(
+            cache.keys().is_empty(),
+            "oversize cache must be treated as empty"
+        );
+
+        // Original path must have been moved aside (an .oversize-* sibling
+        // should now exist in the temp dir).
+        assert!(
+            !tmp.exists(),
+            "oversize file must be moved aside, not left at the original path"
+        );
+
+        // Cleanup any oversize-* sibling.
+        if let Ok(entries) = fs::read_dir(tmp.parent().unwrap_or(std::path::Path::new("."))) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with(&format!(
+                    "wafrift_learning_cache_oversize_{}.json.oversize",
+                    std::process::id()
+                )) {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
     }
 }

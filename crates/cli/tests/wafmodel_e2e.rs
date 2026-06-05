@@ -19,20 +19,8 @@
 //! 12. `harden --class sqli` exits 0.
 //! 13. `harden` with non-existent ruleset exits non-zero.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ── Help surface ──────────────────────────────────────────────────────────
 
@@ -40,9 +28,18 @@ fn wafrift(args: &[&str]) -> (i32, String, String) {
 fn audit_help_documents_flags() {
     let (code, stdout, _) = wafrift(&["audit", "--help"]);
     assert_eq!(code, 0, "audit --help must exit 0");
-    assert!(stdout.contains("--format"), "must document --format: {stdout}");
-    assert!(stdout.contains("--class"), "must document --class: {stdout}");
-    assert!(stdout.contains("--ruleset"), "must document --ruleset: {stdout}");
+    assert!(
+        stdout.contains("--format"),
+        "must document --format: {stdout}"
+    );
+    assert!(
+        stdout.contains("--class"),
+        "must document --class: {stdout}"
+    );
+    assert!(
+        stdout.contains("--ruleset"),
+        "must document --ruleset: {stdout}"
+    );
 }
 
 #[test]
@@ -63,8 +60,14 @@ fn audit_and_harden_appear_in_main_help() {
 fn harden_help_documents_flags() {
     let (code, stdout, _) = wafrift(&["harden", "--help"]);
     assert_eq!(code, 0, "harden --help must exit 0");
-    assert!(stdout.contains("--format"), "must document --format: {stdout}");
-    assert!(stdout.contains("--class"), "must document --class: {stdout}");
+    assert!(
+        stdout.contains("--format"),
+        "must document --format: {stdout}"
+    );
+    assert!(
+        stdout.contains("--class"),
+        "must document --class: {stdout}"
+    );
 }
 
 // ── `audit` ───────────────────────────────────────────────────────────────
@@ -72,7 +75,10 @@ fn harden_help_documents_flags() {
 #[test]
 fn audit_exits_0_with_embedded_ruleset() {
     let (code, _stdout, stderr) = wafrift(&["audit"]);
-    assert_eq!(code, 0, "audit must exit 0 on embedded ruleset; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "audit must exit 0 on embedded ruleset; stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -115,9 +121,18 @@ fn audit_json_holes_array_has_required_fields() {
     // At least one hole must exist (double-URL encoding bypasses the embedded CRS).
     assert!(!holes.is_empty(), "audit must find at least one hole: {v}");
     for hole in holes {
-        assert!(hole["class"].is_string(), "hole.class must be string: {hole}");
-        assert!(hole["label"].is_string(), "hole.label must be string: {hole}");
-        assert!(hole["attack"].is_string(), "hole.attack must be string: {hole}");
+        assert!(
+            hole["class"].is_string(),
+            "hole.class must be string: {hole}"
+        );
+        assert!(
+            hole["label"].is_string(),
+            "hole.label must be string: {hole}"
+        );
+        assert!(
+            hole["attack"].is_string(),
+            "hole.attack must be string: {hole}"
+        );
         assert!(
             hole["delivered_as"].is_string(),
             "hole.delivered_as must be string: {hole}"
@@ -153,7 +168,10 @@ fn audit_class_sqli_exits_0() {
 fn audit_nonexistent_ruleset_exits_nonzero() {
     let (code, _stdout, stderr) =
         wafrift(&["audit", "--ruleset", "/nonexistent/path/ruleset.toml"]);
-    assert_ne!(code, 0, "nonexistent ruleset must exit non-zero; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "nonexistent ruleset must exit non-zero; stderr: {stderr}"
+    );
     assert!(
         !stderr.is_empty(),
         "nonexistent ruleset must emit error message"
@@ -174,7 +192,10 @@ fn harden_exits_0_closure_proven_on_embedded_ruleset() {
 #[test]
 fn harden_json_format_emits_valid_json_with_all_proven() {
     let (code, stdout, stderr) = wafrift(&["harden", "--format", "json"]);
-    assert_eq!(code, 0, "harden --format json must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "harden --format json must exit 0; stderr: {stderr}"
+    );
 
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("harden --format json must emit valid JSON");
@@ -199,9 +220,18 @@ fn harden_json_classes_have_required_fields_and_added_rules() {
     assert!(!classes.is_empty(), "classes array must not be empty: {v}");
 
     for class in classes {
-        assert!(class["class"].is_string(), "class.class must be string: {class}");
-        assert!(class["holes_before"].is_number(), "holes_before must be number: {class}");
-        assert!(class["holes_after"].is_number(), "holes_after must be number: {class}");
+        assert!(
+            class["class"].is_string(),
+            "class.class must be string: {class}"
+        );
+        assert!(
+            class["holes_before"].is_number(),
+            "holes_before must be number: {class}"
+        );
+        assert!(
+            class["holes_after"].is_number(),
+            "holes_after must be number: {class}"
+        );
         assert!(
             class["benign_false_positives"].is_number(),
             "benign_false_positives must be number: {class}"
@@ -210,8 +240,13 @@ fn harden_json_classes_have_required_fields_and_added_rules() {
             class["proven_closed"].as_bool().is_some(),
             "proven_closed must be boolean: {class}"
         );
-        let rules = class["added_rules"].as_array().expect("added_rules must be array");
-        assert!(!rules.is_empty(), "harden must add rules for class: {class}");
+        let rules = class["added_rules"]
+            .as_array()
+            .expect("added_rules must be array");
+        assert!(
+            !rules.is_empty(),
+            "harden must add rules for class: {class}"
+        );
 
         // Each rule must have transforms as an ARRAY (not a string —
         // this was the pre-fix bug).
@@ -225,8 +260,14 @@ fn harden_json_classes_have_required_fields_and_added_rules() {
                 !rule["transforms"].as_array().unwrap().is_empty(),
                 "rule.transforms must not be empty: {rule}"
             );
-            assert!(rule["pattern"].is_string(), "rule.pattern must be string: {rule}");
-            assert!(rule["score"].is_number(), "rule.score must be number: {rule}");
+            assert!(
+                rule["pattern"].is_string(),
+                "rule.pattern must be string: {rule}"
+            );
+            assert!(
+                rule["score"].is_number(),
+                "rule.score must be number: {rule}"
+            );
         }
     }
 }
@@ -241,19 +282,15 @@ fn harden_double_decode_rules_have_urldecodeuni_twice() {
     // At least one rule across all classes must have UrlDecodeUni appearing
     // twice (the double-decode variant for closing double-encoded bypass holes).
     let has_double_decode = classes.iter().any(|class| {
-        class["added_rules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| {
-                rule["transforms"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .filter(|t| t.as_str() == Some("UrlDecodeUni"))
-                    .count()
-                    >= 2
-            })
+        class["added_rules"].as_array().unwrap().iter().any(|rule| {
+            rule["transforms"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|t| t.as_str() == Some("UrlDecodeUni"))
+                .count()
+                >= 2
+        })
     });
     assert!(
         has_double_decode,
@@ -277,7 +314,10 @@ fn harden_class_sqli_exits_0() {
 fn harden_nonexistent_ruleset_exits_nonzero() {
     let (code, _stdout, stderr) =
         wafrift(&["harden", "--ruleset", "/nonexistent/path/ruleset.toml"]);
-    assert_ne!(code, 0, "nonexistent ruleset must exit non-zero; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "nonexistent ruleset must exit non-zero; stderr: {stderr}"
+    );
     assert!(
         !stderr.is_empty(),
         "nonexistent ruleset must emit error message"

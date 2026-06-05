@@ -20,6 +20,9 @@ tracing = { workspace = true }
 # Quote-free SQL mutator URL-decodes incoming payloads so its shape
 # detection works on encoded forms (1%27+OR+%271%27%3D%271).
 urlencoding = { workspace = true }
+# Real NFKC normalization — builds the complete inverse-NFKC preimage map for
+# the normalization-differential homoglyph engine (grammar::nfkc_preimage).
+unicode-normalization = "0.1.24"
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }
@@ -29,6 +32,14 @@ toml = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }
 wafrift-oracle = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+# Drives the dogfood test that proves the NFKC-preimage engine defeats real
+# OWASP-CRS-941 XSS regexes.
+regex = "1"
+
+[[bench]]
+name = "sql_mutate_hot_paths"
+harness = false
 
 [lints]
 workspace = true

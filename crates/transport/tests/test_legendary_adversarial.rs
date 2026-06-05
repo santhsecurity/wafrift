@@ -67,12 +67,32 @@ fn test_adversarial_is_waf_block_unicode_homoglyphs() {
 
 #[tokio::test]
 async fn test_adversarial_send_max_attempts_integer_bounds() {
+    // Adversarial: u32::MAX must be rejected with a structured error
+    // (not a panic, not silently clamped). The runtime cap is a
+    // hardening: a runaway max_attempts would let a misconfigured
+    // attack loop forever or exhaust target-side resources before the
+    // operator notices. The cap message must name both the offending
+    // value and the ceiling so the operator can pick a sane number.
     let config = EvasionConfig {
         max_attempts: u32::MAX,
         ..Default::default()
     };
-    let client = EvasionClient::with_config(config).unwrap();
+    let err = match EvasionClient::with_config(config) {
+        Ok(_) => panic!("u32::MAX max_attempts must be rejected"),
+        Err(e) => e,
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("max_attempts") && msg.contains(&u32::MAX.to_string()),
+        "error must name field and offending value: {msg}"
+    );
 
+    // Sanity: a sane max_attempts still constructs cleanly.
+    let ok_config = EvasionConfig {
+        max_attempts: 100,
+        ..Default::default()
+    };
+    let client = EvasionClient::with_config(ok_config).unwrap();
     let host_state = client.host_state("example.com");
-    assert!(host_state.is_none());
+    assert!(host_state.is_none(), "cold-start state must be None");
 }

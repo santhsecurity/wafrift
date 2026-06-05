@@ -8,8 +8,9 @@ use wafrift_core::content_type::{
     ContentTypeTechnique, generate_variants, generate_variants_from_body,
 };
 use wafrift_core::encoding::{self, Strategy};
+use wafrift_core::{EscalationLevel, EvasionConfig};
 use wafrift_core::strategy::{
-    CalibrationResult, EscalationLevel, EvasionConfig, HostState, analyze_calibration, evade,
+    CalibrationResult, HostState, analyze_calibration, evade,
 };
 use wafrift_core::{Request, Technique};
 
@@ -349,16 +350,29 @@ fn content_type_boundary_in_payload() {
 
     if let Some(mp) = multipart {
         let body_str = String::from_utf8_lossy(&mp.body);
-        // Count boundary occurrences - should be predictable
-        let boundary_count = body_str.matches("------WafriftBoundary").count();
+        // Extract the actual boundary used (the prefix is randomised
+        // per call from `NEUTRAL_BOUNDARY_PREFIXES` to defeat
+        // signature-WAF fingerprinting). Pull it out of the
+        // Content-Type header so this test stays correct across the
+        // pool.
+        let actual_boundary = mp
+            .content_type
+            .split_once("boundary=")
+            .map(|(_, b)| b.trim_matches('"').to_string())
+            .expect("multipart variant must declare a boundary param");
+        let needle = format!("--{actual_boundary}");
+        let boundary_count = body_str.matches(&needle).count();
         // The boundary appears in:
-        // 1. Header (boundary parameter)
-        // 2. Body (before each part)
-        // 3. Body (closing)
-        // 4. INSIDE the payload value itself (the bug)
+        // 1. Body (before each part)
+        // 2. Body (closing)
+        // 3. INSIDE the payload value itself (the bug — the payload
+        //    contains the legacy `------WafriftBoundary` literal as
+        //    test fixture content, but the actual random boundary
+        //    will not match it unless the pool drew Wafrift; either
+        //    way the count must reach >=2 from real framing alone).
         assert!(
-            boundary_count >= 3,
-            "Boundary injection may confuse multipart parsing: found {boundary_count} boundaries"
+            boundary_count >= 2,
+            "Boundary injection may confuse multipart parsing: found {boundary_count} occurrences of {needle:?}"
         );
     }
 }
@@ -768,7 +782,16 @@ fn strategy_layered_evasion_encoding_plus_ct() {
                 || body_str.contains("%25")  // any double-encoded byte
                 || body_str.contains("%3C")  // single-encoded <
                 || body_str.contains("<script>")  // raw (no encoding applied)
-                || body_str.contains("WafriftBoundary"), // multipart envelope
+                // Multipart envelope: boundary prefix is randomised
+                // per call (NEUTRAL_BOUNDARY_PREFIXES); any of the
+                // pooled prefixes is acceptable evidence of a
+                // multipart wrapper having been applied.
+                || body_str.contains("WebKitFormBoundary")
+                || body_str.contains("formdata-undici-")
+                || body_str.contains("formdata-")
+                || body_str.contains("ECMAScriptFormBoundary")
+                || body_str.contains("MultipartBoundary")
+                || body_str.contains("WafriftBoundary"),
             "Body doesn't show expected encoding: {body_str}"
         );
     }

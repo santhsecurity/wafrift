@@ -29,13 +29,20 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 use wafrift_detect::waf_detect;
+use wafrift_encoding::auth_bypass::AUTH_BYPASS_PROBE_COUNT;
 
 use crate::bypass_probe::{BypassProbeArgs, run_bypass_probe};
 use crate::detect_cmd::{fetch_differential, fetch_for_detect, infra_markers};
 use crate::helpers::shell_single_quote;
 
+/// Max divergences / variants rendered per section in the legendary
+/// markdown writeup. Pre-R49 (CLAUDE.md §7 DEDUPLICATION) two
+/// per-block `const RENDER_CAP` declarations drifted; one canonical
+/// source now.
+const RENDER_CAP: usize = 25;
+
 #[derive(Args, Debug)]
-pub struct LegendaryArgs {
+pub(crate) struct LegendaryArgs {
     /// Target URL — the surface to probe end-to-end.
     pub target: String,
 
@@ -60,7 +67,13 @@ pub struct LegendaryArgs {
     #[arg(long, short)]
     pub output: Option<PathBuf>,
 
-    /// HTTP timeout in seconds for each phase.
+    /// HTTP timeout in seconds for each phase. NOTE on total runtime: the
+    /// bypass-probe phase fires its full sweep (~270 probes) at
+    /// `--concurrency` parallelism, so worst-case wall-clock ≈
+    /// probes × `--timeout-secs` ÷ `--concurrency` when a target stalls or
+    /// rate-limits (e.g. 270 × 12 ÷ 8 ≈ 400s). To bound a slow run: lower
+    /// `--timeout-secs`, raise `--concurrency`, or pass
+    /// `--skip-bypass-probe`.
     #[arg(long, default_value_t = 12)]
     pub timeout_secs: u64,
 
@@ -69,7 +82,7 @@ pub struct LegendaryArgs {
     pub insecure: bool,
 
     /// Skip the bypass-probe phase. Useful when the target's rate
-    /// limiter makes a 150-probe sweep noisy.
+    /// limiter makes the full auth/path/method sweep noisy.
     #[arg(long)]
     pub skip_bypass_probe: bool,
 
@@ -225,6 +238,15 @@ struct PhaseScan {
     blocked: Option<u64>,
     errors: Option<u64>,
     bypass_rate_pct: Option<f64>,
+    /// Primary WAF-bypass verdict from scan JSON (`waf_bypass` object).
+    waf_bypass_verdict: Option<String>,
+    waf_in_play: Option<bool>,
+    bypass_confirmed: Option<u64>,
+    waf_bypass_headline: Option<String>,
+    effective_url: Option<String>,
+    effective_param: Option<String>,
+    injection_delivery: Option<String>,
+    scan_exit_code: Option<i32>,
     elapsed_ms: Option<f64>,
     /// The bypass-variant findings, deserialised verbatim from the
     /// inline scan's JSON output. Empty when the scan ran but found
@@ -270,8 +292,27 @@ struct BypassVariantSummary {
 /// surfaced in the report itself, not propagated as an exit code,
 /// because the demo's value is showing **what wafrift saw**, including
 /// "we tried this and the target threw a 503."
-pub fn run_legendary(mut args: LegendaryArgs) -> ExitCode {
+pub(crate) fn run_legendary(mut args: LegendaryArgs) -> ExitCode {
     args.target = crate::helpers::normalize_target_url(&args.target);
+    // R45 6-I1 fix (dogfood pass 6): validate --output's parent
+    // directory BEFORE running the 4-phase pipeline. Pre-fix the
+    // operator ran ~1.6 s of live probes against the target only
+    // to hit "No such file or directory" when the final write
+    // happened. Stat the parent up front so the error surfaces
+    // before any network I/O.
+    if let Some(ref out) = args.output
+        && let Some(parent) = out.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        eprintln!(
+            "error: --output {} parent directory does not exist. \
+             Create it first or pick a different path. Refusing to \
+             run the 4-phase pipeline only to fail at the final write.",
+            out.display()
+        );
+        return ExitCode::from(2);
+    }
     let start = Instant::now();
     let started_at = unix_now_iso8601();
     let mut report = LegendaryReport {
@@ -389,7 +430,7 @@ pub fn run_legendary(mut args: LegendaryArgs) -> ExitCode {
         );
     } else {
         eprintln!(
-            "{} 150-probe sweep against {}",
+            "{} {AUTH_BYPASS_PROBE_COUNT}+ probe auth/path/method sweep against {}",
             "[3/4] bypass-probe:".bright_black(),
             args.target
         );
@@ -398,15 +439,7 @@ pub fn run_legendary(mut args: LegendaryArgs) -> ExitCode {
         // probe streamed text to the terminal and ONLY the re-run
         // command landed in the markdown — section 3 was unusable
         // as a client deliverable). Same pattern as the scan phase.
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let bp_nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let bp_tmp = std::env::temp_dir().join(format!(
-            "wafrift-legendary-bp-{}-{bp_nanos}.json",
-            std::process::id()
-        ));
+        let bp_tmp = crate::helpers::secure_tmp_path("wafrift-legendary-bp", "json");
         let bp_args = BypassProbeArgs {
             url: args.target.clone(),
             paths_file: args.paths_file.clone(),
@@ -541,7 +574,13 @@ pub fn run_legendary(mut args: LegendaryArgs) -> ExitCode {
                 variants_cap: args.scan_variants,
                 exploit_cap,
             }) {
-                Ok(scan_json) => apply_scan_json(&mut report.scan, &scan_json),
+                Ok(scan_json) => {
+                    report.scan.scan_exit_code = scan_json
+                        .get("_legendary_scan_exit")
+                        .and_then(|x| x.as_i64())
+                        .map(|c| c as i32);
+                    apply_scan_json(&mut report.scan, &scan_json);
+                }
                 Err(e) => {
                     eprintln!("       {} {}", "error:".red(), e);
                     report.scan.error = Some(e);
@@ -592,15 +631,7 @@ fn run_inline_scan(a: InlineScanArgs<'_>) -> Result<serde_json::Value, String> {
     // `legendary` runs on the same host would otherwise corrupt the
     // JSON capture. Nanos guard against the edge case of two PID-1
     // hosts (containers) racing.
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    let tmp = std::env::temp_dir().join(format!(
-        "wafrift-legendary-scan-{}-{nanos}.json",
-        std::process::id()
-    ));
+    let tmp = crate::helpers::secure_tmp_path("wafrift-legendary-scan", "json");
 
     let mut cmd = std::process::Command::new(&exe);
     cmd.arg("scan")
@@ -638,7 +669,9 @@ fn run_inline_scan(a: InlineScanArgs<'_>) -> Result<serde_json::Value, String> {
     // `aborted_rate_limited` field. Anything else non-zero is fatal
     // for this phase.
     let exit_code = status.code().unwrap_or(-1);
-    if !status.success() && exit_code != 5 {
+    // 0 = bypass confirmed; 4 = WAF in play, none won; 5 = rate-limited partial;
+    // 6 = no WAF on surface; 7 = timeout partial — all still emit JSON.
+    if !status.success() && !matches!(exit_code, 4 | 5 | 6 | 7) {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!(
             "`wafrift scan` exited with status {exit_code} (no JSON captured)"
@@ -648,7 +681,12 @@ fn run_inline_scan(a: InlineScanArgs<'_>) -> Result<serde_json::Value, String> {
     let body = std::fs::read_to_string(&tmp)
         .map_err(|e| format!("read scan JSON from {}: {e}", tmp.display()))?;
     let _ = std::fs::remove_file(&tmp);
-    serde_json::from_str(&body).map_err(|e| format!("parse scan JSON: {e}"))
+    let mut v: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("parse scan JSON: {e}"))?;
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("_legendary_scan_exit".into(), serde_json::json!(exit_code));
+    }
+    Ok(v)
 }
 
 /// Drain a scan JSON envelope (the shape emitted by `scan/mod.rs`
@@ -671,8 +709,34 @@ fn apply_scan_json(phase: &mut PhaseScan, root: &serde_json::Value) {
     phase.bypassed = v.get("bypassed").and_then(|x| x.as_u64());
     phase.blocked = v.get("blocked").and_then(|x| x.as_u64());
     phase.errors = v.get("errors").and_then(|x| x.as_u64());
-    phase.bypass_rate_pct = v.get("bypass_rate_pct").and_then(|x| x.as_f64());
+    phase.bypass_rate_pct = v
+        .get("bypass_rate_pct")
+        .and_then(|x| if x.is_null() { None } else { x.as_f64() });
     phase.elapsed_ms = v.get("elapsed_ms").and_then(|x| x.as_f64());
+    phase.injection_delivery = v
+        .get("injection_delivery")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    phase.effective_url = v
+        .get("effective_url")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    phase.effective_param = v
+        .get("effective_param")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    if let Some(wb) = v.get("waf_bypass") {
+        phase.waf_bypass_verdict = wb
+            .get("verdict")
+            .and_then(|x| x.as_str())
+            .map(str::to_string);
+        phase.waf_in_play = wb.get("waf_in_play").and_then(|x| x.as_bool());
+        phase.bypass_confirmed = wb.get("bypass_confirmed").and_then(|x| x.as_u64());
+        phase.waf_bypass_headline = wb
+            .get("headline")
+            .and_then(|x| x.as_str())
+            .map(str::to_string);
+    }
     if let Some(arr) = v.get("bypass_variants").and_then(|x| x.as_array()) {
         phase.bypass_variants = arr
             .iter()
@@ -821,23 +885,27 @@ fn render_verdict_paragraph(r: &LegendaryReport) -> String {
     } else if r.scan.error.is_some() {
         let _ = write!(out, "**Payload mutation scan:** _phase errored_\n\n");
     } else if r.scan.ran {
-        let bypassed = r.scan.bypassed.unwrap_or(0);
-        let total = r.scan.total_variants.unwrap_or(0);
-        if bypassed == 0 {
-            let _ = write!(
-                out,
-                "**Payload mutation scan:** {total} variants fired, **0 bypasses** (WAF held)\n\n"
-            );
-        } else if let Some(rate) = r.scan.bypass_rate_pct {
-            let _ = write!(
-                out,
-                "**Payload mutation scan:** {total} variants fired, **{bypassed} bypassed** ({rate:.1}%; see section 4)\n\n"
-            );
+        if let Some(ref headline) = r.scan.waf_bypass_headline {
+            let _ = write!(out, "**WAF evasion scan:** {headline}\n\n");
         } else {
-            let _ = write!(
-                out,
-                "**Payload mutation scan:** {total} variants fired, **{bypassed} bypassed** (see section 4)\n\n"
-            );
+            let bypassed = r.scan.bypassed.unwrap_or(0);
+            let total = r.scan.total_variants.unwrap_or(0);
+            if bypassed == 0 {
+                let _ = write!(
+                    out,
+                    "**Payload mutation scan:** {total} variants fired, **0 bypasses** (WAF held)\n\n"
+                );
+            } else if let Some(rate) = r.scan.bypass_rate_pct {
+                let _ = write!(
+                    out,
+                    "**Payload mutation scan:** {total} variants fired, **{bypassed} bypassed** ({rate:.1}%; see section 4)\n\n"
+                );
+            } else {
+                let _ = write!(
+                    out,
+                    "**Payload mutation scan:** {total} variants fired, **{bypassed} bypassed** (see section 4)\n\n"
+                );
+            }
         }
     }
 
@@ -943,9 +1011,9 @@ fn render_markdown(r: &LegendaryReport) -> String {
             out.push_str(&format!("Reproduce / debug:\n\n```bash\n{cmd}\n```\n\n"));
         }
     } else if r.bypass_probe.ran {
-        out.push_str(
-            "Fires the full 136-probe auth-bypass set + path-routing-disagreement variants + 7 HTTP method overrides against the target, classifying each response vs the baseline.\n\n",
-        );
+        out.push_str(&format!(
+            "Fires the full {AUTH_BYPASS_PROBE_COUNT}-probe auth-bypass set + path-routing-disagreement variants + 7 HTTP method overrides against the target, classifying each response vs the baseline.\n\n"
+        ));
 
         // Summary counters.
         let any_counter =
@@ -974,7 +1042,9 @@ fn render_markdown(r: &LegendaryReport) -> String {
                  try the scan phase below to attack the payload axis.\n\n",
             );
         } else {
-            const RENDER_CAP: usize = 25;
+            // R49 (pass-11 I2, CLAUDE.md §7 DEDUPLICATION): inherits
+            // from module-scope RENDER_CAP so the two render blocks
+            // stay in lockstep without per-block redefinition.
             let total = r.bypass_probe.divergences.len();
             let shown = total.min(RENDER_CAP);
             out.push_str(&format!(
@@ -1119,7 +1189,9 @@ fn render_markdown(r: &LegendaryReport) -> String {
             // them turns the report into a 10000-line wall that
             // nobody reads. Cap the rendered table at 25 and add a
             // footer pointing at the JSON output for the full list.
-            const RENDER_CAP: usize = 25;
+            // R49 (pass-11 I2, CLAUDE.md §7 DEDUPLICATION): inherits
+            // from module-scope RENDER_CAP so the two render blocks
+            // stay in lockstep without per-block redefinition.
             let total = r.scan.bypass_variants.len();
             let shown = total.min(RENDER_CAP);
             out.push_str(&format!(
@@ -1279,13 +1351,12 @@ fn fence_escape(s: &str) -> String {
     }
 }
 
+/// Delegates to the workspace-canonical [`crate::probe_classify::truncate`]
+/// (byte-cap + char-boundary walk). Pre-consolidation this used a
+/// char-count variant that could exceed the byte budget for multi-byte
+/// code points; the byte-cap form is strictly tighter.
 fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        let take: String = s.chars().take(n).collect();
-        format!("{take}…")
-    }
+    crate::probe_classify::truncate(s, n)
 }
 
 fn unix_now_iso8601() -> String {
@@ -1345,16 +1416,24 @@ mod tests {
 
     #[test]
     fn truncate_ascii_long() {
-        assert_eq!(truncate("hello world", 5), "hello…");
+        // Byte-cap semantics: n=5 → cap=4 bytes → last char boundary ≤ 4
+        // is at offset 3 (char 'd' of "hell"), so output is "hell…".
+        // The old char-count variant produced "hello…" (5 chars); the
+        // byte-cap form is strictly ≤n bytes before the ellipsis.
+        assert_eq!(truncate("hello world", 5), "hell…");
     }
 
     #[test]
     fn truncate_unicode_grapheme_safe_at_char_boundary() {
-        // chars().take() is char-boundary safe; truncate must not panic
-        // on multi-byte input.
+        // The canonical implementation (probe_classify::truncate) uses a
+        // BYTE cap, not a char count, so for n=3 on Greek text (2 bytes
+        // per char): cap = 2 bytes → the cut lands after the first char
+        // `α` (byte boundary at offset 2). The output is "α…", not "αβγ…".
+        // This is intentional and documented in probe_classify::truncate —
+        // the byte cap is strictly tighter and avoids multi-byte overruns.
         let s = "αβγδεζηθικλμ";
         let t = truncate(s, 3);
-        assert_eq!(t, "αβγ…");
+        assert_eq!(t, "α…");
     }
 
     #[test]
@@ -1372,6 +1451,32 @@ mod tests {
         assert!(md.contains("## 3. Bypass probe"));
         assert!(md.contains("## 4. Live scan"));
         assert!(md.contains("## Reproduce this whole report"));
+    }
+
+    #[test]
+    fn markdown_bypass_probe_scope_cites_canonical_probe_count() {
+        // §10 COHERENCE: the legendary markdown is a client deliverable.
+        // Its bypass-probe scope sentence must cite the real auth-bypass
+        // corpus size (AUTH_BYPASS_PROBE_COUNT), never a stale literal —
+        // pre-fix it claimed a "136-probe" set and a "150-probe sweep"
+        // long after the corpus grew to 230. This pins the 4th doc site
+        // the count integrity test (auth_bypass_probe_count_documented)
+        // does not reach.
+        let mut r = LegendaryReport {
+            target: "https://example.test/".into(),
+            ..Default::default()
+        };
+        r.detect.ran = true;
+        r.bypass_probe.ran = true;
+        let md = render_markdown(&r);
+        assert!(
+            md.contains(&format!("{AUTH_BYPASS_PROBE_COUNT}-probe auth-bypass set")),
+            "scope sentence must cite the canonical count; got:\n{md}"
+        );
+        assert!(
+            !md.contains("136-probe") && !md.contains("150-probe"),
+            "markdown still carries a stale hardcoded probe count:\n{md}"
+        );
     }
 
     #[test]

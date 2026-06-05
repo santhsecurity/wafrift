@@ -12,13 +12,11 @@ categories = ["network-programming", "web-programming"]
 
 [dependencies]
 wafrift-transport = { workspace = true }
-captchaforge = "0.1"
-# All Chromium driving goes through `runtime_headless` (which re-exports
-# `chromiumoxide` for any consumer that still needs raw CDP types). The
-# direct `chromiumoxide = "0.9"` dep was vestigial — every call site in
-# this crate already routes through `runtime_headless::{BrowserRuntime,
-# BrowserLaunchOptions}` (Phase 09).
-runtime-headless = { path = "../../../../libs/runtime/headless" }
+captchaforge = { path = "../../../captchaforge", version = "0.2", features = ["vision"] }
+# Firefox + BiDi driving via rustenium. Replaces the old
+# `runtime_headless` + `chromiumoxide` CDP stack.
+runtime-foxdriver = { path = "../../../../libs/runtime/foxdriver" }
+guise = { workspace = true, features = ["browser"] }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -26,6 +24,7 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 futures = { version = "0.3" }
 serde_json = { workspace = true }
+which = { version = "7" }
 
 [lints]
 workspace = true

@@ -270,10 +270,10 @@ impl ScoreParser {
         ];
         for (name, value) in headers {
             let lower = name.to_ascii_lowercase();
-            if score_headers.iter().any(|&h| h == lower) {
-                if let Ok(f) = value.trim().parse::<f64>() {
-                    return Some(f);
-                }
+            if score_headers.iter().any(|&h| h == lower)
+                && let Ok(f) = value.trim().parse::<f64>()
+            {
+                return Some(f);
             }
         }
         None

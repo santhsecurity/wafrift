@@ -10,7 +10,25 @@ use wafrift_wafmodel::{norm_mismatch_members, sink_for_tag};
 fn every_bridge_member_reconstructs_the_attack_under_its_declared_sink() {
     let attack = "<svg onload=alert(1)>";
     let members = norm_mismatch_members(attack, "q");
-    assert_eq!(members.len(), 3, "double-url + json + html-entity sinks");
+
+    // double-url + json + html-entity always apply; NFKC folds the angle
+    // brackets / `=` / parens of this XSS attack, so it appears too. best-fit
+    // has no quote/dash/slash to coerce here, so the skip-degenerate guard
+    // correctly omits it (emitting it would be the raw attack).
+    let tags: Vec<&str> = members.iter().map(|m| m.rules[0]).collect();
+    for required in [
+        "norm_mismatch_double_url",
+        "norm_mismatch_json_unescape",
+        "norm_mismatch_html_entity",
+        "norm_mismatch_nfkc",
+    ] {
+        assert!(tags.contains(&required), "missing sink member {required}; got {tags:?}");
+    }
+    assert!(
+        !tags.contains(&"norm_mismatch_bestfit"),
+        "best-fit no-ops on a quote-free XSS attack — must be skipped, not emitted \
+         as the raw attack; got {tags:?}"
+    );
 
     for m in &members {
         let tag = m.rules[0];
@@ -31,6 +49,31 @@ fn every_bridge_member_reconstructs_the_attack_under_its_declared_sink() {
             "tag {tag} is the raw attack, not an evasion"
         );
     }
+}
+
+#[test]
+fn bestfit_member_self_selects_to_a_quoted_sqli_attack() {
+    // Twin of the above: the SAME bridge that skips best-fit for a quote-free
+    // XSS attack DOES emit it for a quoted SQLi attack, and that curly-quote
+    // member best-fit-folds back to the injection (sound, and != the attack).
+    let attack = "' OR 1=1--";
+    let members = norm_mismatch_members(attack, "q");
+    let bestfit = members
+        .iter()
+        .find(|m| m.rules[0] == "norm_mismatch_bestfit")
+        .expect("best-fit must fire on a quoted SQLi attack");
+    assert_ne!(bestfit.payload, attack, "best-fit member must be an evasion, not the raw attack");
+    assert!(
+        !bestfit.payload.contains('\''),
+        "best-fit member must hide the literal single quote: {:?}",
+        bestfit.payload
+    );
+    let decoded = sink_for_tag("norm_mismatch_bestfit").unwrap().apply(bestfit.payload.as_bytes());
+    assert!(
+        decoded.windows(attack.len()).any(|w| w == attack.as_bytes()),
+        "best-fit member {:?} must coerce back to the injection",
+        bestfit.payload
+    );
 }
 
 #[test]
@@ -63,8 +106,10 @@ fn bridge_members_are_consumed_by_the_unchanged_scald_loop() {
             assert!(
                 m.payload.contains("%25")
                     || m.payload.contains("\\u00")
-                    || m.payload.contains("&#x"),
-                "normalization-mismatch member must carry an encoded payload, got {:?}",
+                    || m.payload.contains("&#x")
+                    || !m.payload.is_ascii(),
+                "normalization-mismatch member must carry an encoded or homoglyph \
+                 payload, got {:?}",
                 m.payload
             );
         }
@@ -105,7 +150,8 @@ fn solver_solution_becomes_a_canonical_member() {
         .unwrap()
         .expect("solvable");
 
-    let member = solution_member(&sol, "q");
+    let member = solution_member(&sol, "q")
+        .expect("solution is valid UTF-8 (R54 pass-16 I5 contract)");
     assert_eq!(member.rules, vec!["solver_bypass"]);
     // The member's payload IS the solved double-encoded bypass.
     assert_eq!(member.payload, "%253Cscript%253E");

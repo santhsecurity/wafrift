@@ -8,7 +8,7 @@ use wafrift_encoding::encoding::Strategy;
 use crate::technique_filter::strategy_path;
 
 #[derive(Debug, Clone)]
-pub enum Outcome {
+pub(crate) enum Outcome {
     /// Strategy ran and contributed `variant_count` unique variants.
     Applied { variant_count: usize },
     /// Strategy ran but every output was already produced by another path.
@@ -20,7 +20,7 @@ pub enum Outcome {
 }
 
 #[derive(Debug)]
-pub struct ExplainEntry {
+pub(crate) struct ExplainEntry {
     pub strategy: Strategy,
     pub outcome: Outcome,
 }
@@ -31,13 +31,13 @@ pub struct ExplainEntry {
 /// name with whether the transform produced a unique variant or
 /// was a no-op / duplicate.
 #[derive(Debug)]
-pub struct TamperExplainEntry {
+pub(crate) struct TamperExplainEntry {
     pub name: String,
     pub outcome: TamperOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TamperOutcome {
+pub(crate) enum TamperOutcome {
     /// Tamper transformed the payload into a NEW variant.
     Applied,
     /// Tamper produced a byte-identical output (no transform
@@ -51,7 +51,7 @@ pub enum TamperOutcome {
 }
 
 #[derive(Debug, Default)]
-pub struct ExplainTrace {
+pub(crate) struct ExplainTrace {
     pub entries: Vec<ExplainEntry>,
     pub tampers: Vec<TamperExplainEntry>,
 }

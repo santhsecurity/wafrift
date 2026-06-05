@@ -16,11 +16,10 @@ use colored::Colorize;
 use std::process::ExitCode;
 use wafrift_detect::waf_detect::{self, DetectedWaf};
 use wafrift_evolution::advisor::{self, EvasionPlan};
-use wafrift_evolution::custom_rules::{CustomDetection, CustomRulesFile};
 
 /// Everything Step 1 produced — feeds the rest of the scan.
 #[derive(Debug, Clone)]
-pub struct DetectOutcome {
+pub(crate) struct DetectOutcome {
     /// HTTP status code of the baseline GET.
     pub baseline_status: u16,
     /// Response headers from the baseline (used to identify CDN /
@@ -53,14 +52,16 @@ pub struct DetectOutcome {
 /// baseline request fails at the transport layer — every
 /// downstream phase becomes meaningless without one, so we bail
 /// early with a clear error.
-pub async fn run(
+pub(crate) async fn run(
     http: &reqwest::Client,
     target: &str,
     scan_text: bool,
-    custom_rules: Option<&CustomRulesFile>,
 ) -> Result<DetectOutcome, ExitCode> {
     if scan_text {
-        println!("{}", "[1/3] Detecting WAF...".bold().cyan());
+        // §13 dogfooding: progress lines go to stderr so `wafrift scan | jq`
+        // doesn't see WAF-detection noise on stdout (matches the scan
+        // orchestrator's Fix #7 requirement that all progress → stderr).
+        eprintln!("{}", "[1/3] Detecting WAF...".bold().cyan());
     }
     let baseline_response = match http.get(target).send().await {
         Ok(resp) => resp,
@@ -82,35 +83,40 @@ pub async fn run(
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
-    let body_bytes = baseline_response.bytes().await.unwrap_or_default().to_vec();
-
-    let mut detected = waf_detect::detect(baseline_status, &headers_vec, &body_bytes);
-    // Layer custom rules on top. Their result is wrapped as a DetectedWaf
-    // and merged via `merge_custom_into_detected`, which keeps the list
-    // sorted by descending confidence so `detected[0]` is still the top
-    // candidate regardless of whether it came from built-ins or custom.
-    if let Some(rules) = custom_rules {
-        if let Some(custom_hit) =
-            wafrift_evolution::custom_rules::detect(rules, baseline_status, &headers_vec, &body_bytes)
-        {
+    // §15 OOM / decompression-bomb defence: reqwest auto-decodes
+    // Content-Encoding: gzip/brotli. A hostile WAF can serve a 1 KB
+    // compressed bomb that expands to hundreds of MB before .bytes()
+    // returns, OOM-crashing the CLI. Cap at DEFAULT_MAX_RESPONSE_BYTES
+    // (8 MiB) — more than enough for any WAF block page / detection
+    // corpus, safe on a laptop. Fall back to empty body on overrun
+    // (detection still succeeds on headers alone).
+    let body_bytes = match crate::safe_body::read_bounded(
+        baseline_response,
+        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+    )
+    .await
+    {
+        Ok(b) => b,
+        Err(e) => {
             if scan_text {
-                println!(
-                    "  {} {} ({:.0}%) via --custom-rules",
-                    "✓ Custom:".green().bold(),
-                    custom_hit.rule_name.bold().yellow(),
-                    custom_hit.confidence * 100.0
+                eprintln!(
+                    "  {} baseline body read aborted ({e}) — WAF detection \
+                     continuing on headers only",
+                    "warn:".yellow().bold()
                 );
             }
-            merge_custom_into_detected(&mut detected, custom_hit);
+            Vec::new()
         }
-    }
+    };
+
+    let detected = waf_detect::detect(baseline_status, &headers_vec, &body_bytes);
     let top_detection = detected
         .first()
         .filter(|result| result.confidence >= waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD)
         .cloned();
     let waf_name = if let Some(result) = top_detection.as_ref() {
         if scan_text {
-            println!(
+            eprintln!(
                 "  {} {} ({:.0}% confidence)",
                 "✓ Detected:".green().bold(),
                 result.name.bold().yellow(),
@@ -120,7 +126,7 @@ pub async fn run(
         result.name.clone()
     } else {
         if scan_text {
-            println!(
+            eprintln!(
                 "  {}",
                 "⚠ No WAF confidently detected (testing anyway)"
                     .yellow()
@@ -134,16 +140,16 @@ pub async fn run(
     let evasion_plan = advisor::advise(top_detection.as_ref(), None);
     if scan_text {
         for rationale in &evasion_plan.rationale {
-            println!("  {} {}", "📋 Advisor:".bold().cyan(), rationale.yellow());
+            eprintln!("  {} {}", "📋 Advisor:".bold().cyan(), rationale.yellow());
         }
         if evasion_plan.use_header_obfuscation {
-            println!("    {} header obfuscation", "✓".green());
+            eprintln!("    {} header obfuscation", "✓".green());
         }
         if evasion_plan.use_content_type_switch {
-            println!("    {} content-type switching", "✓".green());
+            eprintln!("    {} content-type switching", "✓".green());
         }
         if evasion_plan.use_h2 {
-            println!("    {} HTTP/2 evasion", "✓".green());
+            eprintln!("    {} HTTP/2 evasion", "✓".green());
         }
     }
 
@@ -156,68 +162,6 @@ pub async fn run(
         detected_waf_obj: top_detection,
         evasion_plan,
     })
-}
-
-/// Merge a custom-rules detection into the built-in detection list,
-/// preserving the descending-confidence ordering downstream code
-/// relies on.
-///
-/// The conversion preserves:
-/// - `rule_name` → `DetectedWaf::name` (so the advisor and JSON
-///   output show the operator's chosen label).
-/// - `confidence` → `DetectedWaf::confidence` (raw passthrough; the
-///   custom_rules validator already enforces `[0.0, 1.0]`).
-/// - `vendor` + `evasion_strategies` → joined into the `indicators`
-///   list. This is the only place the operator's vendor string +
-///   strategy hints surface in scan's JSON output, so they're not
-///   silently dropped.
-///
-/// If the custom detection matches an existing `name` in `detected`
-/// (case-insensitive), the existing entry's confidence is **raised
-/// to the max** of the two — so layering custom rules on top of
-/// built-ins can only INCREASE confidence, never decrease it. This
-/// is the property an operator naturally expects when adding
-/// in-house signatures to the built-in corpus.
-pub(crate) fn merge_custom_into_detected(
-    detected: &mut Vec<DetectedWaf>,
-    custom: CustomDetection,
-) {
-    let mut indicators = Vec::new();
-    if !custom.vendor.is_empty() {
-        indicators.push(format!("vendor={}", custom.vendor));
-    }
-    if !custom.evasion_strategies.is_empty() {
-        indicators.push(format!(
-            "evasion_strategies={}",
-            custom.evasion_strategies.join(",")
-        ));
-    }
-    indicators.push("source=custom-rules".to_string());
-
-    if let Some(existing) = detected
-        .iter_mut()
-        .find(|d| d.name.eq_ignore_ascii_case(&custom.rule_name))
-    {
-        if custom.confidence > existing.confidence {
-            existing.confidence = custom.confidence;
-        }
-        existing.indicators.extend(indicators);
-    } else {
-        detected.push(DetectedWaf {
-            name: custom.rule_name,
-            confidence: custom.confidence,
-            indicators,
-        });
-    }
-    // Re-sort by descending confidence so `detected[0]` is still the
-    // top candidate. NaN can't appear (validator forbids it) so
-    // partial_cmp.unwrap is safe; we still belt-and-suspender it with
-    // a fallback to Equal.
-    detected.sort_by(|a, b| {
-        b.confidence
-            .partial_cmp(&a.confidence)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
 }
 
 #[cfg(test)]
@@ -254,7 +198,7 @@ mod tests {
             .timeout(Duration::from_secs(2))
             .build()
             .unwrap();
-        let result = run(&client, "http://127.0.0.1:1/", false, None).await;
+        let result = run(&client, "http://127.0.0.1:1/", false).await;
         match result {
             Err(_) => {}
             Ok(_) => panic!("dead port must err"),
@@ -269,7 +213,7 @@ mod tests {
         )
         .await;
         let client = reqwest::Client::builder().build().unwrap();
-        let outcome = run(&client, &format!("http://{addr}/"), false, None)
+        let outcome = run(&client, &format!("http://{addr}/"), false)
             .await
             .expect("ok");
         assert_eq!(outcome.baseline_status, 200);
@@ -290,7 +234,7 @@ mod tests {
         )
         .await;
         let client = reqwest::Client::builder().build().unwrap();
-        let outcome = run(&client, &format!("http://{addr}/"), false, None)
+        let outcome = run(&client, &format!("http://{addr}/"), false)
             .await
             .expect("ok");
         // Either Cloudflare lands by name, or it lands as Unknown
@@ -301,6 +245,77 @@ mod tests {
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("cf-ray"));
         assert!(cf_ray, "CF-Ray should be in the captured headers");
+    }
+
+    /// §15 OOM / decompression-bomb defence pin.
+    ///
+    /// Pre-fix: `detect_phase::run` called `.bytes().await` with no cap.
+    /// A hostile WAF serving a ~100 KiB gzip bomb expanding to >8 MiB
+    /// would OOM the CLI before detection finished. The fix routes the
+    /// baseline body through `safe_body::read_bounded`; on overrun the
+    /// body is empty and detection continues on headers alone.
+    ///
+    /// This test serves a body that exceeds DEFAULT_MAX_RESPONSE_BYTES
+    /// without gzip (to keep the test fast); the bounded reader's cap
+    /// fires at the raw byte level. The outcome must be `Ok` (no panic,
+    /// no process abort) and the body_bytes must be empty (overrun
+    /// path) while the status is still captured correctly.
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_does_not_oom_on_oversized_baseline_body() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        // Serve a body well above DEFAULT_MAX_RESPONSE_BYTES (8 MiB).
+        // We use 9 MiB of zeros so the body reader hits the cap quickly.
+        let body_size: usize = 9 * 1024 * 1024;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    // Announce 9 MiB body with a known status.
+                    let header = format!(
+                        "HTTP/1.1 403 Forbidden\r\nContent-Length: {body_size}\r\n\
+                         Server: test-mock\r\nConnection: close\r\n\r\n"
+                    );
+                    let _ = sock.write_all(header.as_bytes()).await;
+                    // Write the oversized body in 64 KiB chunks.
+                    let chunk = vec![0u8; 64 * 1024];
+                    let mut written = 0_usize;
+                    while written < body_size {
+                        let n = (body_size - written).min(chunk.len());
+                        if sock.write_all(&chunk[..n]).await.is_err() {
+                            break;
+                        }
+                        written += n;
+                    }
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let outcome = run(&client, &format!("http://{addr}/"), false)
+            .await
+            .expect("run must return Ok even when body overruns the cap");
+
+        // Status captured correctly before the body read.
+        assert_eq!(outcome.baseline_status, 403);
+        // Body empty — the overrun defence discards the body and
+        // continues on headers (waf_name may be "Unknown" since
+        // there are no detection signals in this mock response).
+        assert!(
+            outcome.body_bytes.is_empty(),
+            "body must be empty on overrun; got {} bytes",
+            outcome.body_bytes.len()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -317,7 +332,7 @@ mod tests {
         )
         .await;
         let client = reqwest::Client::builder().build().unwrap();
-        let outcome = run(&client, &format!("http://{addr}/"), false, None)
+        let outcome = run(&client, &format!("http://{addr}/"), false)
             .await
             .expect("ok");
         assert!(
@@ -325,149 +340,6 @@ mod tests {
                 .headers_vec
                 .iter()
                 .any(|(k, _)| k.eq_ignore_ascii_case("x-weird"))
-        );
-    }
-
-    // ─── merge_custom_into_detected ──────────────────────────────────────
-
-    fn det(name: &str, c: f64) -> DetectedWaf {
-        DetectedWaf {
-            name: name.to_string(),
-            confidence: c,
-            indicators: vec![format!("builtin:{name}")],
-        }
-    }
-
-    fn cd(name: &str, c: f64, vendor: &str, strat: &[&str]) -> CustomDetection {
-        CustomDetection {
-            rule_name: name.to_string(),
-            vendor: vendor.to_string(),
-            confidence: c,
-            evasion_strategies: strat.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-
-    #[test]
-    fn merge_appends_new_waf_and_preserves_descending_sort() {
-        let mut detected = vec![det("Cloudflare", 0.9), det("ModSecurity", 0.6)];
-        merge_custom_into_detected(&mut detected, cd("InHouseWAF", 0.7, "acme", &[]));
-        assert_eq!(detected.len(), 3);
-        assert_eq!(detected[0].name, "Cloudflare");
-        assert_eq!(detected[1].name, "InHouseWAF");
-        assert_eq!(detected[2].name, "ModSecurity");
-        // Source tag is present so JSON consumers can tell it came from --custom-rules.
-        assert!(detected[1].indicators.iter().any(|i| i == "source=custom-rules"));
-    }
-
-    #[test]
-    fn merge_raises_existing_waf_confidence_only_upward() {
-        let mut detected = vec![det("Cloudflare", 0.6)];
-        // Higher custom → existing confidence rises.
-        merge_custom_into_detected(&mut detected, cd("Cloudflare", 0.95, "cf", &[]));
-        assert_eq!(detected.len(), 1, "must not duplicate same-name entry");
-        assert!((detected[0].confidence - 0.95).abs() < 1e-9);
-    }
-
-    #[test]
-    fn merge_does_not_lower_existing_confidence() {
-        let mut detected = vec![det("Cloudflare", 0.95)];
-        merge_custom_into_detected(&mut detected, cd("Cloudflare", 0.30, "cf", &[]));
-        assert_eq!(detected.len(), 1);
-        assert!(
-            (detected[0].confidence - 0.95).abs() < 1e-9,
-            "merge must never reduce confidence, got {}",
-            detected[0].confidence
-        );
-    }
-
-    #[test]
-    fn merge_case_insensitive_name_match() {
-        // operator typed `cloudflare` lowercase — must collapse with built-in `Cloudflare`.
-        let mut detected = vec![det("Cloudflare", 0.6)];
-        merge_custom_into_detected(&mut detected, cd("cloudflare", 0.7, "cf", &[]));
-        assert_eq!(detected.len(), 1, "case must NOT cause duplicate entries");
-    }
-
-    #[test]
-    fn merge_carries_vendor_and_evasion_strategies_into_indicators() {
-        let mut detected = vec![];
-        merge_custom_into_detected(
-            &mut detected,
-            cd("Foo", 0.5, "acme", &["DoubleUrlEncode", "CaseAlternation"]),
-        );
-        assert_eq!(detected.len(), 1);
-        let inds = &detected[0].indicators;
-        assert!(inds.iter().any(|i| i == "vendor=acme"));
-        assert!(inds
-            .iter()
-            .any(|i| i.starts_with("evasion_strategies=") && i.contains("DoubleUrlEncode")));
-        assert!(inds.iter().any(|i| i == "source=custom-rules"));
-    }
-
-    #[test]
-    fn merge_with_empty_vendor_omits_vendor_indicator() {
-        let mut detected = vec![];
-        merge_custom_into_detected(&mut detected, cd("Foo", 0.5, "", &[]));
-        let inds = &detected[0].indicators;
-        // Source tag still required.
-        assert!(inds.iter().any(|i| i == "source=custom-rules"));
-        // But no `vendor=` prefix when operator left it blank.
-        assert!(
-            !inds.iter().any(|i| i.starts_with("vendor=")),
-            "blank vendor must not emit a vendor= indicator: {inds:?}"
-        );
-    }
-
-    #[test]
-    fn merge_empty_list_just_appends() {
-        let mut detected: Vec<DetectedWaf> = vec![];
-        merge_custom_into_detected(&mut detected, cd("Solo", 0.42, "v", &[]));
-        assert_eq!(detected.len(), 1);
-        assert_eq!(detected[0].name, "Solo");
-    }
-
-    #[test]
-    fn merge_stable_ordering_when_confidences_equal() {
-        // Two entries with identical confidence — order between them is
-        // unspecified, but the new entry must STILL appear in the list.
-        let mut detected = vec![det("A", 0.5), det("B", 0.5)];
-        merge_custom_into_detected(&mut detected, cd("C", 0.5, "v", &[]));
-        assert_eq!(detected.len(), 3);
-        let names: Vec<&str> = detected.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"A") && names.contains(&"B") && names.contains(&"C"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn run_with_custom_rules_layers_detection_on_top() {
-        // Origin returns plain content with NO built-in WAF signal,
-        // but a custom rule matches on a body substring.
-        let addr = spawn_mock(
-            "HTTP/1.1 200 OK\r\nServer: nginx\r\nX-Origin-Foo: yes\r\n\
-             Content-Length: 24\r\nConnection: close\r\n\r\nBlocked by InHouseWAF v3",
-        )
-        .await;
-        let toml = r#"
-[[waf]]
-name = "InHouseWAF"
-vendor = "acme-corp"
-
-[[waf.body_signatures]]
-pattern = "Blocked by InHouseWAF"
-confidence = 0.92
-"#;
-        let rules = wafrift_evolution::custom_rules::load_rules(toml).expect("parses");
-        let client = reqwest::Client::builder().build().unwrap();
-        let outcome = run(&client, &format!("http://{addr}/"), false, Some(&rules))
-            .await
-            .expect("ok");
-        // The custom hit becomes the top candidate (confidence 0.92).
-        assert!(
-            outcome
-                .detected
-                .iter()
-                .any(|d| d.name == "InHouseWAF" && (d.confidence - 0.92).abs() < 1e-6),
-            "expected InHouseWAF in detected list, got {:?}",
-            outcome.detected
         );
     }
 }

@@ -16,21 +16,23 @@
 //! - Ctrl-C is received (graceful — finishes the current in-flight round
 //!   before persisting and exiting).
 //!
-//! ## Auto-submit (--auto-submit, #72)
+//! ## Bypass corpus (consumed by `wafrift harvest`)
 //!
-//! When `--auto-submit` is set, every newly confirmed bypass is queued for
-//! HackerOne submission via the HackerOne REST API (requires `H1_API_KEY`
-//! in environment). The first 24 h of any campaign runs in implicit
-//! `--dry-run-submit` mode — bypasses are accumulated in the corpus but
-//! NOT filed. After 24 h have elapsed from campaign start, live submission
-//! begins (unless `--dry-run-submit` is also passed explicitly, in which
-//! case dry-run is permanent).
+//! Every round runs `bench-waf` with a per-target `--corpus-out` under
+//! `~/.wafrift`, so a campaign accumulates the concrete winning payload +
+//! response evidence for each confirmed bypass. `wafrift harvest` later
+//! reads that corpus, re-verifies each candidate live, and writes
+//! review-ready reports. `hunt` itself NEVER submits anything — filing is
+//! a deliberate, one-at-a-time manual step via `wafrift submit`. (Auto-
+//! submitting machine-generated reports at a bounty program is a ban risk,
+//! so wafrift has no automatic or batch submission path.)
 //!
 //! ## CumulusFire preset (--target cumulusfire)
 //!
 //! Pre-fills `--base-url` with the CumulusFire testing endpoint and sets
 //! the `--i-have-permission` reason to the pre-registered CF scope
-//! identifier. Combine with `--auto-submit` for the 24/7 bounty harness.
+//! identifier. Then `wafrift harvest --target cumulusfire` turns the
+//! accumulated corpus into review-ready bounty reports.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -43,18 +45,34 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use wafrift_strategy::drift_window::{BypassRateMonitor, ChangePointEvent};
 
 // ─── Preset ──────────────────────────────────────────────────────────────────
 
 /// Known target presets.
 const CUMULUSFIRE_BASE_URL: &str = "https://waf.cumulusfire.net";
-const CUMULUSFIRE_PERMISSION: &str = "CumulusFire public bug bounty scope — wafrift hunt --target cumulusfire";
+const CUMULUSFIRE_PERMISSION: &str =
+    "CumulusFire public bug bounty scope — wafrift hunt --target cumulusfire";
+
+/// Hunt round writes a `bench-waf --output` JSON to a tmp file then
+/// reads it back. Even though the path is owned by wafrift, a tmpdir
+/// race (other process replacing the tmp inode with a multi-GB
+/// symlink between `run_bench_waf` returning and the read) can OOM
+/// the process. 64 MiB matches bench-diff: enough for 10k+ cases,
+/// not enough to OOM.
+const HUNT_BENCH_OUTPUT_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+/// Campaign state JSON in `~/.wafrift/hunt-<id>.json` is small (a
+/// list of round counts + bypass list). 16 MiB catches any
+/// runaway-write accident and hostile symlinks pointed at
+/// arbitrary files.
+const HUNT_CAMPAIGN_STATE_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 // ─── Campaign state ──────────────────────────────────────────────────────────
 
 /// A single confirmed bypass recorded by the campaign.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CampaignBypass {
+pub(crate) struct CampaignBypass {
     /// Wall-clock timestamp (Unix seconds) when the bypass was confirmed.
     pub discovered_at: u64,
     /// Round index in which this bypass was found.
@@ -67,9 +85,27 @@ pub struct CampaignBypass {
     pub submitted: bool,
 }
 
+/// A change-point event detected by the CUSUM bypass-rate monitor (C-11).
+///
+/// Recorded when the online CUSUM detector fires — indicating a statistically
+/// significant drop in bypass rate, likely caused by a WAF vendor rule update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ChangePointMarker {
+    /// Wall-clock timestamp (Unix seconds) when the alarm fired.
+    pub detected_at: u64,
+    /// Round in which the alarm fired.
+    pub round: u64,
+    /// Windowed bypass rate at alarm time (fraction in `[0.0, 1.0]`).
+    pub observed_rate: f64,
+    /// Baseline bypass rate just before the alarm (fraction in `[0.0, 1.0]`).
+    pub baseline_rate: f64,
+    /// Absolute drop expressed in percentage points.
+    pub drop_pp: f64,
+}
+
 /// Persisted campaign state.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CampaignState {
+pub(crate) struct CampaignState {
     /// Stable campaign identifier (matches the filename stem).
     pub campaign_id: String,
     /// Target base URL.
@@ -84,16 +120,23 @@ pub struct CampaignState {
     pub schema_version: u32,
     /// All confirmed bypasses.
     pub bypasses: Vec<CampaignBypass>,
+    /// Change-point events detected by the CUSUM bypass-rate monitor.
+    /// Empty in campaigns run without `--change-point-alarm`.
+    /// Added in schema_version 2; defaults to empty for v1 state files.
+    #[serde(default)]
+    pub change_points: Vec<ChangePointMarker>,
 }
 
 impl CampaignState {
-    pub const SCHEMA_VERSION: u32 = 1;
+    /// Schema version 2 adds `change_points` (C-11 CUSUM alarm log).
+    /// v1 state files load cleanly via `#[serde(default)]` on the field.
+    pub const SCHEMA_VERSION: u32 = 2;
 }
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Args, Debug)]
-pub struct HuntArgs {
+pub(crate) struct HuntArgs {
     /// Base URL of the WAF target. Overridden by `--target cumulusfire`.
     #[arg(long)]
     pub base_url: Option<String>,
@@ -115,6 +158,14 @@ pub struct HuntArgs {
     /// Default: `heavy,equiv-cegis` (same default as bench-waf).
     #[arg(long, value_delimiter = ',', default_value = "heavy,equiv-cegis")]
     pub strategies: Vec<String>,
+
+    /// Known WAF class of the target (e.g. "Cloudflare Bot Management",
+    /// "AWS Bot Control"). When it names an ML-backed WAF, the campaign
+    /// adds the `ml-evasion` decision-boundary strategy to its rotation and
+    /// passes the name through to each bench round. Omit for rule-based
+    /// targets — `ml-evasion` would be a no-op there.
+    #[arg(long)]
+    pub waf_name: Option<String>,
 
     /// Variants per corpus case per strategy per round.
     #[arg(long, default_value_t = 5)]
@@ -143,18 +194,6 @@ pub struct HuntArgs {
     #[arg(long)]
     pub campaign_id: Option<String>,
 
-    /// When set, submit every newly confirmed bypass to HackerOne via
-    /// the H1 API (requires `H1_API_KEY` env var).
-    /// The first 24 h of any campaign are always dry-run; live
-    /// submission begins after that grace period.
-    #[arg(long, default_value_t = false)]
-    pub auto_submit: bool,
-
-    /// Force dry-run submit mode permanently — accumulate the corpus but
-    /// never actually POST to HackerOne, even after the 24 h grace period.
-    #[arg(long, default_value_t = false)]
-    pub dry_run_submit: bool,
-
     /// Authorization statement for non-allowlisted targets. Required for
     /// any target outside localhost / RFC1918 / wafrift's built-in list
     /// (unless `--target cumulusfire` is used, which has a built-in reason).
@@ -164,32 +203,69 @@ pub struct HuntArgs {
     /// Delay between requests inside each round (ms).
     #[arg(long, default_value_t = 0)]
     pub delay_ms: u64,
+
+    /// Enable CUSUM bypass-rate change-point alarm (C-11).
+    ///
+    /// When set, the campaign monitors the bypass rate online and emits a
+    /// warning to stderr when a statistically significant drop is detected
+    /// (indicating a likely WAF rule update). The alarm is also recorded in
+    /// the campaign state file under `change_points`.
+    #[arg(long, default_value_t = false)]
+    pub change_point_alarm: bool,
+
+    /// Sliding window size for the bypass-rate CUSUM detector (samples).
+    ///
+    /// Larger windows provide a smoother rate estimate but slower detection.
+    /// Applies only when `--change-point-alarm` is set.
+    #[arg(long, default_value_t = 50)]
+    pub change_point_window: usize,
+
+    /// CUSUM slack parameter k for the bypass-rate change-point detector.
+    ///
+    /// Controls the per-sample allowable drift before the CUSUM accumulates.
+    /// Typical value: 0.5 × the minimum detectable rate drop (fraction).
+    /// Applies only when `--change-point-alarm` is set.
+    #[arg(long, default_value_t = 0.05)]
+    pub change_point_k: f64,
+
+    /// CUSUM decision threshold h for the bypass-rate change-point detector.
+    ///
+    /// The CUSUM accumulator must exceed this value before an alarm fires.
+    /// Higher values = fewer false positives but slower detection.
+    /// Applies only when `--change-point-alarm` is set.
+    #[arg(long, default_value_t = 0.5)]
+    pub change_point_h: f64,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
-pub fn run_hunt(args: HuntArgs) -> ExitCode {
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("{} failed to start tokio runtime: {e}", "error:".red().bold());
-            return ExitCode::from(1);
-        }
-    };
-    rt.block_on(run_hunt_async(args))
+pub(crate) fn run_hunt(args: HuntArgs) -> ExitCode {
+    // §7 DEDUPLICATION: delegate to the canonical runtime helper.
+    crate::helpers::block_on_with_runtime(run_hunt_async(args))
 }
 
 async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
     // Apply --target preset.
-    if let Some(ref preset) = args.target.clone() {
-        if preset == "cumulusfire" {
-            if args.base_url.is_none() {
-                args.base_url = Some(CUMULUSFIRE_BASE_URL.to_string());
-            }
-            if args.i_have_permission.is_none() {
-                args.i_have_permission = Some(CUMULUSFIRE_PERMISSION.to_string());
-            }
+    if let Some(ref preset) = args.target.clone()
+        && preset == "cumulusfire"
+    {
+        if args.base_url.is_none() {
+            args.base_url = Some(CUMULUSFIRE_BASE_URL.to_string());
         }
+        if args.i_have_permission.is_none() {
+            args.i_have_permission = Some(CUMULUSFIRE_PERMISSION.to_string());
+        }
+    }
+
+    // Paradigm-aware routing: if the operator names an ML-backed WAF
+    // (AWS/Cloudflare/Akamai bot-management, Datadome), add the `ml-evasion`
+    // decision-boundary strategy to the rotation — rule-decompilation
+    // (equiv-cegis) is the wrong paradigm for a learned classifier.
+    if let Some(wn) = &args.waf_name
+        && wafrift_types::WafClass::from_waf_name(wn).is_ml_backed()
+        && !args.strategies.iter().any(|s| s == "ml-evasion")
+    {
+        args.strategies.push("ml-evasion".to_string());
     }
 
     let base_url = match args.base_url.clone() {
@@ -203,12 +279,65 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
 
     let campaign_id = args.campaign_id.clone().unwrap_or_else(|| {
         // Stable ID from current wall time (seconds).
-        let ts = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let ts = crate::helpers::now_unix_secs();
         format!("{ts}")
     });
+    if let Err(e) = validate_campaign_id(&campaign_id) {
+        eprintln!("error: {e}");
+        return ExitCode::from(2);
+    }
+
+    // N7 fix (dogfood R29 cohort): pre-fix hunt would launch with a
+    // missing corpus path, fail per-round inside bench_waf with an
+    // error buried in round-1 output, then proceed to "complete"
+    // with exit 0. A CI smoke test (`wafrift hunt … --max-duration-
+    // secs 30 && echo ok`) printed "ok" even though no round had
+    // ever processed a case. Catch the missing-corpus state at the
+    // top level BEFORE round 1 starts so the operator sees the
+    // failure as a top-level error and the exit code reflects it.
+    if !args.corpus.exists() {
+        eprintln!(
+            "error: corpus path {} does not exist. Default is `wafrift-bench/corpus` \
+             relative to CWD; either `cd` into the wafrift repo root before running \
+             hunt, or pass `--corpus PATH` explicitly. Hunt aborted before round 1 \
+             so the failure is visible to CI.",
+            args.corpus.display()
+        );
+        return ExitCode::from(2);
+    }
+    // R47 fix (dogfood pass 8 I3): pre-fix hunt would loop forever
+    // on an empty corpus directory (every round failed with "no
+    // cases found" inside bench_waf but the campaign continued).
+    // Walk the corpus path once at startup; if zero .toml files
+    // exist, abort with exit 2 — a corpus-less hunt produces zero
+    // signal by construction. Recursive walk matches bench_waf's
+    // own corpus-loading rule.
+    fn has_any_toml(path: &std::path::Path) -> bool {
+        if path.is_file() {
+            return path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("toml"));
+        }
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return false;
+        };
+        for ent in entries.flatten() {
+            if has_any_toml(&ent.path()) {
+                return true;
+            }
+        }
+        false
+    }
+    if !has_any_toml(&args.corpus) {
+        eprintln!(
+            "error: corpus path {} contains no `*.toml` files. An empty corpus \
+             produces zero signal per round — the campaign would loop forever \
+             burning rate-limit budget. Add at least one corpus TOML before \
+             launching hunt.",
+            args.corpus.display()
+        );
+        return ExitCode::from(2);
+    }
 
     let state_path = campaign_state_path(&campaign_id);
     let state = load_or_init_state(&state_path, &campaign_id, &base_url);
@@ -220,13 +349,6 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
         campaign_id.bright_white(),
         base_url.bright_yellow(),
     );
-    if args.auto_submit {
-        eprintln!(
-            "  {} auto-submit ON — first 24 h = dry-run grace period",
-            "⚠".yellow()
-        );
-    }
-
     // Ctrl-C → set shutdown flag and cancel the inner token.
     let shutdown = Arc::new(AtomicBool::new(false));
     let cancel = CancellationToken::new();
@@ -245,10 +367,7 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
         });
     }
 
-    let campaign_start = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let campaign_start = crate::helpers::now_unix_secs();
 
     let max_duration = if args.max_duration_secs == 0 {
         None
@@ -262,16 +381,29 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
         s.rounds_completed
     };
 
+    // C-11: CUSUM bypass-rate change-point monitor.
+    // Constructed once and owned by the campaign loop; persists CUSUM
+    // accumulator state across rounds so the detector integrates evidence
+    // continuously rather than resetting every round.
+    let mut cp_monitor = args.change_point_alarm.then(|| {
+        BypassRateMonitor::new(
+            args.change_point_window,
+            args.change_point_k,
+            args.change_point_h,
+        )
+    });
+
+    // C-11: How many remaining rounds of exploration boost to pass to bench_waf.
+    // Starts at 0; set to 10 when a change-point alarm fires, decremented
+    // each round until it reaches 0 again.
+    let mut pending_exploration_boost: u32 = 0;
+
     loop {
         if shutdown.load(Ordering::SeqCst) || cancel.is_cancelled() {
             break;
         }
         if let Some(max) = max_duration {
-            let elapsed = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0)
-                .saturating_sub(campaign_start);
+            let elapsed = crate::helpers::now_unix_secs().saturating_sub(campaign_start);
             if elapsed >= max.as_secs() {
                 eprintln!(
                     "{} max-duration {}s reached — stopping.",
@@ -293,17 +425,69 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
         );
 
         // Run one bench-waf round and collect any new bypasses.
-        let new_bypasses = run_one_round(&args, &base_url, round).await;
+        // Pass the pending exploration boost so evolutionary-search engines
+        // created inside this round call on_change_point() and explore broadly.
+        let boost_this_round = pending_exploration_boost;
+        pending_exploration_boost = pending_exploration_boost.saturating_sub(1);
+        let round_summary = run_one_round(&args, &base_url, round, boost_this_round).await;
+        let new_bypasses = &round_summary.bypasses;
+
+        // §13 dogfood round-2 DEFECT 6 (platform UX): a hunt round can run
+        // for minutes inside run_one_round; pre-fix the operator saw the
+        // "round N — strategies:" start line and then total silence until the
+        // next round (or the wall-clock budget), with no signal the campaign
+        // was making progress. Emit a per-round completion summary with the
+        // elapsed time + fire/bypass counts so each round visibly closes.
+        eprintln!(
+            "{} round {} done in {:.1}s — fired {} variant(s), {} new verified bypass(es)",
+            "[wafrift hunt]".bright_cyan(),
+            round,
+            round_start.elapsed().as_secs_f64(),
+            round_summary.total_variants_sent,
+            new_bypasses.len(),
+        );
+
+        // C-11: Feed per-variant bypass outcomes into the CUSUM monitor.
+        // We synthesise individual observations from the aggregate counts:
+        // `total_variants_bypassed` samples of `true` followed by
+        // `total_variants_sent - total_variants_bypassed` samples of `false`.
+        // This is statistically equivalent to the round's actual distribution
+        // and keeps the CUSUM accumulator calibrated to attempt-level granularity
+        // rather than round-level (1 observation/round = too coarse for CUSUM).
+        let mut change_point_event: Option<ChangePointEvent> = None;
+        if let Some(ref mut monitor) = cp_monitor {
+            let sent = round_summary.total_variants_sent;
+            let bypassed = round_summary.total_variants_bypassed.min(sent);
+            let blocked = sent.saturating_sub(bypassed);
+
+            // Feed bypassed attempts first (true), then blocked (false).
+            for _ in 0..bypassed {
+                monitor.observe(true);
+            }
+            for _ in 0..blocked {
+                let evt = monitor.observe(false);
+                if matches!(evt, ChangePointEvent::AlarmFired { .. }) {
+                    // Record the first alarm in this round (subsequent ones
+                    // in the same round are noise from baseline re-adaptation).
+                    if change_point_event.is_none() {
+                        change_point_event = Some(evt);
+                    }
+                }
+            }
+
+            // If no alarm fired on the blocked observations, check the last
+            // bypassed observation pass as well (needed when ALL attempts bypass).
+            if change_point_event.is_none() && bypassed > 0 {
+                // Already called observe above; nothing more needed here.
+            }
+        }
 
         // Persist new bypasses.
         {
             let mut s = state.lock().await;
             s.rounds_completed = round;
-            let now_ts = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            for bp in &new_bypasses {
+            let now_ts = crate::helpers::now_unix_secs();
+            for bp in new_bypasses {
                 // Deduplicate by technique+class.
                 let already = s.bypasses.iter().any(|existing| {
                     existing.technique == bp.technique && existing.class == bp.class
@@ -320,6 +504,35 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
                 }
             }
 
+            // C-11: Record change-point alarm in campaign state and emit stderr warning.
+            // Also activate an exploration boost for the next 10 bench rounds so
+            // evolutionary-search engines discard their learned (now-invalidated)
+            // strategy and explore the changed WAF landscape broadly.
+            if let Some(ChangePointEvent::AlarmFired {
+                observed_rate,
+                baseline_rate,
+                drop_pp,
+            }) = change_point_event
+            {
+                eprintln!(
+                    "  {} CHANGE POINT: bypass rate dropped from {:.0}% to {:.0}% — WAF rule update likely",
+                    "⚠".yellow().bold(),
+                    baseline_rate * 100.0,
+                    observed_rate * 100.0,
+                );
+                s.change_points.push(ChangePointMarker {
+                    detected_at: now_ts,
+                    round,
+                    observed_rate,
+                    baseline_rate,
+                    drop_pp,
+                });
+                // Activate exploration boost for the next 10 rounds.
+                // The boost is passed to run_one_round → bench_waf → EvolutionEngine
+                // so future bench rounds explore more broadly after the rule update.
+                pending_exploration_boost = 10;
+            }
+
             if let Err(e) = persist_state(&state_path, &s) {
                 eprintln!("{} persist state: {e}", "error:".red());
             }
@@ -330,33 +543,6 @@ async fn run_hunt_async(mut args: HuntArgs) -> ExitCode {
                 new_bypasses.len().to_string().bright_green(),
                 s.total_bypasses.to_string().bright_green(),
             );
-
-            // Auto-submit: try to submit newly confirmed bypasses.
-            if args.auto_submit && !args.dry_run_submit {
-                let elapsed_secs = now_ts.saturating_sub(s.started_at);
-                if elapsed_secs >= 86_400 {
-                    // 24 h grace period elapsed — submit.
-                    for bp in s.bypasses.iter_mut().filter(|b| !b.submitted) {
-                        match submit_to_h1(&base_url, &bp.class, &bp.technique).await {
-                            Ok(()) => {
-                                bp.submitted = true;
-                            }
-                            Err(e) => {
-                                eprintln!("{} H1 submit failed: {e}", "warn:".yellow());
-                            }
-                        }
-                    }
-                } else {
-                    let remaining = 86_400u64.saturating_sub(elapsed_secs);
-                    eprintln!(
-                        "  {} dry-run grace period: {}s remaining before live submission",
-                        "⚠".yellow(),
-                        remaining
-                    );
-                }
-            } else if args.auto_submit && args.dry_run_submit {
-                eprintln!("  {} --dry-run-submit active — bypasses queued but NOT submitted", "⚠".yellow());
-            }
         }
 
         if shutdown.load(Ordering::SeqCst) || cancel.is_cancelled() {
@@ -401,13 +587,46 @@ struct RoundBypass {
     technique: String,
 }
 
+/// Summary counts returned from a bench-waf round, used by the CUSUM
+/// bypass-rate monitor to feed per-attempt observations.
+struct RoundSummary {
+    bypasses: Vec<RoundBypass>,
+    /// Total variant attempts sent in this round (across all corpus cases).
+    total_variants_sent: u64,
+    /// Total variants confirmed as bypasses in this round.
+    total_variants_bypassed: u64,
+}
+
 /// Run one round of bench-waf evasion and collect newly confirmed bypasses.
 ///
 /// We invoke the bench logic by constructing `BenchWafArgs` and passing it
 /// directly to the bench runner rather than spawning a subprocess — this
 /// keeps the campaign in-process and avoids serialization overhead.
-async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<RoundBypass> {
+///
+/// Returns a [`RoundSummary`] containing the bypasses plus total variant
+/// counts, which the CUSUM bypass-rate monitor uses to feed per-attempt
+/// observations without requiring access to bench-waf's internal state.
+///
+/// `exploration_boost_rounds > 0` signals to evolutionary-search strategies
+/// that a change-point alarm fired in the previous round and they should
+/// explore more broadly (see `EvolutionEngine::on_change_point`).
+async fn run_one_round(
+    args: &HuntArgs,
+    base_url: &str,
+    round: u64,
+    exploration_boost_rounds: u32,
+) -> RoundSummary {
     use crate::bench_waf::{BenchWafArgs, run_bench_waf};
+
+    // Persist every confirmed bypass's winning payload + response evidence
+    // to a per-target rule-bypass corpus under ~/.wafrift, so a campaign
+    // accumulates a re-verifiable, submittable bypass set across rounds
+    // (consumed by `wafrift harvest`). Pre-fix hunt passed corpus_out:None,
+    // discarding every winning payload the strategies found — only
+    // technique tags survived in the campaign state, which can't
+    // reconstruct the wire payload. The path is computed by the SINGLE
+    // shared helper `harvest` also reads from, so the two can't diverge.
+    let (corpus_path, coverage_path) = crate::corpus_recorder::default_corpus_paths(base_url);
 
     let bench_args = BenchWafArgs {
         base_url: Some(base_url.to_string()),
@@ -416,36 +635,101 @@ async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<Round
         evade: true, // hunt always evades
         variants: args.variants,
         strategies: rotate_strategies(&args.strategies, round),
+        // Paradigm-aware routing: the campaign-level `--waf-name` flows to
+        // each bench round so the `ml-evasion` strategy (added to the
+        // rotation above when the WAF is ML-backed) routes through the
+        // manifold-projected ML-evasion structural mutator.
+        waf_name: args.waf_name.clone(),
+        // hunt gates at the campaign level (--i-have-permission / cumulus
+        // preset); its internal bench rounds don't re-gate — the CLI bench-waf
+        // arm is what gates direct invocations.
+        i_have_permission: None,
         oracle_gate: false, // no-op flag
         delay_ms: args.delay_ms,
         timeout_secs: 15,
         insecure: false,
-        output: None,        // we handle persistence ourselves
+        output: None, // we handle persistence ourselves
+        // Overwrite REQUIRED: run_one_round pre-claims the per-round tmp
+        // output path via O_CREAT|O_EXCL (the TOCTOU/symlink defense
+        // below), so the file already exists when bench_waf opens it.
+        // Without force_overwrite, bench_waf's no-clobber guard rejects
+        // EVERY round's output ("already exists … --force-overwrite") and
+        // the whole campaign records 0 bypasses. We own the freshly
+        // claimed regular file, so overwriting it is correct + safe.
+        force_overwrite: true,
         format: "json".into(),
-        summary_only: true,  // don't print per-case noise
+        summary_only: true, // don't print per-case noise
+        prove_execution: false,
         skip_healthcheck: true,
         adaptive_pause_after_errors: 50,
         adaptive_pause_secs: 2,
         validate_only: false,
         lineage_output: None,
+        // Info-gain scheduling: hunt manages its own round budget via
+        // exploration_boost_rounds + per-strategy rotation, so the
+        // per-bench-waf scheduler stays off here. If a future tweak
+        // ever wants hunt to feed the scheduler with cross-round
+        // history, surface a HuntArgs flag and plumb it through.
+        budget: None,
+        history_file: None,
+        history_merge: Vec::new(),
+        fair_class: false,
+        list_schedule: false,
         egress_socks5: Vec::new(),
         egress_http_proxy: Vec::new(),
         egress_tailscale_nodes: Vec::new(),
-        egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
-        egress_challenge_threshold: 3,
-        egress_cooldown_secs: 300,
+        egress_tailscale_socks_addr: crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR.into(),
+        egress_challenge_threshold: crate::config::DEFAULT_EGRESS_CHALLENGE_THRESHOLD,
+        egress_cooldown_secs: crate::config::DEFAULT_EGRESS_COOLDOWN_SECS,
         mutator: "default".into(),
         seed: None,
         dilution_weight: 0.0,
-        corpus_out: None,
-        coverage_out: None,
+        corpus_out: Some(corpus_path),
+        coverage_out: Some(coverage_path),
         corpus_fingerprint: String::new(),
+        ci_threshold: 0.0, // hunt doesn't use CI gating; pass-through default
+        exploration_boost_rounds, // C-11: injected by hunt when CUSUM alarm fires
     };
 
     // Capture stdout temporarily to intercept the bench JSON output.
     // We run bench_waf on a thread (it has its own tokio runtime) and
     // collect the results via the JSON output path written to a temp file.
-    let tmp = std::env::temp_dir().join(format!("wafrift-hunt-round-{round}.json"));
+    //
+    // The tmp filename includes the process PID + a nanosecond timestamp
+    // to defeat the predictable-tmp-path symlink attack: pre-fix the
+    // path was `/tmp/wafrift-hunt-round-{round}.json`, which an attacker
+    // on a shared box could pre-create as `ln -s /etc/cron.d/evil <path>`
+    // BEFORE hunt started — bench_waf's `fs::write` would then follow
+    // the symlink and clobber the attacker-chosen target.
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "wafrift-hunt-round-{}-{nanos}-{round}.json",
+        std::process::id()
+    ));
+    // Belt + braces: claim the inode atomically via O_CREAT|O_EXCL
+    // BEFORE handing the path to bench_waf. If anything (including a
+    // symlink) already sits at the path, this errors and we skip the
+    // round — much safer than truncating a victim file. Once claimed,
+    // bench_waf's fs::write (O_CREAT|O_TRUNC) reopens OUR regular
+    // file and proceeds normally.
+    if let Err(e) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+    {
+        eprintln!(
+            "warn: hunt round {round} could not claim {} ({e}); skipping round",
+            tmp.display()
+        );
+        return RoundSummary {
+            bypasses: Vec::new(),
+            total_variants_sent: 0,
+            total_variants_bypassed: 0,
+        };
+    }
     let tmp_clone = tmp.clone();
 
     let bench_args_with_output = BenchWafArgs {
@@ -462,19 +746,41 @@ async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<Round
     let _ = exit;
 
     // Parse the output file.
-    let raw = match std::fs::read_to_string(&tmp) {
+    let raw = match crate::safe_body::read_bounded_text_file(&tmp, HUNT_BENCH_OUTPUT_MAX_BYTES) {
         Ok(s) => s,
-        Err(_) => return vec![],
+        Err(_) => {
+            return RoundSummary {
+                bypasses: Vec::new(),
+                total_variants_sent: 0,
+                total_variants_bypassed: 0,
+            };
+        }
     };
     let _ = std::fs::remove_file(&tmp);
 
     let json: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
-        Err(_) => return vec![],
+        Err(_) => {
+            return RoundSummary {
+                bypasses: Vec::new(),
+                total_variants_sent: 0,
+                total_variants_bypassed: 0,
+            };
+        }
     };
 
+    // Extract top-level summary variant counts for the CUSUM monitor.
+    let total_variants_sent = json
+        .get("total_variants_sent")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let total_variants_bypassed = json
+        .get("total_variants_bypassed")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
     // Collect confirmed bypasses from the results array.
-    let mut out = Vec::new();
+    let mut bypasses = Vec::new();
     if let Some(results) = json.get("results").and_then(|v| v.as_array()) {
         for result in results {
             let class = result
@@ -488,20 +794,18 @@ async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<Round
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
                 if bypassed > 0 {
-                    if let Some(techs) = evaded
-                        .get("bypass_techniques")
-                        .and_then(|v| v.as_array())
+                    if let Some(techs) = evaded.get("bypass_techniques").and_then(|v| v.as_array())
                     {
                         for t in techs {
                             if let Some(s) = t.as_str() {
-                                out.push(RoundBypass {
+                                bypasses.push(RoundBypass {
                                     class: class.clone(),
                                     technique: s.to_string(),
                                 });
                             }
                         }
                     } else {
-                        out.push(RoundBypass {
+                        bypasses.push(RoundBypass {
                             class: class.clone(),
                             technique: "unknown".to_string(),
                         });
@@ -510,7 +814,11 @@ async fn run_one_round(args: &HuntArgs, base_url: &str, round: u64) -> Vec<Round
             }
         }
     }
-    out
+    RoundSummary {
+        bypasses,
+        total_variants_sent,
+        total_variants_bypassed,
+    }
 }
 
 /// Rotate strategy list each round — cycle through subsets to explore the
@@ -531,7 +839,47 @@ fn rotate_strategies(strategies: &[String], round: u64) -> Vec<String> {
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
+/// Permit only safe filename chars in `--campaign-id`. Pre-fix the
+/// id was interpolated raw into `hunt-{id}.json`, so an operator
+/// passing `--campaign-id ../../tmp/pwn` (whether by mistake or in a
+/// scripted pipeline) escaped `~/.wafrift/` and could overwrite
+/// arbitrary user-writable files. The allowed alphabet is the
+/// portable-filename set plus dash and dot.
+fn validate_campaign_id(id: &str) -> Result<(), String> {
+    if id.is_empty() {
+        return Err("--campaign-id cannot be empty".to_string());
+    }
+    if id.len() > 128 {
+        return Err(format!(
+            "--campaign-id is {} chars; maximum is 128",
+            id.len()
+        ));
+    }
+    if id == "." || id == ".." {
+        return Err(format!("--campaign-id '{id}' is reserved"));
+    }
+    if id.starts_with('-') {
+        // Defends against a campaign-id that looks like a CLI flag if
+        // the value ever flows back into a subprocess argv.
+        return Err(format!("--campaign-id '{id}' cannot start with '-'"));
+    }
+    for ch in id.chars() {
+        let ok = ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.';
+        if !ok {
+            return Err(format!(
+                "--campaign-id '{id}' contains invalid character {ch:?}; \
+                 allowed: [A-Za-z0-9_-.]"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn campaign_state_path(campaign_id: &str) -> PathBuf {
+    // Caller MUST have already validated campaign_id via
+    // validate_campaign_id; in release we still defence-in-depth by
+    // accepting only the validator's alphabet via the format string
+    // (any traversal char would already have been rejected upstream).
     let base = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".wafrift");
@@ -539,23 +887,24 @@ fn campaign_state_path(campaign_id: &str) -> PathBuf {
     base.join(format!("hunt-{campaign_id}.json"))
 }
 
-fn load_or_init_state(path: &PathBuf, campaign_id: &str, target_url: &str) -> CampaignState {
-    if let Ok(raw) = std::fs::read_to_string(path) {
-        if let Ok(s) = serde_json::from_str::<CampaignState>(&raw) {
-            eprintln!(
-                "{} resuming campaign {} (round {}, {} bypasses so far)",
-                "[wafrift hunt]".bright_cyan(),
-                campaign_id.bright_white(),
-                s.rounds_completed,
-                s.total_bypasses
-            );
-            return s;
-        }
+fn load_or_init_state(
+    path: &std::path::Path,
+    campaign_id: &str,
+    target_url: &str,
+) -> CampaignState {
+    if let Ok(raw) = crate::safe_body::read_bounded_text_file(path, HUNT_CAMPAIGN_STATE_MAX_BYTES)
+        && let Ok(s) = serde_json::from_str::<CampaignState>(&raw)
+    {
+        eprintln!(
+            "{} resuming campaign {} (round {}, {} bypasses so far)",
+            "[wafrift hunt]".bright_cyan(),
+            campaign_id.bright_white(),
+            s.rounds_completed,
+            s.total_bypasses
+        );
+        return s;
     }
-    let started_at = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let started_at = crate::helpers::now_unix_secs();
     CampaignState {
         campaign_id: campaign_id.to_string(),
         target_url: target_url.to_string(),
@@ -564,87 +913,20 @@ fn load_or_init_state(path: &PathBuf, campaign_id: &str, target_url: &str) -> Ca
         total_bypasses: 0,
         schema_version: CampaignState::SCHEMA_VERSION,
         bypasses: vec![],
+        change_points: vec![],
     }
 }
 
-fn persist_state(path: &PathBuf, state: &CampaignState) -> Result<(), String> {
+fn persist_state(path: &std::path::Path, state: &CampaignState) -> Result<(), String> {
     let json = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
-    // Write to a sibling `.json.tmp` file first, then rename atomically into
-    // place.  `std::fs::write` truncates the file before writing: a crash or
-    // SIGKILL between the truncate and the final flush leaves an empty /
-    // partial JSON file, silently destroying the campaign state.  The rename
-    // syscall is atomic on all POSIX filesystems and on Windows NTFS (via
-    // MoveFileExW), so the destination is either the old complete file or the
-    // new complete file — never a partially-written one.
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &json)
-        .map_err(|e| format!("write tmp {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .map_err(|e| format!("rename {} → {}: {e}", tmp.display(), path.display()))?;
-    Ok(())
-}
-
-// ─── HackerOne submission (#72) ──────────────────────────────────────────────
-
-/// Submit a confirmed bypass to HackerOne via their REST API.
-///
-/// Requires `H1_API_KEY` (token) and `H1_USERNAME` (your H1 handle) in the
-/// environment. Reports are created as draft findings under the
-/// CumulusFire program by default; extend for other programs via config.
-///
-/// This is the real implementation — no stubs. If the API key is absent we
-/// return an error rather than pretending we submitted.
-async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<(), String> {
-    let api_key = std::env::var("H1_API_KEY")
-        .map_err(|_| "H1_API_KEY not set — cannot submit to HackerOne".to_string())?;
-    let username = std::env::var("H1_USERNAME")
-        .unwrap_or_else(|_| "wafrift-hunt".to_string());
-
-    // HackerOne Reports API v1:
-    // POST https://api.hackerone.com/v1/hackers/reports
-    // Auth: Basic <username>:<api_key>
-    let title = format!("WAF bypass via {technique} ({class} class) on {target_url}");
-    let body = format!(
-        "## Summary\n\nA WAF bypass was confirmed by `wafrift hunt`.\n\n\
-         - **Target**: {target_url}\n\
-         - **Attack class**: {class}\n\
-         - **Technique**: `{technique}`\n\n\
-         ## Reproduction\n\n\
-         ```\n\
-         wafrift bench-waf --evade --base-url {target_url} --strategies {technique}\n\
-         ```\n\n\
-         ## Impact\n\n\
-         Payload passes the WAF unblocked and reaches the origin as a working attack."
-    );
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post("https://api.hackerone.com/v1/hackers/reports")
-        .basic_auth(&username, Some(&api_key))
-        .json(&serde_json::json!({
-            "data": {
-                "type": "report",
-                "attributes": {
-                    "team_handle": "cumulusfire",
-                    "title": title,
-                    "vulnerability_information": body,
-                    "severity_rating": "high",
-                    "impact": "WAF bypass allows unfiltered attack payloads to reach the origin.",
-                    "weakness_id": 20,  // CWE-20 Improper Input Validation
-                }
-            }
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("H1 API request failed: {e}"))?;
-
-    let status = resp.status();
-    if status.is_success() {
-        Ok(())
-    } else {
-        let body = resp.text().await.unwrap_or_default();
-        Err(format!("H1 API returned {status}: {body}"))
-    }
+    // R49 tail (CLAUDE.md §7 DEDUPLICATION): use the canonical
+    // wafrift_types::loaders::write_atomic helper instead of the
+    // ad-hoc tmp+rename dance. Same semantics, one source of truth,
+    // matches seed.rs / bank.rs callers. The helper also handles
+    // parent-fsync for crash durability which the ad-hoc version
+    // skipped.
+    wafrift_types::loaders::write_atomic(path, json.as_bytes())
+        .map_err(|e| format!("atomic write {}: {e}", path.display()))
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -652,6 +934,39 @@ async fn submit_to_h1(target_url: &str, class: &str, technique: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Regression: hunt round runner must overwrite its pre-claimed tmp ──
+
+    #[test]
+    fn round_runner_overwrites_its_preclaimed_tmp_output() {
+        // run_one_round pre-claims the per-round tmp output path via
+        // O_CREAT|O_EXCL (the TOCTOU/symlink defense), so the file already
+        // exists when bench_waf opens it. bench_waf MUST be told to
+        // overwrite it — otherwise its no-clobber guard rejects EVERY
+        // round's output ("already exists … --force-overwrite") and the
+        // campaign records 0 bypasses (the hunt was entirely non-functional
+        // against the live edge until this was fixed; caught by dogfooding
+        // a real CumulusFire campaign).
+        // This test greps its OWN source via include_str!, so neither the
+        // wanted nor the forbidden setting may appear here as a contiguous
+        // literal — that would self-match and defeat the check. Both needles
+        // are assembled at runtime from split pieces; the only contiguous
+        // `force_overwrite: <bool>` in this file is the production assignment
+        // in run_one_round above.
+        let src = include_str!("hunt_cmd.rs");
+        let field = "force_overwrite:";
+        let want = format!("{field} {}", "true");
+        let forbidden = format!("{field} {}", "false");
+        assert!(
+            src.contains(&want),
+            "run_one_round must keep overwrite enabled — it pre-claims the tmp output inode, so \
+             bench_waf's no-clobber guard would reject every round otherwise (0 bypasses)"
+        );
+        assert!(
+            !src.contains(&forbidden),
+            "hunt overwrite flag reverted to disabled — every round's output is rejected (0 bypasses)"
+        );
+    }
 
     // ── Test 1: rotate_strategies wraps at length ─────────────────────────
 
@@ -708,6 +1023,7 @@ mod tests {
                 technique: "tamper/comment".into(),
                 submitted: false,
             }],
+            change_points: vec![],
         };
         let json = serde_json::to_string(&state).unwrap();
         let de: CampaignState = serde_json::from_str(&json).unwrap();
@@ -743,6 +1059,7 @@ mod tests {
             total_bypasses: 0,
             schema_version: CampaignState::SCHEMA_VERSION,
             bypasses: vec![],
+            change_points: vec![],
         };
         persist_state(&tmp, &state).unwrap();
         let raw = std::fs::read_to_string(&tmp).unwrap();
@@ -764,6 +1081,7 @@ mod tests {
             total_bypasses: 2,
             schema_version: CampaignState::SCHEMA_VERSION,
             bypasses: vec![],
+            change_points: vec![],
         };
         persist_state(&tmp, &state).unwrap();
         let loaded = load_or_init_state(&tmp, "resume-test", "http://localhost");
@@ -776,8 +1094,10 @@ mod tests {
 
     #[test]
     fn bypass_dedup() {
-        let mut state = CampaignState::default();
-        state.schema_version = CampaignState::SCHEMA_VERSION;
+        let mut state = CampaignState {
+            schema_version: CampaignState::SCHEMA_VERSION,
+            ..Default::default()
+        };
         let bp = CampaignBypass {
             discovered_at: 0,
             round: 1,
@@ -787,9 +1107,10 @@ mod tests {
         };
         // Insert same bypass twice via the dedup guard.
         for _ in 0..2 {
-            let already = state.bypasses.iter().any(|e| {
-                e.technique == bp.technique && e.class == bp.class
-            });
+            let already = state
+                .bypasses
+                .iter()
+                .any(|e| e.technique == bp.technique && e.class == bp.class);
             if !already {
                 state.bypasses.push(bp.clone());
                 state.total_bypasses += 1;
@@ -809,64 +1130,14 @@ mod tests {
     }
 
     // ── Test 10: schema_version constant is stable ────────────────────────
+    // Schema version 2 added the `change_points` field (C-11 CUSUM alarm log).
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(CampaignState::SCHEMA_VERSION, 1);
+        assert_eq!(CampaignState::SCHEMA_VERSION, 2);
     }
 
-    // ── Test 11: dry-run-submit always skips H1 call ─────────────────────
-    // This test verifies the flag is correctly propagated in state logic.
-    // The actual HTTP call is not made in unit tests.
-
-    #[test]
-    fn dry_run_submit_flag_is_independent() {
-        // Ensure the fields exist and have sane defaults when constructed.
-        let args = HuntArgs {
-            base_url: Some("http://localhost".into()),
-            target: None,
-            corpus: PathBuf::from("corpus"),
-            class: vec![],
-            strategies: vec!["heavy".into()],
-            variants: 5,
-            interval_secs: 60,
-            max_duration_secs: 0,
-            round_budget: 0,
-            campaign_id: None,
-            auto_submit: true,
-            dry_run_submit: true,
-            i_have_permission: Some("test".into()),
-            delay_ms: 0,
-        };
-        assert!(args.auto_submit);
-        assert!(args.dry_run_submit);
-    }
-
-    // ── Test 12 (bonus): auto_submit false keeps dry-run implicit ─────────
-
-    #[test]
-    fn no_auto_submit_no_h1_calls() {
-        let args = HuntArgs {
-            base_url: Some("http://localhost".into()),
-            target: None,
-            corpus: PathBuf::from("corpus"),
-            class: vec![],
-            strategies: vec!["heavy".into()],
-            variants: 5,
-            interval_secs: 60,
-            max_duration_secs: 0,
-            round_budget: 0,
-            campaign_id: None,
-            auto_submit: false,
-            dry_run_submit: false,
-            i_have_permission: None,
-            delay_ms: 0,
-        };
-        // Without auto_submit, no submission path is ever reached.
-        assert!(!args.auto_submit);
-    }
-
-    // ── Test 13: persist_state is atomic — no orphaned .tmp on success ───
+    // ── Test 11: persist_state is atomic — no orphaned .tmp on success ───
     // After a successful persist_state call, the sibling `.json.tmp` file
     // must NOT exist (it was renamed into the final path).
 
@@ -887,6 +1158,7 @@ mod tests {
             total_bypasses: 1,
             schema_version: CampaignState::SCHEMA_VERSION,
             bypasses: vec![],
+            change_points: vec![],
         };
         persist_state(&path, &state).unwrap();
 
@@ -928,6 +1200,7 @@ mod tests {
             total_bypasses: 1,
             schema_version: CampaignState::SCHEMA_VERSION,
             bypasses: vec![bypass],
+            change_points: vec![],
         };
         persist_state(&path, &state).unwrap();
 
@@ -958,6 +1231,7 @@ mod tests {
             total_bypasses: bypasses,
             schema_version: CampaignState::SCHEMA_VERSION,
             bypasses: vec![],
+            change_points: vec![],
         };
 
         persist_state(&path, &mk_state(1, 0)).unwrap();
@@ -977,11 +1251,220 @@ mod tests {
     #[test]
     fn persist_state_returns_err_for_bad_path() {
         // A path whose parent does not exist must produce an Err, not a panic.
-        let bad_path = std::path::PathBuf::from(
-            "/this/directory/does/not/exist/campaign.json",
-        );
+        let bad_path = std::path::PathBuf::from("/this/directory/does/not/exist/campaign.json");
         let state = CampaignState::default();
         let result = persist_state(&bad_path, &state);
         assert!(result.is_err(), "expected Err for non-existent parent dir");
+    }
+
+    // ── Round 22: path-traversal defence on --campaign-id ─────────────
+    //
+    // Pre-fix, `--campaign-id "../../tmp/pwn"` formatted into
+    // `~/.wafrift/hunt-../../tmp/pwn.json` which path-resolves
+    // outside `.wafrift/`. The validator now rejects any character
+    // outside the safe portable-filename alphabet.
+
+    #[test]
+    fn validate_campaign_id_accepts_safe_ids() {
+        for id in [
+            "default",
+            "campaign-001",
+            "campaign_001",
+            "2026-05-26",
+            "abc.def",
+            "A1B2C3",
+        ] {
+            assert!(
+                super::validate_campaign_id(id).is_ok(),
+                "safe id rejected: {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_campaign_id_rejects_traversal() {
+        for bad in [
+            "../../tmp/pwn",
+            "..",
+            ".",
+            "a/b",
+            "a\\b",
+            "/etc/passwd",
+            "campaign with spaces",
+            "campaign\nwith\nnewlines",
+            "campaign\0null",
+            "",
+        ] {
+            assert!(
+                super::validate_campaign_id(bad).is_err(),
+                "traversal/unsafe id accepted: {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_campaign_id_rejects_leading_dash() {
+        // A campaign-id like "--evil" could be reinterpreted as a
+        // CLI flag if it ever flows into a subprocess argv.
+        assert!(super::validate_campaign_id("-x").is_err());
+        assert!(super::validate_campaign_id("--evil").is_err());
+    }
+
+    #[test]
+    fn validate_campaign_id_rejects_oversize() {
+        let long = "a".repeat(129);
+        assert!(super::validate_campaign_id(&long).is_err());
+        let exact = "a".repeat(128);
+        assert!(super::validate_campaign_id(&exact).is_ok());
+    }
+
+    #[test]
+    fn campaign_state_path_stays_under_dot_wafrift() {
+        // Sanity: for every validator-allowed campaign id, the
+        // resolved state path must remain a child of the .wafrift
+        // base directory.
+        let base = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".wafrift");
+        for id in ["default", "campaign-001", "x.y_z"] {
+            let p = super::campaign_state_path(id);
+            assert!(
+                p.starts_with(&base),
+                "campaign state path {p:?} escaped {base:?} for id {id}"
+            );
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // C-11: Change-point alarm tests (LAW 9 — pinned JSON shape + wiring)
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── CP-1: ChangePointMarker round-trips through JSON with correct fields.
+    // Pins the JSON schema so downstream consumers notice if it changes.
+
+    #[test]
+    fn change_point_marker_json_shape() {
+        let marker = ChangePointMarker {
+            detected_at: 1_700_000_042,
+            round: 7,
+            observed_rate: 0.05,
+            baseline_rate: 0.30,
+            drop_pp: 25.0,
+        };
+        let json = serde_json::to_string(&marker).expect("must serialize");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("must deserialize");
+        assert_eq!(v["detected_at"], 1_700_000_042u64, "detected_at field");
+        assert_eq!(v["round"], 7u64, "round field");
+        assert!(
+            (v["observed_rate"].as_f64().unwrap() - 0.05).abs() < 1e-9,
+            "observed_rate field"
+        );
+        assert!(
+            (v["baseline_rate"].as_f64().unwrap() - 0.30).abs() < 1e-9,
+            "baseline_rate field"
+        );
+        assert!(
+            (v["drop_pp"].as_f64().unwrap() - 25.0).abs() < 1e-9,
+            "drop_pp field"
+        );
+    }
+
+    // ── CP-2: CampaignState with change_points persists and reloads correctly.
+    // Verifies the new field survives the persist → load round trip.
+
+    #[test]
+    fn campaign_state_change_points_persist_roundtrip() {
+        let path = std::env::temp_dir().join("wafrift-hunt-cp-roundtrip-test.json");
+        let _ = std::fs::remove_file(&path);
+
+        let state = CampaignState {
+            campaign_id: "cp-test".into(),
+            target_url: "http://localhost".into(),
+            started_at: 0,
+            rounds_completed: 10,
+            total_bypasses: 2,
+            schema_version: CampaignState::SCHEMA_VERSION,
+            bypasses: vec![],
+            change_points: vec![ChangePointMarker {
+                detected_at: 99999,
+                round: 5,
+                observed_rate: 0.0,
+                baseline_rate: 0.35,
+                drop_pp: 35.0,
+            }],
+        };
+        persist_state(&path, &state).unwrap();
+
+        let loaded = load_or_init_state(&path, "cp-test", "http://localhost");
+        assert_eq!(
+            loaded.change_points.len(),
+            1,
+            "one change_point must survive round-trip"
+        );
+        assert_eq!(loaded.change_points[0].round, 5);
+        assert!((loaded.change_points[0].baseline_rate - 0.35).abs() < 1e-9);
+        assert!((loaded.change_points[0].drop_pp - 35.0).abs() < 1e-9);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── CP-3: v1 state file (no change_points field) loads cleanly into v2.
+    // Backwards-compat: campaigns started before C-11 must not fail to load.
+
+    #[test]
+    fn change_points_defaults_to_empty_on_v1_state_file() {
+        let path = std::env::temp_dir().join("wafrift-hunt-v1-compat-test.json");
+        let _ = std::fs::remove_file(&path);
+
+        // Write a v1-style JSON that has no change_points key.
+        let v1_json = r#"{
+            "campaign_id": "v1-compat",
+            "target_url": "http://localhost",
+            "started_at": 0,
+            "rounds_completed": 3,
+            "total_bypasses": 1,
+            "schema_version": 1,
+            "bypasses": []
+        }"#;
+        std::fs::write(&path, v1_json).unwrap();
+
+        let loaded = load_or_init_state(&path, "v1-compat", "http://localhost");
+        assert_eq!(
+            loaded.change_points.len(),
+            0,
+            "v1 state file must deserialize with empty change_points"
+        );
+        assert_eq!(loaded.rounds_completed, 3);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── CP-4: change_point_alarm flag is available on HuntArgs with defaults.
+
+    #[test]
+    fn change_point_alarm_flags_have_correct_defaults() {
+        let args = HuntArgs {
+            base_url: None,
+            target: None,
+            corpus: PathBuf::from("corpus"),
+            class: vec![],
+            strategies: vec!["heavy".into()],
+            waf_name: None,
+            variants: 5,
+            interval_secs: 60,
+            max_duration_secs: 0,
+            round_budget: 0,
+            campaign_id: None,
+            i_have_permission: None,
+            delay_ms: 0,
+            change_point_alarm: false,
+            change_point_window: 50,
+            change_point_k: 0.05,
+            change_point_h: 0.5,
+        };
+        assert!(!args.change_point_alarm, "default alarm is off");
+        assert_eq!(args.change_point_window, 50);
+        assert!((args.change_point_k - 0.05).abs() < 1e-9);
+        assert!((args.change_point_h - 0.5).abs() < 1e-9);
     }
 }

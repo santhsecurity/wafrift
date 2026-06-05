@@ -132,8 +132,16 @@ impl UpstreamClient {
     pub fn stealth(_profile: ImpersonateProfile) -> Result<Self, UpstreamError> {
         #[cfg(feature = "tls-impersonate")]
         {
-            let client = StealthClient::with_timeout(_profile, Duration::from_secs(60))
-                .map_err(|e| UpstreamError::Request(e.to_string()))?;
+            // R56 pass-21: was hardcoded 60s — diverged from the canonical
+            // `wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS` (30) used by every
+            // other client in this binary. Operators saw different timeout
+            // behaviour depending on whether the request went through
+            // UpstreamClient::stealth vs main.rs's direct StealthClient.
+            let client = StealthClient::with_timeout(
+                _profile,
+                Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS),
+            )
+            .map_err(|e| UpstreamError::Request(e.to_string()))?;
             Ok(Self::Stealth(std::sync::Arc::new(client)))
         }
         #[cfg(not(feature = "tls-impersonate"))]
@@ -162,8 +170,11 @@ impl UpstreamClient {
             }
             let mut clients = Vec::with_capacity(_profiles.len());
             for &p in _profiles {
-                let c = StealthClient::with_timeout(p, Duration::from_secs(60))
-                    .map_err(|e| UpstreamError::Request(format!("{}: {e}", p.name())))?;
+                let c = StealthClient::with_timeout(
+                    p,
+                    Duration::from_secs(wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS),
+                )
+                .map_err(|e| UpstreamError::Request(format!("{}: {e}", p.name())))?;
                 clients.push(std::sync::Arc::new(c));
             }
             Ok(Self::StealthPool {

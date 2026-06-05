@@ -12,20 +12,10 @@
 //! 5. Empty bypasses produces an empty cluster report (exit 0).
 //! 6. Missing/malformed input exits non-zero with an error message.
 
+mod common;
+use common::wafrift;
 use std::io::Write;
 use std::process::{Command, Stdio};
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    (
-        out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
-}
 
 fn wafrift_stdin(args: &[&str], stdin_data: &str) -> (i32, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift"))
@@ -109,8 +99,10 @@ fn cluster_appears_in_main_help() {
 
 #[test]
 fn cluster_json_format_emits_schema_version_and_clusters() {
-    let (code, stdout, stderr) =
-        wafrift_stdin(&["cluster", "-", "--format", "json"], bench_json_with_bypasses());
+    let (code, stdout, stderr) = wafrift_stdin(
+        &["cluster", "-", "--format", "json"],
+        bench_json_with_bypasses(),
+    );
     assert_eq!(code, 0, "cluster must exit 0; stderr: {stderr}");
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("json must be valid JSON");
@@ -130,16 +122,27 @@ fn cluster_json_format_emits_schema_version_and_clusters() {
     );
     // Each cluster must have required fields.
     for c in clusters {
-        assert!(c["rule_id"].is_string(), "cluster.rule_id must be string: {c}");
-        assert!(c["member_count"].is_number(), "cluster.member_count must be number: {c}");
+        assert!(
+            c["rule_id"].is_string(),
+            "cluster.rule_id must be string: {c}"
+        );
+        assert!(
+            c["member_count"].is_number(),
+            "cluster.member_count must be number: {c}"
+        );
     }
 }
 
 #[test]
 fn cluster_empty_bypasses_produces_empty_cluster_report() {
-    let (code, stdout, stderr) =
-        wafrift_stdin(&["cluster", "-", "--format", "json"], bench_json_no_bypasses());
-    assert_eq!(code, 0, "cluster with no bypasses must still exit 0; stderr: {stderr}");
+    let (code, stdout, stderr) = wafrift_stdin(
+        &["cluster", "-", "--format", "json"],
+        bench_json_no_bypasses(),
+    );
+    assert_eq!(
+        code, 0,
+        "cluster with no bypasses must still exit 0; stderr: {stderr}"
+    );
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("json must be valid JSON");
     assert_eq!(
@@ -148,7 +151,10 @@ fn cluster_empty_bypasses_produces_empty_cluster_report() {
         "total_bypasses must be 0 when no variants bypassed: {v}"
     );
     let clusters = v["clusters"].as_array().expect("clusters array");
-    assert!(clusters.is_empty(), "clusters must be empty with no bypasses: {v}");
+    assert!(
+        clusters.is_empty(),
+        "clusters must be empty with no bypasses: {v}"
+    );
 }
 
 #[test]
@@ -157,7 +163,10 @@ fn cluster_rejects_malformed_json_with_nonzero_exit() {
         &["cluster", "-", "--format", "json"],
         "NOT VALID JSON AT ALL",
     );
-    assert_ne!(code, 0, "malformed JSON must exit non-zero; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "malformed JSON must exit non-zero; stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -166,13 +175,18 @@ fn cluster_rejects_missing_results_array() {
         &["cluster", "-", "--format", "json"],
         r#"{"no_results_key": []}"#,
     );
-    assert_ne!(code, 0, "JSON without 'results' must exit non-zero; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "JSON without 'results' must exit non-zero; stderr: {stderr}"
+    );
 }
 
 #[test]
 fn cluster_text_format_emits_human_readable_output() {
-    let (code, stdout, stderr) =
-        wafrift_stdin(&["cluster", "-", "--format", "text"], bench_json_with_bypasses());
+    let (code, stdout, stderr) = wafrift_stdin(
+        &["cluster", "-", "--format", "text"],
+        bench_json_with_bypasses(),
+    );
     assert_eq!(code, 0, "cluster text format must exit 0; stderr: {stderr}");
     // Text format: not a JSON object.
     assert!(

@@ -15,20 +15,8 @@
 //! 8. Sucuri headers are detected.
 //! 9. Body with Cloudflare marker is detected even without headers.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ── Help surface ──────────────────────────────────────────────────────────
 
@@ -102,9 +90,13 @@ fn detect_identifies_cloudflare_from_server_header() {
         "Cloudflare headers must produce a detection: {v}"
     );
 
-    let has_cloudflare = detected
-        .iter()
-        .any(|d| d["name"].as_str().unwrap_or("").to_lowercase().contains("cloudflare"));
+    let has_cloudflare = detected.iter().any(|d| {
+        d["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("cloudflare")
+    });
     assert!(has_cloudflare, "must detect Cloudflare: {v}");
 }
 
@@ -141,7 +133,7 @@ fn detect_cloudflare_detection_has_required_fields() {
         );
         let conf = entry["confidence"].as_f64().unwrap_or(0.0);
         assert!(
-            conf >= 0.0 && conf <= 1.0,
+            (0.0..=1.0).contains(&conf),
             "confidence must be in [0, 1]: {entry}"
         );
     }
@@ -160,7 +152,10 @@ fn detect_unknown_server_produces_empty_detected() {
         "--format",
         "json",
     ]);
-    assert_eq!(code, 0, "detect must exit 0 for unknown server; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "detect must exit 0 for unknown server; stderr: {stderr}"
+    );
 
     let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid JSON");
     let detected = v["detected"].as_array().expect("detected array");
@@ -192,9 +187,13 @@ fn detect_identifies_sucuri_from_header() {
         "Sucuri X-Sucuri-ID header must produce a detection: {v}"
     );
 
-    let has_sucuri = detected
-        .iter()
-        .any(|d| d["name"].as_str().unwrap_or("").to_lowercase().contains("sucuri"));
+    let has_sucuri = detected.iter().any(|d| {
+        d["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("sucuri")
+    });
     assert!(has_sucuri, "must detect Sucuri: {v}");
 }
 
@@ -202,13 +201,8 @@ fn detect_identifies_sucuri_from_header() {
 
 #[test]
 fn detect_rejects_out_of_range_status_0() {
-    let (code, _stdout, stderr) = wafrift(&[
-        "detect",
-        "--status",
-        "0",
-        "--headers",
-        "Server: test",
-    ]);
+    let (code, _stdout, stderr) =
+        wafrift(&["detect", "--status", "0", "--headers", "Server: test"]);
     assert_ne!(code, 0, "status 0 must exit non-zero; stderr: {stderr}");
     // Error must hint at the valid range.
     assert!(
@@ -219,13 +213,8 @@ fn detect_rejects_out_of_range_status_0() {
 
 #[test]
 fn detect_rejects_out_of_range_status_1000() {
-    let (code, _stdout, stderr) = wafrift(&[
-        "detect",
-        "--status",
-        "1000",
-        "--headers",
-        "Server: test",
-    ]);
+    let (code, _stdout, stderr) =
+        wafrift(&["detect", "--status", "1000", "--headers", "Server: test"]);
     assert_ne!(code, 0, "status 1000 must exit non-zero; stderr: {stderr}");
 }
 
@@ -258,13 +247,15 @@ fn detect_infrastructure_lists_server_header() {
     assert_eq!(code, 0, "detect must exit 0; stderr: {stderr}");
 
     let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid JSON");
-    let infra = v["infrastructure"].as_array().expect("infrastructure array");
+    let infra = v["infrastructure"]
+        .as_array()
+        .expect("infrastructure array");
 
     // Server: cloudflare must appear in the infrastructure list.
     let has_server = infra.iter().any(|entry| {
         entry["header"]
             .as_str()
-            .map(|h| h.to_ascii_lowercase() == "server")
+            .map(|h| h.eq_ignore_ascii_case("server"))
             .unwrap_or(false)
     });
     assert!(

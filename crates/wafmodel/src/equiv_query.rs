@@ -285,7 +285,10 @@ impl EquivalenceOracle for UcbBanditEq {
                     }
                 }
             }
-            let (s, sym) = best.expect("non-empty alphabet and cover");
+            // `best` is None iff `cover` is empty or `alpha.len() == 0`.
+            // Both mean the caller supplied a degenerate hypothesis or
+            // alphabet — propagate a typed error instead of panicking.
+            let (s, sym) = best.ok_or(crate::error::WafModelError::EmptySearchSpace)?;
             *self.counts.entry((s, sym)).or_insert(0) += 1;
 
             // Word = access(s) · sym · random suffix.
@@ -392,5 +395,86 @@ impl EquivalenceOracle for ChainedEq {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::WafModelError;
+    use crate::sfa::BytePred;
+
+    /// Helper: single-state SFA that rejects every input (start=0, not
+    /// accepting, one self-loop on BytePred::any()).
+    fn reject_all_sfa() -> Sfa {
+        Sfa::new(0, vec![false], vec![vec![(BytePred::any(), 0)]])
+    }
+
+    /// UCB bandit with budget=0 must return Ok(None) without querying
+    /// the oracle — the for loop never executes, so the `ok_or()`
+    /// line is never reached. Anti-rig: budget=0 is the boundary case.
+    #[test]
+    fn ucb_bandit_zero_budget_returns_ok_none() {
+        let hyp = reject_all_sfa();
+        let alpha = Alphabet::new(vec![], b'\x00');
+        let mut oracle = UcbBanditEq {
+            budget: 0,
+            max_suffix: 4,
+            seed: 1,
+            counts: HashMap::new(),
+            total: 0,
+        };
+        let result = oracle.find_counterexample(&hyp, &alpha, &mut |_| Ok(false));
+        assert!(
+            result.is_ok(),
+            "zero-budget UCB bandit must return Ok, got {result:?}"
+        );
+        assert!(
+            result.unwrap().is_none(),
+            "zero-budget UCB bandit must return Ok(None)"
+        );
+    }
+
+    /// UCB bandit on a single-state SFA (start = only state, rejected)
+    /// with a positive budget must return Ok(None) when the oracle
+    /// agrees with the hypothesis on every queried word.
+    /// This exercises the formerly-panicking `best.ok_or(...)` path
+    /// with a valid non-empty search space and confirms it doesn't panic.
+    #[test]
+    fn ucb_bandit_single_state_no_counterexample_returns_ok_none() {
+        let hyp = reject_all_sfa();
+        let alpha = Alphabet::new(vec![b'a'], b'\x00');
+        let mut oracle = UcbBanditEq {
+            budget: 10,
+            max_suffix: 2,
+            seed: 42,
+            counts: HashMap::new(),
+            total: 0,
+        };
+        // Oracle always says "false" (reject) — matches hypothesis, no counterexample.
+        let result = oracle.find_counterexample(&hyp, &alpha, &mut |_| Ok(false));
+        assert!(
+            result.is_ok(),
+            "UCB bandit on consistent oracle must not return Err: {result:?}"
+        );
+    }
+
+    /// Regression guard: if the inner loop's `best.ok_or(EmptySearchSpace)`
+    /// fires, it must return the typed `WafModelError::EmptySearchSpace`
+    /// variant — not panic and not a different error variant. We simulate
+    /// this by directly calling `ok_or` on None and checking the variant.
+    #[test]
+    fn empty_search_space_error_variant_is_correct() {
+        let none: Option<(StateId, usize)> = None;
+        let err = none.ok_or(WafModelError::EmptySearchSpace).unwrap_err();
+        assert!(
+            matches!(err, WafModelError::EmptySearchSpace),
+            "expected EmptySearchSpace variant, got {err:?}"
+        );
+        // The Display message must be informative (not empty).
+        assert!(
+            !err.to_string().is_empty(),
+            "EmptySearchSpace Display must not be empty"
+        );
     }
 }

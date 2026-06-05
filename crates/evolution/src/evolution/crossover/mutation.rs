@@ -1,6 +1,7 @@
 use crate::evolution::{Chromosome, GenePool};
 use crate::lineage::MutationOp;
 use rand::Rng;
+use wafrift_types::pick::pick_from_rng;
 
 /// Mutate a chromosome and return a log of applied mutations.
 pub fn mutate_with_log(
@@ -50,7 +51,7 @@ pub fn structural_add_mutation(
         .collect();
 
     if !missing_names.is_empty() && rng.gen_bool(add_rate) {
-        let name = missing_names[rng.gen_range(0..missing_names.len())];
+        let name = pick_from_rng(&missing_names, missing_names[0], rng);
         if let Some(value) = gene_pool.random_value(name, rng) {
             chromosome.genes.push((name.to_string(), value));
         }
@@ -77,7 +78,7 @@ pub fn structural_remove_mutation(
             .collect();
 
         if !removable.is_empty() {
-            let idx = removable[rng.gen_range(0..removable.len())];
+            let idx = pick_from_rng(&removable, removable[0], rng);
             chromosome.genes.remove(idx);
         }
     }

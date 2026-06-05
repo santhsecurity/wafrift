@@ -31,9 +31,22 @@ pub fn evolutionary_fitness(chromosome: &Chromosome, gene_stats: &[GeneStatRecor
         return (chromosome.fitness * 0.35).min(0.35);
     }
 
+    // §1 SPEED: pre-fix called `smoothed_gene_success_rate` once per active
+    // gene, each doing an O(n) linear scan of `gene_stats` (up to 500 entries).
+    // With 8 active genes that was 8 × 500 = 4 000 string comparisons per call.
+    // Fix: build a `(name,value) → (successes,attempts)` HashMap once in O(n),
+    // then resolve each gene in O(1). Total: O(n + g) instead of O(n × g).
+    let stat_map = gene_stat_index(gene_stats);
+
     let historical_support = active_genes
         .iter()
-        .map(|(name, value)| smoothed_gene_success_rate(gene_stats, name, value))
+        .map(|(name, value)| {
+            stat_map
+                .get(&(name.as_str(), value.as_str()))
+                .map_or(0.5, |&(successes, attempts)| {
+                    f64::from(successes + 1) / f64::from(attempts + 2)
+                })
+        })
         .sum::<f64>()
         / active_genes.len() as f64;
     let confidence = (1.0 - (-f64::from(chromosome.evaluations) / 6.0).exp()).clamp(0.6, 1.0);
@@ -42,13 +55,18 @@ pub fn evolutionary_fitness(chromosome: &Chromosome, gene_stats: &[GeneStatRecor
     (chromosome.fitness * modifier * confidence).clamp(0.0, 1.0)
 }
 
-fn smoothed_gene_success_rate(gene_stats: &[GeneStatRecord], name: &str, value: &str) -> f64 {
+/// Build a `(name, value) → (successes, attempts)` lookup map for O(1)
+/// per-gene access inside fitness functions.  Kept `pub(crate)` so sibling
+/// modules can reuse it without duplicating the build logic.
+pub(crate) fn gene_stat_index(
+    gene_stats: &[GeneStatRecord],
+) -> std::collections::HashMap<(&str, &str), (u32, u32)> {
     gene_stats
         .iter()
-        .find(|(stat_name, stat_value, _, _)| stat_name == name && stat_value == value)
-        .map_or(0.5, |(_, _, successes, attempts)| {
-            f64::from(*successes + 1) / f64::from(*attempts + 2)
+        .map(|(name, value, successes, attempts)| {
+            ((name.as_str(), value.as_str()), (*successes, *attempts))
         })
+        .collect()
 }
 
 /// Calculate confidence-weighted average fitness for a population.

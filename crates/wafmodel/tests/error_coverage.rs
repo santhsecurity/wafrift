@@ -143,6 +143,56 @@ score = 5
     );
 }
 
+/// R51 pass-13 I3: `TableNotClosed` fires when the L* observation table
+/// is not closed, e.g. because a non-deterministic oracle produced
+/// inconsistent answers that left the suffix column set without an
+/// empty-suffix column.  The variant carries a human-actionable message
+/// directing the operator to use a stable target.  This test pins the
+/// Display contract; the internal trigger path (build_hypothesis) is
+/// exercised by the wafmodel integration suite.
+#[test]
+fn table_not_closed_variant_display() {
+    let err = WafModelError::TableNotClosed;
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not closed"),
+        "Display must say 'not closed': {msg}"
+    );
+    assert!(
+        msg.contains("non-deterministic oracle") || msg.contains("Retry"),
+        "Display must mention non-deterministic oracle or retry: {msg}"
+    );
+    assert!(
+        matches!(err, WafModelError::TableNotClosed),
+        "variant identity preserved"
+    );
+}
+
+#[test]
+fn empty_search_space_variant_display_and_identity() {
+    // EmptySearchSpace is the error emitted by UcbBanditEq when the
+    // search space degenerates (empty cover or zero alphabet classes).
+    // Through the safe public Alphabet API, the catch-all class is always
+    // present so alpha.len() >= 1, making this unreachable via normal use.
+    // That means it's a defensive guard for future refactors. We test the
+    // Display contract and variant identity here (same pattern as
+    // table_not_closed_variant_display for TableNotClosed).
+    let err = WafModelError::EmptySearchSpace;
+    let msg = err.to_string();
+    assert!(
+        msg.contains("search space is empty"),
+        "Display must say 'search space is empty': {msg}"
+    );
+    assert!(
+        msg.contains("non-trivial") || msg.contains("zero symbols") || msg.contains("alphabet"),
+        "Display must mention the degenerate-input cause: {msg}"
+    );
+    assert!(
+        matches!(err, WafModelError::EmptySearchSpace),
+        "variant identity must round-trip"
+    );
+}
+
 #[test]
 fn every_variant_is_covered_by_this_file() {
     // A compile-time exhaustiveness guard: if a new variant is added to
@@ -154,6 +204,8 @@ fn every_variant_is_covered_by_this_file() {
             WafModelError::BudgetExhausted { .. } => {}
             WafModelError::Artifact(_) => {}
             WafModelError::BadRule { .. } => {}
+            WafModelError::TableNotClosed => {}
+            WafModelError::EmptySearchSpace => {}
         }
     }
 }

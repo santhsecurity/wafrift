@@ -11,20 +11,8 @@
 //! 5. `tmin` and `distill` produce identical exit codes on the same inputs.
 //! 6. `tmin` with an unreachable URL and a real payload exits non-zero.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ── Help surface ──────────────────────────────────────────────────────────
 
@@ -32,18 +20,37 @@ fn wafrift(args: &[&str]) -> (i32, String, String) {
 fn tmin_help_documents_key_flags() {
     let (code, stdout, _) = wafrift(&["tmin", "--help"]);
     assert_eq!(code, 0, "tmin --help must exit 0");
-    assert!(stdout.contains("--payload"), "must document --payload: {stdout}");
-    assert!(stdout.contains("--max-fires"), "must document --max-fires: {stdout}");
-    assert!(stdout.contains("--format"), "must document --format: {stdout}");
+    assert!(
+        stdout.contains("--payload"),
+        "must document --payload: {stdout}"
+    );
+    assert!(
+        stdout.contains("--max-fires"),
+        "must document --max-fires: {stdout}"
+    );
+    assert!(
+        stdout.contains("--format"),
+        "must document --format: {stdout}"
+    );
 }
 
 #[test]
-fn tmin_appears_in_main_help() {
+// `tmin` is a hidden alias of `distill` (2026-05). `distill` is the
+// advertised command; `tmin` must keep working forever (LAW 2).
+fn distill_is_in_main_help_and_tmin_alias_still_runs() {
+    // 1. `distill` is discoverable in top-level help.
     let (code, stdout, _) = wafrift(&["--help"]);
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("tmin"),
-        "tmin must appear in top-level help: {stdout}"
+        stdout.contains("\n  distill"),
+        "`distill` must appear as a top-level command in --help: {stdout}"
+    );
+
+    // 2. Deprecated alias still runs (LAW 2 backwards-compat).
+    let (code2, _stdout2, stderr2) = wafrift(&["tmin", "--help"]);
+    assert_eq!(
+        code2, 0,
+        "`wafrift tmin --help` must still exit 0 — stderr:\n{stderr2}"
     );
 }
 

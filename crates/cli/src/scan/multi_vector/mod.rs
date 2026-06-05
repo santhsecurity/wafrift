@@ -60,7 +60,7 @@ use builders::build_request_for_vector;
 /// [`build_request_for_vector`]; the `content_type` is what the
 /// builder usually sets (compression variants override it).
 #[derive(Debug, Clone, Copy)]
-pub struct Vector {
+pub(crate) struct Vector {
     pub name: &'static str,
     pub content_type: &'static str,
 }
@@ -76,7 +76,7 @@ pub struct Vector {
 /// natural body shapes (POST-form / POST-json) so the most-common
 /// surface is visible first. Beyond the baselines, ordering reflects
 /// the attack-axis grouping, not any per-row significance.
-pub const VECTORS: &[Vector] = &[
+pub(crate) const VECTORS: &[Vector] = &[
     // ──────── BASELINE BODY SHAPES ────────────────────────────
     // The four natural request shapes a backend speaks: form,
     // JSON, XML, multipart. WAFs gate body inspection per
@@ -373,7 +373,7 @@ pub const VECTORS: &[Vector] = &[
 /// full ScanArgs shape and keeps the inputs to this module
 /// minimal. `top_payloads` is the operator's top-confidence set
 /// from the equivalence-class phase, already deduped.
-pub struct PhaseInput<'a> {
+pub(crate) struct PhaseInput<'a> {
     pub http: &'a Client,
     pub target: &'a str,
     pub param: &'a str,
@@ -392,12 +392,17 @@ pub struct PhaseInput<'a> {
     /// Starting counter for `vector::<name>` techniques so
     /// downstream telemetry stays monotone across phases.
     pub variant_id_base: usize,
+    /// Global fires already counted by the orchestrator before this phase.
+    /// Used with `max_fires` to enforce the global --max-fires cap.
+    pub fires_so_far: usize,
+    /// Global fire-budget cap (--max-fires). 0 = unlimited.
+    pub max_fires: usize,
 }
 
 /// What this phase produces. Counters are DELTAS — the caller
 /// merges them into its running totals.
 #[derive(Debug, Default)]
-pub struct PhaseOutcome {
+pub(crate) struct PhaseOutcome {
     pub total_fired_delta: usize,
     pub bypassed_delta: u32,
     pub blocked_delta: u32,
@@ -425,7 +430,7 @@ pub struct PhaseOutcome {
 ///    earlier delivery shape was getting caught. Recovered ones
 ///    are tagged with `vector::<name>::rescue` so the operator
 ///    can audit "what was blocked, what got rescued".
-pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
+pub(crate) async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
     let mut outcome = PhaseOutcome::default();
 
     let total_inputs = input.top_payloads.len() + input.rescue_payloads.len();
@@ -458,11 +463,22 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
         if input.cancel.is_cancelled() {
             break;
         }
+        // Respect the global --max-fires budget between vectors too.
+        if input.max_fires != 0 && input.fires_so_far + outcome.total_fired_delta >= input.max_fires
+        {
+            break;
+        }
         let mut v_bypassed: u32 = 0;
         let mut v_blocked: u32 = 0;
 
         for ((payload, techs), is_rescue) in &combined {
             if input.cancel.is_cancelled() {
+                break;
+            }
+            // Respect the global --max-fires budget. 0 = unlimited.
+            if input.max_fires != 0
+                && input.fires_so_far + outcome.total_fired_delta >= input.max_fires
+            {
                 break;
             }
             let fire_counter = input.variant_id_base + outcome.total_fired_delta;

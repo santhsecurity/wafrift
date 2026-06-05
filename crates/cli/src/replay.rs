@@ -17,18 +17,19 @@ use clap::Args;
 use colored::Colorize;
 use serde::Serialize;
 use serde_json::json;
-use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use wafrift_strategy::HostState;
 use wafrift_strategy::strategy::evade;
-use wafrift_strategy::{EvasionConfig, HostState};
 use wafrift_transport::is_waf_block;
-use wafrift_types::{Method, Request};
+// §8 ARCHITECTURE: import EvasionConfig from its canonical home (wafrift_types)
+// rather than via the forwarding re-export in wafrift_strategy — one import
+// path per type prevents grep from missing half the usages during refactors.
+use wafrift_types::{EvasionConfig, Method, Request};
 
 /// Arguments for `wafrift replay`.
 #[derive(Args, Debug, Clone)]
-pub struct ReplayArgs {
+pub(crate) struct ReplayArgs {
     /// Target URL, e.g. `https://api.example.com/search`.
     #[arg(long)]
     pub target: String,
@@ -117,18 +118,15 @@ struct ReplayResult {
     repro_curl: Option<String>,
 }
 
-pub fn run_replay(args: ReplayArgs, quiet: bool) -> ExitCode {
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("failed to start tokio runtime for replay: {e}. Fix: verify system resources and try again.");
-            return ExitCode::from(1);
-        }
-    };
-    rt.block_on(async { run_replay_inner(args, quiet).await })
+const REPLAY_SCHEMA_VERSION: u32 = 1;
+
+pub(crate) fn run_replay(mut args: ReplayArgs) -> ExitCode {
+    args.target = crate::helpers::normalize_target_url(&args.target);
+    // §7 DEDUPLICATION: delegate to the canonical runtime helper.
+    crate::helpers::block_on_with_runtime(run_replay_inner(args))
 }
 
-async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
+async fn run_replay_inner(args: ReplayArgs) -> ExitCode {
     // Resolve technique list. Order: explicit --technique > --from-host >
     // --from-waf. If the resolved list is empty we error out instead of
     // silently sending an unmodified payload — that would be a
@@ -149,9 +147,8 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
     }
 
     // Build the base request. The payload goes into `?param=...` for
-    // GET-like methods and stays in the URL — body-injected replay is a
-    // future expansion (POST forms aren't reconstructible from a host
-    // gene bank entry without remembering form structure).
+    // GET-like methods and stays in the URL; replay does not synthesize
+    // POST form structure from host gene-bank entries.
     let target_url = match build_url_with_param(&args.target, &args.param, &args.payload) {
         Ok(u) => u,
         Err(msg) => {
@@ -166,12 +163,13 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
         .or_else(|| extract_host_from_url(&args.target))
         .unwrap_or_default();
 
-    let req = Request::with_method(method.clone(), target_url)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        )
-        .header("Accept", "*/*");
+    let req = match request_with_shared_browser_headers(method.clone(), target_url) {
+        Ok(req) => req,
+        Err(msg) => {
+            eprintln!("{} {msg}", "error:".red().bold());
+            return ExitCode::from(1);
+        }
+    };
 
     // Drive the existing evasion engine in "rotation" mode by stamping
     // the saved keys onto a fresh HostState as proven winners. This is
@@ -191,18 +189,17 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
         evasion.techniques.iter().map(ToString::to_string).collect()
     };
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(args.timeout_secs))
-        .danger_accept_invalid_certs(args.insecure)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{} Failed to build HTTP client for replay (check --timeout-secs, --insecure, and system TLS). Fix: verify the target URL and network settings. {e}", "error:".red().bold());
-            return ExitCode::from(1);
-        }
-    };
+    let client =
+        match wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, None)
+            .redirect(crate::helpers::safe_redirect_policy(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{} reqwest client build failed: {e}", "error:".red().bold());
+                return ExitCode::from(1);
+            }
+        };
 
     let reqwest_method =
         match reqwest::Method::from_bytes(evasion.request.method.as_str().as_bytes()) {
@@ -230,11 +227,7 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
     let resp = match builder.send().await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!(
-                "{} Request to {} failed: {e}. Fix: verify the target is reachable and the URL is correct.",
-                "error:".red().bold(),
-                evasion.request.url
-            );
+            eprintln!("{} request failed: {e}", "error:".red().bold());
             return ExitCode::from(1);
         }
     };
@@ -244,33 +237,32 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
     // as an empty body would call is_waf_block(status, &[]) and potentially
     // report a false "BYPASS" verdict while the actual body was never read.
     // Surface the overrun to the operator so they know the target misbehaved.
-    let body = match crate::safe_body::read_bounded(
-        resp,
-        crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-    )
-    .await
-    {
-        Ok(b) => b,
-        Err(crate::safe_body::ReadError::Overrun {
-            cap_bytes,
-            observed_bytes,
-        }) => {
-            eprintln!(
-                "{} decompression-bomb defence triggered: response body exceeded \
+    let body =
+        match crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+            .await
+        {
+            Ok(b) => b,
+            Err(crate::safe_body::ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            }) => {
+                eprintln!(
+                    "{} decompression-bomb defence triggered: response body exceeded \
                  {cap_bytes}-byte cap ({observed_bytes}+ bytes) — verdict is unreliable",
-                "warning:".yellow().bold()
-            );
-            Vec::new()
-        }
-        Err(crate::safe_body::ReadError::Transport(e)) => {
-            eprintln!("{} reading response body: {e}", "error:".red().bold());
-            return ExitCode::from(1);
-        }
-    };
+                    "warning:".yellow().bold()
+                );
+                Vec::new()
+            }
+            Err(crate::safe_body::ReadError::Transport(e)) => {
+                eprintln!("{} reading response body: {e}", "error:".red().bold());
+                return ExitCode::from(1);
+            }
+        };
     let elapsed = started.elapsed();
     let blocked = is_waf_block(status, &body);
 
-    let repro_curl = crate::poc_emit::render_curl_for_bypass(&evasion, None, Some("wafrift-replay")).ok();
+    let repro_curl =
+        crate::poc_emit::render_curl_for_bypass(&evasion, None, Some("wafrift-replay")).ok();
 
     let result = ReplayResult {
         schema_version: REPLAY_SCHEMA_VERSION,
@@ -288,12 +280,11 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
         repro_curl,
     };
 
-    if quiet || args.format == "json" {
-        let mut json_result = serde_json::to_value(&result).unwrap_or_default();
-        if let Some(obj) = json_result.as_object_mut() {
-            obj.insert("schema_version".to_string(), json!(1));
-        }
-        println!("{}", serde_json::to_string_pretty(&json_result).unwrap_or_default());
+    if args.format == "json" {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!(result)).unwrap_or_default()
+        );
     } else {
         let verdict = if blocked {
             format!("{} (status {status})", "BLOCKED".red().bold())
@@ -328,7 +319,11 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
             // paste the bypass into a terminal or pentest report.
             if let Some(ref curl) = result.repro_curl {
                 println!();
-                println!("{}  {}", "── curl reproducer ──".bold().cyan(), "(with bypass metadata comment block)".bright_black());
+                println!(
+                    "{}  {}",
+                    "── curl reproducer ──".bold().cyan(),
+                    "(with bypass metadata comment block)".bright_black()
+                );
                 println!("{curl}");
             }
             // Also show a Python requests snippet for operators who
@@ -350,7 +345,7 @@ async fn run_replay_inner(args: ReplayArgs, quiet: bool) -> ExitCode {
     }
 
     if blocked {
-        ExitCode::from(1)
+        ExitCode::from(2)
     } else {
         ExitCode::SUCCESS
     }
@@ -361,7 +356,28 @@ fn resolve_techniques(args: &ReplayArgs) -> Result<Vec<String>, String> {
         return Ok(args.technique.clone());
     }
     if let Some(host) = &args.from_host {
-        return load_from_proxy_bank(host, args.proxy_bank.as_ref());
+        // Fix #5: when the proxy gene bank doesn't contain this host,
+        // fall through to the per-WAF genome bank rather than erroring.
+        // This fixes the common case where a fresh `wafrift scan` has
+        // written bypass techniques to the per-WAF genome but the scan
+        // was not run through `wafrift-proxy`, so the proxy bank is empty.
+        match load_from_proxy_bank(host, args.proxy_bank.as_ref()) {
+            Ok(techs) if !techs.is_empty() => return Ok(techs),
+            Ok(_) | Err(_) => {
+                // Proxy bank empty or host not present — fall through to
+                // the per-WAF genome bank.
+                eprintln!(
+                    "[wafrift replay] host '{host}' not found in proxy gene bank — \
+                     falling back to per-WAF genome (use --from-waf <name> to be explicit)"
+                );
+                // Try to find any non-empty genome. We iterate all known
+                // genomes and return the first one with seed winners.
+                // If the operator also supplied --from-waf that would have
+                // been checked by the explicit branch below; here we do a
+                // "best effort" fallback scan of all available genomes.
+                return load_from_any_genome();
+            }
+        }
     }
     if let Some(waf) = &args.from_waf {
         return load_from_waf_genome(waf);
@@ -369,17 +385,38 @@ fn resolve_techniques(args: &ReplayArgs) -> Result<Vec<String>, String> {
     Ok(Vec::new())
 }
 
-#[derive(serde::Deserialize)]
-struct PersistedHostState {
-    #[serde(default)]
-    proven_winners: Vec<String>,
+/// Scan all available per-WAF genomes and return the technique set from
+/// the first one with seed winners.  Used as a fallback when
+/// `--from-host` is given but the proxy bank has no entry for that host.
+fn load_from_any_genome() -> Result<Vec<String>, String> {
+    let bank = wafrift_strategy::gene_bank::GeneBank::open_default()
+        .map_err(|e| format!("open gene bank for fallback: {e}"))?;
+    let mut bank = bank;
+    for waf_name in bank.list_wafs() {
+        if let Some(genome) = bank.load(&waf_name) {
+            let seeds = genome.seed_winners();
+            if !seeds.is_empty() {
+                eprintln!(
+                    "[wafrift replay] using genome for '{waf_name}' as fallback \
+                     (pass --from-waf {waf_name} to suppress this message)"
+                );
+                return Ok(seeds);
+            }
+        }
+    }
+    Err(
+        "no per-WAF genome has seed winners — run `wafrift scan` against a target first \
+         to build the gene bank"
+            .to_string(),
+    )
 }
 
-#[derive(serde::Deserialize)]
-struct PersistedGeneBank {
-    #[serde(default)]
-    hosts: HashMap<String, PersistedHostState>,
-}
+// R77 pass-21 §7 DEDUP: pre-fix this struct had only `proven_winners`
+// — `blocklisted`, `waf_name`, and `schema` were silently dropped on
+// load. Now routed through the canonical schema in
+// `wafrift_types::gene_bank_io` so future fields land here at
+// compile-time.
+use wafrift_types::gene_bank_io::PersistedGeneBank;
 
 fn load_from_proxy_bank(host: &str, custom_path: Option<&PathBuf>) -> Result<Vec<String>, String> {
     let path = match custom_path {
@@ -390,8 +427,9 @@ fn load_from_proxy_bank(host: &str, custom_path: Option<&PathBuf>) -> Result<Vec
             PathBuf::from(home).join(".wafrift").join("gene-bank.json")
         }
     };
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| format!("read proxy gene bank {}: {e}", path.display()))?;
+    let raw =
+        crate::safe_body::read_bounded_text_file(&path, crate::safe_body::GENE_BANK_FILE_MAX_BYTES)
+            .map_err(|e| format!("read proxy gene bank {}: {e}", path.display()))?;
     let bank: PersistedGeneBank =
         serde_json::from_str(&raw).map_err(|e| format!("parse proxy gene bank: {e}"))?;
     let host_entry = bank
@@ -471,6 +509,24 @@ fn extract_host_from_url(s: &str) -> Option<String> {
     wafrift_transport::host_from_url(s)
 }
 
+fn request_with_shared_browser_headers(
+    method: Method,
+    target_url: String,
+) -> Result<Request, String> {
+    let scan_identity = crate::config::shared_scan_browser_headers(None)?;
+    let mut req = Request::with_method(method, target_url);
+    for (name, value) in &scan_identity.headers {
+        let value = value.to_str().map_err(|_| {
+            format!(
+                "shared browser header {} is not a valid visible ASCII header value",
+                name.as_str()
+            )
+        })?;
+        req.add_header(name.as_str(), value);
+    }
+    Ok(req)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,6 +535,26 @@ mod tests {
     fn build_url_appends_param() {
         let u = build_url_with_param("https://x/y", "q", "1=1").unwrap();
         assert_eq!(u, "https://x/y?q=1%3D1");
+    }
+
+    #[test]
+    fn replay_base_request_uses_shared_browser_headers() {
+        let req =
+            request_with_shared_browser_headers(Method::Get, "https://target.local/?q=x".into())
+                .expect("shared browser request");
+        let facts = guise::fingerprint::default_profile_facts();
+        assert_eq!(req.get_header("User-Agent"), Some(facts.user_agent));
+        assert_eq!(req.get_header("Accept"), Some(facts.accept));
+        assert_eq!(
+            req.get_header("Accept-Language"),
+            Some(facts.accept_language)
+        );
+        assert_eq!(req.get_header("Sec-Fetch-Mode"), Some("navigate"));
+        assert_ne!(
+            req.get_header("Accept"),
+            Some("*/*"),
+            "replay should use browser navigation Accept, not a generic client wildcard"
+        );
     }
 
     #[test]
@@ -506,7 +582,10 @@ mod tests {
     #[test]
     fn build_url_encodes_utf8_payload() {
         let u = build_url_with_param("https://x/y", "q", "パイロード").unwrap();
-        assert_eq!(u, "https://x/y?q=%E3%83%91%E3%82%A4%E3%83%AD%E3%83%BC%E3%83%89");
+        assert_eq!(
+            u,
+            "https://x/y?q=%E3%83%91%E3%82%A4%E3%83%AD%E3%83%BC%E3%83%89"
+        );
     }
 
     #[test]
@@ -552,10 +631,37 @@ mod tests {
             ..base.clone()
         };
         // --from-host wins over --from-waf when --technique is absent.
-        // (We can't test the full load here without a gene-bank file,
-        // but we can verify the error comes from the proxy-bank path.)
-        let err2 = resolve_techniques(&args2).unwrap_err();
-        assert!(err2.contains("proxy gene bank"), "unexpected: {err2}");
+        // Fix #5: when the proxy bank fails (no HOME or no entry), we fall
+        // through to the per-WAF genome.  The genome bank may or may not
+        // have entries depending on the test machine's state:
+        //
+        //   Ok(techs)  → genome bank had seeds; return them.
+        //   Err(msg)   → genome bank is also empty / unreachable; the error
+        //                must reference the genome path, NOT the proxy bank.
+        match resolve_techniques(&args2) {
+            Ok(techs) => {
+                // Genome fallback succeeded — this is correct Fix #5 behaviour.
+                assert!(
+                    !techs.is_empty(),
+                    "fallback from proxy bank to genome succeeded but returned empty vec"
+                );
+            }
+            Err(msg) => {
+                // Acceptable error messages after Fix #5:
+                // - "open gene bank for fallback: ..." (no HOME or missing file)
+                // - "no per-WAF genome has seed winners ..."
+                // The proxy-bank "host not found" error must NOT be the terminal one.
+                assert!(
+                    msg.contains("genome") || msg.contains("gene bank") || msg.contains("HOME"),
+                    "Fix #5 regression: terminal error references proxy bank, not genome: {msg}"
+                );
+                // The error must NOT name the fictitious host 'host'.
+                assert!(
+                    !msg.contains("'host'"),
+                    "Fix #5 regression: error names the proxy-bank host lookup: {msg}"
+                );
+            }
+        }
 
         let args3 = ReplayArgs {
             technique: vec![],
@@ -584,5 +690,150 @@ mod tests {
         // Only truly hostless inputs return None now.
         assert_eq!(extract_host_from_url(""), None);
         assert_eq!(extract_host_from_url("https://"), None);
+    }
+
+    // ── Fix #5: --from-host fallback to per-WAF genome ───────────────────
+
+    #[test]
+    fn replay_falls_back_to_per_waf_genome_when_proxy_bank_empty() {
+        // Synthetic setup: write a gene-bank.json with the requested host
+        // but an empty proven_winners list.  The proxy bank is present and
+        // parseable but carries no techniques for this host.  Fix #5
+        // requires that `resolve_techniques` does NOT return an error
+        // quoting the proxy bank — it must fall through to
+        // `load_from_any_genome()`, whose error (or success) is the
+        // terminal outcome.
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-test-empty-bank-{}.json",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        let bank_json = serde_json::json!({
+            "schema": 1,
+            "hosts": {
+                "target.example.com": {
+                    "proven_winners": [],
+                    "blocklisted": [],
+                    "waf_name": null
+                }
+            }
+        });
+        {
+            let mut f = std::fs::File::create(&tmp).expect("create temp bank file");
+            write!(f, "{}", bank_json).expect("write temp bank file");
+        }
+
+        let args = ReplayArgs {
+            target: "https://target.example.com/".into(),
+            param: "q".into(),
+            payload: "test".into(),
+            method: "GET".into(),
+            technique: vec![],
+            from_host: Some("target.example.com".into()),
+            proxy_bank: Some(tmp.clone()),
+            from_waf: None,
+            insecure: false,
+            timeout_secs: 30,
+            format: "text".into(),
+            host: None,
+        };
+
+        let result = resolve_techniques(&args);
+
+        // Clean up before asserting.
+        let _ = std::fs::remove_file(&tmp);
+
+        match result {
+            Ok(techs) => {
+                // Success path: genome fallback found real techniques.
+                // (Only possible if the test machine has genomes installed.)
+                assert!(
+                    !techs.is_empty(),
+                    "if resolve_techniques succeeds, the technique list must be non-empty"
+                );
+            }
+            Err(msg) => {
+                // Error path: genome bank is also empty / absent (typical in
+                // CI without a populated ~/.wafrift/genomes/).
+                // The critical invariant is that the error DOES NOT say
+                // "host 'target.example.com' not found in proxy gene bank"
+                // — that would mean Fix #5 failed to fall through.
+                assert!(
+                    !msg.contains("target.example.com"),
+                    "Fix #5 regression: error references the proxy-bank host lookup \
+                     instead of the genome fallback. msg: {msg}"
+                );
+                // The error must reference the genome / gene-bank (the
+                // terminal step), not the proxy bank (the intermediate step).
+                assert!(
+                    msg.contains("genome") || msg.contains("gene bank") || msg.contains("HOME"),
+                    "error should reference the genome fallback step, got: {msg}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn load_from_proxy_bank_succeeds_with_populated_winners() {
+        // Complementary test: when the proxy bank HAS proven_winners, they
+        // must be returned directly (no fallback).
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-test-populated-bank-{}.json",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        let bank_json = serde_json::json!({
+            "schema": 1,
+            "hosts": {
+                "api.example.com": {
+                    "proven_winners": ["encoding/url/double", "tamper::sql_comment"],
+                    "blocklisted": [],
+                    "waf_name": "cloudflare"
+                }
+            }
+        });
+        {
+            let mut f = std::fs::File::create(&tmp).expect("create temp bank file");
+            write!(f, "{}", bank_json).expect("write temp bank file");
+        }
+
+        let result = load_from_proxy_bank("api.example.com", Some(&tmp));
+        let _ = std::fs::remove_file(&tmp);
+
+        let techs = result.expect("should succeed with populated proxy bank");
+        assert_eq!(techs, vec!["encoding/url/double", "tamper::sql_comment"]);
+    }
+
+    #[test]
+    fn load_from_proxy_bank_returns_err_for_absent_host() {
+        // A host that is not in the file should produce an error (not panic).
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift-test-absent-host-{}.json",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        let bank_json = serde_json::json!({"schema": 1, "hosts": {}});
+        {
+            let mut f = std::fs::File::create(&tmp).expect("create temp bank file");
+            write!(f, "{}", bank_json).expect("write temp bank file");
+        }
+
+        let result = load_from_proxy_bank("missing.example.com", Some(&tmp));
+        let _ = std::fs::remove_file(&tmp);
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("missing.example.com"),
+            "error should name the missing host: {err}"
+        );
     }
 }

@@ -37,7 +37,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -260,18 +260,43 @@ impl Tamper for TomlTamper {
 /// Maximum TOML plugin file size: 256 KiB.
 const TOML_MAX_BYTES: u64 = 256 * 1024;
 
-fn load_toml_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
-    let meta = std::fs::metadata(path)?;
-    if meta.len() > TOML_MAX_BYTES {
-        return Err(PluginError::InvalidManifest(format!(
-            "{}: file too large ({} bytes, max {} bytes)",
-            path.display(),
-            meta.len(),
-            TOML_MAX_BYTES,
-        )));
+/// Bounded read for plugin files. The previous metadata()+read()
+/// pattern was vulnerable to TOCTOU: a symlink reporting len=0 (e.g.
+/// pointing at /dev/zero) would pass the metadata gate and then
+/// stream until OOM. Enforce the cap DURING the read so symlinks +
+/// races + post-stat replacements cannot evade it.
+fn read_capped_file(path: &Path, max_bytes: u64) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+    let f = std::fs::File::open(path)?;
+    let mut limited = f.take(max_bytes + 1);
+    let mut buf = Vec::with_capacity(8 * 1024);
+    limited.read_to_end(&mut buf)?;
+    if (buf.len() as u64) > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{}: file exceeds {}-byte cap (>{} bytes observed)",
+                path.display(),
+                max_bytes,
+                max_bytes,
+            ),
+        ));
     }
+    Ok(buf)
+}
 
-    let content = std::fs::read_to_string(path)?;
+fn load_toml_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
+    let raw = read_capped_file(path, TOML_MAX_BYTES).map_err(|e| {
+        PluginError::InvalidManifest(format!(
+            "{}: failed to read manifest ({}, max {} bytes)",
+            path.display(),
+            e,
+            TOML_MAX_BYTES,
+        ))
+    })?;
+    let content = String::from_utf8(raw).map_err(|e| {
+        PluginError::InvalidManifest(format!("{}: not valid UTF-8: {e}", path.display()))
+    })?;
     let parsed: TomlPluginFile = toml::from_str(&content).map_err(|e| PluginError::TomlParse {
         file: path.to_owned(),
         cause: e.to_string(),
@@ -287,13 +312,23 @@ fn load_toml_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
     };
     manifest.validate()?;
 
+    // ReDoS guard: cap the compiled NFA size so a malicious plugin
+    // with a pathological pattern (e.g. `(a+)+`) cannot stall the
+    // engine. 1 MiB is stricter than the workspace-canonical 4 MiB
+    // (wafrift_types::REGEX_NFA_SIZE_LIMIT) because plugin patterns
+    // come from fully untrusted third parties. The tighter cap is
+    // intentional — do NOT bump it to match the workspace constant.
+    const PLUGIN_REGEX_SIZE_LIMIT: usize = 1024 * 1024;
     let mut compiled_rules = Vec::with_capacity(parsed.rules.len());
     for rule in &parsed.rules {
-        let re = Regex::new(&rule.pattern).map_err(|e| PluginError::InvalidRegex {
-            file: path.to_owned(),
-            pattern: rule.pattern.clone(),
-            cause: e.to_string(),
-        })?;
+        let re = RegexBuilder::new(&rule.pattern)
+            .size_limit(PLUGIN_REGEX_SIZE_LIMIT)
+            .build()
+            .map_err(|e| PluginError::InvalidRegex {
+                file: path.to_owned(),
+                pattern: rule.pattern.clone(),
+                cause: e.to_string(),
+            })?;
         compiled_rules.push((re, rule.replacement.clone()));
     }
 
@@ -365,6 +400,19 @@ impl WasmRuntime {
         let result_ptr = ((result_packed >> 32) & 0xFFFF_FFFF) as usize;
         let result_len = (result_packed & 0xFFFF_FFFF) as usize;
 
+        // §15 host-OOM defence: `result_len` is attacker-controlled — the low
+        // 32 bits of the UNTRUSTED guest's return value, up to ~4 GiB. The
+        // guest's own linear memory is capped (4 MiB), so any (ptr, len) that
+        // does not fit inside the current guest memory is necessarily a lie —
+        // and a naive `vec![0u8; result_len]` would allocate gigabytes on the
+        // HOST and OOM it BEFORE `memory.read` (which only bounds-checks the
+        // read itself) ever runs. Reject the out-of-bounds/oversized result
+        // up front so the host allocation can never exceed guest memory.
+        let mem_size = memory.data_size(&self.store);
+        if result_ptr.saturating_add(result_len) > mem_size {
+            return None; // oversized / out-of-bounds guest result — fail safe
+        }
+
         let mut out = vec![0u8; result_len];
         memory.read(&self.store, result_ptr, &mut out).ok()?;
 
@@ -412,16 +460,14 @@ struct WasmEmbeddedManifest {
 }
 
 fn load_wasm_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
-    let meta = std::fs::metadata(path)?;
-    if meta.len() > WASM_MAX_BYTES {
-        return Err(PluginError::InvalidManifest(format!(
-            "{}: WASM file too large ({} bytes)",
+    let wasm_bytes = read_capped_file(path, WASM_MAX_BYTES).map_err(|e| {
+        PluginError::InvalidManifest(format!(
+            "{}: failed to read WASM ({}, max {} bytes)",
             path.display(),
-            meta.len()
-        )));
-    }
-
-    let wasm_bytes = std::fs::read(path)?;
+            e,
+            WASM_MAX_BYTES,
+        ))
+    })?;
 
     // Build a sandboxed engine: no WASI, fuel enabled, memory limited.
     let mut config = wasmtime::Config::new();
@@ -1076,5 +1122,37 @@ replacement = "/**/"
         // Second rule fires: "SEL/**/ECT/**/1"
         assert!(result.contains("SEL/**/ECT"), "got: {result}");
         assert!(!result.contains(" "), "spaces should be gone: {result}");
+    }
+
+    // ── Round 20: bounded plugin reads (TOCTOU defence) ──────────────
+    //
+    // Pre-fix `metadata()`-then-`read()` was vulnerable to symlinks
+    // reporting len=0 (pointed at /dev/zero) and to attackers
+    // replacing the file between the stat and the read. The fix
+    // enforces the cap DURING the read.
+
+    #[test]
+    fn read_capped_file_rejects_oversize_input() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("oversize.bin");
+        let mut f = std::fs::File::create(&path).expect("create");
+        f.write_all(&vec![b'x'; 1024]).expect("write");
+        drop(f);
+        let err = super::read_capped_file(&path, 256).expect_err("must reject");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds"), "msg: {err}");
+    }
+
+    #[test]
+    fn read_capped_file_accepts_exact_cap() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("exact.bin");
+        let mut f = std::fs::File::create(&path).expect("create");
+        f.write_all(&[b'a'; 100]).expect("write");
+        drop(f);
+        let got = super::read_capped_file(&path, 100).expect("at cap must pass");
+        assert_eq!(got.len(), 100);
     }
 }

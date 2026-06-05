@@ -360,7 +360,7 @@ impl DriftDetector {
         let mut sorted: Vec<f64> = self.rt_window.iter().copied().collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let mid = sorted.len() / 2;
-        if sorted.len() % 2 == 0 {
+        if sorted.len().is_multiple_of(2) {
             (sorted[mid - 1] + sorted[mid]) / 2.0
         } else {
             sorted[mid]
@@ -433,6 +433,201 @@ impl DriftDetector {
             self.compute_block_rate(),
             self.compute_body_entropy(),
         ]
+    }
+}
+
+// ── Bypass-rate CUSUM change-point monitor (C-11) ────────────────────────────
+
+/// Event returned from [`BypassRateMonitor::observe`].
+///
+/// `NoChange` means the CUSUM accumulator is below the decision threshold.
+/// `AlarmFired` means a statistically significant drop in bypass rate was
+/// detected — a WAF rule update likely pushed bypasses that were working
+/// into blocked territory.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChangePointEvent {
+    /// Bypass rate is stationary; no action needed.
+    NoChange,
+    /// CUSUM threshold crossed — bypass rate dropped significantly.
+    AlarmFired {
+        /// Current windowed bypass rate (fraction in `[0.0, 1.0]`).
+        observed_rate: f64,
+        /// Baseline rate at the time the alarm fired.
+        baseline_rate: f64,
+        /// Absolute drop in percentage points (baseline − observed) × 100.
+        drop_pp: f64,
+    },
+}
+
+/// Online CUSUM-based bypass-rate change-point detector.
+///
+/// Tracks a sliding window of bypass/block outcomes and detects downward
+/// shifts in the bypass rate (i.e. "WAF started blocking more stuff").
+///
+/// # Algorithm
+///
+/// Maintains a one-sided lower CUSUM:
+///
+/// ```text
+/// S_n = max(0, S_{n-1} + (p_baseline - p_observed - k))
+/// ```
+///
+/// where `p_observed` is the current windowed bypass rate, `p_baseline`
+/// is the rate at the start of the current stationary regime, and `k` is
+/// a slack parameter (half the minimum detectable shift).  When `S_n > h`
+/// (decision threshold), an alarm fires, the baseline resets to
+/// `p_observed`, and `S_n` resets to zero.
+///
+/// # Parameters
+///
+/// | Parameter       | Meaning                                                        | Default |
+/// |-----------------|----------------------------------------------------------------|---------|
+/// | `window_size`   | Sliding window length for bypass-rate estimation               | 50      |
+/// | `k`             | Slack (allowable drift per sample before CUSUM accumulates)    | 0.05    |
+/// | `h`             | Decision threshold (CUSUM value that triggers an alarm)        | 0.5     |
+///
+/// With defaults:
+/// - A steady 5 pp/sample drop accumulates into an alarm after ~10 samples.
+/// - A perfectly stationary rate never fires.
+///
+/// # Example
+///
+/// ```rust
+/// use wafrift_strategy::drift_window::{BypassRateMonitor, ChangePointEvent};
+///
+/// let mut monitor = BypassRateMonitor::new_default();
+/// // Fill baseline window with 30% bypass rate.
+/// for i in 0..50 {
+///     monitor.observe(i % 3 == 0); // ~33% bypass
+/// }
+/// // Rate collapses to 0% — alarm should fire within 20 more samples.
+/// let mut fired = false;
+/// for _ in 0..30 {
+///     if let ChangePointEvent::AlarmFired { .. } = monitor.observe(false) {
+///         fired = true;
+///         break;
+///     }
+/// }
+/// assert!(fired, "alarm must fire on a 33%→0% bypass rate drop");
+/// ```
+#[derive(Debug, Clone)]
+pub struct BypassRateMonitor {
+    /// Sliding window of recent bypass outcomes (true = bypassed).
+    window: VecDeque<bool>,
+    /// Maximum number of samples in the sliding window.
+    window_size: usize,
+    /// Slack parameter k: per-sample allowable drift before CUSUM accumulates.
+    k: f64,
+    /// Decision threshold h: CUSUM value that triggers an alarm.
+    h: f64,
+    /// Current lower CUSUM accumulator.
+    s: f64,
+    /// Baseline bypass rate for the current stationary regime.
+    /// `None` until `window_size` samples have been collected.
+    baseline: Option<f64>,
+}
+
+impl BypassRateMonitor {
+    /// Create a monitor with explicit parameters.
+    ///
+    /// - `window_size`: samples for bypass-rate estimation (min 4).
+    /// - `k`: slack (typ. 0.5 × minimum detectable shift in rate).
+    /// - `h`: decision threshold (larger = fewer false positives but slower
+    ///   detection; smaller = faster detection but noisier).
+    #[must_use]
+    pub fn new(window_size: usize, k: f64, h: f64) -> Self {
+        let ws = window_size.max(4);
+        Self {
+            window: VecDeque::with_capacity(ws),
+            window_size: ws,
+            k: k.max(0.0),
+            h: h.max(0.0),
+            s: 0.0,
+            baseline: None,
+        }
+    }
+
+    /// Create a monitor with production-ready defaults:
+    /// `window_size = 50`, `k = 0.05`, `h = 0.5`.
+    #[must_use]
+    pub fn new_default() -> Self {
+        Self::new(50, 0.05, 0.5)
+    }
+
+    /// Record one attempt outcome and return whether a change-point was detected.
+    ///
+    /// `bypassed = true` means the payload evaded the WAF; `false` means blocked.
+    ///
+    /// This is O(1) per call regardless of window size.
+    pub fn observe(&mut self, bypassed: bool) -> ChangePointEvent {
+        // Slide the window.
+        if self.window.len() >= self.window_size {
+            self.window.pop_front();
+        }
+        self.window.push_back(bypassed);
+
+        // Need a full window to compute a meaningful rate.
+        let p_observed = self.current_rate_inner();
+
+        // Set baseline from the first full window.
+        let baseline = match self.baseline {
+            Some(b) => b,
+            None => {
+                if self.window.len() < self.window_size {
+                    return ChangePointEvent::NoChange;
+                }
+                // First full window: establish baseline, CUSUM starts at 0.
+                self.baseline = Some(p_observed);
+                return ChangePointEvent::NoChange;
+            }
+        };
+
+        // One-sided lower CUSUM: accumulates when rate falls below baseline.
+        // S_n = max(0, S_{n-1} + (baseline - p_observed - k))
+        self.s = (self.s + (baseline - p_observed - self.k)).max(0.0);
+
+        if self.s > self.h {
+            // Alarm fired: reset accumulator and update baseline to current rate.
+            self.s = 0.0;
+            let old_baseline = baseline;
+            self.baseline = Some(p_observed);
+            let drop_pp = (old_baseline - p_observed) * 100.0;
+            return ChangePointEvent::AlarmFired {
+                observed_rate: p_observed,
+                baseline_rate: old_baseline,
+                drop_pp,
+            };
+        }
+
+        ChangePointEvent::NoChange
+    }
+
+    /// Current windowed bypass rate in `[0.0, 1.0]`.
+    ///
+    /// Returns `None` if fewer than `window_size` samples have been observed
+    /// (no reliable estimate yet).
+    #[must_use]
+    pub fn current_rate(&self) -> Option<f64> {
+        if self.window.len() < self.window_size {
+            return None;
+        }
+        Some(self.current_rate_inner())
+    }
+
+    /// Current baseline rate.
+    ///
+    /// Returns `None` until the first full window has been observed.
+    #[must_use]
+    pub fn baseline_rate(&self) -> Option<f64> {
+        self.baseline
+    }
+
+    fn current_rate_inner(&self) -> f64 {
+        if self.window.is_empty() {
+            return 0.0;
+        }
+        let bypassed = self.window.iter().filter(|&&b| b).count();
+        bypassed as f64 / self.window.len() as f64
     }
 }
 
@@ -772,5 +967,248 @@ mod tests {
         assert!((snap2[0] - 75.0).abs() < 1.0, "median RT must be ~75 ms");
         // block rate must be 1.0 (all blocked).
         assert!((snap2[2] - 1.0).abs() < 0.01, "block rate must be ~1.0");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BypassRateMonitor tests (C-11 — CUSUM bypass-rate change-point)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── BRM-1. Empty window: current_rate is None, baseline is None ───────
+
+    #[test]
+    fn bypass_monitor_empty_window_returns_none() {
+        let monitor = BypassRateMonitor::new(50, 0.05, 0.5);
+        assert!(monitor.current_rate().is_none(), "no rate before window fills");
+        assert!(monitor.baseline_rate().is_none(), "no baseline before window fills");
+    }
+
+    // ── BRM-2. Monotone good rate (30% bypass, steady) → NO alarm ─────────
+
+    #[test]
+    fn bypass_monitor_steady_rate_no_alarm() {
+        let mut monitor = BypassRateMonitor::new(50, 0.05, 0.5);
+        // 200 samples at ~30% bypass rate (deterministic: every 3rd is bypass).
+        let mut fired = false;
+        for i in 0..200usize {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(i % 3 == 0) {
+                fired = true;
+                break;
+            }
+        }
+        assert!(!fired, "steady 33% bypass rate must not fire an alarm");
+    }
+
+    // ── BRM-3. Monotone bad rate (0% bypass after baseline) → alarm fires ─
+
+    #[test]
+    fn bypass_monitor_zero_rate_fires_alarm() {
+        let mut monitor = BypassRateMonitor::new(20, 0.05, 0.5);
+        // Establish baseline at 50% bypass (10 bypasses in first 20).
+        for i in 0..20usize {
+            monitor.observe(i % 2 == 0);
+        }
+        assert!(monitor.baseline_rate().is_some());
+        // Drop to 0% — alarm must fire within 30 more samples.
+        let mut fired = false;
+        for _ in 0..30 {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(false) {
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "zero bypass rate after 50% baseline must trigger alarm");
+    }
+
+    // ── BRM-4. Bimodal pattern: alarm at the break ─────────────────────────
+
+    #[test]
+    fn bypass_monitor_bimodal_alarm_at_break() {
+        let mut monitor = BypassRateMonitor::new(30, 0.05, 0.5);
+        // Phase 1: 60% bypass (steady regime).
+        for i in 0..60usize {
+            monitor.observe(i % 5 < 3); // 3/5 = 60%
+        }
+        // Phase 2: 0% bypass (WAF rule update).
+        let mut alarm_idx: Option<usize> = None;
+        for i in 0..60usize {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(false) {
+                alarm_idx = Some(i);
+                break;
+            }
+        }
+        assert!(
+            alarm_idx.is_some(),
+            "bimodal pattern must trigger alarm in phase-2 region"
+        );
+        // Alarm must fire reasonably quickly (within 40 samples of the break).
+        assert!(
+            alarm_idx.unwrap() < 40,
+            "alarm should fire within 40 samples of the regime break"
+        );
+    }
+
+    // ── BRM-5. High threshold (h=10) does not fire on moderate drop ───────
+
+    #[test]
+    fn bypass_monitor_high_threshold_no_fire() {
+        let mut monitor = BypassRateMonitor::new(30, 0.05, 10.0);
+        // Establish 50% baseline.
+        for i in 0..30usize {
+            monitor.observe(i % 2 == 0);
+        }
+        // Drop to 40% — a moderate, not catastrophic, decrease.
+        let mut fired = false;
+        for i in 0..60usize {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(i % 5 < 2) {
+                fired = true;
+                break;
+            }
+        }
+        assert!(!fired, "h=10 must NOT fire on a moderate rate drop");
+    }
+
+    // ── BRM-6. Low threshold (h=0.01) fires near-immediately ─────────────
+
+    #[test]
+    fn bypass_monitor_low_threshold_fires_fast() {
+        let mut monitor = BypassRateMonitor::new(10, 0.05, 0.01);
+        // Establish 100% bypass baseline.
+        for _ in 0..10 {
+            monitor.observe(true);
+        }
+        // First blocked sample should fire almost immediately.
+        let mut alarm_idx: Option<usize> = None;
+        for i in 0..10 {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(false) {
+                alarm_idx = Some(i);
+                break;
+            }
+        }
+        assert!(
+            alarm_idx.is_some(),
+            "h=0.01 must fire almost immediately on any downward deviation"
+        );
+        assert!(
+            alarm_idx.unwrap() <= 5,
+            "h=0.01 must fire within 5 samples of the change (got {:?})",
+            alarm_idx
+        );
+    }
+
+    // ── BRM-7. Reset-after-alarm: baseline re-established at new level ─────
+
+    #[test]
+    fn bypass_monitor_reset_after_alarm() {
+        // Use window_size=4 so the window fully drains in 4 steps.
+        // With h=0.5 and k=0.05, a 100%→0% drop will fire alarm
+        // after a few samples, then the window drains within 4 more.
+        let mut monitor = BypassRateMonitor::new(4, 0.05, 0.5);
+        // Establish 100% bypass baseline.
+        for _ in 0..4 {
+            monitor.observe(true);
+        }
+        // Drive to 0% — run enough samples to (a) fire the alarm AND
+        // (b) fully flush all `true` values from the window before
+        //     the second-alarm check begins.
+        let mut first_alarm_fired = false;
+        for _ in 0..20 {
+            let evt = monitor.observe(false);
+            if let ChangePointEvent::AlarmFired { observed_rate, .. } = evt {
+                first_alarm_fired = true;
+                // After reset, baseline must equal the observed rate.
+                let new_baseline = monitor.baseline_rate().unwrap();
+                assert!(
+                    (new_baseline - observed_rate).abs() < 0.05,
+                    "baseline must reset to observed rate after alarm: new_baseline={new_baseline:.3}, observed={observed_rate:.3}"
+                );
+                // Continue the loop (don't break) so the window drains
+                // to all-false before the second-alarm test below.
+                // The alarm has fired and baseline has been reset; we
+                // need a few more calls to drain the old `true` entries.
+            }
+        }
+        assert!(first_alarm_fired, "first alarm must have fired");
+        // After 20 blocked calls on a size-4 window, the window is
+        // definitely all-false (0% bypass rate = 0%) and baseline = 0%.
+
+        // Now stay at 0% — no second alarm should fire within 100 samples
+        // (CUSUM accumulator stays at 0 when baseline ≈ p_observed).
+        let mut second_alarm = false;
+        for _ in 0..100 {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(false) {
+                second_alarm = true;
+                break;
+            }
+        }
+        assert!(
+            !second_alarm,
+            "no second alarm when staying at 0% after baseline reset and window drain"
+        );
+    }
+
+    // ── BRM-8. ANTI-RIG: alarm fires within 20 attempts of 30%→0% drop ───
+
+    #[test]
+    fn bypass_monitor_alarm_within_20_samples_of_drop() {
+        // Uses default params (window=50, k=0.05, h=0.5).
+        let mut monitor = BypassRateMonitor::new_default();
+        // Fill baseline window at exactly 30% bypass rate.
+        // 50 samples: 15 bypassed, 35 blocked. Deterministic.
+        for i in 0..50usize {
+            monitor.observe(i % 10 < 3); // 3/10 = 30%
+        }
+        let baseline = monitor.baseline_rate().expect("baseline must be set");
+        assert!(
+            (baseline - 0.3).abs() < 0.05,
+            "baseline must be ~30%: got {baseline:.3}"
+        );
+
+        // Drop to 0% bypass — alarm MUST fire within 20 samples.
+        let mut alarm_idx: Option<usize> = None;
+        for i in 0..20 {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(false) {
+                alarm_idx = Some(i);
+                break;
+            }
+        }
+        assert!(
+            alarm_idx.is_some(),
+            "alarm must fire within 20 samples of a 30%→0% bypass rate drop"
+        );
+    }
+
+    // ── BRM-9. ANTI-RIG: no alarm on steady 30% for 200 samples ──────────
+
+    #[test]
+    fn bypass_monitor_no_alarm_on_steady_30pct_200_samples() {
+        let mut monitor = BypassRateMonitor::new_default();
+        // 200 samples at exactly 30% bypass rate (deterministic).
+        let mut fired = false;
+        for i in 0..200usize {
+            if let ChangePointEvent::AlarmFired { .. } = monitor.observe(i % 10 < 3) {
+                fired = true;
+                break;
+            }
+        }
+        assert!(
+            !fired,
+            "must NOT fire on a perfectly steady 30% bypass rate over 200 samples"
+        );
+    }
+
+    // ── BRM-10. current_rate tracks the window accurately ─────────────────
+
+    #[test]
+    fn bypass_monitor_current_rate_accurate() {
+        let mut monitor = BypassRateMonitor::new(10, 0.05, 0.5);
+        // Fill with exactly 7 bypassed out of 10.
+        for i in 0..10usize {
+            monitor.observe(i < 7);
+        }
+        let rate = monitor.current_rate().expect("rate must be available after window fills");
+        assert!(
+            (rate - 0.7).abs() < 0.01,
+            "current_rate must be ~70% but got {rate:.3}"
+        );
     }
 }

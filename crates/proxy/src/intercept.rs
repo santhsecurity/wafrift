@@ -30,9 +30,19 @@ static INTERCEPT_MODE: AtomicBool = AtomicBool::new(false);
 static INTERCEPT_STORE: OnceLock<InterceptStore> = OnceLock::new();
 
 /// Read intercept-mode atomically. Cheap.
+///
+/// Uses `Acquire` to pair with the `Release` store in
+/// `toggle_intercept_mode` / `set_intercept_mode`. Pre-R60 this was
+/// `Relaxed` on both sides — the mutex around the WRITE serialised
+/// writers against each other but did NOT establish a happens-before
+/// edge from writer-with-mutex to reader-without-mutex. On
+/// weakly-ordered hardware (ARM/aarch64) a request handler thread
+/// could observe `false` indefinitely after a TUI keypress flipped
+/// intercept ON, silently bypassing the intercept queue.
+/// R60 pass-21 §15 audit-hunts (concurrent-state ordering).
 #[must_use]
 pub fn intercept_mode_enabled() -> bool {
-    INTERCEPT_MODE.load(Ordering::Relaxed)
+    INTERCEPT_MODE.load(Ordering::Acquire)
 }
 
 /// Serializes the (flip, drain) pair in toggle/set so two concurrent
@@ -53,7 +63,10 @@ pub fn toggle_intercept_mode() -> bool {
     let _guard = MODE_TRANSITION
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let prev = INTERCEPT_MODE.fetch_xor(true, Ordering::Relaxed);
+    // R60 pass-21 §15: Release pairs with the Acquire load in
+    // `intercept_mode_enabled()` — establishes the happens-before edge
+    // required for the reader to observe the new value on ARM/aarch64.
+    let prev = INTERCEPT_MODE.fetch_xor(true, Ordering::Release);
     let now_on = !prev;
     if !now_on {
         let _ = global_store().drain_release();
@@ -67,7 +80,9 @@ pub fn set_intercept_mode(on: bool) {
     let _guard = MODE_TRANSITION
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let prev = INTERCEPT_MODE.swap(on, Ordering::Relaxed);
+    // R60 pass-21 §15: Release pairs with Acquire in
+    // `intercept_mode_enabled()`. See toggle_intercept_mode comment.
+    let prev = INTERCEPT_MODE.swap(on, Ordering::Release);
     if prev && !on {
         let _ = global_store().drain_release();
     }
@@ -106,7 +121,7 @@ pub struct InterceptStore {
     inner: Arc<Mutex<InterceptInner>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct InterceptInner {
     /// Per-request rendezvous sender. Removed when the operator
     /// resolves the intercept (release/kill) or when a timeout fires.
@@ -121,15 +136,6 @@ struct InterceptInner {
     next_id: u64,
 }
 
-impl Default for InterceptInner {
-    fn default() -> Self {
-        Self {
-            senders: BTreeMap::new(),
-            pending: BTreeMap::new(),
-            next_id: 0,
-        }
-    }
-}
 
 /// Default intercept timeout — after which the request defaults
 /// to `Release` so the proxy never wedges if the operator walks

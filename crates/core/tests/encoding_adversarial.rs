@@ -3,7 +3,7 @@
 //! Tests every encoding strategy with edge cases: empty inputs, single characters,
 //! huge inputs, null bytes, unicode, and layered combinations.
 
-use wafrift_core::encoding::{self, Strategy};
+use wafrift_core::encoding::{self, EncodeError, Strategy};
 
 // ============================================================================
 // Empty Input Tests (12 tests)
@@ -495,13 +495,36 @@ fn encode_layered_double() {
 #[test]
 fn encode_layered_all_strategies() {
     let strategies = encoding::all_strategies();
-    let input = "SELECT";
-    let result = encoding::encode_layered(input, strategies).unwrap();
-    // Layering every strategy must (a) not panic, (b) actually transform
-    // the input — passing through `SELECT` unchanged would be a silent
-    // pipeline break.
-    assert!(!result.is_empty(), "must produce output");
-    assert_ne!(result, input, "layered pipeline must transform input");
+    // Single-char input: each content-expanding strategy multiplies size
+    // by up to ~6× (worst case: HTML decimal entity `&#xxx;` plus url-
+    // percent-encoding plus unicode \uXXXX). With ~22 strategies the
+    // pipeline saturates the 8 MiB cap even from a single letter.
+    // Both outcomes are valid evidence the pipeline is wired correctly:
+    //   - `Ok(transformed)` — every strategy fired and the result fits.
+    //   - `Err(LayeredOutputTooLarge { actual > original })` — the
+    //     pipeline expanded the input far enough to trip the anti-DoS
+    //     cap, which itself proves the strategies are being applied.
+    // What's NOT valid: `Ok(unchanged)` (silent pass-through) or any
+    // panic / arithmetic-overflow / other error variant.
+    let input = "A";
+    match encoding::encode_layered(input, strategies) {
+        Ok(result) => {
+            assert!(!result.is_empty(), "must produce output");
+            assert_ne!(result, input, "layered pipeline must transform input");
+        }
+        Err(EncodeError::LayeredOutputTooLarge { max, actual }) => {
+            assert!(
+                actual > input.len(),
+                "cap rejection must prove expansion: actual={actual} input={}",
+                input.len()
+            );
+            assert!(
+                max > 0,
+                "cap must be a positive byte budget: max={max}"
+            );
+        }
+        Err(e) => panic!("unexpected error variant from layered pipeline: {e:?}"),
+    }
     assert!(
         strategies.len() >= 2,
         "layered_combinations must drive >1 step"
@@ -551,7 +574,14 @@ fn layered_combinations_not_empty() {
 #[test]
 fn layered_combinations_valid_pairs() {
     let combos = encoding::layered_combinations(2);
-    let input = "' UNION SELECT * FROM users --";
+    // Input is engineered to give EVERY content-dependent encoder
+    // something to bite on: the `"` and `\n` hit JsonEncode, the `ffi`
+    // digraph (in `office`) hits LigatureEncode, the spaces hit
+    // WhitespaceInsertion, the alphabetic chars hit case-alternation
+    // and url-encode strategies, `--` hits sql-comment, `<` hits HTML
+    // entity, the digit hits unicode-encode. A no-op pair here is a
+    // genuine silent pipeline break — not just a content mismatch.
+    let input = "' UNION SELECT * FROM \"users\" WHERE office=1 --\n<x>";
     for combo in combos {
         let (s1, s2) = (combo[0], combo[1]);
         let layered = encoding::encode_layered(input, &[s1, s2]).unwrap();

@@ -507,7 +507,17 @@ mod tests {
         // appears (preceded by --) in any of the supplied strings, so a
         // multipart parser cannot mis-frame on attacker-controlled input.
         let candidate = unique_boundary(&["benign content with no boundary"]);
-        assert!(candidate.starts_with("----WafriftBoundary"));
+        // Structural check (brand-agnostic): the boundary must start
+        // with one of the realistic-client prefixes the random pool
+        // draws from. We don't pin the specific brand — that's
+        // randomised per call to defeat signature WAFs (see
+        // `NEUTRAL_BOUNDARY_PREFIXES`).
+        assert!(
+            crate::content_type::NEUTRAL_BOUNDARY_PREFIXES
+                .iter()
+                .any(|p| candidate.starts_with(p)),
+            "boundary must start with one of the neutral pool prefixes: got {candidate:?}"
+        );
 
         // Adversarial: feed the just-issued boundary back in. The helper
         // must produce a different value (or at least one whose framing
@@ -522,16 +532,13 @@ mod tests {
     }
 
     #[test]
-    fn unique_boundary_same_inputs_same_output() {
-        // After FNV fix: unique_boundary is deterministic — same inputs produce
-        // same boundary. Distinct request params (different values slice) produce
-        // distinct boundaries, which is what we need for reproducibility.
+    fn unique_boundary_two_calls_differ() {
+        // Independent calls return distinct boundaries — important so a
+        // future caller that cached one boundary across requests would
+        // not silently make framing predictable.
         let a = unique_boundary(&["x"]);
         let b = unique_boundary(&["x"]);
-        assert_eq!(a, b, "unique_boundary must be stable for identical inputs");
-        // Different inputs produce different boundaries.
-        let c = unique_boundary(&["y"]);
-        assert_ne!(a, c, "unique_boundary must differ for different inputs");
+        assert_ne!(a, b);
     }
 
     // ── New tests added 2026-05-24 ─────────────────────────────────────────
@@ -575,18 +582,38 @@ mod tests {
 
     #[test]
     fn boundary_collision_deterministic_rng_1000_variants() {
-        // Generate 1000 boundary pairs. No pair should have real == fake.
+        // Generate 1000 boundaries. Two structural properties must
+        // hold regardless of which prefix the pool picks:
+        //   - every output starts with one of the neutral-pool prefixes
+        //   - the population spans multiple prefixes (anti-rig: a
+        //     regression that locks the pool to one entry would defeat
+        //     the signature-defense gain).
         use std::collections::HashSet;
         let mut seen: HashSet<String> = HashSet::new();
+        let mut prefixes_observed: HashSet<&str> = HashSet::new();
         for _ in 0..1000 {
             let b = unique_boundary(&[]);
-            // Each boundary must start with the expected prefix.
-            assert!(b.starts_with("----WafriftBoundary"), "unexpected prefix: {b}");
+            let prefix = crate::content_type::NEUTRAL_BOUNDARY_PREFIXES
+                .iter()
+                .find(|p| b.starts_with(*p))
+                .unwrap_or_else(|| panic!("boundary {b:?} did not match any neutral prefix"));
+            prefixes_observed.insert(prefix);
             seen.insert(b);
         }
         // Almost all 1000 must be unique (entropy is 128-bit).
         // Allow for an astronomically-unlikely collision: require >= 990 unique.
-        assert!(seen.len() >= 990, "too many collisions among 1000 boundaries: {}", seen.len());
+        assert!(
+            seen.len() >= 990,
+            "too many collisions among 1000 boundaries: {}",
+            seen.len()
+        );
+        // Spread check: 1000 picks from a 6-entry pool should hit
+        // every prefix with overwhelming probability (≈1 − 6·(5/6)^1000).
+        assert_eq!(
+            prefixes_observed.len(),
+            crate::content_type::NEUTRAL_BOUNDARY_PREFIXES.len(),
+            "1000 samples must hit every prefix in the neutral pool"
+        );
     }
 
     #[test]
@@ -839,5 +866,56 @@ mod tests {
                 v.technique
             );
         }
+    }
+
+    /// R61 pass-21 §15 audit-hunts (CRLF injection): a corpus-supplied
+    /// param key containing `\r\n` must NEVER reach the wire as raw
+    /// CRLF inside a `Content-Disposition` header. Pre-fix variants 11
+    /// (MultipartCharsetEarlySection) and 13 (MultipartFilenameStarEncoded)
+    /// interpolated `k` directly via `format!("...name=\"{k}\"...")`
+    /// without calling `safe_multipart_name`. A key like
+    /// `foo\r\nX-Smuggled: yes` produced a body whose part header set
+    /// included an attacker-controlled header line, corrupting the
+    /// probe (or worse, injecting attacker-controlled framing the
+    /// downstream WAF didn't expect to see).
+    #[test]
+    fn variants_strip_crlf_from_multipart_part_names() {
+        use crate::content_type::{ContentTypeTechnique, generate_variants};
+        let evil = "ok\r\nX-Smuggled: yes".to_string();
+        let params = vec![(evil.clone(), "v".to_string())];
+        let variants = generate_variants(&params);
+        let mut saw_charset = false;
+        let mut saw_filename_star = false;
+        for v in &variants {
+            // Sanity: the variants list reaches these two techniques
+            // for non-empty params (else this anti-rig test would be
+            // vacuous).
+            match v.technique {
+                ContentTypeTechnique::MultipartCharsetEarlySection => saw_charset = true,
+                ContentTypeTechnique::MultipartFilenameStarEncoded => saw_filename_star = true,
+                _ => {}
+            }
+            // The CR/LF MUST be stripped before the key reaches the
+            // header line. If "\r\nX-Smuggled:" appears anywhere in
+            // the body it means a CRLF-bearing key punched out of the
+            // `name="..."` value and became a new header line — that
+            // is the injection. (The literal substring "X-Smuggled:"
+            // still appears inside the quoted name= value when the
+            // CR/LF are stripped, which is the safe behaviour.)
+            assert!(
+                !v.body.windows(13).any(|w| w == b"\r\nX-Smuggled:"),
+                "{:?} body contains CRLF-injected header — first 200 bytes: {:?}",
+                v.technique,
+                &v.body[..v.body.len().min(200)]
+            );
+        }
+        assert!(
+            saw_charset,
+            "anti-rig: expected MultipartCharsetEarlySection variant — test would be vacuous otherwise"
+        );
+        assert!(
+            saw_filename_star,
+            "anti-rig: expected MultipartFilenameStarEncoded variant — test would be vacuous otherwise"
+        );
     }
 }

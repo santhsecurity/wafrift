@@ -636,14 +636,12 @@ mod tests {
         let mut offset = 0;
         let w = &frag.wire_bytes;
         let mut last_payload_start = 0;
-        let mut last_header_size = 0;
         let mut last_declared_len = 0u64;
         while offset < w.len() {
             let (fin, _, _, _, dl, hs) = decode_frame_header(&w[offset..]);
             last_payload_start = offset + hs;
-            last_header_size = hs;
             last_declared_len = dl;
-            let _ = (fin, last_header_size);
+            let _ = fin;
             offset += hs + dl as usize;
         }
         let last_payload = &w[last_payload_start..last_payload_start + last_declared_len as usize];

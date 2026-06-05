@@ -1,0 +1,61 @@
+test wafmodel_cmd::tests::channel_set_toml_output_is_parseable_by_sim_regex_waf ... ok
+test wafmodel_cmd::tests::audit_xss_finds_at_least_one_hole ... ok
+test wafmodel_cmd::tests::channel_set_toml_single_channel_has_one_entry ... ok
+test wafmodel_cmd::tests::class_data_all_returns_two_entries ... ok
+test wafmodel_cmd::tests::class_data_sqli_returns_one_entry ... ok
+test wafmodel_cmd::tests::class_data_xss_returns_one_entry ... ok
+test wafmodel_cmd::tests::harden_bad_ruleset_file_returns_exit_2 ... ok
+test wafmodel_cmd::tests::harden_json_format_flag_accepted_and_sane ... ok
+test wafmodel_cmd::tests::harden_all_proves_closure_with_embedded_ruleset ... ok
+test wafmodel_cmd::tests::harden_toml_output_reflects_actual_transform_chain ... ok
+test wafmodel_cmd::tests::harden_sqli_only_proves_closure ... ok
+test wafmodel_cmd::tests::ruleset_cap_is_sane ... ok
+test wafmodel_cmd::tests::ruleset_load_is_bounded ... ok
+test wafmodel_cmd::tests::harden_xss_only_proves_closure ... ok
+test session_init::tests::establish_returns_no_url_error_when_curl_missing_url ... ok
+test session_init::tests::establish_from_file_with_malformed_curl_returns_typed_error ... ok
+test distill_cmd::tests::distill_rejects_when_input_payload_is_blocked_by_target ... ok
+test gql_diff_cmd::tests::run_gql_diff_finds_introspection_leak_on_permissive_mock ... ok
+test header_diff_cmd::tests::run_header_diff_against_mock_finds_x_real_ip_localhost_divergence ... ok
+test scan::differential_phase::tests::run_records_blocked_outcomes_when_server_returns_403 ... ok
+test session_init::tests::establish_carries_authorization_header_forward ... ok
+test import_curl::tests::send_parsed_applies_headers_cookie_and_user_agent ... ok
+test jwt_diff_cmd::tests::run_jwt_diff_against_permissive_mock_succeeds ... ok
+test listener_cmd::tests::end_to_end_callback_with_unknown_token_records_unmatched ... ok
+test listener_cmd::tests::end_to_end_body_exactly_at_cap_is_not_marked_truncated ... ok
+test listener_cmd::tests::end_to_end_body_above_cap_is_truncated_with_counter ... ok
+test listener_cmd::tests::end_to_end_callback_with_matching_token_in_path ... ok
+test listener_cmd::tests::end_to_end_huge_content_length_does_not_pre_allocate ... ok
+test listener_cmd::tests::end_to_end_callback_with_token_in_header_value_is_matched ... ok
+test session_init::tests::establish_strips_setcookie_attributes_keeps_only_name_value ... ok
+test smuggle_cmd::tests::time_first_byte_returns_quickly_when_server_responds ... ok
+test model_evade_cmd::tests::lstar_budgeted_learns_simple_boundary ... ok
+test session_init::tests::establish_carries_curl_cookie_forward ... ok
+test smuggle_cmd::tests::time_first_byte_returns_timeout_value_when_server_silent ... ok
+test listener_cmd::tests::end_to_end_lowercase_method_is_normalised_to_upper ... ok
+test listener_cmd::tests::end_to_end_callback_with_token_in_body_is_matched ... ok
+test listener_cmd::tests::end_to_end_malformed_request_does_not_crash_the_listener ... ok
+test listener_cmd::tests::end_to_end_negative_content_length_does_not_crash ... ok
+test listener_cmd::tests::end_to_end_one_byte_above_cap_truncates_one_byte ... ok
+test listener_cmd::tests::management_check_does_not_record_itself_as_a_callback ... ok
+test listener_cmd::tests::registry_matched_count_excludes_unmatched_callbacks ... ok
+test session_init::tests::establish_set_cookie_overrides_curl_supplied_value_by_name ... ok
+test session_init::tests::establish_summary_names_status_and_cookie_count ... ok
+test session_init::tests::establish_from_file_full_e2e_with_real_disk_curl_file ... ok
+
+failures:
+
+---- hunt_cmd::tests::round_runner_overwrites_its_preclaimed_tmp_output stdout ----
+
+thread 'hunt_cmd::tests::round_runner_overwrites_its_preclaimed_tmp_output' (1643558) panicked at crates/cli/src/hunt_cmd.rs:898:9:
+hunt force_overwrite reverted to false — every round's output is rejected (0 bypasses)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    hunt_cmd::tests::round_runner_overwrites_its_preclaimed_tmp_output
+
+test result: FAILED. 1667 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.42s
+
+error: test failed, to rerun pass `-p wafrift-cli --bin wafrift`
+EXIT=101

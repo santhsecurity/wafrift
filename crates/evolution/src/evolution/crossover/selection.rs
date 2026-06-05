@@ -1,5 +1,6 @@
 use crate::evolution::Chromosome;
 use rand::Rng;
+use wafrift_types::pick::pick_ref_from_rng;
 
 /// Selection strategy for tournament selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,14 +35,14 @@ pub fn tournament_select_with_size<'a>(
         "tournament_select_with_size called with empty population — caller bug"
     );
     let size = tournament_size.min(population.len());
-    let mut best_idx = rng.gen_range(0..population.len());
+    let mut best = pick_ref_from_rng(population, rng).unwrap_or(&population[0]);
     for _ in 1..size {
-        let candidate_idx = rng.gen_range(0..population.len());
-        if population[candidate_idx].fitness > population[best_idx].fitness {
-            best_idx = candidate_idx;
+        let candidate = pick_ref_from_rng(population, rng).unwrap_or(&population[0]);
+        if candidate.fitness > best.fitness {
+            best = candidate;
         }
     }
-    &population[best_idx]
+    best
 }
 
 /// Roulette wheel selection (fitness proportionate selection).
@@ -59,7 +60,7 @@ pub fn roulette_select<'a>(population: &'a [Chromosome], rng: &mut impl Rng) -> 
     }
     let total_fitness: f64 = population.iter().map(|c| c.fitness.max(0.0)).sum();
     if total_fitness <= 0.0 {
-        return &population[rng.gen_range(0..population.len())];
+        return pick_ref_from_rng(population, rng).unwrap_or(&population[0]);
     }
     let mut spin = rng.gen_range(0.0..total_fitness);
     for chromosome in population {

@@ -55,10 +55,10 @@ use reqwest::{Client, Url};
 use serde_json::json;
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
+use crate::parser_diff_common::severity_of_cache;
 
 #[derive(Args, Debug)]
-pub struct CacheDiffArgs {
+pub(crate) struct CacheDiffArgs {
     /// Target URL — fixed authority + path. The scanner varies
     /// only key-affecting surface (host header case, query order,
     /// fragment, etc.).
@@ -103,7 +103,7 @@ pub struct CacheDiffArgs {
 
 /// One cache-key-confusion probe.
 #[derive(Debug, Clone)]
-pub struct CacheKeyProbe {
+pub(crate) struct CacheKeyProbe {
     /// Stable short identifier.
     pub kind: &'static str,
     /// Human description.
@@ -117,7 +117,7 @@ pub struct CacheKeyProbe {
 
 /// Result of one cache-diff probe.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct CacheDiffResult {
+pub(crate) struct CacheDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub probe_url: String,
@@ -137,7 +137,7 @@ pub struct CacheDiffResult {
 /// `baseline_url` is the URL to vary; `param` is the canonical
 /// query-parameter name.
 #[must_use]
-pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyProbe> {
+pub(crate) fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyProbe> {
     let mut out = Vec::new();
 
     // Parse the URL once so probes can mutate the parts they care about.
@@ -195,8 +195,17 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     // ── 4. Query parameter ORDER ─────────────────────────────
     out.push(CacheKeyProbe {
         kind: "query-param-order",
-        description: "Same param set, reordered — RFC says equivalent, but most caches \
-             key on the literal query bytestring",
+        // The single-param baseline (`{param}=baseline`) means this probe cannot
+        // isolate PURE reordering from added keys — it varies both at once. It
+        // still detects the security-relevant property (does the cache normalise
+        // the query, or key on the literal bytestring?); the description is
+        // worded to match what is actually sent rather than claiming a pure
+        // reorder of the same set (which a 1-param baseline can't express).
+        description: "Canonical param wrapped in extra keys in non-canonical order \
+             (z=1&{param}=baseline&a=2) — caches keying on the literal query \
+             bytestring (no param-sort, no unknown-key strip) treat this as a \
+             separate slot; normalising caches collapse it to the baseline key, \
+             exposing the collision via Age",
         probe_url: with_query(baseline_url, &format!("z=1&{param}=baseline&a=2")),
         extra_headers: vec![],
     });
@@ -233,9 +242,21 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
     // ── 7. Fragment leak ─────────────────────────────────────
     out.push(CacheKeyProbe {
         kind: "fragment-leak",
-        description: "URL with a #fragment — fragments are client-side and shouldn't \
-             reach the server, but some library configs propagate; harmless \
-             if cleanly stripped, key collision if not",
+        // NOTE: `with_query` routes the value through `Url::set_query`, whose
+        // query percent-encode set encodes `#` → `%23`. So this sends
+        // `{param}=baseline%23frag` (an encoded-hash query VALUE), NOT a real
+        // URL fragment — and that is unavoidable here: a true `#fragment` is
+        // never transmitted by a compliant HTTP client (incl. reqwest), so the
+        // original "does a fragment reach the server" premise can't be tested
+        // client-side at all. What this DOES test (encoded-`#` cache-key
+        // normalisation) is still useful, so the probe stays with an honest
+        // description (LAW 1: no fakes). Pinned by
+        // `fragment_leak_probe_sends_encoded_hash_not_raw_fragment`.
+        description: "Query value with an encoded hash ({param}=baseline%23frag) — the \
+             URL parser encodes `#` into the query rather than emitting a \
+             client-side fragment (compliant clients never transmit fragments). \
+             Tests whether the cache decodes/normalises %23 to collide with the \
+             baseline key, or keys on the literal encoded bytes (separate slot)",
         probe_url: with_query(baseline_url, &format!("{param}=baseline#frag")),
         extra_headers: vec![],
     });
@@ -254,7 +275,7 @@ pub fn generate_cache_variants(baseline_url: &str, param: &str) -> Vec<CacheKeyP
 }
 
 /// Run the cache-diff scanner.
-pub async fn run_cache_diff(mut args: CacheDiffArgs) -> ExitCode {
+pub(crate) async fn run_cache_diff(mut args: CacheDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
@@ -298,13 +319,11 @@ pub async fn run_cache_diff(mut args: CacheDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = match crate::helpers::acquire_diff_permit(&sem, "cache-diff").await {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("{} {e}", "error:".red());
-                return ExitCode::from(1);
-            }
-        };
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let counter = counter.clone();
         let delay = Duration::from_millis(args.delay_ms);
@@ -346,7 +365,7 @@ pub async fn run_cache_diff(mut args: CacheDiffArgs) -> ExitCode {
                 let body_hash_match = probe.body_hash == baseline.body_hash && probe.body_len > 0;
                 let cache_signals_match =
                     probe.cache_signal == baseline.cache_signal && baseline.cache_signal.is_some();
-                let severity = severity_of(
+                let severity = severity_of_cache(
                     body_hash_match,
                     cache_signals_match,
                     probe.status,
@@ -400,7 +419,10 @@ async fn fire_get(
     let resp = req.send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
     let cache_signal = extract_cache_signal(resp.headers());
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    // §15 OOM / decompression-bomb: cap the body read.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     let body_hash = fnv1a(&body);
     Ok(FireOutcome {
         status,
@@ -433,35 +455,11 @@ fn extract_cache_signal(headers: &reqwest::header::HeaderMap) -> Option<String> 
     }
 }
 
-/// FNV-1a 64-bit hash. Pure, deterministic, fast.
+/// FNV-1a 64-bit hash. Delegates to the canonical implementation in
+/// `wafrift_types::hash` so all dedup-style fingerprints in the
+/// workspace come from one definition. R57 pass-21 §7 DEDUP.
 fn fnv1a(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-    let mut hash = FNV_OFFSET;
-    for b in bytes {
-        hash ^= u64::from(*b);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
-}
-
-/// `"high"` — body hash matches baseline (strong cache hit /
-/// collision evidence); `"medium"` — cache-signal headers match
-/// (weaker — cache layer is in front but content differs); `"none"`
-/// otherwise.
-fn severity_of(
-    body_hash_match: bool,
-    cache_signals_match: bool,
-    probe_status: u16,
-    baseline_status: u16,
-) -> &'static str {
-    if body_hash_match && probe_status == baseline_status {
-        "high"
-    } else if cache_signals_match {
-        "medium"
-    } else {
-        "none"
-    }
+    wafrift_types::hash::fnv1a_64(bytes)
 }
 
 /// Replace (or append) the query string on a URL. Pure.
@@ -503,15 +501,7 @@ fn upper_first(s: &str) -> String {
 }
 
 fn render_curl(url: &str, extra_headers: &[(String, String)]) -> String {
-    let mut out = String::from("curl -i");
-    for (n, v) in extra_headers {
-        out.push(' ');
-        out.push_str("-H ");
-        out.push_str(&shell_single_quote(&format!("{n}: {v}")));
-    }
-    out.push(' ');
-    out.push_str(&shell_single_quote(url));
-    out
+    crate::helpers::render_simple_curl(None, url, extra_headers, None)
 }
 
 crate::impl_parser_diff_http_args!(CacheDiffArgs);
@@ -522,8 +512,7 @@ fn emit_output(
     baseline: &FireOutcome,
     errors: u32,
 ) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
@@ -534,10 +523,7 @@ fn emit_output(
             "baseline_cache_signal": baseline.cache_signal,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high": high.len(),
-                "medium": medium.len(),
-            },
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -546,12 +532,15 @@ fn emit_output(
 
     if !args.quiet {
         println!();
+        // Cache-specific vocabulary ("collision(s)", "strong/weak") so
+        // this stays inline rather than routing through
+        // parser_diff_common::print_text_summary.
         println!(
             "  {} {} cache-key collision(s) — {} strong, {} weak · {} error(s)",
             "[wafrift cache-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
+            (high + medium).to_string().bold().yellow(),
+            high.to_string().bright_red().bold(),
+            medium.to_string().yellow(),
             errors
         );
     }
@@ -648,6 +637,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fragment_leak_probe_sends_encoded_hash_not_raw_fragment() {
+        // §5/§11: `with_query` → Url::set_query percent-encodes `#` into the
+        // query (`%23`), so the fragment-leak probe sends an encoded-hash query
+        // VALUE, not a transmitted fragment. Pin this so the (now honest)
+        // description can't drift back to claiming a real fragment — and so a
+        // url-crate change that stopped encoding `#` (which would emit an
+        // un-sent fragment, making the probe inert) is caught here.
+        let v = generate_cache_variants("http://example.com/p", "q");
+        let frag = v
+            .iter()
+            .find(|p| p.kind == "fragment-leak")
+            .expect("fragment-leak probe");
+        assert!(
+            frag.probe_url.contains("%23frag"),
+            "expected encoded-hash query value, got: {}",
+            frag.probe_url
+        );
+        // A raw `#frag` fragment must NOT survive — a compliant client would
+        // strip it before sending, making the probe test nothing.
+        assert!(
+            !frag.probe_url.contains("#frag"),
+            "probe must not carry a raw (un-sent) fragment: {}",
+            frag.probe_url
+        );
+    }
+
     // ── extract_cache_signal ──────────────────────────────────
 
     #[test]
@@ -706,31 +722,8 @@ mod tests {
         assert_ne!(fnv1a(b"hello"), fnv1a(b"hellp"));
     }
 
-    // ── severity_of ───────────────────────────────────────────
-
-    #[test]
-    fn severity_of_high_when_body_hash_matches_and_status_matches() {
-        assert_eq!(severity_of(true, false, 200, 200), "high");
-    }
-
-    #[test]
-    fn severity_of_not_high_when_status_differs_even_if_body_matches() {
-        // Identical bodies under different statuses is unusual but
-        // possible — treat as "medium" only if cache headers match,
-        // else "none".
-        assert_eq!(severity_of(true, false, 200, 403), "none");
-        assert_eq!(severity_of(true, true, 200, 403), "medium");
-    }
-
-    #[test]
-    fn severity_of_medium_when_only_cache_signals_match() {
-        assert_eq!(severity_of(false, true, 200, 200), "medium");
-    }
-
-    #[test]
-    fn severity_of_none_when_nothing_matches() {
-        assert_eq!(severity_of(false, false, 200, 200), "none");
-    }
+    // severity_of tests live with the function — see
+    // `parser_diff_common::tests::severity_of_cache_*`.
 
     // ── with_query ────────────────────────────────────────────
 
@@ -826,7 +819,7 @@ mod tests {
             delay_ms: 0,
             concurrency: 4,
             // 30s: Windows loopback + starved current_thread runtime.
-            timeout_secs: 30,
+            timeout_secs: wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             insecure: false,
             proxy: None,
             header: Vec::new(),

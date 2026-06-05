@@ -10,6 +10,7 @@ members = [
     "crates/grammar",           # per-class payload grammars
     "crates/content-type",      # multipart / charset / json variants
     "crates/smuggling",         # CL.TE / TE.CL / H2 / Kettle / WS
+    "crates/tcpoverlap",        # target-based TCP sequence-overlap desync
     "crates/fingerprint",       # TLS JA3/JA4, H2 SETTINGS
     "crates/http3-evasion",     # QPACK desync, conn migration, 0-RTT
     "crates/grpc-evasion",      # protobuf opaque-payload framing
@@ -19,14 +20,16 @@ members = [
     "crates/detect",            # WAF fingerprint via headers + DNS
     "crates/evolution",         # MAP-Elites, ast_mcts, coverage-feedback
     "crates/wafmodel",          # L*, SFA, mine, solve, mlwaf, booster
+    "crates/sanitizer",         # client-sanitizer decompiler (sourcemap→extract→L* mine)
+    "crates/liveoracle",        # calibrated live WAF-response oracle (split from CLI)
 
     # ── Pipeline ── orchestrate the techniques.
     "crates/strategy",          # host_state, MCTS bridge, drift_window
     "crates/oracle",            # per-payload-class semantic oracles
 
     # ── Runtime ── send the bytes, observe the responses.
-    "crates/transport",         # client + tls-impersonate + egress pool + internal pool module
-    "crates/proxy",              # MITM forward proxy + intercept
+    "crates/transport",         # client + tls-impersonate + egress pool
+    "crates/proxy",             # MITM forward proxy + intercept
     "crates/captchaforge-bridge", # optional captcha-solver bridge
 
     # ── Frontend ── operator surface.
@@ -38,7 +41,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.21"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -82,27 +85,43 @@ doc_lazy_continuation = "allow"
 
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)
-wafrift-types = { path = "crates/types", version = "0.2.21" }
-wafrift-encoding = { path = "crates/encoding", version = "0.2.21" }
-wafrift-grammar = { path = "crates/grammar", version = "0.2.21" }
-wafrift-content-type = { path = "crates/content-type", version = "0.2.21" }
-wafrift-smuggling = { path = "crates/smuggling", version = "0.2.21" }
-wafrift-fingerprint = { path = "crates/fingerprint", version = "0.2.21" }
-wafrift-detect = { path = "crates/detect", version = "0.2.21" }
-wafrift-evolution = { path = "crates/evolution", version = "0.2.21" }
-wafrift-wafmodel = { path = "crates/wafmodel", version = "0.2.21" }
-wafrift-strategy = { path = "crates/strategy", version = "0.2.21" }
-wafrift-oracle = { path = "crates/oracle", version = "0.2.21" }
-wafrift-transport = { path = "crates/transport", version = "0.2.21" }
-wafrift-recon = { path = "crates/recon", version = "0.2.21" }
-wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.2.21" }
-wafrift-genome-registry = { path = "crates/genome-registry", version = "0.2.21" }
-wafrift-graphql = { path = "crates/graphql", version = "0.2.21" }
-wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.2.21" }
-wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.2.21" }
-wafrift-plugin-api = { path = "crates/plugin-api", version = "0.2.21" }
+wafrift-types = { path = "crates/types", version = "0.3.0" }
+wafrift-encoding = { path = "crates/encoding", version = "0.3.0" }
+wafrift-grammar = { path = "crates/grammar", version = "0.3.0" }
+wafrift-content-type = { path = "crates/content-type", version = "0.3.0" }
+wafrift-smuggling = { path = "crates/smuggling", version = "0.3.0" }
+wafrift-tcpoverlap = { path = "crates/tcpoverlap", version = "0.3.0" }
+wafrift-fingerprint = { path = "crates/fingerprint", version = "0.3.0" }
+wafrift-detect = { path = "crates/detect", version = "0.3.0" }
+wafrift-evolution = { path = "crates/evolution", version = "0.3.0" }
+wafrift-wafmodel = { path = "crates/wafmodel", version = "0.3.0" }
+wafrift-sanitizer = { path = "crates/sanitizer", version = "0.3.0" }
+wafrift-liveoracle = { path = "crates/liveoracle", version = "0.3.0" }
+wafrift-strategy = { path = "crates/strategy", version = "0.3.0" }
+wafrift-oracle = { path = "crates/oracle", version = "0.3.0" }
+wafrift-transport = { path = "crates/transport", version = "0.3.0" }
+proxywire = { path = "../../libs/runtime/proxywire" }
+wafrift-recon = { path = "crates/recon", version = "0.3.0" }
+wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.3.0" }
+wafrift-genome-registry = { path = "crates/genome-registry", version = "0.3.0" }
+wafrift-graphql = { path = "crates/graphql", version = "0.3.0" }
+wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.3.0" }
+wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.3.0" }
+wafrift-plugin-api = { path = "crates/plugin-api", version = "0.3.0" }
+guise = { path = "../../libs/runtime/guise", default-features = false, features = ["fingerprint", "http", "rotation"] }
+guise-pacing = { path = "../../libs/runtime/guise-pacing" }
+scanclient = { path = "../../libs/scanner/scanclient", default-features = false }
 mctrust = "=0.4.0"
 pocgen = { path = "../../libs/offensive/pocgen" }
+# Canonical SSRF bogon/CIDR classifier shared with gossan + keyhog. wafrift
+# delegates `wafrift_types::ip_addr_is_bogon` to it so one fix (e.g. the NAT64
+# 64:ff9b::/96 IMDS bypass) lands for every tool — see crates/types/src/bogon.rs.
+bogon = { path = "../../libs/scanner/bogon", version = "0.1.0" }
+boundedio = { path = "../../libs/general/boundedio" }
+# Canonical crt.sh / CT-log client. wafrift-recon's bounded, timeout-guarded
+# crt.sh reader was the donor for this crate; recon now consumes it (with the
+# `fetch` layer) so the one hardened reader is shared, not re-derived.
+ctlog = { path = "../../libs/scanner/ctlog", features = ["fetch"] }
 
 # Core
 tokio = { version = "1", features = ["full"] }
@@ -145,7 +164,7 @@ tokio-rustls = "0.26"
 # the origin strips every HTTP header — `www.ebay.com → akamaiedge.net`
 # is the canonical example. Resolution happens once per `wafrift detect`
 # probe, in parallel with the HTTP fetch, so the latency cost is hidden.
-hickory-resolver = { version = "0.26", default-features = false, features = ["tokio", "system-config"] }
+hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio", "system-config"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -170,6 +189,12 @@ arboard = { version = "3", default-features = false }
 dirs = "6"
 proptest = "1.11.0"
 base64 = "0.22.1"
+# Crypto primitives for interactsh-compatible OOB callback server.
+# Versions match the interactsh client crate for wire compatibility.
+rsa = { version = "0.9", features = ["pem"] }
+aes = "0.8"
+ctr = "0.9"
+sha2 = "0.10"
 hex = "0.4.3"
 colored = "2"
 rcgen = { version = "0.14.7", features = ["pem", "x509-parser"] }
@@ -181,10 +206,6 @@ wiremock = "0.6.5"
 async-trait = "0.1.89"
 futures-util = "0.3.32"
 moka = { version = "0.12.15", features = ["future"] }
-# LRU cache used by wafrift-strategy for MCTS PV memoization (H2).
-# Pinned to the same major as wafrift-evolution so no second copy of hashbrown is pulled.
-lru = "0.18"
-parking_lot = "0.12"
 rustls-pki-types = "1.14.0"
 
 webpki-roots = "1.0.6"
@@ -193,3 +214,4 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 # WASM sandbox engine for plugin-api external tampers.
 wasmtime = { version = "30", default-features = false, features = ["runtime", "cranelift"] }
 tempfile = "3"
+lru = "0.18"

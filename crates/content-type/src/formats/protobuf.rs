@@ -35,7 +35,16 @@ pub fn deserialize(bytes: &[u8]) -> String {
         return String::new();
     };
     let start = 1 + n_used;
-    let end = start + len as usize;
+    // `len` is an attacker-controlled u64 straight off the wire varint, so
+    // `start + len` can overflow `usize`. Unguarded this panics two ways: in
+    // debug it trips add-overflow; in release it wraps to a tiny `end` that
+    // slips past the `end > bytes.len()` guard and then panics the slice with
+    // "starts at {start} but ends at {end}". `checked_add` fails closed to an
+    // empty string, matching the `saturating_add` guard in the messagepack
+    // sibling decoder (formats/messagepack.rs).
+    let Some(end) = start.checked_add(len as usize) else {
+        return String::new();
+    };
     if end > bytes.len() {
         return String::new();
     }
@@ -116,5 +125,28 @@ mod tests {
         // Tag + claims-len-100 + 3 actual bytes — must not panic.
         let bytes = [0x0A, 100, b'a', b'b', b'c'];
         assert_eq!(deserialize(&bytes), "");
+    }
+
+    #[test]
+    fn deserialize_huge_varint_length_fails_closed_no_panic() {
+        // Adversarial / overflow audit: a length-prefix varint encoding a
+        // value near u64::MAX. Pre-fix `start + len as usize` overflowed
+        // usize — panicking on the add under the test profile's
+        // overflow-checks, and in release wrapping to a tiny `end` that
+        // slipped past the `end > bytes.len()` bound check and then panicked
+        // the `&bytes[start..end]` slice ("starts at {start} but ends at
+        // {end}"). With the `checked_add` guard it must fail closed to an
+        // empty string. Deleting the guard turns this test red.
+        let mut bytes = vec![0x0A]; // field 1, wire type 2 (Len)
+        write_varint(&mut bytes, u64::MAX);
+        bytes.extend_from_slice(b"actual-payload-bytes");
+        assert_eq!(deserialize(&bytes), "");
+
+        // A near-max value that is large but, were the add unchecked, would
+        // still wrap on a 64-bit usize.
+        let mut bytes2 = vec![0x0A];
+        write_varint(&mut bytes2, u64::MAX - 8);
+        bytes2.extend_from_slice(b"xy");
+        assert_eq!(deserialize(&bytes2), "");
     }
 }

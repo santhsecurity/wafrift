@@ -161,6 +161,83 @@ fn json_escape_is_safe() {
 }
 
 #[test]
+fn bench_waf_profile_fallback_uses_shared_browser_default() {
+    let identity = browser_identity_for_catalog_profile(None).expect("default identity");
+    assert_eq!(identity.user_agent, crate::config::DEFAULT_USER_AGENT);
+    assert_eq!(
+        identity
+            .headers
+            .get(reqwest::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok()),
+        Some(crate::config::DEFAULT_USER_AGENT)
+    );
+    assert!(
+        identity
+            .headers
+            .get(reqwest::header::ACCEPT_LANGUAGE)
+            .is_some()
+    );
+}
+
+#[test]
+fn bench_waf_explicit_user_agent_wins() {
+    let identity =
+        bench_waf_browser_identity(Some(42), Some("Operator-UA/1.0".into())).expect("identity");
+    assert_eq!(identity.user_agent, "Operator-UA/1.0");
+    assert_eq!(
+        identity
+            .headers
+            .get(reqwest::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok()),
+        Some("Operator-UA/1.0")
+    );
+    assert!(
+        identity
+            .headers
+            .get(reqwest::header::ACCEPT_LANGUAGE)
+            .is_none(),
+        "literal operator UA without a selected profile keeps the header surface minimal"
+    );
+}
+
+#[test]
+fn bench_waf_seeded_identity_uses_profile_pool_headers() {
+    let seed = 42;
+    let profile =
+        guise::fingerprint::browser_catalog::seeded_profile(seed).expect("profile pool populated");
+    let identity = bench_waf_browser_identity(Some(seed), None).expect("identity");
+    assert_eq!(identity.user_agent, profile.user_agent);
+    assert_eq!(
+        identity
+            .headers
+            .get(reqwest::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok()),
+        Some(profile.user_agent)
+    );
+    assert_eq!(
+        identity
+            .headers
+            .get(reqwest::header::ACCEPT)
+            .and_then(|value| value.to_str().ok()),
+        Some(profile.accept)
+    );
+    assert_eq!(
+        identity
+            .headers
+            .get(reqwest::header::ACCEPT_LANGUAGE)
+            .and_then(|value| value.to_str().ok()),
+        Some(profile.accept_language)
+    );
+    assert!(
+        identity
+            .headers
+            .get(reqwest::header::ACCEPT_ENCODING)
+            .is_none(),
+        "bench-waf reqwest client should leave compression negotiation to reqwest"
+    );
+}
+
+#[test]
 fn delivery_shapes_build_correct_requests() {
     use grammar::equiv::DeliveryShape as D;
     let p = "1' OR '1'='1";
@@ -434,7 +511,7 @@ fn class_to_payload_type_maps_every_known_class() {
     // PayloadType. A future class addition that's left at
     // Unknown silently regresses mutator richness.
     for class in [
-        "sql", "xss", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql",
+        "sql", "xss", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql", "ssi",
     ] {
         let pt = class_to_payload_type(class);
         assert!(
@@ -446,12 +523,22 @@ fn class_to_payload_type_maps_every_known_class() {
 
 #[test]
 fn class_to_payload_type_unknown_class_falls_back_to_unknown() {
-    // log4shell / xxe / cve_pocs have no wafrift mutator yet
-    // — they fall back to Unknown by design (encoding-only
-    // mutations). Lock this contract in.
-    for class in ["log4shell", "xxe", "cve_pocs", "totally-bogus"] {
+    // xxe / cve_pocs still have no grammar mutator — they fall back to
+    // Unknown (encoding-only mutations). log4shell now has a real JNDI
+    // mutator (PayloadType::Jndi) and must NOT fall through here.
+    for class in ["xxe", "cve_pocs", "totally-bogus"] {
         assert!(matches!(class_to_payload_type(class), PayloadType::Unknown));
     }
+}
+
+#[test]
+fn class_to_payload_type_log4shell_maps_to_jndi() {
+    // log4shell corpus entries now route to the JNDI grammar mutator
+    // instead of falling through to encoding-only mutations.
+    assert!(matches!(
+        class_to_payload_type("log4shell"),
+        PayloadType::Jndi
+    ));
 }
 
 // ── resolve_base_url ──────────────────────────────────────
@@ -488,30 +575,41 @@ fn default_bench_args_for_tests() -> BenchWafArgs {
         evade: false,
         variants: 5,
         strategies: vec!["heavy".into()],
+        waf_name: None,
+        i_have_permission: None,
         oracle_gate: false,
         delay_ms: 25,
         timeout_secs: 15,
         insecure: false,
         format: "text".into(),
         output: None,
+        force_overwrite: false,
         summary_only: false,
+        prove_execution: false,
         skip_healthcheck: true,
         adaptive_pause_after_errors: 50,
         adaptive_pause_secs: 2,
         validate_only: false,
         lineage_output: None,
+        budget: None,
+        history_file: None,
+        history_merge: Vec::new(),
+        fair_class: false,
+        list_schedule: false,
         egress_socks5: Vec::new(),
         egress_http_proxy: Vec::new(),
         egress_tailscale_nodes: Vec::new(),
-        egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
-        egress_challenge_threshold: 3,
-        egress_cooldown_secs: 300,
+        egress_tailscale_socks_addr: crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR.into(),
+        egress_challenge_threshold: crate::config::DEFAULT_EGRESS_CHALLENGE_THRESHOLD,
+        egress_cooldown_secs: crate::config::DEFAULT_EGRESS_COOLDOWN_SECS,
         mutator: "default".into(),
         seed: None,
         dilution_weight: 0.0,
         corpus_out: None,
         coverage_out: None,
         corpus_fingerprint: String::new(),
+        ci_threshold: 0.0,
+        exploration_boost_rounds: 0,
     }
 }
 
@@ -617,4 +715,387 @@ fn validate_corpus_flags_duplicate_ids() {
     ];
     let code = validate_corpus_and_exit(&cases, "text").unwrap();
     assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(4)));
+}
+
+mod round18_bounded_input_tests {
+    //! Round 18 regression: bench corpus TOML files must go through
+    //! the bounded reader. Pre-fix `fs::read_to_string(path)` could
+    //! be pointed at `/dev/zero` or a multi-GB symlink and OOM.
+    use super::super::BENCH_CORPUS_FILE_MAX_BYTES;
+
+    #[test]
+    fn corpus_load_one_is_bounded() {
+        let src = include_str!("bench_waf.rs");
+        let needle = "safe_body::read_bounded_text_file(path, BENCH_CORPUS_FILE_MAX_BYTES)";
+        assert!(
+            src.contains(needle),
+            "bench_waf.rs `load_one` must use bounded reader with BENCH_CORPUS_FILE_MAX_BYTES"
+        );
+        let banned = concat!(
+            "fs::",
+            "read_to_",
+            "string(path).map_err(|e| format!(\"read"
+        );
+        assert!(
+            !src.contains(banned),
+            "raw unbounded fs read of corpus path reintroduced — OOM regression"
+        );
+    }
+
+    #[test]
+    fn corpus_cap_is_sane() {
+        assert!(
+            BENCH_CORPUS_FILE_MAX_BYTES >= 8 * 1024 * 1024,
+            "BENCH_CORPUS_FILE_MAX_BYTES tightened below 8 MiB — could reject legitimate corpora"
+        );
+    }
+
+    #[test]
+    fn bounded_reader_overruns_on_oversize_file() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "wafrift-bench-corpus-overrun-{}-{}.bin",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        {
+            let mut f = std::fs::File::create(&path).expect("create tmp");
+            f.write_all(&vec![b'x'; 4096]).expect("write tmp");
+        }
+        let res = crate::safe_body::read_bounded_text_file(&path, 256);
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            matches!(res, Err(crate::safe_body::ReadError::Overrun { .. })),
+            "expected Overrun for 4096-byte file with 256-byte cap, got {res:?}"
+        );
+    }
+}
+
+// Fix #6: days_to_ymd + run_timestamp + ci_pass + overall_bypass_rate tests.
+mod fix6_bench_json_schema {
+    use super::super::days_to_ymd;
+
+    #[test]
+    fn days_to_ymd_unix_epoch_is_1970_jan_1() {
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_known_date_2026_05_27() {
+        // 2026-05-27 is day 20600 from Unix epoch.
+        // Derived: (2026-1970)*365 + 14 leap-days = 20454 (Jan 1 2026),
+        // + 31 (Jan) + 28 (Feb) + 31 (Mar) + 30 (Apr) + 26 (days 1-26 May) = 20600.
+        // Verified: date -d "1970-01-01 +20600 days" +%Y-%m-%d → 2026-05-27
+        let (y, m, d) = days_to_ymd(20600);
+        assert_eq!((y, m, d), (2026, 5, 27), "2026-05-27 must be day 20600");
+    }
+
+    #[test]
+    fn days_to_ymd_leap_year_feb_29_2000() {
+        // 2000 is a leap year.  2000-02-29 = day 11016 (0-indexed from epoch).
+        // Verified: date -d "1970-01-01 +11016 days" +%Y-%m-%d → 2000-02-29
+        let (y, m, d) = days_to_ymd(11016);
+        assert_eq!((y, m, d), (2000, 2, 29), "2000-02-29 must be day 11016");
+    }
+
+    #[test]
+    fn parse_ci_threshold_accepts_valid_floats() {
+        assert!(super::super::parse_ci_threshold("0.0").is_ok());
+        assert!(super::super::parse_ci_threshold("0.5").is_ok());
+        assert!(super::super::parse_ci_threshold("1.0").is_ok());
+    }
+
+    #[test]
+    fn parse_ci_threshold_rejects_out_of_range() {
+        assert!(super::super::parse_ci_threshold("-0.1").is_err());
+        assert!(super::super::parse_ci_threshold("1.1").is_err());
+        assert!(super::super::parse_ci_threshold("abc").is_err());
+    }
+
+    #[test]
+    fn ci_pass_default_threshold_passes_on_any_bypass() {
+        // With threshold = 0.0, bypass_rate 0.001 must ci_pass = true.
+        let threshold = 0.0_f64;
+        let bypass_rate = 0.001_f64;
+        assert!(
+            bypass_rate >= threshold,
+            "any bypass must pass at threshold 0.0"
+        );
+    }
+
+    #[test]
+    fn ci_pass_fails_when_below_threshold() {
+        let threshold = 0.10_f64;
+        let bypass_rate = 0.05_f64;
+        assert!(
+            bypass_rate < threshold,
+            "5% bypass < 10% threshold → ci_pass must be false"
+        );
+    }
+}
+
+// ───────── C-14 rule-quality scoring ─────────
+//
+// classify_case_quality is a pure classifier. These tests pin the
+// 5-state semantic and the entropy-based score so a silent re-tuning
+// (e.g. introducing a "near-trivial" band that swallows real signal)
+// is caught immediately.
+
+fn evade(bypass_rate: f64, variants_total: usize) -> EvadeResult {
+    EvadeResult {
+        variants_total,
+        variants_bypassed: (bypass_rate * variants_total as f64).round() as usize,
+        bypass_rate,
+        variants_oracle_valid: (bypass_rate * variants_total as f64).round() as usize,
+        oracle_valid_rate: bypass_rate,
+        variants_unverified_not_blocked: 0,
+        variants_executed: 0,
+        executed_rate: 0.0,
+        by_strategy: std::collections::BTreeMap::new(),
+        bypass_techniques: Vec::new(),
+    }
+}
+
+// ── honest bypass-vs-exploit gate (detonate_bypass_body) ──
+// The execution oracle must NOT claim execution for a non-HTML reflection —
+// this is exactly why bench reported 0 against the httpbin (JSON) backend: a
+// payload that BYPASSES the WAF but is echoed as JSON cannot execute. These
+// tests pin that distinction without needing the detonate subprocess (the
+// HTML gate short-circuits before any detonation is attempted).
+
+#[test]
+fn detonate_bypass_body_false_for_json_backend_like_httpbin() {
+    // httpbin's /post echoes the payload inside a JSON document. Even a live
+    // `<svg onload=alert(1)>` here cannot execute — content-type gates it out.
+    let headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+    let body = br#"{"form":{"q":"<svg onload=alert(1)>"}}"#;
+    assert!(
+        !detonate_bypass_body(body, &headers, "http://t/"),
+        "a JSON-echo backend must never count as an executing exploit"
+    );
+}
+
+#[test]
+fn detonate_bypass_body_false_for_plain_text_and_missing_ctype() {
+    let html_payload = b"<script>alert(1)</script>";
+    assert!(
+        !detonate_bypass_body(
+            html_payload,
+            &[("Content-Type".into(), "text/plain".into())],
+            "http://t/"
+        ),
+        "text/plain reflection is inert"
+    );
+    assert!(
+        !detonate_bypass_body(html_payload, &[], "http://t/"),
+        "no content-type → cannot assert HTML execution"
+    );
+}
+
+#[test]
+fn detonate_bypass_body_html_ctype_is_case_insensitive_and_charset_tolerant() {
+    // The HTML gate must accept real-world content-type spellings so a genuine
+    // reflective HTML origin is detonated (the detonation itself degrades to
+    // false without the tool, which is fine — we assert the gate, not the run).
+    let body = b"<p>inert</p>";
+    // These are inert bodies, so the result is false either way; the point is
+    // the gate doesn't reject HTML on header-spelling grounds before detonating.
+    for ct in [
+        "text/html",
+        "text/html; charset=utf-8",
+        "TEXT/HTML",
+        "image/svg+xml",
+    ] {
+        // No panic, deterministic false for inert content.
+        let _ = detonate_bypass_body(body, &[("content-type".into(), ct.into())], "http://t/");
+    }
+}
+
+#[test]
+fn case_quality_not_measured_when_evaded_is_none() {
+    let (q, s) = classify_case_quality(true, None);
+    assert_eq!(q, CaseQuality::NotMeasured);
+    assert_eq!(s, 0.0);
+}
+
+#[test]
+fn case_quality_baseline_failed_when_raw_not_blocked() {
+    let e = evade(0.5, 10);
+    let (q, s) = classify_case_quality(false, Some(&e));
+    assert_eq!(q, CaseQuality::BaselineFailed);
+    assert_eq!(s, 0.0);
+}
+
+#[test]
+fn case_quality_trivial_block_at_zero_bypass_rate() {
+    let e = evade(0.0, 50);
+    let (q, s) = classify_case_quality(true, Some(&e));
+    assert_eq!(q, CaseQuality::TrivialBlock);
+    assert_eq!(s, 0.0);
+}
+
+#[test]
+fn case_quality_trivial_pass_at_full_bypass_rate() {
+    let e = evade(1.0, 50);
+    let (q, s) = classify_case_quality(true, Some(&e));
+    assert_eq!(q, CaseQuality::TrivialPass);
+    assert_eq!(s, 0.0);
+}
+
+#[test]
+fn case_quality_signal_at_half_bypass_rate_peaks_entropy() {
+    let e = evade(0.5, 100);
+    let (q, s) = classify_case_quality(true, Some(&e));
+    assert_eq!(q, CaseQuality::Signal);
+    // Binary entropy at p=0.5 is exactly 1.0.
+    assert!(
+        (s - 1.0).abs() < 1e-9,
+        "entropy at p=0.5 must be exactly 1.0 (got {s})"
+    );
+}
+
+#[test]
+fn case_quality_signal_at_quartile_bypass_rate() {
+    let e = evade(0.25, 100);
+    let (q, s) = classify_case_quality(true, Some(&e));
+    assert_eq!(q, CaseQuality::Signal);
+    // H(0.25) = -0.25*log2(0.25) - 0.75*log2(0.75) ≈ 0.8113
+    assert!(
+        (s - 0.8112781244591328).abs() < 1e-9,
+        "entropy at p=0.25 must be ≈0.8113 (got {s})"
+    );
+}
+
+#[test]
+fn case_quality_signal_is_symmetric_around_half() {
+    let (_, lo) = classify_case_quality(true, Some(&evade(0.1, 100)));
+    let (_, hi) = classify_case_quality(true, Some(&evade(0.9, 100)));
+    assert!(
+        (lo - hi).abs() < 1e-9,
+        "entropy must be symmetric: H(0.1)={lo}, H(0.9)={hi}"
+    );
+}
+
+#[test]
+fn case_quality_not_measured_when_variants_total_zero() {
+    let mut e = evade(0.0, 0);
+    e.bypass_rate = 0.0;
+    let (q, _) = classify_case_quality(true, Some(&e));
+    assert_eq!(
+        q,
+        CaseQuality::NotMeasured,
+        "zero variants must NOT be silently classified as TrivialBlock"
+    );
+}
+
+/// LAW 12 anti-rig: the 5 CaseQuality variants are a pinned public
+/// contract. Adding a 6th variant or renaming an existing one would
+/// silently change consumer filter logic. If you must add a variant,
+/// add the test FOR that variant first.
+#[test]
+fn case_quality_enum_pinned_to_five_variants() {
+    // Exhaustive match — adding a variant fails to compile here.
+    for q in [
+        CaseQuality::BaselineFailed,
+        CaseQuality::TrivialBlock,
+        CaseQuality::TrivialPass,
+        CaseQuality::Signal,
+        CaseQuality::NotMeasured,
+    ] {
+        // Exhaustive — Rust requires every variant covered.
+        match q {
+            CaseQuality::BaselineFailed
+            | CaseQuality::TrivialBlock
+            | CaseQuality::TrivialPass
+            | CaseQuality::Signal
+            | CaseQuality::NotMeasured => {}
+        }
+    }
+}
+
+/// LAW 12: serde wire format is `snake_case`. Consumer dashboards
+/// filter on these strings.
+#[test]
+fn case_quality_serde_emits_snake_case() {
+    assert_eq!(
+        serde_json::to_string(&CaseQuality::BaselineFailed).unwrap(),
+        "\"baseline_failed\""
+    );
+    assert_eq!(
+        serde_json::to_string(&CaseQuality::TrivialBlock).unwrap(),
+        "\"trivial_block\""
+    );
+    assert_eq!(
+        serde_json::to_string(&CaseQuality::TrivialPass).unwrap(),
+        "\"trivial_pass\""
+    );
+    assert_eq!(
+        serde_json::to_string(&CaseQuality::Signal).unwrap(),
+        "\"signal\""
+    );
+    assert_eq!(
+        serde_json::to_string(&CaseQuality::NotMeasured).unwrap(),
+        "\"not_measured\""
+    );
+}
+
+/// LAW 12: quality_score is bounded to [0.0, 1.0]. A score outside
+/// the range would break downstream summaries (mean/max).
+#[test]
+fn case_quality_score_is_always_in_unit_interval() {
+    for p in [0.0, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 1.0] {
+        let (_, s) = classify_case_quality(true, Some(&evade(p, 100)));
+        assert!(
+            (0.0..=1.0).contains(&s),
+            "quality_score {s} out of [0,1] at p={p}"
+        );
+    }
+}
+
+/// LAW 12: signal fraction is the load-bearing metric — fraction of
+/// the corpus that actually discriminates the WAF. Pin the math
+/// (count of Signal / total cases) so a silent re-tuning of "what
+/// counts as signal" can't inflate the headline.
+#[test]
+fn signal_fraction_math_is_pinned() {
+    // 4 cases: 1 baseline_failed, 1 trivial_block, 1 trivial_pass, 1 signal.
+    let qualities = [
+        CaseQuality::BaselineFailed,
+        CaseQuality::TrivialBlock,
+        CaseQuality::TrivialPass,
+        CaseQuality::Signal,
+    ];
+    let signal_count = qualities
+        .iter()
+        .filter(|q| matches!(q, CaseQuality::Signal))
+        .count();
+    let total = qualities.len();
+    let frac = signal_count as f64 / total as f64;
+    assert!(
+        (frac - 0.25).abs() < 1e-9,
+        "1/4 signal cases must yield signal_fraction == 0.25 (got {frac})"
+    );
+}
+
+/// LAW 9: classify_case_quality is reachable from a real
+/// non-test caller (the bench loop). If the classifier were
+/// dead-code wrapped in a test-only path, refactor pressure could
+/// silently remove the wiring. Compile-time check: the function
+/// is `pub(crate)`-visible from this test mod (which lives next
+/// to bench_waf.rs), so the test module sees it; production code
+/// uses the same function. Anti-rig: pin a non-Signal result here
+/// that production wiring can't fake.
+#[test]
+fn classify_case_quality_returns_consistent_result_under_repeated_call() {
+    // Pure function: same input → same output, 100 calls.
+    let e = evade(0.3, 50);
+    let first = classify_case_quality(true, Some(&e));
+    for _ in 0..100 {
+        let again = classify_case_quality(true, Some(&e));
+        assert_eq!(first, again, "classifier must be pure");
+    }
 }

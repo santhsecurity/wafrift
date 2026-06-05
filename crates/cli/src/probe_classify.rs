@@ -15,7 +15,7 @@
 /// included when sorting; never matched when filtering). Case-
 /// insensitive so callers can pass `"HIGH"`, `"high"`, or `"High"`.
 #[must_use]
-pub fn severity_rank(s: &str) -> u8 {
+pub(crate) fn severity_rank(s: &str) -> u8 {
     match s.to_ascii_uppercase().as_str() {
         "HIGH" => 4,
         "MEDIUM" => 3,
@@ -34,7 +34,7 @@ pub fn severity_rank(s: &str) -> u8 {
 /// is a false positive that buries any real finding in rate-limit
 /// noise.
 #[must_use]
-pub fn is_throttle_or_unavailable(status: u16) -> bool {
+pub(crate) fn is_throttle_or_unavailable(status: u16) -> bool {
     matches!(status, 408 | 429 | 502 | 503 | 504 | 520..=527)
 }
 
@@ -42,13 +42,18 @@ pub fn is_throttle_or_unavailable(status: u16) -> bool {
 /// baseline" convention shared across `bypass_probe` and
 /// `parser_diff`: an empty baseline plus non-empty probe = 100%
 /// (content appeared); both empty = 0% (no change).
+///
+/// R55 pass-18 I4 (CLAUDE.md §7 DEDUP): delegated to
+/// [`crate::parser_diff_common::body_delta_pct`] (which itself routes
+/// through `respdiff::body_size_delta_pct`) so a tuning of the
+/// rule — e.g. switching from raw bytes to ratio of similarity —
+/// reaches every diff family from one place. Pre-fix this module
+/// carried its own inline formula and the parser-diff path went
+/// through respdiff; they happened to agree but were silently drift-
+/// prone the next time either side was touched.
 #[must_use]
-pub fn body_delta_pct(baseline_len: usize, probe_len: usize) -> f64 {
-    if baseline_len == 0 {
-        if probe_len == 0 { 0.0 } else { 100.0 }
-    } else {
-        ((probe_len as f64 - baseline_len as f64) / baseline_len as f64) * 100.0
-    }
+pub(crate) fn body_delta_pct(baseline_len: usize, probe_len: usize) -> f64 {
+    crate::parser_diff_common::body_delta_pct(baseline_len, probe_len)
 }
 
 /// The "is this response meaningfully different from the baseline?"
@@ -59,7 +64,7 @@ pub fn body_delta_pct(baseline_len: usize, probe_len: usize) -> f64 {
 /// doesn't pick a name for the divergence because the consumers
 /// disagree on the vocabulary (`Divergence` vs `DiffResult`).
 #[must_use]
-pub fn delta_signal(
+pub(crate) fn delta_signal(
     baseline_status: u16,
     baseline_len: usize,
     probe_status: u16,
@@ -72,12 +77,43 @@ pub fn delta_signal(
     (status_changed, body_changed, delta)
 }
 
+/// Trim a string to at most `n` bytes, appending `…` if truncated.
+///
+/// The cut point is the last UTF-8 code-point boundary that fits
+/// within `n - 1` bytes, so the output is always valid UTF-8 and the
+/// ellipsis never blows past the byte budget.
+///
+/// Pre-consolidation, `legendary.rs` used a *char-count* variant and
+/// `bench_waf.rs` used this *byte-cap* variant. Both appeared correct
+/// for ASCII-heavy WAF payloads, but the char-count form can produce
+/// outputs longer than `n` bytes for multi-byte code points (e.g. CJK
+/// or box-drawing characters). The byte-cap form is strictly tighter
+/// and is adopted as the canonical implementation.
+#[must_use]
+pub(crate) fn truncate(s: &str, n: usize) -> String {
+    if s.len() <= n {
+        return s.to_string();
+    }
+    // Walk char_indices to find the last safe cut point ≤ n-1 bytes.
+    // The naïve `&s[..n-1]` panics when n-1 lands mid-codepoint
+    // (e.g. `truncate("café", 5)` would split the two-byte `é`).
+    let cap = n.saturating_sub(1);
+    let mut end = 0;
+    for (i, _) in s.char_indices() {
+        if i > cap {
+            break;
+        }
+        end = i;
+    }
+    format!("{}…", &s[..end])
+}
+
 /// Canonical severity heuristic: HIGH for an auth bypass
 /// (401/403 -> 2xx/3xx), MEDIUM for a status flip into the 2xx-3xx
 /// band OR a meaningful body growth, LOW for anything else that
 /// still counts as a divergence, EQUAL for "baseline matched".
 #[must_use]
-pub fn severity_label(
+pub(crate) fn severity_label(
     baseline_status: u16,
     probe_status: u16,
     body_delta: f64,
@@ -281,5 +317,49 @@ mod tests {
         // With a strict 50% threshold, a 30% growth must NOT count
         // as a divergence — caller asked for the noise floor.
         assert_eq!(severity_label(200, 200, 30.0, 50.0), "EQUAL");
+    }
+
+    // ── truncate ───────────────────────────────────────────────
+
+    #[test]
+    fn truncate_short_string_unchanged() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_exact_length_unchanged() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_appends_ellipsis() {
+        let out = truncate("hello world", 6);
+        assert!(out.ends_with('…'), "must end with ellipsis, got {out:?}");
+        // byte length must not exceed n (ellipsis = 3 bytes, so total ≤ n - 1 + 3)
+        assert!(out.len() <= 6 - 1 + "…".len(), "output too long: {out:?}");
+    }
+
+    #[test]
+    fn truncate_multibyte_does_not_split_codepoint() {
+        // "café" = 5 bytes (c a f é). truncate("café", 5) must not
+        // split é's two-byte encoding.
+        let out = truncate("café", 5);
+        assert!(
+            std::str::from_utf8(out.as_bytes()).is_ok(),
+            "output is not valid UTF-8"
+        );
+    }
+
+    #[test]
+    fn truncate_empty_string_unchanged() {
+        assert_eq!(truncate("", 0), "");
+        assert_eq!(truncate("", 10), "");
+    }
+
+    #[test]
+    fn truncate_n_zero_gives_ellipsis_only() {
+        let out = truncate("abc", 0);
+        // n=0 → cap=0 → end=0 → format("…") because s.len() > 0
+        assert_eq!(out, "…");
     }
 }

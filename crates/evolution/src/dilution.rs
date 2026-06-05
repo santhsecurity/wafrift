@@ -180,7 +180,7 @@ mod tests {
         // A well-known SQLi payload should classify to at least one group
         // and return a defined score.
         let score = compute_dilution_score("' UNION SELECT--", &estimator(), 40.0);
-        assert!(score >= 0.0 && score <= 1.0, "score must be in [0,1]: {score}");
+        assert!((0.0..=1.0).contains(&score), "score must be in [0,1]: {score}");
     }
 
     #[test]
@@ -188,7 +188,7 @@ mod tests {
         let score = compute_dilution_score("hello world", &estimator(), 40.0);
         // "hello world" classifies to ProtocolViolation (single group) — dilute()
         // returns Some (one group → one strategy).  Score depends on coefficients.
-        assert!(score >= 0.0 && score <= 1.0, "score must be in [0,1]: {score}");
+        assert!((0.0..=1.0).contains(&score), "score must be in [0,1]: {score}");
     }
 
     // ── dilution_adjusted_fitness ─────────────────────────────────────
@@ -196,8 +196,7 @@ mod tests {
     #[test]
     fn dilution_weight_zero_returns_oracle_fitness() {
         // With weight=0.0, dilution has no effect regardless of payload or WAF.
-        let mut config = EvasionConfig::default();
-        config.dilution_weight = 0.0;
+        let config = EvasionConfig { dilution_weight: 0.0, ..Default::default() };
         let adj = dilution_adjusted_fitness(
             0.7,
             "' UNION SELECT--",
@@ -212,8 +211,7 @@ mod tests {
     #[test]
     fn dilution_weight_one_returns_pure_dilution() {
         // With weight=1.0, the oracle score is ignored — only dilution matters.
-        let mut config = EvasionConfig::default();
-        config.dilution_weight = 1.0;
+        let config = EvasionConfig { dilution_weight: 1.0, ..Default::default() };
         let dilution_only = compute_dilution_score("' UNION SELECT--", &estimator(), 40.0);
         let adj = dilution_adjusted_fitness(
             0.0, // oracle says "blocked"
@@ -233,8 +231,7 @@ mod tests {
     fn dilution_gating_no_effect_on_non_ensemble_waf() {
         // PlainModSec without anomaly scoring is not ensemble — dilution
         // must have zero effect regardless of weight.
-        let mut config = EvasionConfig::default();
-        config.dilution_weight = 1.0; // maximum weight
+        let config = EvasionConfig { dilution_weight: 1.0, ..Default::default() }; // maximum weight
         let adj = dilution_adjusted_fitness(
             0.55,
             "' UNION SELECT--",
@@ -252,8 +249,7 @@ mod tests {
     #[test]
     fn dilution_adjusted_clamps_to_unit_interval() {
         // Even with extreme weights, the result must stay in [0.0, 1.0].
-        let mut config = EvasionConfig::default();
-        config.dilution_weight = 0.3;
+        let config = EvasionConfig { dilution_weight: 0.3, ..Default::default() };
         let adj = dilution_adjusted_fitness(
             1.0,
             "' UNION SELECT<script>alert(1)</script>",
@@ -262,7 +258,7 @@ mod tests {
             &config,
             "cloudflare",
         );
-        assert!(adj >= 0.0 && adj <= 1.0, "clamped to [0,1]: {adj}");
+        assert!((0.0..=1.0).contains(&adj), "clamped to [0,1]: {adj}");
     }
 
     #[test]

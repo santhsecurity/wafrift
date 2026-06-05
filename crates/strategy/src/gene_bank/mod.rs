@@ -167,10 +167,21 @@ impl WafGenome {
             .iter()
             .filter(|t| t.total_attempts >= min_attempts)
             .collect();
+        // R51 pass-13 I4 (CLAUDE.md §11 UTILIZATION): wire
+        // target_count into the rank as a tiebreaker. A technique
+        // with 100% on ONE target is less trustworthy than one
+        // with 95% across five targets — the latter generalises;
+        // the former is likely a fluke or fixture artifact.
+        // target_count was previously written by merge_session
+        // but never consulted; this turns it into a real signal.
+        // Primary key remains success_rate so existing semantics
+        // don't shift; target_count breaks ties.
         eligible.sort_by(|a, b| {
             b.success_rate()
                 .partial_cmp(&a.success_rate())
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.target_count.cmp(&a.target_count))
+                .then_with(|| b.last_success_epoch.cmp(&a.last_success_epoch))
         });
         eligible.truncate(n);
         eligible
@@ -189,30 +200,65 @@ impl WafGenome {
         let now = current_epoch();
         self.targets_scanned = self.targets_scanned.saturating_add(1);
         self.updated_at = now;
-
         for (name, successes, attempts) in stats {
-            if let Some(existing) = self.techniques.iter_mut().find(|t| t.name == *name) {
-                existing.total_successes = existing.total_successes.saturating_add(*successes);
-                existing.total_attempts = existing.total_attempts.saturating_add(*attempts);
-                if *successes > 0 {
-                    existing.target_count = existing.target_count.saturating_add(1);
-                    existing.last_success_epoch = now;
-                }
-            } else if self.techniques.len() < Self::MAX_TECHNIQUES {
-                self.techniques.push(TechniqueRecord {
-                    name: name.clone(),
-                    total_successes: *successes,
-                    total_attempts: *attempts,
-                    target_count: u32::from(*successes > 0),
-                    last_success_epoch: if *successes > 0 { now } else { 0 },
-                    per_class: BTreeMap::new(),
-                });
-            }
-            // Beyond the cap, novel technique names are silently
-            // dropped. The fix-it for the operator: if MAX_TECHNIQUES
-            // is genuinely too small for their corpus, raise it and
-            // re-seed.
+            self.merge_one_technique(name, *successes, *attempts, now, None);
         }
+    }
+
+    /// Per-technique merge — shared by [`Self::merge_session`] and
+    /// [`Self::merge_session_for_class`]. Folds `(successes, attempts)`
+    /// into the matching record (creating one if absent and the
+    /// MAX_TECHNIQUES cap allows), and optionally folds into the
+    /// per-class breakdown when `class_key` is `Some`.
+    ///
+    /// R51 pass-13 I5 (CLAUDE.md §7 DEDUP): pre-fix the 15-line
+    /// inner loop was duplicated across both merge functions; any
+    /// scoring-formula change (e.g. wiring target_count into rank)
+    /// had to be applied twice. Single source of truth now.
+    fn merge_one_technique(
+        &mut self,
+        name: &str,
+        successes: u32,
+        attempts: u32,
+        now: u64,
+        class_key: Option<&str>,
+    ) {
+        if let Some(existing) = self.techniques.iter_mut().find(|t| t.name == *name) {
+            existing.total_successes = existing.total_successes.saturating_add(successes);
+            existing.total_attempts = existing.total_attempts.saturating_add(attempts);
+            if successes > 0 {
+                existing.target_count = existing.target_count.saturating_add(1);
+                existing.last_success_epoch = now;
+            }
+            if let Some(ck) = class_key {
+                let entry = existing.per_class.entry(ck.to_string()).or_default();
+                entry.successes = entry.successes.saturating_add(successes);
+                entry.attempts = entry.attempts.saturating_add(attempts);
+            }
+        } else if self.techniques.len() < Self::MAX_TECHNIQUES {
+            let mut per_class = BTreeMap::new();
+            if let Some(ck) = class_key {
+                per_class.insert(
+                    ck.to_string(),
+                    ClassStat {
+                        successes,
+                        attempts,
+                    },
+                );
+            }
+            self.techniques.push(TechniqueRecord {
+                name: name.to_string(),
+                total_successes: successes,
+                total_attempts: attempts,
+                target_count: u32::from(successes > 0),
+                last_success_epoch: if successes > 0 { now } else { 0 },
+                per_class,
+            });
+        }
+        // Beyond the cap, novel technique names are silently
+        // dropped. The fix-it for the operator: if MAX_TECHNIQUES
+        // is genuinely too small for their corpus, raise it and
+        // re-seed.
     }
 
     /// Get technique names that should pre-populate the winner pool.
@@ -253,34 +299,7 @@ impl WafGenome {
         self.targets_scanned = self.targets_scanned.saturating_add(1);
         self.updated_at = now;
         for (name, successes, attempts) in stats {
-            if let Some(existing) = self.techniques.iter_mut().find(|t| t.name == *name) {
-                existing.total_successes = existing.total_successes.saturating_add(*successes);
-                existing.total_attempts = existing.total_attempts.saturating_add(*attempts);
-                if *successes > 0 {
-                    existing.target_count = existing.target_count.saturating_add(1);
-                    existing.last_success_epoch = now;
-                }
-                let entry = existing.per_class.entry(class_key.clone()).or_default();
-                entry.successes = entry.successes.saturating_add(*successes);
-                entry.attempts = entry.attempts.saturating_add(*attempts);
-            } else if self.techniques.len() < Self::MAX_TECHNIQUES {
-                let mut per_class = BTreeMap::new();
-                per_class.insert(
-                    class_key.clone(),
-                    ClassStat {
-                        successes: *successes,
-                        attempts: *attempts,
-                    },
-                );
-                self.techniques.push(TechniqueRecord {
-                    name: name.clone(),
-                    total_successes: *successes,
-                    total_attempts: *attempts,
-                    target_count: u32::from(*successes > 0),
-                    last_success_epoch: if *successes > 0 { now } else { 0 },
-                    per_class,
-                });
-            }
+            self.merge_one_technique(name, *successes, *attempts, now, Some(&class_key));
         }
     }
 
@@ -331,6 +350,37 @@ pub struct GeneBank {
     root: PathBuf,
     /// In-memory cache of loaded genomes.
     cache: HashMap<String, WafGenome>,
+}
+
+/// Bundled default genome: proven *generic* technique-records (delivery-vector
+/// + encoding confusion) that warm-start a COLD bank, so the first scan against
+/// a WAF fires known winners instead of discovering from zero — the warm-start
+/// pentesters want. These are generic recipes (technique-keys + priors), NOT
+/// target-specific payloads (those stay in the private per-target corpus, never
+/// shipped). Sourced from real bench/cumulus runs; a test pins that it parses.
+const DEFAULT_GENERIC_GENOME: &str = include_str!("default_genomes/generic.json");
+
+/// Cloudflare-class default genome: the delivery-vector + encoding techniques
+/// proven most effective against Cloudflare-fronted WAFs (content-type
+/// confusion — JSON dup-key / multipart / CBOR / YAML — plus overlong-UTF8 /
+/// hex). A pentester hitting a Cloudflare target warm-starts from these instead
+/// of the broad generic encodings. Generic technique-keys + priors, not
+/// target-specific payloads (those stay in the private per-target corpus).
+const DEFAULT_CLOUDFLARE_GENOME: &str = include_str!("default_genomes/cloudflare.json");
+
+/// Pick the bundled default genome best-matched to the detected WAF class.
+/// Cloudflare-fronted targets (managed-rules or bot-management) warm-start from
+/// the delivery-vector-heavy Cloudflare set; everything else (CRS / ModSec /
+/// Coraza / naxsi / unknown) gets the broadly-effective generic encodings.
+/// (§6 GENERALIZATION: routed by `WafClass`, never a hardcoded literal name.)
+fn bundled_default_for(waf_name: &str) -> &'static str {
+    use wafrift_types::WafClass;
+    match WafClass::from_waf_name(waf_name) {
+        WafClass::CloudflareManagedRules | WafClass::CloudflareBotMgmt => {
+            DEFAULT_CLOUDFLARE_GENOME
+        }
+        _ => DEFAULT_GENERIC_GENOME,
+    }
 }
 
 impl GeneBank {
@@ -384,27 +434,53 @@ impl GeneBank {
         }
 
         let path = self.genome_path(&key);
-        if !path.exists() {
+
+        // R59 pass-21 §15 audit-hunts: open-then-stat instead of
+        // stat-exists-then-stat-then-open. Pre-fix had three serialised
+        // filesystem calls (`exists()`, `metadata()`, `read_to_string()`)
+        // between each of which a concurrent agent on the shared NFS mount
+        // could swap the file (delete, replace with symlink, truncate).
+        // Opening once and using the file handle's metadata closes the
+        // TOCTOU window — the kernel guarantees the stat we read describes
+        // the file we will then read from. NFS-correct because every
+        // wafrift agent operates on the same `/media/.../Santh/` share.
+        let mut file = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "failed to open genome file"
+                );
+                return None;
+            }
+        };
+
+        // F137 + R59: size cap from the OPEN file handle's metadata, not a
+        // separate stat call. fstat on the same handle is atomic with the
+        // open above.
+        if let Ok(meta) = file.metadata()
+            && meta.len() > Self::MAX_GENOME_FILE_BYTES
+        {
+            tracing::warn!(
+                path = %path.display(),
+                bytes = meta.len(),
+                cap = Self::MAX_GENOME_FILE_BYTES,
+                "genome file exceeds size cap — quarantining to prevent OOM"
+            );
+            let fake_err = serde_json::from_str::<WafGenome>("").unwrap_err();
+            Self::quarantine_corrupt(&path, &fake_err);
             return None;
         }
 
-        // F137: guard against OOM on oversized / crafted genome files.
-        if let Ok(meta) = fs::metadata(&path) {
-            if meta.len() > Self::MAX_GENOME_FILE_BYTES {
-                tracing::warn!(
-                    path = %path.display(),
-                    bytes = meta.len(),
-                    cap = Self::MAX_GENOME_FILE_BYTES,
-                    "genome file exceeds size cap — quarantining to prevent OOM"
-                );
-                let fake_err = serde_json::from_str::<WafGenome>("").unwrap_err();
-                Self::quarantine_corrupt(&path, &fake_err);
-                return None;
-            }
-        }
-
-        match fs::read_to_string(&path) {
-            Ok(contents) => match serde_json::from_str::<WafGenome>(&contents) {
+        let mut contents = String::new();
+        use std::io::Read;
+        match (&mut file)
+            .take(Self::MAX_GENOME_FILE_BYTES)
+            .read_to_string(&mut contents)
+        {
+            Ok(_) => match serde_json::from_str::<WafGenome>(&contents) {
                 Ok(genome) => {
                     self.cache.insert(key.clone(), genome);
                     self.cache.get(&key)
@@ -438,6 +514,45 @@ impl GeneBank {
     /// # Errors
     ///
     /// Returns an error if the file cannot be written.
+    /// The bundled default genome's technique names — the warm-start seed pool
+    /// for a brand-new (cold) install with no per-WAF history yet. Empty only
+    /// if the embedded default fails to parse (a build-time invariant pinned by
+    /// a test, so in practice this always yields the proven generic set).
+    #[must_use]
+    pub fn default_seed_winners() -> Vec<String> {
+        serde_json::from_str::<WafGenome>(DEFAULT_GENERIC_GENOME)
+            .map(|g| g.seed_winners())
+            .unwrap_or_default()
+    }
+
+    /// Like [`load`](Self::load), but on a COLD bank (no genome yet for this
+    /// WAF) it materializes the bundled default best-matched to the WAF class
+    /// (Cloudflare-fronted → the delivery-vector set, else the generic
+    /// encodings) — stamping it with the detected `waf_name` and writing it
+    /// through to disk — so the
+    /// FIRST scan warm-starts from proven techniques instead of discovering from
+    /// zero. An existing genome is returned untouched (the default never
+    /// clobbers accumulated knowledge).
+    ///
+    /// Write-through is best-effort: a read-only `$HOME` falls back to an
+    /// in-memory seed so the scan still warm-starts — this never fails a scan.
+    /// Returns `None` only if there's no existing genome AND the bundled default
+    /// fails to parse (a build-time invariant pinned by a test, so in practice
+    /// a known WAF always warm-starts).
+    pub fn load_or_default(&mut self, waf_name: &str) -> Option<&WafGenome> {
+        let key = normalize_name(waf_name);
+        if self.load(waf_name).is_some() {
+            return self.cache.get(&key);
+        }
+        // Cold start — seed from the bundled default for this WAF.
+        let mut default: WafGenome = serde_json::from_str(bundled_default_for(waf_name)).ok()?;
+        default.waf_name = waf_name.to_string();
+        if self.save(&default).is_err() {
+            self.cache.insert(key.clone(), default);
+        }
+        self.cache.get(&key)
+    }
+
     pub fn save(&mut self, genome: &WafGenome) -> Result<(), GeneBankError> {
         let key = normalize_name(&genome.waf_name);
         let path = self.genome_path(&key);
@@ -599,18 +714,18 @@ impl GeneBank {
         // F137: same OOM guard as `load` — an adversarial file here
         // would be consumed by the merge_and_save / merge_and_save_for_class
         // path, which is equally reachable from the scan loop.
-        if let Ok(meta) = fs::metadata(path) {
-            if meta.len() > Self::MAX_GENOME_FILE_BYTES {
-                tracing::warn!(
-                    path = %path.display(),
-                    bytes = meta.len(),
-                    cap = Self::MAX_GENOME_FILE_BYTES,
-                    "genome file exceeds size cap during merge — quarantining to prevent OOM"
-                );
-                let fake_err = serde_json::from_str::<WafGenome>("").unwrap_err();
-                Self::quarantine_corrupt(path, &fake_err);
-                return None;
-            }
+        if let Ok(meta) = fs::metadata(path)
+            && meta.len() > Self::MAX_GENOME_FILE_BYTES
+        {
+            tracing::warn!(
+                path = %path.display(),
+                bytes = meta.len(),
+                cap = Self::MAX_GENOME_FILE_BYTES,
+                "genome file exceeds size cap during merge — quarantining to prevent OOM"
+            );
+            let fake_err = serde_json::from_str::<WafGenome>("").unwrap_err();
+            Self::quarantine_corrupt(path, &fake_err);
+            return None;
         }
         match fs::read_to_string(path) {
             Ok(contents) => match serde_json::from_str(&contents) {

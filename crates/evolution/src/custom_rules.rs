@@ -205,7 +205,12 @@ fn validate_evasion_strategies(rules: &CustomRulesFile) -> std::result::Result<(
 pub fn load_rules_from_file(
     path: &std::path::Path,
 ) -> std::result::Result<CustomRulesFile, String> {
-    let content = std::fs::read_to_string(path)
+    // R49 (pass-11 I1, CLAUDE.md §7 DEDUPLICATION): the file-level
+    // cap MUST match the parse-level cap, otherwise we slurp 16 MiB
+    // off disk just to reject it 4 lines later. Use the single
+    // canonical MAX_CUSTOM_RULES_BYTES so a future cap change lives
+    // in one place.
+    let content = crate::safe_io::read_capped_text(path, MAX_CUSTOM_RULES_BYTES)
         .map_err(|e| format!("failed to read rules file {}: {}", path.display(), e))?;
     load_rules(&content)
 }
@@ -218,7 +223,7 @@ pub fn detect(
     headers: &[(String, String)],
     body: &[u8],
 ) -> Option<CustomDetection> {
-    let body_str = String::from_utf8_lossy(&body[..body.len().min(4096)]).to_ascii_lowercase();
+    let body_str = String::from_utf8_lossy(&body[..body.len().min(wafrift_types::BLOCK_SCAN_BODY_WINDOW)]).to_ascii_lowercase();
     let mut best: Option<CustomDetection> = None;
     for rule in &rules.waf {
         let mut max_confidence: f64 = 0.0;

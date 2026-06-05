@@ -46,29 +46,28 @@ proptest! {
     #[test]
     fn nested_round_trips(payload in "[a-zA-Z0-9 _',./\\\\<>(){}=*-]{0,80}", depth in 0u8..=20) {
         let frame = embed_attack_in_nested(&payload, depth);
-        let (_, _, mut body) = decode_grpc_frame(&frame).expect("decode frame");
-        let mut tmp;
+        let (_, _, body) = decode_grpc_frame(&frame).expect("decode frame");
+        // Own each level's bytes so the slice stays live across iterations.
+        // Pre-fix this used `transmute::<&[u8], &[u8]>` to extend the
+        // borrow lifetime of a `tmp` Vec that was overwritten on the
+        // next iteration — undefined behaviour that the transmute
+        // hid from the borrow checker.
+        let mut current: Vec<u8> = body.to_vec();
         for _ in 0..depth {
-            let fields = decode_string_fields(body).expect("nested fields");
+            let fields = decode_string_fields(&current).expect("nested fields");
             prop_assert_eq!(fields.len(), 1);
             prop_assert_eq!(fields[0].0, 1u32);
-            tmp = fields[0].1.clone();
-            // Walk down one level by re-pointing body to the embedded bytes.
-            body = unsafe { std::mem::transmute::<&[u8], &[u8]>(tmp.as_slice()) };
-            let _ = body;
-            // Re-decode from the cloned bytes via a fresh decode call.
-            let inner = decode_string_fields(&tmp).expect("inner decode");
+            let next = fields[0].1.clone();
+            let inner = decode_string_fields(&next).expect("inner decode");
             if inner.is_empty() {
-                // We hit the innermost level; verify the string matches.
-                prop_assert_eq!(String::from_utf8(tmp.clone()).unwrap_or_default(), payload.clone());
+                // Innermost level — verify the payload matches.
+                prop_assert_eq!(String::from_utf8(next).unwrap_or_default(), payload.clone());
                 return Ok(());
-            } else {
-                // Continue descending.
-                body = unsafe { std::mem::transmute::<&[u8], &[u8]>(tmp.as_slice()) };
             }
+            current = next;
         }
         // After unwrapping `depth` levels, we should be at the payload string.
-        let final_fields = decode_string_fields(body).expect("final fields");
+        let final_fields = decode_string_fields(&current).expect("final fields");
         prop_assert_eq!(final_fields.len(), 1);
         prop_assert_eq!(&final_fields[0].1, payload.as_bytes());
     }

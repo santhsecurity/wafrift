@@ -15,6 +15,7 @@
 //! 7. Percent-encoded dotted-quad hosts
 //! 8. Configurable OOB (out-of-band) interaction domains
 
+use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
@@ -115,6 +116,142 @@ impl MetadataEndpoint {
     }
 }
 
+// ──────────────────────────────────────────────
+//  TOML-loaded mutation variant lists (Tier-B)
+// ──────────────────────────────────────────────
+//
+// These feed the BROAD same-class fuzzer `mutate` (scan's exploration pass).
+// They are NOT the sound same-attack equivalences — those live in
+// `grammar::equiv::ssrf` and carry their own oracle. Operators extend coverage
+// by dropping entries into rules/ssrf/mutate_variants.toml (Tier-B contract);
+// the embedded copy below is the fail-closed fallback so a malformed data file
+// degrades to today's behavior instead of dropping the class.
+
+/// Compile-time embedded Tier-B variant data.
+const MUTATE_VARIANTS_TOML: &str = include_str!("../../rules/ssrf/mutate_variants.toml");
+
+/// A `{scheme}`/`{oob_domain}`-templated mutation form.
+#[derive(Debug, Clone, Deserialize)]
+struct VariantTemplate {
+    template: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
+}
+
+/// A parser-confusion authority target host.
+#[derive(Debug, Clone, Deserialize)]
+struct ConfusionTarget {
+    host: String,
+    /// Human-readable label in TOML; not consumed at runtime.
+    #[serde(rename = "description", default)]
+    _description: String,
+}
+
+/// Root structure for rules/ssrf/mutate_variants.toml.
+#[derive(Debug, Clone, Deserialize)]
+struct MutateVariants {
+    #[serde(default)]
+    address_encoding: Vec<VariantTemplate>,
+    #[serde(default)]
+    userinfo_bypass: Vec<VariantTemplate>,
+    #[serde(default)]
+    percent_encoded: Vec<VariantTemplate>,
+    #[serde(default)]
+    confusion_target: Vec<ConfusionTarget>,
+    #[serde(default)]
+    suffixed_address: Vec<VariantTemplate>,
+}
+
+impl Default for MutateVariants {
+    fn default() -> Self {
+        fn vt(t: &str) -> VariantTemplate {
+            VariantTemplate {
+                template: t.into(),
+                _description: String::new(),
+            }
+        }
+        fn ct(h: &str) -> ConfusionTarget {
+            ConfusionTarget {
+                host: h.into(),
+                _description: String::new(),
+            }
+        }
+        Self {
+            address_encoding: vec![
+                vt("{scheme}2130706433"),
+                vt("{scheme}0177.0.0.1"),
+                vt("{scheme}0x7f000001"),
+                vt("{scheme}[::1]"),
+                vt("{scheme}[::ffff:127.0.0.1]"),
+                vt("{scheme}[0:0:0:0:0:ffff:7f00:1]"),
+                vt("{scheme}[::ffff:7f00:1]"),
+                vt("{scheme}[0:0:0:0:0:0:0:1]"),
+                vt("{scheme}127.0.0.1.nip.io"),
+                vt("{scheme}127.0.0.1.xip.io"),
+                vt("{scheme}spoofed.{oob_domain}"),
+                vt("{scheme}localhost"),
+                vt("{scheme}127.1"),
+                vt("{scheme}0"),
+                vt("{scheme}0.0.0.0"),
+                vt("{scheme}127.0.0.2"),
+                vt("{scheme}127.127.127.127"),
+            ],
+            userinfo_bypass: vec![
+                vt("{scheme}evil.com@127.0.0.1"),
+                vt("{scheme}127.0.0.1%23@evil.com"),
+                vt("{scheme}127.0.0.1%2F@evil.com"),
+                vt("{scheme}127.0.0.1?@evil.com"),
+                vt("{scheme}127.0.0.1///@evil.com"),
+                vt("{scheme}////127.0.0.1"),
+                vt("{scheme}127.0.0.1%00.evil.com"),
+            ],
+            percent_encoded: vec![
+                vt("{scheme}%31%32%37.%30.%30.%31"),
+                vt("{scheme}%37%66%30%30%30%30%30%31"),
+                vt("{scheme}127%2e0%2e0%2e1"),
+                vt("{scheme}%6C%6F%63%61%6C%68%6F%73%74"),
+            ],
+            confusion_target: vec![
+                ct("127.0.0.1"),
+                ct("localhost"),
+                ct("169.254.169.254"),
+                ct("metadata.google.internal"),
+                ct("100.100.100.200"),
+                ct("0.0.0.0"),
+            ],
+            suffixed_address: vec![
+                vt("{scheme}2130706433"),
+                vt("{scheme}0177.0.0.1"),
+                vt("{scheme}0x7f000001"),
+                vt("{scheme}[::1]"),
+                vt("{scheme}[::ffff:127.0.0.1]"),
+                vt("{scheme}127.0.0.1.nip.io"),
+                vt("{scheme}spoofed.{oob_domain}"),
+                vt("{scheme}169.254.169.254"),
+                vt("{scheme}metadata.google.internal"),
+                vt("{scheme}metadata.azure"),
+                vt("{scheme}100.100.100.200"),
+                vt("{scheme}168.63.129.16"),
+                vt("{scheme}172.17.0.1"),
+                vt("{scheme}%31%32%37.%30.%30.%31"),
+            ],
+        }
+    }
+}
+
+/// Parse the embedded Tier-B variant data once at first access; on parse
+/// failure warn and fall back to the embedded built-in set (fail-closed).
+fn variants() -> &'static MutateVariants {
+    static RULES: OnceLock<MutateVariants> = OnceLock::new();
+    RULES.get_or_init(|| {
+        toml::from_str(MUTATE_VARIANTS_TOML).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "invalid TOML in rules/ssrf/mutate_variants.toml");
+            MutateVariants::default()
+        })
+    })
+}
+
 /// Generate semantic-preserving SSRF mutations for a candidate payload.
 #[must_use]
 pub fn mutate(payload: &str) -> Vec<String> {
@@ -126,27 +263,14 @@ pub fn mutate(payload: &str) -> Vec<String> {
     let oob_domain = get_oob_domain();
     let mut results = BTreeSet::new();
 
+    // Templated variant lists are Tier-B data (rules/ssrf/mutate_variants.toml);
+    // `{scheme}` and `{oob_domain}` are substituted per-payload here.
+    let subst = |t: &str| t.replace("{scheme}", scheme).replace("{oob_domain}", oob_domain);
+    let v = variants();
+
     // Address encoding variants
-    for variant in [
-        format!("{scheme}2130706433"),              // IPv4 as integer
-        format!("{scheme}0177.0.0.1"),              // Octal notation
-        format!("{scheme}0x7f000001"),              // Hexadecimal
-        format!("{scheme}[::1]"),                   // IPv6 loopback
-        format!("{scheme}[::ffff:127.0.0.1]"),      // IPv4-mapped IPv6
-        format!("{scheme}[0:0:0:0:0:ffff:7f00:1]"), // Full IPv4-mapped IPv6
-        format!("{scheme}[::ffff:7f00:1]"),         // Compressed IPv4-mapped
-        format!("{scheme}[0:0:0:0:0:0:0:1]"),       // Full IPv6 loopback
-        format!("{scheme}127.0.0.1.nip.io"),        // DNS rebinding
-        format!("{scheme}127.0.0.1.xip.io"),        // Alternative DNS rebinding
-        format!("{scheme}spoofed.{oob_domain}"),    // OOB domain
-        format!("{scheme}localhost"),               // Localhost name
-        format!("{scheme}127.1"),                   // Short form
-        format!("{scheme}0"),                       // Zero IP
-        format!("{scheme}0.0.0.0"),                 // Any address
-        format!("{scheme}127.0.0.2"),               // Alternative loopback
-        format!("{scheme}127.127.127.127"),         // Pattern loopback
-    ] {
-        results.insert(variant);
+    for tpl in &v.address_encoding {
+        results.insert(subst(&tpl.template));
     }
 
     // Cloud metadata endpoints
@@ -155,26 +279,13 @@ pub fn mutate(payload: &str) -> Vec<String> {
     }
 
     // Redirect/userinfo bypass variants
-    for variant in [
-        format!("{scheme}evil.com@127.0.0.1"),    // Userinfo bypass
-        format!("{scheme}127.0.0.1%23@evil.com"), // Fragment bypass
-        format!("{scheme}127.0.0.1%2F@evil.com"), // Path encoding bypass
-        format!("{scheme}127.0.0.1?@evil.com"),   // Query bypass
-        format!("{scheme}127.0.0.1///@evil.com"), // Multiple slash bypass
-        format!("{scheme}////127.0.0.1"),         // Leading slash bypass
-        format!("{scheme}127.0.0.1%00.evil.com"), // Null byte bypass
-    ] {
-        results.insert(variant);
+    for tpl in &v.userinfo_bypass {
+        results.insert(subst(&tpl.template));
     }
 
     // Percent-encoded variants
-    for variant in [
-        format!("{scheme}%31%32%37.%30.%30.%31"), // Double-encoded 127.0.0.1
-        format!("{scheme}%37%66%30%30%30%30%30%31"), // Hex 0x7f000001
-        format!("{scheme}127%2e0%2e0%2e1"),       // Partial encoding
-        format!("{scheme}%6C%6F%63%61%6C%68%6F%73%74"), // Encoded 'localhost'
-    ] {
-        results.insert(variant);
+    for tpl in &v.percent_encoded {
+        results.insert(subst(&tpl.template));
     }
 
     if let Some(path_start) = extract_path(payload) {
@@ -208,15 +319,10 @@ pub fn mutate(payload: &str) -> Vec<String> {
     if !cover_host.is_empty() && cover_host.len() <= 253 {
         let path_suffix =
             extract_path(payload).map_or_else(|| "/".to_string(), |i| payload[i..].to_string());
-        for target in [
-            "127.0.0.1",
-            "localhost",
-            "169.254.169.254", // AWS / DO / Azure metadata
-            "metadata.google.internal",
-            "100.100.100.200", // Alibaba
-            "0.0.0.0",
-        ] {
-            for variant in parser_confusion_authority(scheme, &cover_host, target, &path_suffix) {
+        for target in &v.confusion_target {
+            for variant in
+                parser_confusion_authority(scheme, &cover_host, &target.host, &path_suffix)
+            {
                 results.insert(variant);
             }
         }
@@ -501,23 +607,15 @@ fn extract_path(payload: &str) -> Option<usize> {
 }
 
 fn add_with_suffix(results: &mut BTreeSet<String>, scheme: &str, oob_domain: &str, suffix: &str) {
-    for variant in [
-        format!("{scheme}2130706433{suffix}"),
-        format!("{scheme}0177.0.0.1{suffix}"),
-        format!("{scheme}0x7f000001{suffix}"),
-        format!("{scheme}[::1]{suffix}"),
-        format!("{scheme}[::ffff:127.0.0.1]{suffix}"),
-        format!("{scheme}127.0.0.1.nip.io{suffix}"),
-        format!("{scheme}spoofed.{oob_domain}{suffix}"),
-        format!("{scheme}169.254.169.254{suffix}"),
-        format!("{scheme}metadata.google.internal{suffix}"),
-        format!("{scheme}metadata.azure{suffix}"),
-        format!("{scheme}100.100.100.200{suffix}"), // Alibaba
-        format!("{scheme}168.63.129.16{suffix}"),   // Azure WireServer
-        format!("{scheme}172.17.0.1{suffix}"),      // Docker
-        format!("{scheme}%31%32%37.%30.%30.%31{suffix}"),
-    ] {
-        results.insert(variant);
+    // Suffixed forms are Tier-B data (rules/ssrf/mutate_variants.toml,
+    // [[suffixed_address]]); the payload's path/query `suffix` is appended
+    // after `{scheme}`/`{oob_domain}` substitution.
+    for tpl in &variants().suffixed_address {
+        let base = tpl
+            .template
+            .replace("{scheme}", scheme)
+            .replace("{oob_domain}", oob_domain);
+        results.insert(format!("{base}{suffix}"));
     }
 }
 
@@ -551,6 +649,77 @@ fn strip_scheme_and_path(payload: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Golden snapshot: the Tier-B extraction of `mutate`'s variant lists
+    /// (rules/ssrf/mutate_variants.toml) MUST reproduce byte-for-byte the
+    /// output produced when those lists were hardcoded. The fixtures were
+    /// captured from the pre-extraction code; any drift here is a behavior
+    /// regression in the broad same-class fuzzer, not a test that needs
+    /// updating. Two payloads exercise both branches: no path (host-only)
+    /// and a path+query (drives `add_with_suffix`).
+    #[test]
+    fn mutate_matches_golden_snapshot_after_tier_b_extraction() {
+        for (golden, p) in [
+            (
+                include_str!("../../tests/golden/ssrf_mutate_nopath.txt"),
+                "http://example.com",
+            ),
+            (
+                include_str!("../../tests/golden/ssrf_mutate_withpath.txt"),
+                "https://example.com/fetch?url=x",
+            ),
+        ] {
+            let mut v = mutate(p);
+            v.sort();
+            assert_eq!(
+                v.join("\n"),
+                golden,
+                "ssrf::mutate output drifted from golden for {p:?}"
+            );
+        }
+    }
+
+    /// The shipped Tier-B data file must parse and carry the full set.
+    #[test]
+    fn shipped_mutate_variants_toml_parses_with_expected_counts() {
+        let v: MutateVariants =
+            toml::from_str(MUTATE_VARIANTS_TOML).expect("rules/ssrf/mutate_variants.toml is valid");
+        assert_eq!(v.address_encoding.len(), 17, "address_encoding count");
+        assert_eq!(v.userinfo_bypass.len(), 7, "userinfo_bypass count");
+        assert_eq!(v.percent_encoded.len(), 4, "percent_encoded count");
+        assert_eq!(v.confusion_target.len(), 6, "confusion_target count");
+        assert_eq!(v.suffixed_address.len(), 14, "suffixed_address count");
+    }
+
+    /// Fail-closed contract: the embedded built-in fallback must be IDENTICAL
+    /// to the shipped data file, so a corrupt/absent file degrades to exactly
+    /// today's behavior rather than dropping the class.
+    #[test]
+    fn embedded_fallback_matches_shipped_data() {
+        let shipped: MutateVariants =
+            toml::from_str(MUTATE_VARIANTS_TOML).expect("shipped data parses");
+        let fallback = MutateVariants::default();
+        let tpls = |s: &[VariantTemplate]| s.iter().map(|t| t.template.clone()).collect::<Vec<_>>();
+        let hosts = |s: &[ConfusionTarget]| s.iter().map(|t| t.host.clone()).collect::<Vec<_>>();
+        assert_eq!(tpls(&shipped.address_encoding), tpls(&fallback.address_encoding));
+        assert_eq!(tpls(&shipped.userinfo_bypass), tpls(&fallback.userinfo_bypass));
+        assert_eq!(tpls(&shipped.percent_encoded), tpls(&fallback.percent_encoded));
+        assert_eq!(hosts(&shipped.confusion_target), hosts(&fallback.confusion_target));
+        assert_eq!(tpls(&shipped.suffixed_address), tpls(&fallback.suffixed_address));
+    }
+
+    /// A malformed data file must degrade to the built-in set without panic —
+    /// the exact path `variants()` takes on a TOML parse error.
+    #[test]
+    fn malformed_toml_falls_back_to_builtin() {
+        let parsed: Result<MutateVariants, _> = toml::from_str("this is = not [valid toml");
+        assert!(parsed.is_err(), "malformed input should not parse");
+        let degraded = parsed.unwrap_or_default();
+        assert_eq!(degraded.address_encoding.len(), 17);
+        assert_eq!(degraded.suffixed_address.len(), 14);
+        // and the fallback still drives a non-empty mutation set
+        assert!(!mutate("http://example.com").is_empty());
+    }
 
     #[test]
     fn detects_http_url() {

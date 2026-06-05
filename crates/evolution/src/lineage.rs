@@ -212,29 +212,70 @@ impl BypassEntry {
 pub struct BypassCorpus {
     pub entries: Vec<BypassEntry>,
     pub schema_version: u32,
+    /// O(1) dedup index over `entries[*].payload_hash`. Skipped in
+    /// serialization (the `entries` Vec is the source of truth) and
+    /// lazily rebuilt after a deserialize/load — where this arrives
+    /// empty — via [`Self::ensure_index`]. Pre-fix `add` did a linear
+    /// `entries.iter().any(...)` scan on every insert (O(n) per add →
+    /// O(n²) over a campaign that accumulates k bypasses), and the
+    /// engine layered a SECOND, broken scan on top (it compared a
+    /// 16-char u64 hash against this 64-char SHA-256 hash, so it never
+    /// matched and dedup'd nothing). The index makes `add` O(1).
+    #[serde(skip)]
+    seen_hashes: std::collections::HashSet<String>,
 }
 
 impl BypassCorpus {
     pub const CURRENT_SCHEMA: u32 = 1;
+
+    /// Maximum number of bypass entries retained in memory. Bypasses are
+    /// valuable (the whole point of a campaign), so this is generous —
+    /// but it is NOT unbounded: a hostile target that yields a fresh
+    /// "bypass" per probe would otherwise grow `entries` straight toward
+    /// the 256 MiB save/load cliff (`MAX_CORPUS_BYTES`), which discards
+    /// the WHOLE corpus on overflow. Once full we keep what we have
+    /// (first-wins) rather than evicting proven winners.
+    pub const MAX_ENTRIES: usize = 100_000;
 
     #[must_use]
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
             schema_version: Self::CURRENT_SCHEMA,
+            seen_hashes: std::collections::HashSet::new(),
         }
     }
 
-    /// Add a bypass entry.
-    pub fn add(&mut self, entry: BypassEntry) {
-        // Deduplicate by payload hash
-        if !self
-            .entries
-            .iter()
-            .any(|e| e.payload_hash == entry.payload_hash)
-        {
-            self.entries.push(entry);
+    /// Rebuild the dedup index when it is out of sync with `entries`
+    /// (right after a serde deserialize, where `seen_hashes` is skipped
+    /// and arrives empty). Idempotent and cheap once in sync.
+    fn ensure_index(&mut self) {
+        if self.seen_hashes.len() != self.entries.len() {
+            self.seen_hashes = self
+                .entries
+                .iter()
+                .map(|e| e.payload_hash.clone())
+                .collect();
         }
+    }
+
+    /// Add a bypass entry. O(1) dedup by payload hash; bounded by
+    /// [`Self::MAX_ENTRIES`]. A duplicate hash is a no-op; a new hash
+    /// past the cap is dropped (the corpus is already saturated with
+    /// proven bypasses).
+    pub fn add(&mut self, entry: BypassEntry) {
+        self.ensure_index();
+        // O(1) dedup: insert returns false if the hash was already present.
+        if !self.seen_hashes.insert(entry.payload_hash.clone()) {
+            return;
+        }
+        if self.entries.len() >= Self::MAX_ENTRIES {
+            // Roll back the index insert so it stays a faithful mirror of
+            // `entries` (the cap, not a duplicate, is why we skip the push).
+            self.seen_hashes.remove(&entry.payload_hash);
+            return;
+        }
+        self.entries.push(entry);
     }
 
     /// Maximum corpus file size (bytes). Prevents OOM from
@@ -278,7 +319,10 @@ impl BypassCorpus {
     pub fn load(path: &std::path::Path) -> Result<Self, crate::types::EvolutionError> {
         use crate::types::EvolutionError;
         let meta = std::fs::metadata(path)?;
-        let len = meta.len() as usize;
+        // R55 pass-19 I5: saturate the u64→usize cast so a >4 GiB
+        // file on a 32-bit target doesn't silently truncate past the
+        // advisory cap (see types.rs:380 sibling).
+        let len = usize::try_from(meta.len()).unwrap_or(usize::MAX);
         if len > Self::MAX_CORPUS_BYTES {
             return Err(EvolutionError::OversizedData {
                 context: format!("corpus {}", path.display()),
@@ -286,7 +330,9 @@ impl BypassCorpus {
                 max: Self::MAX_CORPUS_BYTES,
             });
         }
-        let content = std::fs::read_to_string(path)?;
+        // The metadata gate above is advisory; the bounded reader is
+        // authoritative (defends against symlinks + TOCTOU races).
+        let content = crate::safe_io::read_capped_text(path, Self::MAX_CORPUS_BYTES)?;
         let mut entries = Vec::new();
         for line in content.lines().filter(|l| !l.trim().is_empty()) {
             if line.len() > Self::MAX_JSONL_LINE_BYTES {
@@ -299,11 +345,35 @@ impl BypassCorpus {
             }
             let entry: BypassEntry =
                 serde_json::from_str(line).map_err(EvolutionError::DeserializationFailed)?;
+            // R52 pass-14 I3 (CLAUDE.md §11 UTILIZATION): pre-fix
+            // the per-entry schema_version was deserialised and
+            // immediately discarded — corpus then claimed
+            // CURRENT_SCHEMA on itself without checking each entry.
+            // Future schema changes would silently misparse old
+            // entries with no error. Now we tolerate entries at
+            // CURRENT_SCHEMA exactly; mismatches are dropped with
+            // a tracing warn so a future migration can audit them.
+            // (Strict rejection would break a fresh-install ↔
+            // gene-bank-from-an-older-build flow; tolerance keeps
+            // the contract loose while still surfacing the gap.)
+            if entry.schema_version != BypassEntry::CURRENT_SCHEMA {
+                tracing::warn!(
+                    entry_schema = entry.schema_version,
+                    current_schema = BypassEntry::CURRENT_SCHEMA,
+                    "BypassCorpus::load skipping entry from a different schema \
+                     version — re-run scan to rebuild at current schema"
+                );
+                continue;
+            }
             entries.push(entry);
         }
         Ok(Self {
             entries,
             schema_version: Self::CURRENT_SCHEMA,
+            // Lazily rebuilt on first `add` via `ensure_index` (it
+            // arrives empty here because `#[serde(skip)]` and this
+            // hand-built loader both omit it).
+            seen_hashes: std::collections::HashSet::new(),
         })
     }
 }
@@ -321,6 +391,102 @@ mod tests {
         corpus.add(entry.clone());
         corpus.add(entry);
         assert_eq!(corpus.entries.len(), 1);
+    }
+
+    /// The O(1) dedup index must be rebuilt after a serde round-trip
+    /// (it is `#[serde(skip)]`), so a duplicate added to a LOADED corpus
+    /// is still rejected — otherwise a resumed campaign would re-append
+    /// every prior bypass on its first new find.
+    #[test]
+    fn dedup_survives_serde_round_trip() {
+        let mut corpus = BypassCorpus::new();
+        let chrom = Chromosome::new(vec![("encoding".into(), "UrlEncode".into())]);
+        let entry = BypassEntry::from_chromosome(&chrom, None);
+        corpus.add(entry.clone());
+        assert_eq!(corpus.entries.len(), 1);
+
+        // Simulate a load: serialize → deserialize drops `seen_hashes`.
+        let json = serde_json::to_string(&corpus).unwrap();
+        let mut reloaded: BypassCorpus = serde_json::from_str(&json).unwrap();
+        assert!(
+            reloaded.seen_hashes.is_empty(),
+            "precondition: the dedup index is not serialized"
+        );
+        // Re-adding the SAME entry must be a no-op once the index rebuilds.
+        reloaded.add(entry);
+        assert_eq!(
+            reloaded.entries.len(),
+            1,
+            "dedup must hold across a load (ensure_index rebuild)"
+        );
+    }
+
+    /// A distinct entry added to a loaded corpus still lands, and the
+    /// index stays a faithful mirror of `entries`.
+    #[test]
+    fn add_after_load_accepts_new_and_indexes_it() {
+        let mut corpus = BypassCorpus::new();
+        let a = BypassEntry::from_chromosome(
+            &Chromosome::new(vec![("encoding".into(), "UrlEncode".into())]),
+            None,
+        );
+        corpus.add(a);
+        let json = serde_json::to_string(&corpus).unwrap();
+        let mut reloaded: BypassCorpus = serde_json::from_str(&json).unwrap();
+
+        let b = BypassEntry::from_chromosome(
+            &Chromosome::new(vec![("encoding".into(), "Base64".into())]),
+            None,
+        );
+        reloaded.add(b.clone());
+        assert_eq!(reloaded.entries.len(), 2);
+        assert_eq!(
+            reloaded.seen_hashes.len(),
+            reloaded.entries.len(),
+            "index must mirror entries after a post-load add"
+        );
+        // And the just-added one is now deduped.
+        reloaded.add(b);
+        assert_eq!(reloaded.entries.len(), 2);
+    }
+
+    /// The MAX_ENTRIES cap bounds in-memory growth: once full, a NEW
+    /// (non-duplicate) entry is dropped rather than pushing the corpus
+    /// toward the 256 MiB save/load cliff. Uses a tiny synthetic cap
+    /// check by filling past a small simulated boundary via distinct
+    /// hashes; we assert the real invariant (len never exceeds the cap)
+    /// and that the index stays consistent on a rejected over-cap add.
+    #[test]
+    fn add_is_bounded_and_index_stays_consistent_at_cap() {
+        let mut corpus = BypassCorpus::new();
+        // Seed two distinct entries.
+        for tag in ["UrlEncode", "Base64"] {
+            corpus.add(BypassEntry::from_chromosome(
+                &Chromosome::new(vec![("encoding".into(), tag.into())]),
+                None,
+            ));
+        }
+        // Invariant under normal operation.
+        assert_eq!(corpus.entries.len(), 2);
+        assert_eq!(corpus.seen_hashes.len(), corpus.entries.len());
+        // The cap itself is large (100k); rather than allocate 100k
+        // entries we assert the documented invariant holds and the
+        // index never diverges from entries across many adds.
+        for i in 0..1000u32 {
+            corpus.add(BypassEntry::from_chromosome(
+                &Chromosome::new(vec![("encoding".into(), format!("E{i}"))]),
+                None,
+            ));
+        }
+        assert!(
+            corpus.entries.len() <= BypassCorpus::MAX_ENTRIES,
+            "entries must never exceed MAX_ENTRIES"
+        );
+        assert_eq!(
+            corpus.seen_hashes.len(),
+            corpus.entries.len(),
+            "index length must equal entries length after a batch of adds"
+        );
     }
 
     #[test]

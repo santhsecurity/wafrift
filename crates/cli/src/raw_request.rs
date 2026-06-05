@@ -49,7 +49,7 @@ use crate::helpers::shell_single_quote;
 /// or browser dev-tools. Round-trips to a `curl -i` invocation via
 /// [`RawRequest::to_curl`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawRequest {
+pub(crate) struct RawRequest {
     /// HTTP method verb. Conventionally uppercase; `to_curl` emits
     /// the `-X <METHOD>` flag for anything other than `GET` (curl
     /// defaults to GET, no flag needed).
@@ -67,7 +67,7 @@ pub struct RawRequest {
 /// The injection-marker literal a pentester drops into the request
 /// to indicate where the payload should be substituted. Matches
 /// Burp Intruder's `§…§` syntax in its degenerate `§§` form.
-pub const INJECTION_MARKER: &str = "§§";
+pub(crate) const INJECTION_MARKER: &str = "§§";
 
 /// Parse a Burp-style raw HTTP request file with a caller-supplied
 /// URL scheme (typically `http` or `https`). The default scheme for
@@ -79,7 +79,10 @@ pub const INJECTION_MARKER: &str = "§§";
 /// Returns a human-readable error when the request line is malformed,
 /// the `Host:` header is absent (cannot reconstruct URL), or any
 /// header line is structurally invalid.
-pub fn parse_raw_http_request_with_scheme(text: &str, scheme: &str) -> Result<RawRequest, String> {
+pub(crate) fn parse_raw_http_request_with_scheme(
+    text: &str,
+    scheme: &str,
+) -> Result<RawRequest, String> {
     if text.is_empty() {
         return Err("empty request file".to_string());
     }

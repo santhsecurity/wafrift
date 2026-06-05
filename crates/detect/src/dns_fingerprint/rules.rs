@@ -23,6 +23,15 @@ use crate::waf_detect::DetectedWaf;
 use regex::Regex;
 use serde::Deserialize;
 
+/// NFA compile-size limit — workspace-canonical value from
+/// [`wafrift_types::REGEX_NFA_SIZE_LIMIT`].  Mirrors `waf_detect/rules.rs`.
+/// Caps compile-time NFA explosion so a crafted TOML with a pattern like
+/// `(a?){200}` returns a fast `Err` instead of hanging.  Even though the
+/// current production path only compiles the embedded TOML (known-good
+/// patterns), `from_toml` is `pub` and future callers may pass untrusted
+/// input.  Defence-in-depth cost: zero.
+const CNAME_REGEX_SIZE_LIMIT: usize = wafrift_types::REGEX_NFA_SIZE_LIMIT;
+
 use super::types::DnsProbe;
 
 /// On-disk shape of one CNAME rule's signature.
@@ -103,7 +112,15 @@ impl CnameRuleEngine {
                 } else {
                     format!("(?i){}", s.host_regex)
                 };
-                let re = Regex::new(&full)
+                // §15 ReDoS defence: use size_limit to prevent a crafted
+                // TOML pattern from causing O(2^N) NFA expansion during
+                // compile (e.g. `(a?){200}`). Matches the protection in
+                // waf_detect/rules.rs::compile_ci_regex and
+                // wafmodel/oracle.rs. The `(?i)` prefix was already added
+                // above, so pass the combined `full` string to the builder.
+                let re = regex::RegexBuilder::new(&full)
+                    .size_limit(CNAME_REGEX_SIZE_LIMIT)
+                    .build()
                     .map_err(|e| format!("bad CNAME regex '{}': {e}", s.host_regex))?;
                 signatures.push(CompiledCnameSignature {
                     host_regex: re,

@@ -17,23 +17,12 @@
 //! 7. Callback from a matching GET request is logged (JSON NDJSON line).
 //! 8. Invalid --bind address exits non-zero immediately.
 
+mod common;
+use common::wafrift;
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
 
 /// Spawn a listener child with piped stdout/stderr.  Returns the child
 /// so the caller can read from stdout/stderr and then kill it.
@@ -312,13 +301,7 @@ fn listener_logs_callback_when_matching_token_is_sent() {
 fn listener_invalid_bind_address_exits_nonzero() {
     // An address that cannot be bound exits immediately with non-zero.
     // Port 1 requires root — will fail fast on all test platforms.
-    let (code, _stdout, stderr) = wafrift(&[
-        "listener",
-        "--bind",
-        "127.0.0.1:1",
-        "--tokens",
-        "1",
-    ]);
+    let (code, _stdout, stderr) = wafrift(&["listener", "--bind", "127.0.0.1:1", "--tokens", "1"]);
     assert_ne!(
         code, 0,
         "binding to a privileged port must exit non-zero; stderr: {stderr}"

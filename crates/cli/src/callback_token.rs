@@ -10,21 +10,28 @@
 //! encoding.
 
 use rand::RngCore;
+use rand::rngs::OsRng;
 
 /// 128-bit randomness, encoded to base32 (26 ASCII chars).
 /// Collision probability for N tokens is N² / 2^129 — same security
 /// floor as UUIDv4.
 #[must_use]
-pub fn generate_token() -> String {
+pub(crate) fn generate_token() -> String {
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    OsRng.fill_bytes(&mut bytes);
     base32_encode(&bytes)
 }
 
 /// RFC 4648 base32 (upper-case, no padding). 16-byte input -> 26
 /// characters. Less code than a base32 crate dep would be, and
 /// the alphabet + size is fixed for our use.
-pub fn base32_encode(bytes: &[u8]) -> String {
+///
+/// R55 pass-18 I7 (CLAUDE.md §11 UTILIZATION): private to the module.
+/// `generate_token` is the public surface; this helper is an
+/// implementation detail. Tests in this file exercise it directly
+/// because Rust automatically allows test access to private items in
+/// the same module.
+fn base32_encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     let mut out = String::with_capacity((bytes.len() * 8).div_ceil(5));
     let mut buffer: u32 = 0;
@@ -60,7 +67,7 @@ pub fn base32_encode(bytes: &[u8]) -> String {
 /// positions (e.g. SSRF in a Location-header + a body-side echo
 /// channel) and still correlate to one observation.
 #[must_use]
-pub fn substitute(payload: &str, callback_base_url: &str) -> Option<Substitution> {
+pub(crate) fn substitute(payload: &str, callback_base_url: &str) -> Option<Substitution> {
     if !payload.contains("{{CALLBACK}}") {
         return None;
     }
@@ -78,7 +85,7 @@ pub fn substitute(payload: &str, callback_base_url: &str) -> Option<Substitution
 /// that was inserted, and the full callback URL the operator can
 /// search for in the listener log.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Substitution {
+pub(crate) struct Substitution {
     /// Payload bytes with `{{CALLBACK}}` replaced by `callback_url`.
     pub payload: String,
     /// The base32 token embedded in this variant. Unique per call.

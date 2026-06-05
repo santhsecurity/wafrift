@@ -1,0 +1,25 @@
+test mock_modsec_json5_comment_is_blocked_by_naive_walker ... ok
+test mock_modsec_multipart_qp_sqli_bypasses ... ok
+test mock_modsec_ndjson_body_bypasses ... ok
+test mock_modsec_application_yaml_body_bypasses ... ok
+test mock_modsec_text_xml_sqli_body_bypasses ... ok
+test mock_modsec_json_as_form_is_blocked_by_lowercase_substring_scan ... ok
+test mock_modsec_uncompressed_sqli_body_is_blocked ... ok
+test mock_modsec_sqli_payload_returns_apache_403 ... ok
+test mock_modsec_deeply_nested_json_is_blocked_by_naive_walker ... ok
+test differential_probe_against_mock_classifies_waf_present ... ok
+test mock_modsec_multipart_b64_filename_bypasses ... ok
+test mock_modsec_brotli_wrapped_sqli_body_bypasses ... ok
+test mock_modsec_compound_bom_plus_brotli_bypasses ... ok
+test mock_modsec_deflate_wrapped_sqli_form_body_bypasses ... ok
+test mock_modsec_brotli_wrapped_log4shell_bypasses ... ok
+test mock_modsec_deflate_wrapped_sqli_json_body_bypasses ... ok
+test mock_modsec_gzip_wrapped_sqli_body_is_still_blocked ... ok
+test parser_diff_against_admin_path_completes_no_panic ... ok
+test harvest_writes_verified_report_for_corpus_bypass ... ok
+test harvest_faithful_delivery_re_fires_the_recorded_shape ... ok
+test callback_substitution_round_trip_against_mock_listener ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+M=0

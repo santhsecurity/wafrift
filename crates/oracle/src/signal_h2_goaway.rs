@@ -57,4 +57,85 @@ mod tests {
     fn benign_goaway_ignored() {
         assert!(classify_h2_goaway("NO_ERROR").is_none());
     }
+
+    // -- §12 boundary and edge-case tests -----------------------------------
+
+    #[test]
+    fn empty_reason_returns_none() {
+        // Empty string cannot contain any known WAF phrase.
+        assert!(classify_h2_goaway("").is_none());
+    }
+
+    #[test]
+    fn case_insensitive_detection_lower() {
+        // "enhance_your_calm" should match even in all lowercase.
+        let s = classify_h2_goaway("enhance_your_calm");
+        assert!(
+            s.is_some(),
+            "lowercase ENHANCE_YOUR_CALM must be detected as WAF GOAWAY"
+        );
+    }
+
+    #[test]
+    fn case_insensitive_detection_mixed() {
+        let s = classify_h2_goaway("Enhance_Your_Calm");
+        assert!(
+            s.is_some(),
+            "mixed-case ENHANCE_YOUR_CALM must be detected as WAF GOAWAY"
+        );
+    }
+
+    #[test]
+    fn original_reason_string_preserved_in_signal() {
+        // The signal must carry the *original* reason (not lowercased),
+        // so the operator sees what the server actually sent.
+        let original = "ENHANCE_YOUR_CALM";
+        let s = classify_h2_goaway(original).expect("must be detected");
+        match s {
+            Signal::H2Goaway(r) => assert_eq!(r, original, "original casing must be preserved"),
+            other => panic!("unexpected signal variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn whitespace_in_reason_benign_passes_through() {
+        // A reason that is pure whitespace is not a WAF signal.
+        assert!(classify_h2_goaway("   ").is_none());
+    }
+
+    #[test]
+    fn goaway_rules_file_is_nonempty() {
+        // Smoke test: the bundled TOML must parse and have at least one
+        // entry so the detector is not silently disabled.
+        let reasons = super::waf_goaway_reasons();
+        assert!(
+            !reasons.is_empty(),
+            "rules/h2/goaway.toml has no entries -- GOAWAY detection is disabled"
+        );
+    }
+
+    #[test]
+    fn very_long_reason_string_does_not_panic() {
+        // §15 OOM guard: the classifier must not stack-overflow or panic
+        // on a megabyte-scale reason string from a hostile server.
+        let huge = "X".repeat(1_000_000);
+        // Must complete without panic (no signal expected for junk input).
+        let result = classify_h2_goaway(&huge);
+        let _ = result;
+    }
+
+    #[test]
+    fn reason_with_embedded_waf_phrase_is_detected() {
+        // WAF phrases may appear embedded in a longer reason string.
+        let reason = "Server-side ENHANCE_YOUR_CALM enforcement active";
+        let s = classify_h2_goaway(reason);
+        assert!(
+            s.is_some(),
+            "ENHANCE_YOUR_CALM embedded in a longer reason must still be detected"
+        );
+        // Original full reason must be preserved, not just the matched phrase.
+        if let Some(Signal::H2Goaway(r)) = s {
+            assert_eq!(r, reason, "full reason must be preserved in signal");
+        }
+    }
 }

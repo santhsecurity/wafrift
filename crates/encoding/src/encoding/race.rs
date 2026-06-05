@@ -152,7 +152,7 @@ pub fn h2_prestaged_frames(
     hpack_encoded_headers: &[u8],
     body_without_last_byte: &[u8],
 ) -> Option<Vec<u8>> {
-    if stream_id == 0 || stream_id % 2 == 0 {
+    if stream_id == 0 || stream_id.is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::new();
@@ -260,25 +260,25 @@ mod tests {
 
     #[test]
     fn h2_last_byte_sync_rejects_mismatched_lengths() {
-        let r = h2_last_byte_sync_frames(&[1, 3], &[b'a']);
+        let r = h2_last_byte_sync_frames(&[1, 3], b"a");
         assert!(r.is_none());
     }
 
     #[test]
     fn h2_last_byte_sync_rejects_zero_stream() {
-        let r = h2_last_byte_sync_frames(&[0], &[b'a']);
+        let r = h2_last_byte_sync_frames(&[0], b"a");
         assert!(r.is_none());
     }
 
     #[test]
     fn h2_last_byte_sync_rejects_even_stream() {
-        let r = h2_last_byte_sync_frames(&[2], &[b'a']);
+        let r = h2_last_byte_sync_frames(&[2], b"a");
         assert!(r.is_none());
     }
 
     #[test]
     fn h2_last_byte_sync_basic_frame_shape() {
-        let bytes = h2_last_byte_sync_frames(&[1], &[b'X']).expect("ok");
+        let bytes = h2_last_byte_sync_frames(&[1], b"X").expect("ok");
         // 9-byte header + 1-byte payload = 10 bytes.
         assert_eq!(bytes.len(), 10);
         // Length = 1.
@@ -315,7 +315,7 @@ mod tests {
     fn h2_last_byte_sync_clears_reserved_bit() {
         // Stream id with the high bit set should have it cleared by
         // the encoder.
-        let bytes = h2_last_byte_sync_frames(&[0x80_00_00_01], &[b'x']).expect("ok");
+        let bytes = h2_last_byte_sync_frames(&[0x80_00_00_01], b"x").expect("ok");
         let id = u32::from_be_bytes([bytes[5], bytes[6], bytes[7], bytes[8]]);
         assert_eq!(id & 0x8000_0000, 0, "high bit must be cleared");
         assert_eq!(id, 1, "low bits preserved");
@@ -379,8 +379,8 @@ mod tests {
 
     #[test]
     fn h2_last_byte_sync_deterministic() {
-        let a = h2_last_byte_sync_frames(&[1, 3], &[b'a', b'b']).expect("ok");
-        let b = h2_last_byte_sync_frames(&[1, 3], &[b'a', b'b']).expect("ok");
+        let a = h2_last_byte_sync_frames(&[1, 3], b"ab").expect("ok");
+        let b = h2_last_byte_sync_frames(&[1, 3], b"ab").expect("ok");
         assert_eq!(a, b);
     }
 

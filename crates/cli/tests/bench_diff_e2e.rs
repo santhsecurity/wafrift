@@ -13,20 +13,8 @@
 //! 7. `--bypass-drop-pp` custom threshold is honoured.
 //! 8. raw-block-rate below floor exits 0 (stack-mismatch, not regression).
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 /// Write a bench-waf–shaped JSON fixture to a temp file and return the path.
 fn write_fixture(suffix: &str, bypass_rate: f64, raw_block_rate: f64) -> String {
@@ -49,21 +37,37 @@ fn write_fixture(suffix: &str, bypass_rate: f64, raw_block_rate: f64) -> String 
 fn bench_diff_help_documents_required_flags() {
     let (code, stdout, _) = wafrift(&["bench-diff", "--help"]);
     assert_eq!(code, 0, "bench-diff --help must exit 0");
-    assert!(stdout.contains("--current"), "must document --current: {stdout}");
-    assert!(stdout.contains("--baseline"), "must document --baseline: {stdout}");
+    assert!(
+        stdout.contains("--current"),
+        "must document --current: {stdout}"
+    );
+    assert!(
+        stdout.contains("--baseline"),
+        "must document --baseline: {stdout}"
+    );
     assert!(
         stdout.contains("--bypass-drop-pp"),
         "must document --bypass-drop-pp: {stdout}"
     );
 }
 
+// Surface reduction: bench-diff is dev/QA tooling hidden from the user-facing menu (LAW 2 —
+// the command still runs, just not advertised at the top level).
 #[test]
-fn bench_diff_appears_in_main_help() {
+fn bench_diff_hidden_from_menu_but_still_runs() {
+    // Must NOT appear in the top-level command listing (hidden dev tool).
     let (code, stdout, _) = wafrift(&["--help"]);
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("bench-diff"),
-        "bench-diff must appear in top-level help: {stdout}"
+        !stdout.contains("\n  bench-diff"),
+        "bench-diff must be hidden from top-level help (dev/QA tooling): {stdout}"
+    );
+
+    // Must still be invokable — LAW 2 backwards compat.
+    let (sub_code, sub_stdout, _) = wafrift(&["bench-diff", "--help"]);
+    assert_eq!(
+        sub_code, 0,
+        "bench-diff --help must exit 0 (still runnable): {sub_stdout}"
     );
 }
 
@@ -73,13 +77,7 @@ fn bench_diff_appears_in_main_help() {
 fn bench_diff_exits_0_when_no_regression() {
     let base = write_fixture("no_regress_base", 0.50, 1.0);
     let cur = write_fixture("no_regress_cur", 0.50, 1.0);
-    let (code, stdout, stderr) = wafrift(&[
-        "bench-diff",
-        "--baseline",
-        &base,
-        "--current",
-        &cur,
-    ]);
+    let (code, stdout, stderr) = wafrift(&["bench-diff", "--baseline", &base, "--current", &cur]);
     assert_eq!(code, 0, "no-regression diff must exit 0; stderr: {stderr}");
     assert!(
         stdout.contains("OK") || stdout.contains("bypass"),
@@ -92,17 +90,8 @@ fn bench_diff_exits_3_on_regression() {
     // baseline 50%, current 40% → 10pp drop → regression (> 2pp threshold).
     let base = write_fixture("regress_base", 0.50, 1.0);
     let cur = write_fixture("regress_cur", 0.40, 1.0);
-    let (code, _stdout, stderr) = wafrift(&[
-        "bench-diff",
-        "--baseline",
-        &base,
-        "--current",
-        &cur,
-    ]);
-    assert_eq!(
-        code, 3,
-        "10pp regression must exit 3; stderr: {stderr}"
-    );
+    let (code, _stdout, stderr) = wafrift(&["bench-diff", "--baseline", &base, "--current", &cur]);
+    assert_eq!(code, 3, "10pp regression must exit 3; stderr: {stderr}");
     assert!(
         stderr.to_uppercase().contains("REGRESSION"),
         "regression must be reported in stderr: {stderr}"
@@ -116,13 +105,7 @@ fn bench_diff_custom_threshold_gates_regression() {
     let base = write_fixture("thresh_base", 0.50, 1.0);
     let cur = write_fixture("thresh_cur", 0.47, 1.0);
 
-    let (code_default, _, _) = wafrift(&[
-        "bench-diff",
-        "--baseline",
-        &base,
-        "--current",
-        &cur,
-    ]);
+    let (code_default, _, _) = wafrift(&["bench-diff", "--baseline", &base, "--current", &cur]);
     assert_eq!(
         code_default, 3,
         "3pp drop must be a regression at default 2pp threshold"
@@ -149,13 +132,7 @@ fn bench_diff_raw_block_floor_does_not_cause_exit_3() {
     // bypass rate unchanged → must still exit 0.
     let base = write_fixture("floor_base", 0.50, 1.0);
     let cur = write_fixture("floor_cur", 0.50, 0.80); // raw-block dropped
-    let (code, _stdout, _stderr) = wafrift(&[
-        "bench-diff",
-        "--baseline",
-        &base,
-        "--current",
-        &cur,
-    ]);
+    let (code, _stdout, _stderr) = wafrift(&["bench-diff", "--baseline", &base, "--current", &cur]);
     assert_eq!(
         code, 0,
         "stack-mismatch (raw-block below floor) must exit 0, not 3"
@@ -177,7 +154,10 @@ fn bench_diff_missing_baseline_exits_1() {
         "--current",
         &cur,
     ]);
-    assert_eq!(code, 1, "missing baseline file must exit 1; stderr: {stderr}");
+    assert_eq!(
+        code, 1,
+        "missing baseline file must exit 1; stderr: {stderr}"
+    );
     assert!(!stderr.is_empty(), "missing file must emit error message");
 }
 

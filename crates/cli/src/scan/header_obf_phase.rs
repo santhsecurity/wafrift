@@ -30,7 +30,7 @@ use wafrift_oracle::response_oracle::{ResponseContext, ResponseOracle};
 /// canonical header name being mutated; the `value` is what the
 /// header carries on the wire.
 #[derive(Debug, Clone, Copy)]
-pub struct HeaderTechnique {
+pub(crate) struct HeaderTechnique {
     pub name: &'static str,
     pub target_header: &'static str,
 }
@@ -39,7 +39,7 @@ pub struct HeaderTechnique {
 /// `obfuscate`. The catalogue stays narrow on purpose — every
 /// technique here corresponds to a documented WAF parser bug
 /// that's worth re-emitting against fresh targets.
-pub const TECHNIQUES: &[HeaderTechnique] = &[
+pub(crate) const TECHNIQUES: &[HeaderTechnique] = &[
     HeaderTechnique {
         name: "case_mixing",
         target_header: "Content-Type",
@@ -72,7 +72,7 @@ const HEADER_VALUE: &str = "application/x-www-form-urlencoded";
 /// header-name string the request should carry. Pure function —
 /// no I/O.
 #[must_use]
-pub fn obfuscate(technique: &HeaderTechnique) -> String {
+pub(crate) fn obfuscate(technique: &HeaderTechnique) -> String {
     match technique.name {
         "case_mixing" => header_obfuscation::case_mix(technique.target_header),
         "underscore_sub" => header_obfuscation::underscore_substitute(technique.target_header),
@@ -89,7 +89,7 @@ pub fn obfuscate(technique: &HeaderTechnique) -> String {
 }
 
 /// The phase's I/O surface.
-pub struct PhaseInput<'a> {
+pub(crate) struct PhaseInput<'a> {
     pub http: &'a Client,
     pub target: &'a str,
     pub param: &'a str,
@@ -103,10 +103,14 @@ pub struct PhaseInput<'a> {
     pub delay: Duration,
     /// Starting fire counter for monotone telemetry IDs.
     pub variant_id_base: usize,
+    /// Global fires already counted by the orchestrator before this phase.
+    pub fires_so_far: usize,
+    /// Global fire-budget cap (--max-fires). 0 = unlimited.
+    pub max_fires: usize,
 }
 
 #[derive(Debug, Default)]
-pub struct PhaseOutcome {
+pub(crate) struct PhaseOutcome {
     pub total_fired_delta: usize,
     pub bypassed_delta: u32,
     pub blocked_delta: u32,
@@ -141,7 +145,7 @@ fn scan_url(target: &str, param: &str, value_encoded: &str) -> String {
     }
 }
 
-pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
+pub(crate) async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
     let mut outcome = PhaseOutcome::default();
 
     let combined: Vec<(&String, bool)> = input
@@ -152,7 +156,7 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
         .collect();
 
     if input.scan_text {
-        println!(
+        eprintln!(
             "\n{}",
             format!(
                 "[6/7] Header obfuscation — {} payloads ({} bypass + {} rescue) × {} techniques...",
@@ -170,8 +174,19 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
         if input.cancel.is_cancelled() {
             break;
         }
+        // Respect the global --max-fires budget. 0 = unlimited.
+        if input.max_fires != 0 && input.fires_so_far + outcome.total_fired_delta >= input.max_fires
+        {
+            break;
+        }
         for technique in TECHNIQUES {
             if input.cancel.is_cancelled() {
+                break;
+            }
+            // Also gate the inner loop per-fire.
+            if input.max_fires != 0
+                && input.fires_so_far + outcome.total_fired_delta >= input.max_fires
+            {
                 break;
             }
             let obfuscated_header = obfuscate(technique);
@@ -243,7 +258,7 @@ pub async fn run_phase(input: PhaseInput<'_>) -> PhaseOutcome {
 
     if input.scan_text && outcome.total_fired_delta > 0 {
         let rate = f64::from(outcome.bypassed_delta) / outcome.total_fired_delta as f64 * 100.0;
-        println!(
+        eprintln!(
             "\n  {} {}",
             "Header results:".bold().cyan(),
             format!(
@@ -350,6 +365,8 @@ mod tests {
             scan_text: false,
             delay: Duration::ZERO,
             variant_id_base: 0,
+            fires_so_far: 0,
+            max_fires: 0, // 0 = unlimited
         })
         .await;
         assert_eq!(outcome.total_fired_delta, 0);
@@ -374,6 +391,8 @@ mod tests {
             scan_text: false,
             delay: Duration::ZERO,
             variant_id_base: 0,
+            fires_so_far: 0,
+            max_fires: 0, // 0 = unlimited
         })
         .await;
         assert_eq!(outcome.total_fired_delta, 0);
@@ -644,6 +663,8 @@ mod tests {
             scan_text: false,
             delay: Duration::ZERO,
             variant_id_base: 0,
+            fires_so_far: 0,
+            max_fires: 0, // 0 = unlimited
         })
         .await;
         // The unreachable target produces only errors_delta, but
@@ -670,6 +691,8 @@ mod tests {
             scan_text: false,
             delay: Duration::ZERO,
             variant_id_base: 0,
+            fires_so_far: 0,
+            max_fires: 0, // 0 = unlimited
         })
         .await;
         // 3 payloads × 6 techniques = 18 attempted fires; each

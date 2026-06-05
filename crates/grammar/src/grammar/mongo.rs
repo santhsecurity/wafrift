@@ -58,7 +58,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
         results.push(r#"{"$where": "sleep(100) || true"}"#.into());
     }
 
-    results
+    super::variant_util::finalize(results, payload)
 }
 
 #[cfg(test)]

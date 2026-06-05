@@ -11,16 +11,17 @@
 //!                     (Medium+)                                    (Heavy: add smuggling)
 //! ```
 
+use guise::fingerprint::browser_catalog;
 use wafrift_content_type as content_type;
+use wafrift_encoding::contextual as encoding_contextual;
 use wafrift_encoding::encoding;
 use wafrift_encoding::header;
 use wafrift_evolution::advisor::EvasionPlan;
-use wafrift_fingerprint::fingerprint;
 use wafrift_grammar::grammar;
 use wafrift_grpc_evasion;
 use wafrift_smuggling::h2_evasion;
 use wafrift_smuggling::smuggling;
-use wafrift_types::{EvasionResult, Request, Technique};
+use wafrift_types::{EscalationLevel, EvasionConfig, EvasionResult, Request, Technique};
 
 use crate::mcts_bridge::WafRiftEnv;
 use mctrust::{Environment, SearchConfig, TreeSearch};
@@ -30,8 +31,14 @@ pub use crate::host_state::HostState;
 pub use wafrift_types::calibration::{
     CALIBRATION_PAYLOADS, CalibrationResult, analyze_calibration, calibration_request,
 };
-pub use wafrift_types::config::EvasionConfig;
-pub use wafrift_types::escalation::EscalationLevel;
+// §8 ARCHITECTURE (2026-05-27): EvasionConfig and EscalationLevel are defined
+// in wafrift_types and re-exported from wafrift_core::*. They must NOT be
+// re-exported here — two import paths for the same type (`wafrift_strategy::
+// EvasionConfig` AND `wafrift_types::EvasionConfig`) caused grep-confusion
+// during refactors: half the usages were found under one path, half under the
+// other. Callers that used the strategy re-export have been updated to import
+// from wafrift_types directly. If you are adding a new consumer, always use
+// `wafrift_types::EvasionConfig` / `wafrift_types::EscalationLevel`.
 
 fn parse_named_encoding(name: &str) -> Option<encoding::Strategy> {
     let raw = name.strip_prefix("encoding:").unwrap_or(name);
@@ -58,10 +65,10 @@ fn current_winner<'a>(state: &'a HostState, req: &Request) -> Option<&'a str> {
     if !state.has_winners() {
         return None;
     }
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut h: u64 = wafrift_types::hash::FNV_OFFSET_64;
     for b in req.url.bytes().chain(req.method.as_str().bytes()) {
         h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        h = h.wrapping_mul(wafrift_types::hash::FNV_PRIME_64);
     }
     let idx = (h as usize) % state.proven_winners.len();
     state.proven_winners.get(idx).map(String::as_str)
@@ -159,9 +166,9 @@ pub fn evade(request: &Request, state: &HostState, config: &EvasionConfig) -> Ev
 
     // ── Step 1: Fingerprint rotation (every request) ────────────────
     if config.fingerprint_rotation
-        && let Some(profile) = fingerprint::random_profile()
+        && let Some(profile) = browser_catalog::random_profile()
     {
-        fingerprint::apply_profile(&mut req.headers, profile);
+        browser_catalog::apply_profile(&mut req.headers, profile);
         techniques.push(Technique::UserAgentRotation);
     }
 
@@ -399,47 +406,10 @@ pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig)
         return evade(request, state, config);
     }
     let depth = (state.blocks as usize / 2).clamp(2, 5);
-
-    // H2: MCTS principal-variation memoization.
-    //
-    // Key = FNV-1a hash of (HTTP-method || URL-path). Excludes query
-    // string and body so the same endpoint with different payloads hits
-    // the same cached MCTS action sequence (the sequence is an evasion
-    // structure, not payload-specific).
-    //
-    // The cache lives inside Arc<Mutex<...>> on HostState so clones of
-    // the state (taken by the proxy under the lock) share the same
-    // backing store -- updates propagate back to the live entry without
-    // an extra round-trip.
-    let cache_key = mcts_cache_key(request);
-    {
-        let mut cache = state.mcts_cache.lock();
-        if let Some(cached_pv) = cache.get(&cache_key) {
-            // Cache hit: replay the cached principal variation.
-            if let Some(result) = replay_principal_variation(request, cached_pv, config) {
-                return result;
-            }
-            // Replay failed (e.g., action sequence no longer applicable)
-            // -- evict the stale entry and fall through to a fresh MCTS run.
-            cache.pop(&cache_key);
-        }
-    }
-
-    // Cache miss: run full MCTS search.
     if let Some(mcts_result) = evade_mcts(request, config, depth) {
-        // Store the principal variation so the next identical request
-        // skips the 500-iteration MCTS search.
-        let pv: Vec<String> = mcts_result
-            .techniques
-            .iter()
-            .map(|t| t.to_string())
-            .collect();
-        if !pv.is_empty() {
-            state.mcts_cache.lock().put(cache_key, pv);
-        }
         return mcts_result;
     }
-    // MCTS bailed (e.g., empty action space) -- fall back to classic evade.
+    // MCTS bailed (e.g., empty action space) — fall back to classic evade.
     evade(request, state, config)
 }
 
@@ -450,82 +420,6 @@ pub fn evade_smart(request: &Request, state: &HostState, config: &EvasionConfig)
 /// proxy. Real injection payloads are KB-range — anything larger is a
 /// file upload / JSON blob where header & URL evasion is enough.
 pub const MCTS_BODY_BUDGET: usize = 16 * 1024;
-/// FNV-1a (64-bit) hash of the request method and URL path, used as the
-/// MCTS cache key (H2). Excludes query string and body so the same endpoint
-/// with different payloads maps to the same MCTS action sequence. Inline
-/// implementation -- no extra crate needed.
-fn mcts_cache_key(request: &Request) -> u64 {
-    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = FNV_OFFSET;
-    let method_str = request.method.to_string();
-    for byte in method_str.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash ^= u64::from(b'|');
-    hash = hash.wrapping_mul(FNV_PRIME);
-    // Strip scheme, host, and query string -- keep only the path segment.
-    let path = if let Some(path_start) = request.url.find("://") {
-        let after_scheme = &request.url[path_start + 3..];
-        let path_off = after_scheme.find('/').map_or(after_scheme.len(), |i| i);
-        let query_off = after_scheme.find('?').unwrap_or(after_scheme.len());
-        &after_scheme[path_off..query_off.min(after_scheme.len())]
-    } else {
-        request.url.as_str()
-    };
-    for byte in path.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
-}
-
-/// Replay a cached MCTS principal variation as a static evasion chain.
-///
-/// The PV is stored as technique Display-format strings (e.g.
-/// "encoding:UrlEncode"). Parsed back via `Technique::from_pool_key`;
-/// unknown names are skipped (forward-compat). Returns `None` when the
-/// resulting technique list is empty so the caller falls through to a
-/// fresh MCTS run.
-fn replay_principal_variation(
-    request: &Request,
-    pv: &[String],
-    config: &EvasionConfig,
-) -> Option<EvasionResult> {
-    if pv.is_empty() {
-        return None;
-    }
-    let techniques: Vec<Technique> = pv
-        .iter()
-        .filter_map(|name| Technique::from_pool_key(name))
-        .collect();
-    if techniques.is_empty() {
-        return None;
-    }
-    // Build a minimal EvasionPlan from the technique list. We use evade_adaptive
-    // so the plan-driven pipeline applies the same structural choices without
-    // re-running tree search.
-    let plan = EvasionPlan {
-        use_grammar: techniques.iter().any(|t| matches!(t, Technique::GrammarMutation(_))),
-        use_header_obfuscation: techniques.iter().any(|t| matches!(t, Technique::HeaderObfuscation(_))),
-        use_content_type_switch: config.content_type_switching
-            && techniques.iter().any(|t| matches!(t, Technique::ContentTypeSwitch(_))),
-        use_smuggling: config.smuggling_enabled
-            && techniques.iter().any(|t| matches!(t, Technique::RequestSmuggling(_))),
-        use_h2: config.h2_evasion_enabled
-            && techniques.iter().any(|t| matches!(t, Technique::H2Evasion(_))),
-        // encoding_strategies left empty -- evade_adaptive falls back to
-        // prioritized_techniques in HostState, which we leave default here.
-        // The structural choices (grammar, header, content-type) are the
-        // load-bearing cache hit; encoding is re-selected by the pipeline.
-        encoding_strategies: Vec::new(),
-        rationale: Vec::new(),
-    };
-    let state = HostState::default();
-    Some(evade_adaptive(request, config, &plan, &state))
-}
-
 
 #[must_use]
 pub fn evade_adaptive(
@@ -539,9 +433,9 @@ pub fn evade_adaptive(
 
     // Step 1: Fingerprint rotation (always)
     if config.fingerprint_rotation
-        && let Some(profile) = fingerprint::random_profile()
+        && let Some(profile) = browser_catalog::random_profile()
     {
-        fingerprint::apply_profile(&mut req.headers, profile);
+        browser_catalog::apply_profile(&mut req.headers, profile);
         techniques.push(Technique::UserAgentRotation);
     }
 
@@ -559,10 +453,23 @@ pub fn evade_adaptive(
         let strategy = plan.encoding_strategies[i];
         if let Some(ref body) = req.body
             && is_text_payload(&req)
-            && let Ok(encoded) = encoding::encode(body.as_slice(), strategy)
         {
-            req.body = Some(encoded.into_bytes());
-            techniques.push(Technique::PayloadEncoding(strategy.as_str().to_string()));
+            // LAW 9 wiring (B-3): when the caller has detected the
+            // injection context (e.g., JSON body, XML CDATA, header
+            // value), use the context-aware encoder so the encoded
+            // payload is simultaneously WAF-evading AND legal at the
+            // target site. `plan.context = None` falls back to the
+            // raw encoder — preserves the pre-wiring behaviour for
+            // callers that don't pass a context (LAW 2).
+            let encoded_opt = if let Some(ctx) = plan.context {
+                encoding_contextual::encode_in_context(body.as_slice(), strategy, ctx).ok()
+            } else {
+                encoding::encode(body.as_slice(), strategy).ok()
+            };
+            if let Some(encoded) = encoded_opt {
+                req.body = Some(encoded.into_bytes());
+                techniques.push(Technique::PayloadEncoding(strategy.as_str().to_string()));
+            }
         }
     }
 
@@ -621,8 +528,8 @@ pub type WafResponse<'a> = (u16, &'a [(String, String)], &'a [u8]);
 /// # Example
 ///
 /// ```rust,no_run
-/// use wafrift_strategy::{strategy, EvasionConfig, HostState};
-/// use wafrift_types::Request;
+/// use wafrift_strategy::{strategy, HostState};
+/// use wafrift_types::{EvasionConfig, Request};
 ///
 /// let req = Request::post("https://target.com/api", b"q=admin' OR 1=1--".to_vec());
 /// let config = EvasionConfig::default();
@@ -866,7 +773,16 @@ fn apply_grammar_mutations(
     }
 
     if mutated {
-        let detect_body = pairs.iter().map(|(_, v)| *v).collect::<Vec<_>>().join(" ");
+        // §1 SPEED: join the values without collecting into a temporary Vec
+        // first — `intersperse` folds the separator inline so no heap Vec
+        // is materialised for detect-body construction.
+        let mut detect_body = String::new();
+        for (idx, (_, v)) in pairs.iter().enumerate() {
+            if idx > 0 {
+                detect_body.push(' ');
+            }
+            detect_body.push_str(v);
+        }
         let mutation_type = format!("{:?}", grammar::classify(&detect_body));
         req.body = Some(new_body.into_bytes());
         techniques.push(Technique::GrammarMutation(mutation_type));
@@ -953,8 +869,12 @@ fn apply_header_obfuscation(
     {
         let (_, value) = &req.headers[ua_idx];
         // Insert obs-fold: newline + space/continuation
-        // This can break simple header parsing while still being valid HTTP/1.1
-        if value.len() > 20 && !value.contains('\n') {
+        // This can break simple header parsing while still being valid HTTP/1.1.
+        // Guard on BOTH `\r` and `\n`: obs-fold framing is CRLF-based, so a UA
+        // value that already contains either is line-structured and must not be
+        // re-folded (a bare CR slipping past a `\n`-only guard would stack onto
+        // the inserted CRLF and could confuse a lenient parser's framing).
+        if value.len() > 20 && !value.contains(['\r', '\n']) {
             // `value.len() / 2` is an arbitrary byte offset; a custom
             // User-Agent with any multibyte character (operators set
             // these via `import-curl -A`, `--stealth-browser`, or a
@@ -1176,19 +1096,19 @@ pub fn is_graphql_request(req: &Request) -> bool {
         .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
         .map(|(_, v)| v.as_str());
 
-    if let Some(ct) = content_type {
-        if ct.to_ascii_lowercase().contains("application/graphql") {
-            return true;
-        }
+    if let Some(ct) = content_type
+        && ct.to_ascii_lowercase().contains("application/graphql")
+    {
+        return true;
     }
 
     // Heuristic 2: JSON-envelope form  {"query":"..."}
-    if let Some(body) = &req.body {
-        if let Ok(s) = std::str::from_utf8(body) {
-            let trimmed = s.trim_start();
-            if trimmed.starts_with('{') && s.contains(r#""query":"#) {
-                return true;
-            }
+    if let Some(body) = &req.body
+        && let Ok(s) = std::str::from_utf8(body)
+    {
+        let trimmed = s.trim_start();
+        if trimmed.starts_with('{') && s.contains(r#""query":"#) {
+            return true;
         }
     }
 
@@ -1223,7 +1143,11 @@ pub(crate) fn is_text_payload(req: &Request) -> bool {
     else {
         // Without Content-Type, only treat as text if the body is valid UTF-8 (avoid
         // `encode()` on arbitrary binary when callers omit the header).
-        let body = req.body.as_ref().expect("body exists");
+        // SAFETY: req.body.is_some() is checked at the top of this function;
+        // this branch is only reachable when the body is Some.
+        let Some(body) = req.body.as_ref() else {
+            return false;
+        };
         return std::str::from_utf8(body).is_ok();
     };
     let c = ctype.to_ascii_lowercase();

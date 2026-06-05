@@ -7,6 +7,7 @@ use serde::Deserialize;
 use wafrift_detect::response_fingerprint::FingerprintDrift;
 use wafrift_detect::waf_detect::DetectedWaf;
 use wafrift_encoding::encoding;
+use wafrift_types::injection_context::InjectionContext;
 
 /// A recommended evasion plan based on WAF detection.
 #[derive(Debug, Clone, Default)]
@@ -23,6 +24,15 @@ pub struct EvasionPlan {
     pub use_smuggling: bool,
     /// Whether H2 evasion should be attempted.
     pub use_h2: bool,
+    /// Injection-context hint for contextual encoding (LAW 9 wiring).
+    /// When `Some(ctx)`, `strategy::evade_adaptive` uses
+    /// `wafrift_encoding::contextual::encode_in_context` instead of
+    /// the plain encoder — the encoder then escapes/normalises for
+    /// the target context (JSON string, XML CDATA, header value, ...).
+    /// `None` (Default) preserves the pre-wiring behaviour: plain
+    /// `encoding::encode` with no context-aware escape. Backwards
+    /// compat — callers that don't set this see no change.
+    pub context: Option<InjectionContext>,
     /// Rationale for each recommendation.
     pub rationale: Vec<String>,
 }
@@ -150,6 +160,13 @@ pub fn advise(waf: Option<&DetectedWaf>, drift: Option<&FingerprintDrift>) -> Ev
     let rules = load_default_rules();
 
     if let Some(detected) = waf {
+        // N11 fix (dogfood R29 cohort): default_plan() seeds the
+        // rationale with "no WAF detected, using balanced defaults"
+        // — that string is wrong the moment we know a WAF. Clear
+        // it before appending the WAF-specific rationale so the
+        // operator does not see both "no WAF detected" AND
+        // "cloudflare: prioritizing …" in the same scan.
+        plan.rationale.clear();
         if let Some(rule) = match_waf(&detected.name, &rules) {
             apply_rule(&mut plan, &rule);
         } else {
@@ -197,7 +214,27 @@ fn default_plan() -> EvasionPlan {
         use_content_type_switch: true,
         use_smuggling: false,
         use_h2: false,
+        context: None,
         rationale: vec!["no WAF detected, using balanced defaults".into()],
+    }
+}
+
+/// Public helper for callers (e.g. scan, hunt) that have already
+/// detected the request's injection context from the Content-Type
+/// header — set it on the plan so contextual encoding fires in
+/// `evade_adaptive`. Matches LAW 9: every detected context flows
+/// into the executor; no half-wired feature.
+pub fn context_from_content_type(content_type: Option<&str>) -> Option<InjectionContext> {
+    let ct = content_type?.split(';').next()?.trim().to_ascii_lowercase();
+    match ct.as_str() {
+        "application/json" | "application/json-patch+json" | "application/vnd.api+json" => {
+            Some(InjectionContext::JsonString)
+        }
+        "application/xml" | "text/xml" | "application/soap+xml" => Some(InjectionContext::XmlText),
+        "text/html" | "application/xhtml+xml" => Some(InjectionContext::HtmlText),
+        "application/x-www-form-urlencoded" => Some(InjectionContext::UrlQuery),
+        "multipart/form-data" => Some(InjectionContext::MultipartField),
+        _ => None,
     }
 }
 
@@ -242,6 +279,100 @@ mod tests {
         assert!(plan.use_header_obfuscation);
         assert!(!plan.use_smuggling);
         assert!(!plan.encoding_strategies.is_empty());
+    }
+
+    /// LAW 2 backwards-compat pin: a default-constructed EvasionPlan
+    /// has `context: None` so callers that don't opt into contextual
+    /// encoding see no behavioural change after the B-3 wiring landed.
+    #[test]
+    fn default_plan_has_no_context() {
+        let plan = advise(None, None);
+        assert_eq!(plan.context, None);
+        let plan2 = EvasionPlan::default();
+        assert_eq!(plan2.context, None);
+    }
+
+    /// Producer wiring: content-type → injection-context mapping
+    /// covers the common cases (JSON, XML, HTML, form, multipart).
+    /// Everything else returns None so the caller falls back to the
+    /// plain (non-contextual) encoder.
+    #[test]
+    fn context_from_content_type_maps_common_types() {
+        assert_eq!(
+            context_from_content_type(Some("application/json")),
+            Some(InjectionContext::JsonString)
+        );
+        assert_eq!(
+            context_from_content_type(Some("application/xml")),
+            Some(InjectionContext::XmlText)
+        );
+        assert_eq!(
+            context_from_content_type(Some("text/html")),
+            Some(InjectionContext::HtmlText)
+        );
+        assert_eq!(
+            context_from_content_type(Some("application/x-www-form-urlencoded")),
+            Some(InjectionContext::UrlQuery)
+        );
+        assert_eq!(
+            context_from_content_type(Some("multipart/form-data")),
+            Some(InjectionContext::MultipartField)
+        );
+    }
+
+    /// Content-Type parameters (charset, boundary) must be stripped
+    /// before matching. Pre-fix, `application/json; charset=utf-8`
+    /// would have fallen through to None.
+    #[test]
+    fn context_from_content_type_strips_params() {
+        assert_eq!(
+            context_from_content_type(Some("application/json; charset=utf-8")),
+            Some(InjectionContext::JsonString)
+        );
+        assert_eq!(
+            context_from_content_type(Some("multipart/form-data; boundary=----abc")),
+            Some(InjectionContext::MultipartField)
+        );
+    }
+
+    /// Case-insensitive: HTTP header values are case-insensitive per
+    /// RFC 9110 §8.3 — `Application/JSON` must match the same as
+    /// `application/json`. LAW 12 boundary test.
+    #[test]
+    fn context_from_content_type_is_case_insensitive() {
+        assert_eq!(
+            context_from_content_type(Some("Application/JSON")),
+            Some(InjectionContext::JsonString)
+        );
+        assert_eq!(
+            context_from_content_type(Some("TEXT/HTML")),
+            Some(InjectionContext::HtmlText)
+        );
+    }
+
+    /// Anti-rig: an unknown content-type returns None — the caller
+    /// then uses the plain encoder, NOT a default-guessed context.
+    /// (LAW 1: never guess what we don't know.)
+    #[test]
+    fn context_from_content_type_unknown_is_none() {
+        assert_eq!(context_from_content_type(Some("application/octet-stream")), None);
+        assert_eq!(context_from_content_type(Some("text/plain")), None);
+        assert_eq!(context_from_content_type(Some("")), None);
+        assert_eq!(context_from_content_type(None), None);
+    }
+
+    /// Vendor JSON variants (jsonapi, json-patch) all map to
+    /// JsonString — they're all JSON-shaped on the wire.
+    #[test]
+    fn context_from_content_type_vendor_json_variants() {
+        assert_eq!(
+            context_from_content_type(Some("application/vnd.api+json")),
+            Some(InjectionContext::JsonString)
+        );
+        assert_eq!(
+            context_from_content_type(Some("application/json-patch+json")),
+            Some(InjectionContext::JsonString)
+        );
     }
 
     #[test]

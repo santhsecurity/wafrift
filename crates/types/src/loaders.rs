@@ -20,8 +20,42 @@
 //! intentionally lives at the call site because each crate's parsed
 //! type and per-entry post-processing differ.
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+
+/// Per-file cap for the `read_toml_files_*` discovery loops. Rule
+/// TOMLs in the wild are KiBs; 16 MiB catches `/dev/zero`-symlink
+/// pollution of a rule directory without rejecting any legitimate
+/// rule file we have ever shipped.
+const TOML_LOADER_FILE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Read a file as UTF-8 text with a cap enforced DURING the read,
+/// not via `metadata()` (which a symlink to `/dev/zero` would report
+/// as `len = 0`). Used by both the strict and lossy `.toml` walkers
+/// so a single attacker-placed file in a rule directory cannot OOM
+/// the loader.
+fn read_capped_toml(path: &Path) -> io::Result<String> {
+    let f = std::fs::File::open(path)?;
+    let mut limited = f.take(TOML_LOADER_FILE_MAX_BYTES as u64 + 1);
+    let mut buf = Vec::with_capacity(8 * 1024);
+    limited.read_to_end(&mut buf)?;
+    if buf.len() > TOML_LOADER_FILE_MAX_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{}: TOML file exceeds {}-byte cap",
+                path.display(),
+                TOML_LOADER_FILE_MAX_BYTES,
+            ),
+        ));
+    }
+    String::from_utf8(buf).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}: not valid UTF-8: {e}", path.display()),
+        )
+    })
+}
 
 /// Atomically write `bytes` to `path` using the tmp-file + fsync +
 /// rename + parent-fsync dance. Crash-safe: a torn write leaves
@@ -37,6 +71,17 @@ use std::path::{Path, PathBuf};
 /// `cli::seed`) with subtly different tmp-suffix policies and
 /// parent-fsync behaviour.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    // R55 pass-19 I4 follow-up: create the parent directory first so
+    // callers don't have to. Pre-extract, the three evolution
+    // save_atomic clones all did this; dropping the step from the
+    // canonical writer would silently break the
+    // `save_creates_parent_directory` contract every clone honored.
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
     let pid = std::process::id();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -89,7 +134,7 @@ pub fn read_toml_files_strict(dir: &Path) -> io::Result<Vec<(PathBuf, String)>> 
 
     let mut out = Vec::with_capacity(entries.len());
     for path in entries {
-        let contents = std::fs::read_to_string(&path)?;
+        let contents = read_capped_toml(&path)?;
         out.push((path, contents));
     }
     Ok(out)
@@ -118,7 +163,7 @@ pub fn read_toml_files_lossy(dir: &Path) -> Vec<(PathBuf, String)> {
 
     entries
         .into_iter()
-        .filter_map(|path| std::fs::read_to_string(&path).ok().map(|c| (path, c)))
+        .filter_map(|path| read_capped_toml(&path).ok().map(|c| (path, c)))
         .collect()
 }
 
@@ -266,11 +311,33 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), Vec::<u8>::new());
     }
 
+    /// LAW 12: per R55 pass-19 I4, `write_atomic` auto-creates the
+    /// parent directory so callers don't have to. The previous test
+    /// asserted the OPPOSITE (must fail when parent missing) and was
+    /// stale relative to the hardened behaviour — silently passing on
+    /// the unwrap chain. Locked in: parent auto-create succeeds, file
+    /// is written, parent now exists.
     #[test]
-    fn write_atomic_fails_when_parent_missing() {
-        let nope = std::env::temp_dir().join("wafrift-atomic-missing-parent/foo.json");
-        let _ = std::fs::remove_dir_all(nope.parent().unwrap());
-        assert!(write_atomic(&nope, b"x").is_err());
+    fn write_atomic_creates_missing_parent_directory() {
+        let nope = std::env::temp_dir()
+            .join(format!(
+                "wafrift-atomic-missing-parent-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_nanos())
+            ))
+            .join("foo.json");
+        let parent = nope.parent().unwrap();
+        // Pre-condition: parent must NOT exist for this test to mean
+        // anything; the temp-dir suffix guarantees uniqueness across
+        // parallel cargo test workers.
+        assert!(!parent.exists(), "test precondition: parent must not exist");
+        write_atomic(&nope, b"x").expect("write_atomic must auto-create parent");
+        assert!(parent.exists(), "parent dir must be created");
+        assert_eq!(std::fs::read(&nope).unwrap(), b"x");
+        // Cleanup so we don't leave temp dirs behind.
+        let _ = std::fs::remove_dir_all(parent);
     }
 
     #[test]

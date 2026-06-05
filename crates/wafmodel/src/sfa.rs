@@ -110,7 +110,7 @@ impl BytePred {
     /// Lossless 64-hex-char encoding (4 little-endian `u64` words) for
     /// the Tier-B model artifact.
     #[must_use]
-    pub fn to_hex(&self) -> String {
+    pub fn to_hex(self) -> String {
         let mut s = String::with_capacity(64);
         for w in self.0 {
             s.push_str(&format!("{w:016x}"));

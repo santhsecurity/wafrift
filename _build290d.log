@@ -1,0 +1,58 @@
+===GRAMMAR===
+test grammar::equiv::log4shell::tests::deterministic_diverse_and_all_sound ... ok
+test grammar::xss::tests::systematic_every_variant_is_oracle_sound ... ok
+test grammar::equiv::ssrf::tests::every_member_verifies_and_classes_appear ... ok
+test grammar::equiv::nosql::tests::deterministic_diverse_and_all_sound ... ok
+test grammar::equiv::ldap::tests::generator_emits_the_new_sound_classes_and_all_verify ... ok
+test grammar::xss::tests::high_volume_does_not_panic ... ok
+test grammar::tests::high_volume_does_not_panic ... ok
+test grammar::unicode_norm::tests::mutate_size_gate_exact_boundary ... ok
+test grammar::equiv::xxe::tests::deterministic_diverse_and_all_sound ... ok
+
+test result: ok. 593 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+G=0
+===CLI-BINS===
+test model_evade_cmd::tests::lstar_budgeted_learns_simple_boundary ... ok
+test session_init::tests::establish_strips_setcookie_attributes_keeps_only_name_value ... ok
+test session_init::tests::establish_captures_set_cookie_from_response ... ok
+test listener_cmd::tests::end_to_end_callback_with_token_in_header_value_is_matched ... ok
+test listener_cmd::tests::end_to_end_callback_with_unknown_token_records_unmatched ... ok
+test listener_cmd::tests::end_to_end_body_exactly_at_cap_is_not_marked_truncated ... ok
+test listener_cmd::tests::end_to_end_body_above_cap_is_truncated_with_counter ... ok
+test listener_cmd::tests::end_to_end_malformed_request_does_not_crash_the_listener ... ok
+test listener_cmd::tests::end_to_end_callback_with_token_in_body_is_matched ... ok
+test listener_cmd::tests::end_to_end_lowercase_method_is_normalised_to_upper ... ok
+test listener_cmd::tests::end_to_end_huge_content_length_does_not_pre_allocate ... ok
+test listener_cmd::tests::end_to_end_negative_content_length_does_not_crash ... ok
+test listener_cmd::tests::end_to_end_one_byte_above_cap_truncates_one_byte ... ok
+test listener_cmd::tests::management_check_does_not_record_itself_as_a_callback ... ok
+test session_init::tests::establish_summary_names_status_and_cookie_count ... ok
+test smuggle_cmd::tests::time_first_byte_returns_timeout_value_when_server_silent ... ok
+test session_init::tests::establish_from_file_full_e2e_with_real_disk_curl_file ... ok
+test session_init::tests::establish_from_file_missing_file_returns_read_file_error ... ok
+test smuggle_cmd::tests::time_first_byte_returns_quickly_when_server_responds ... ok
+
+test result: ok. 1668 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.35s
+
+C=0
+===MOCK-E2E===
+test mock_modsec_deeply_nested_json_is_blocked_by_naive_walker ... ok
+test mock_modsec_sqli_payload_returns_apache_403 ... ok
+test mock_modsec_deflate_wrapped_sqli_form_body_bypasses ... ok
+test mock_modsec_deflate_wrapped_sqli_json_body_bypasses ... ok
+test differential_probe_against_mock_classifies_waf_present ... ok
+test mock_modsec_brotli_wrapped_sqli_body_bypasses ... ok
+test mock_modsec_multipart_qp_sqli_bypasses ... ok
+test mock_modsec_gzip_wrapped_sqli_body_is_still_blocked ... ok
+test mock_modsec_json_as_form_is_blocked_by_lowercase_substring_scan ... ok
+test mock_modsec_multipart_filename_payload_bypasses ... ok
+test mock_modsec_json5_comment_is_blocked_by_naive_walker ... ok
+test mock_modsec_compound_bom_plus_brotli_bypasses ... ok
+test parser_diff_against_admin_path_completes_no_panic ... ok
+test harvest_writes_verified_report_for_corpus_bypass ... ok
+test callback_substitution_round_trip_against_mock_listener ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+M=0

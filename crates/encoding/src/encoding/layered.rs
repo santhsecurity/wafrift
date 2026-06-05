@@ -1,10 +1,13 @@
 //! Multi-strategy encoding chains and aggressiveness scoring.
 
-use super::strategy::{Strategy, all_strategies, encode};
+use super::strategy::{Strategy, all_strategies, encode, MAX_PAYLOAD_SIZE};
 use crate::error::EncodeError;
 
 /// Maximum accumulated output size for layered encoding.
-pub const MAX_LAYERED_OUTPUT_SIZE: usize = 8 * 1024 * 1024;
+///
+/// §7 DEDUP: mirrors [`MAX_PAYLOAD_SIZE`] so both constants track the
+/// same 8 MiB ceiling without the two diverging on future edits.
+pub const MAX_LAYERED_OUTPUT_SIZE: usize = MAX_PAYLOAD_SIZE;
 
 /// Apply multiple encoding strategies in sequence (layered encoding).
 ///

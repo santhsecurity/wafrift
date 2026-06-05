@@ -17,8 +17,8 @@
 use std::collections::BTreeMap;
 
 use pocgen::{
-    error::PocError, GeneratedPoc, GeneratorOptions, PocFormat, PocGenerator, PocMetadata,
-    RequestSeed,
+    GeneratedPoc, GeneratorOptions, PocFormat, PocGenerator, PocMetadata, RequestSeed,
+    error::PocError,
 };
 use wafrift_types::{EvasionResult, Request};
 
@@ -27,7 +27,7 @@ use wafrift_types::{EvasionResult, Request};
 /// byte-for-byte; headers preserve case but collapse on duplicate
 /// keys, matching pocgen's `BTreeMap<String, String>` shape).
 #[must_use]
-pub fn evasion_request_to_seed(req: &Request) -> RequestSeed {
+fn evasion_request_to_seed(req: &Request) -> RequestSeed {
     let mut headers = BTreeMap::new();
     for (k, v) in &req.headers {
         // Last value wins on duplicate keys — same behaviour as
@@ -50,16 +50,12 @@ pub fn evasion_request_to_seed(req: &Request) -> RequestSeed {
 /// run or fingerprint phase) and source identifier (e.g. the
 /// bench-row index or the bypass-rule ID).
 #[must_use]
-pub fn metadata_for_bypass(
+fn metadata_for_bypass(
     result: &EvasionResult,
     target_waf: Option<&str>,
     source_id: Option<&str>,
 ) -> PocMetadata {
-    let techniques: Vec<String> = result
-        .techniques
-        .iter()
-        .map(|t| format!("{t:?}"))
-        .collect();
+    let techniques: Vec<String> = result.techniques.iter().map(|t| format!("{t:?}")).collect();
     let mut meta = PocMetadata::default()
         .with_techniques(techniques)
         .with_confidence(result.confidence)
@@ -81,7 +77,7 @@ pub fn metadata_for_bypass(
 /// metadata + calling
 /// [`pocgen::PocGenerator::generate_with_metadata`] with
 /// [`PocFormat::Curl`].
-pub fn render_curl_for_bypass(
+pub(crate) fn render_curl_for_bypass(
     result: &EvasionResult,
     target_waf: Option<&str>,
     source_id: Option<&str>,
@@ -99,7 +95,7 @@ pub fn render_curl_for_bypass(
 ///
 /// Builds the [`RequestSeed`] and [`PocMetadata`] inline, then renders
 /// the curl reproducer with the bypass annotation comment block.
-pub fn render_raw_curl(
+pub(crate) fn render_raw_curl(
     url: &str,
     method: &str,
     headers: &[(String, String)],
@@ -138,7 +134,7 @@ pub fn render_raw_curl(
 /// General-purpose: render an [`EvasionResult`] as a PoC in any
 /// supported format, returning the full [`GeneratedPoc`] (title +
 /// format tag + content).
-pub fn render_poc_for_bypass(
+pub(crate) fn render_poc_for_bypass(
     result: &EvasionResult,
     format: PocFormat,
     target_waf: Option<&str>,
@@ -196,7 +192,10 @@ mod tests {
     fn metadata_for_bypass_includes_technique_chain() {
         let result = EvasionResult::new(
             fake_request(),
-            vec![Technique::UserAgentRotation, Technique::HeaderObfuscation("case-mix".to_string())],
+            vec![
+                Technique::UserAgentRotation,
+                Technique::HeaderObfuscation("case-mix".to_string()),
+            ],
             "two-step header bypass".to_string(),
         );
         let meta = metadata_for_bypass(&result, Some("Cloudflare"), Some("bench.row.42"));
@@ -304,8 +303,8 @@ mod tests {
             vec![Technique::HeaderObfuscation("case-mix".to_string())],
             "with source id".to_string(),
         );
-        let poc = render_curl_for_bypass(&result, None, Some("wafrift.bench.row.117"))
-            .expect("render");
+        let poc =
+            render_curl_for_bypass(&result, None, Some("wafrift.bench.row.117")).expect("render");
         assert!(poc.contains("# Source: wafrift.bench.row.117"));
     }
 

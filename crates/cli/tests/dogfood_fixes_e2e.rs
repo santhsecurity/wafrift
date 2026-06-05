@@ -7,20 +7,10 @@
 //! correct (the bug was "rejected at parse time", not "couldn't
 //! connect").
 
+mod common;
+use common::wafrift;
 use std::io::Write;
 use std::process::{Command, Stdio};
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    (
-        out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
-}
 
 fn wafrift_stdin(args: &[&str], stdin: &[u8]) -> (i32, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift"))
@@ -311,12 +301,17 @@ fn seed_technique_is_required_and_marked() {
 
 #[test]
 fn seed_with_technique_dry_run_twin() {
+    // Canonical technique ID: `encoding::DoubleUrlEncode` (the old
+    // `EncodingDoubleUrl` flat ID was renamed when the namespaced
+    // encoding:: prefix was adopted — keep this test current with
+    // the live techniques list so `seed --dry-run` never silently
+    // rejects its own test vector).
     let (code, out, err) = wafrift(&[
         "seed",
         "--waf",
         "cloudflare",
         "--technique",
-        "EncodingDoubleUrl",
+        "encoding::DoubleUrlEncode",
         "--dry-run",
     ]);
     assert_eq!(code, 0, "valid seed --dry-run should succeed: {err}");
@@ -370,10 +365,132 @@ fn bench_waf_explicit_missing_corpus_errors_not_silently_substituted() {
         "--corpus",
         "/definitely/not/here/corpus",
     ]);
-    assert_ne!(code, 0, "explicit missing --corpus must not exit 0: {out}");
+    // §13 dogfood round-2 DEFECT 1: pin the EXIT CODE, not just non-zero.
+    // A nonexistent explicit --corpus is an INPUT error (a "malformed value"
+    // per the documented exit-code contract) → exit 2, matching every other
+    // input error (`--payload ""`, unknown flag). Pre-fix it returned 1
+    // (the generic async runtime-error code), inconsistent with its siblings.
+    assert_eq!(
+        code, 2,
+        "explicit missing --corpus must exit 2 (input error): {out} / {e}"
+    );
     assert!(
         e.contains("/definitely/not/here/corpus") && e.to_lowercase().contains("does not exist"),
         "error must name the missing explicit path, not silently substitute: {e}"
+    );
+}
+
+#[test]
+fn scan_with_missing_corpus_exits_2_like_other_input_errors() {
+    // §13 dogfood round-2 DEFECT 1: `scan --corpus` delegates to the bench
+    // engine; a nonexistent explicit path must be exit 2 (input error) — the
+    // SAME code as `scan --payload ""` and an unknown flag — not exit 1.
+    // The 127.0.0.1:1 target is never reached because the corpus path is
+    // validated before any network activity.
+    let (code, _out, e) = wafrift(&[
+        "scan",
+        "http://127.0.0.1:1",
+        "--corpus",
+        "/definitely/not/here/corpus",
+        "--payload",
+        "x",
+    ]);
+    assert_eq!(
+        code, 2,
+        "scan --corpus <missing> must exit 2 (input error): {e}"
+    );
+    assert!(
+        e.to_lowercase().contains("does not exist"),
+        "error must explain the missing corpus path: {e}"
+    );
+}
+
+#[test]
+fn scan_dry_run_estimate_is_scoped_to_explore_phase() {
+    // §13 dogfood round-2 DEFECT 2: the dry-run estimate covers only the
+    // explore-phase variants; the exploit/multi-vector phase fires more.
+    // Pre-fix the banner printed a bare "estimated ~Ns" that under-counted
+    // by ~55× and could lead a rate-budgeting operator into a ban. The
+    // estimate must now be HONESTLY scoped: JSON carries an explicit
+    // `estimate_scope`, text warns it's a lower bound.
+    let (jcode, jout, _je) = wafrift(&[
+        "scan",
+        "http://127.0.0.1:1",
+        "--payload",
+        "x",
+        "--dry-run",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(jcode, 0, "dry-run must exit 0");
+    assert!(
+        jout.contains(r#""estimate_scope":"explore_phase_only""#),
+        "dry-run JSON must scope the estimate to the explore phase: {jout}"
+    );
+    // Backwards-compat: the machine-parseable `variants` + `estimated_seconds`
+    // fields must remain (the documented stable grep contract).
+    assert!(
+        jout.contains(r#""variants":"#) && jout.contains(r#""estimated_seconds":"#),
+        "dry-run JSON must keep the stable variants/estimated_seconds fields: {jout}"
+    );
+
+    let (tcode, tout, _te) =
+        wafrift(&["scan", "http://127.0.0.1:1", "--payload", "x", "--dry-run"]);
+    assert_eq!(tcode, 0, "text dry-run must exit 0");
+    let lower = tout.to_lowercase();
+    assert!(
+        lower.contains("explore phase") && lower.contains("lower bound"),
+        "text dry-run must flag the estimate as an explore-phase lower bound: {tout}"
+    );
+    // The stable "N variants" token must survive for the documented grep.
+    assert!(
+        tout.contains(" variants"),
+        "text dry-run must keep the 'N variants' token: {tout}"
+    );
+}
+
+#[test]
+fn smuggle_fire_accepts_positional_target_url() {
+    // §13 dogfood round-2 DEFECT 4: every other network subcommand takes the
+    // URL positionally; smuggle-fire must too (it previously required --target
+    // and rejected a positional URL with "unexpected argument"). 127.0.0.1:1
+    // refuses fast, so the run proceeds past arg parsing and fails at the
+    // baseline connect — the point is that the positional is ACCEPTED.
+    let (_code, _out, e) = wafrift(&["smuggle-fire", "http://127.0.0.1:1/", "--limit", "1"]);
+    assert!(
+        !e.contains("unexpected argument"),
+        "positional target URL must be accepted, not rejected as unexpected: {e}"
+    );
+}
+
+#[test]
+fn smuggle_fire_no_target_exits_2_with_guidance() {
+    // §13 dogfood round-2 DEFECT 4: with neither a positional URL nor
+    // --target, smuggle-fire must exit 2 (input error) and name both forms.
+    let (code, _out, e) = wafrift(&["smuggle-fire"]);
+    assert_eq!(
+        code, 2,
+        "smuggle-fire with no target must exit 2 (input error): {e}"
+    );
+    assert!(
+        e.to_lowercase().contains("target url") && e.contains("--target"),
+        "error must guide the operator to positional or --target: {e}"
+    );
+}
+
+#[test]
+fn smuggle_fire_explicit_target_flag_still_works() {
+    // Backwards-compat: --target must keep working after the positional add.
+    let (_code, _out, e) = wafrift(&[
+        "smuggle-fire",
+        "--target",
+        "http://127.0.0.1:1/",
+        "--limit",
+        "1",
+    ]);
+    assert!(
+        !e.contains("unexpected argument") && !e.to_lowercase().contains("needs a target"),
+        "--target must remain accepted: {e}"
     );
 }
 
@@ -617,6 +734,48 @@ fn scan_from_discovery_json_emits_single_envelope_not_concatenated_objects() {
     assert_eq!(
         jobs_total, 2,
         "two endpoints in the report → jobs_total=2 (got {jobs_total})"
+    );
+}
+
+#[test]
+fn scan_from_discovery_dry_run_fires_nothing() {
+    // --dry-run is a SAFETY CONTRACT: previewing a discovery scan must NOT fire
+    // against the target. Pre-fix, `--from-discovery X --dry-run` skipped the
+    // dry-run gate and ran the per-endpoint firing loop live (a fuzz-surfaced
+    // finding). Point at a closed loopback port: if the gate regresses and the
+    // loop runs, the per-job "── job k/N ──" banners appear; the gate instead
+    // emits a "dry-run:" preview and returns without firing.
+    let report = serde_json::json!({
+        "endpoints": [
+            {"url": "http://127.0.0.1:1/", "injection_points": [{"name": "q"}]},
+            {"url": "http://127.0.0.1:1/api", "injection_points": [{"name": "id"}]},
+        ]
+    })
+    .to_string();
+    let (code, out, err) = wafrift_stdin(
+        &[
+            "scan",
+            "--from-discovery",
+            "-",
+            "--dry-run",
+            "--payload",
+            "x",
+        ],
+        report.as_bytes(),
+    );
+    assert_eq!(code, 0, "dry-run discovery scan should exit 0: {err}");
+    let combined = format!("{out}{err}");
+    assert!(
+        combined.contains("dry-run:"),
+        "must emit a dry-run preview, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("discovery endpoint(s)") || combined.contains("scan job(s)"),
+        "preview must report the endpoint/job count, got:\n{combined}"
+    );
+    assert!(
+        !combined.contains("── job "),
+        "dry-run must NOT enter the per-job firing loop, got:\n{combined}"
     );
 }
 
@@ -1087,9 +1246,17 @@ fn scan_variants_cap_truncates_to_operator_supplied_limit() {
     ]);
     let _ = shutdown.send(());
 
+    // The mock is permissive — it reflects every variant with a 200 and blocks
+    // nothing — so the honest WAF-bypass verdict is `WafNotInPlay` (there is no
+    // WAF to bypass), which the documented exit-code contract maps to 6 (see
+    // scan::waf_bypass_verdict::exit_code_for_verdict). Exit 0 specifically means
+    // BypassConfirmed and is unreachable here; asserting it would contradict the
+    // verdict contract. The scan still runs to completion and writes the JSON
+    // envelope on a 6, which is what this test actually exercises (the cap path).
     assert_eq!(
-        code, 0,
-        "scan --variants-cap must succeed; stderr:\n{stderr}"
+        code, 6,
+        "scan against a no-WAF mock must report WafNotInPlay (exit 6) per the \
+         verdict contract; stderr:\n{stderr}"
     );
     let body = std::fs::read_to_string(&tmp).expect("scan must write JSON");
     let v: serde_json::Value = serde_json::from_str(&body).expect("scan JSON parseable");
@@ -1334,7 +1501,20 @@ fn dogfood_b9_missing_field_exits_4_in_validate_only() {
 
 #[test]
 fn dogfood_b2_class_filter_respected_in_validate_only() {
-    let (code, stdout, _stderr) = wafrift(&["bench-waf", "--validate-only", "--class", "sql"]);
+    let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("wafrift-bench")
+        .join("corpus");
+    let corpus_str = corpus.to_string_lossy();
+    let (code, stdout, _stderr) = wafrift(&[
+        "bench-waf",
+        "--validate-only",
+        "--class",
+        "sql",
+        "--corpus",
+        &corpus_str,
+    ]);
     assert_eq!(code, 0);
     // SQL corpus has 277 cases; full corpus has 901. The filter must
     // produce the 277-only count.
@@ -1548,7 +1728,14 @@ fn dogfood_n01_help_text_documents_dual_exit_2_meaning() {
 
 #[test]
 fn dogfood_n08_graphql_class_in_validate_only_output() {
-    let (code, stdout, _stderr) = wafrift(&["bench-waf", "--validate-only"]);
+    let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("wafrift-bench")
+        .join("corpus");
+    let corpus_str = corpus.to_string_lossy();
+    let (code, stdout, _stderr) =
+        wafrift(&["bench-waf", "--validate-only", "--corpus", &corpus_str]);
     assert_eq!(code, 0);
     assert!(
         stdout.contains("graphql:"),
@@ -1558,7 +1745,20 @@ fn dogfood_n08_graphql_class_in_validate_only_output() {
 
 #[test]
 fn dogfood_n08_graphql_class_filter_works() {
-    let (code, stdout, _stderr) = wafrift(&["bench-waf", "--validate-only", "--class", "graphql"]);
+    let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("wafrift-bench")
+        .join("corpus");
+    let corpus_str = corpus.to_string_lossy();
+    let (code, stdout, _stderr) = wafrift(&[
+        "bench-waf",
+        "--validate-only",
+        "--class",
+        "graphql",
+        "--corpus",
+        &corpus_str,
+    ]);
     assert_eq!(code, 0);
     // GraphQL corpus has 19 cases.
     assert!(stdout.contains("19") || stdout.contains("graphql:"));
@@ -1652,7 +1852,7 @@ fn dogfood_n06_seed_dry_run_writes_preview_to_stdout() {
         "--waf",
         "cloudflare",
         "--technique",
-        "EncodingDoubleUrl",
+        "encoding::DoubleUrlEncode",
         "--dry-run",
     ]);
     assert_eq!(

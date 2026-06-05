@@ -22,9 +22,11 @@ use wafrift_wafmodel::{
 #[derive(Deserialize)]
 struct Entry {
     id: String,
-    #[allow(dead_code)]
+    /// Attack technique citation — surfaced in assertion messages so failures
+    /// are self-documenting on CI logs.
     source: String,
-    #[allow(dead_code)]
+    /// Attack class label (e.g. "xss", "sqli") — included in assertion
+    /// messages to make failures diagnosable without reading the fixture file.
     class: String,
     token: String,
     payload: String,
@@ -64,22 +66,23 @@ fn every_pinned_bypass_replays_and_its_patch_closes_it() {
 
     for e in &doc.entry {
         let pb = e.payload.as_bytes();
+        // `class` and `source` are included in every assertion message so
+        // failures are self-documenting on CI logs without opening the fixture.
+        let ctx = format!("[{} class={} source={}]", e.id, e.class, e.source);
 
         // (2) anti-vacuous: the vuln rule really fires on the canonical
         // token (the WAF inspects; the gap is in normalization only).
         let mut vuln_canon = waf(&e.vuln_transforms, &e.token);
         assert!(
             !passes(&mut vuln_canon, e.token.as_bytes()),
-            "[{}] vuln rule is vacuous — blocks nothing",
-            e.id
+            "{ctx} vuln rule is vacuous — blocks nothing",
         );
 
         // (1) the payload bypasses the vulnerable config.
         let mut vuln = waf(&e.vuln_transforms, &e.token);
         assert!(
             passes(&mut vuln, pb),
-            "[{}] payload {:?} does NOT bypass the vuln config — stale replay",
-            e.id,
+            "{ctx} payload {:?} does NOT bypass the vuln config — stale replay",
             e.payload
         );
 
@@ -87,15 +90,13 @@ fn every_pinned_bypass_replays_and_its_patch_closes_it() {
         let mut patched = waf(&e.patched_transforms, &e.token);
         assert!(
             !passes(&mut patched, pb),
-            "[{}] documented patch does NOT close the bypass",
-            e.id
+            "{ctx} documented patch does NOT close the bypass",
         );
         // (4) …without a benign false positive.
         let mut patched_fp = waf(&e.patched_transforms, &e.token);
         assert!(
             passes(&mut patched_fp, e.benign_twin.as_bytes()),
-            "[{}] patch false-positives on benign {:?}",
-            e.id,
+            "{ctx} patch false-positives on benign {:?}",
             e.benign_twin
         );
 

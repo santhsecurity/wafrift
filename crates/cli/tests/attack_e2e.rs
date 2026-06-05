@@ -1,12 +1,13 @@
 //! End-to-end test for `wafrift attack`.
 //!
 //! Spawns a mock origin, drives the real binary, verifies the
-//! orchestrator merges all four sub-probe JSON blobs into a unified
+//! orchestrator merges all seven sub-probe JSON blobs into a unified
 //! report with `divergences` totals and per-family sub-objects.
 
-use std::process::Command;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 async fn spawn_mock() -> std::net::SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -43,41 +44,14 @@ async fn spawn_mock() -> std::net::SocketAddr {
         }
     });
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     addr
 }
 
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
-
 #[serial_test::serial]
 #[test]
-fn attack_runs_all_four_subprobes_and_merges_into_unified_report() {
+fn attack_runs_all_seven_subprobes_and_merges_into_unified_report() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .worker_threads(2)
@@ -137,9 +111,11 @@ fn attack_runs_all_four_subprobes_and_merges_into_unified_report() {
 #[serial_test::serial]
 #[test]
 fn attack_marks_subprobe_failures_without_taking_down_the_whole_run() {
-    // Point at unreachable target — every sub-probe should fail
-    // its BASELINE probe and report an error, but the orchestrator
-    // still exits 0 and emits the unified structure.
+    // Point at unreachable target — every sub-probe should fail its
+    // BASELINE probe. Production contract (R44-I3): when >= 4 of the 7
+    // sub-probes error out (i.e. a strict majority), attack exits 1 so
+    // the unreachable host is NOT silently treated as "0 divergences".
+    // The test asserts exit 1 (not 0) for an all-probes-error run.
     let (code, stdout, stderr) = wafrift(&[
         "attack",
         "http://127.0.0.1:1/",
@@ -151,34 +127,43 @@ fn attack_marks_subprobe_failures_without_taking_down_the_whole_run() {
         "--timeout-secs",
         "2",
     ]);
+    // R44-I3: exit 1 when majority of probes errored — not exit 0.
+    // A CI consumer must see a non-zero exit when the target is unreachable.
     assert_eq!(
-        code, 0,
-        "attack should exit 0 even on subprobe errors — stderr:\n{stderr}"
+        code, 1,
+        "attack must exit 1 when majority of sub-probes error — stderr:\n{stderr}"
     );
 
-    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
-    let probes = parsed["probes"].as_object().expect("probes");
-    // Every sub-probe should either have an "error" field OR an
-    // "errors" count > 0 (some probes succeed transport-wise but
-    // every probe within fails).
-    for (family, body) in probes {
-        let has_err = body.get("error").is_some();
-        let has_errors = body
-            .get("errors")
-            .and_then(serde_json::Value::as_u64)
-            .map(|n| n > 0)
-            .unwrap_or(false);
-        // h2 probe uses "h2_errors" (its own naming convention)
-        // rather than the generic "errors" key the other probes emit.
-        let has_h2_errors = body
-            .get("h2_errors")
-            .and_then(serde_json::Value::as_u64)
-            .map(|n| n > 0)
-            .unwrap_or(false);
-        assert!(
-            has_err || has_errors || has_h2_errors,
-            "sub-probe `{family}` should record failure: {body}"
-        );
+    // Even on error, the JSON structure should still be emitted (for
+    // tooling that wants to inspect which probes failed).
+    if !stdout.trim().is_empty()
+        && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(stdout.trim())
+    {
+        // When JSON is present, every sub-probe should have recorded its failure.
+        // Different sub-probes use different field names:
+        //   - most probes: "error" (string) or "errors" (count)
+        //   - h2-diff uses "h2_errors" (count)
+        //   - h2-diff may also have no top-level "error" if it exited 6 (inconclusive)
+        if let Some(probes) = parsed["probes"].as_object() {
+            for (family, body) in probes {
+                let has_err = body.get("error").is_some();
+                let has_errors = body
+                    .get("errors")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|n| n > 0)
+                    .unwrap_or(false);
+                // h2-diff uses "h2_errors" for its error count.
+                let has_h2_errors = body
+                    .get("h2_errors")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|n| n > 0)
+                    .unwrap_or(false);
+                assert!(
+                    has_err || has_errors || has_h2_errors,
+                    "sub-probe `{family}` should record failure: {body}"
+                );
+            }
+        }
     }
 }
 
@@ -218,8 +203,7 @@ fn attack_h2_exit6_is_not_treated_as_subprobe_error() {
         code, 0,
         "attack must exit 0 even when h2-diff exits 6 — stderr:\n{stderr}"
     );
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("JSON parse");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("JSON parse");
     let h2 = &parsed["probes"]["h2"];
     assert!(
         h2.get("error").is_none(),
@@ -244,12 +228,29 @@ fn attack_help_documents_orchestrator_role() {
 }
 
 #[test]
-fn attack_appears_in_main_help_listing() {
+// `attack` consolidated under `wafrift diff all` (2026-05). LAW 2: flat
+// alias must keep working forever.
+fn attack_is_grouped_under_diff_all_with_working_alias() {
+    // 1. The unified `diff` command is discoverable in top-level help.
     let (code, stdout, _) = wafrift(&["--help"]);
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("attack"),
-        "attack must appear in top-level help"
+        stdout.contains("\n  diff"),
+        "`diff` must appear as a top-level command in --help: {stdout}"
+    );
+
+    // 2. Canonical new path exits 0.
+    let (code2, _stdout2, stderr2) = wafrift(&["diff", "all", "--help"]);
+    assert_eq!(
+        code2, 0,
+        "`wafrift diff all --help` must exit 0 — stderr:\n{stderr2}"
+    );
+
+    // 3. Deprecated flat alias still runs (LAW 2 backwards-compat).
+    let (code3, _stdout3, stderr3) = wafrift(&["attack", "--help"]);
+    assert_eq!(
+        code3, 0,
+        "`wafrift attack --help` must still exit 0 — stderr:\n{stderr3}"
     );
 }
 

@@ -188,11 +188,27 @@ impl ZeroRttReplayBuilder {
 
 // ── HTTP/3 frame builders (minimal, no QPACK — uses literal headers) ──────
 
+/// Maximum byte length for a literal string field in a QPACK-encoded
+/// header. The probe generator uses single-byte prefix-int encoding
+/// for string lengths (7-bit integer, no Huffman flag), which can only
+/// represent 0..=127 without switching to the multi-byte form.
+///
+/// Inputs beyond this limit are silently truncated to avoid a silent
+/// `as u8` cast producing a 0 (or wrong) length for values in 128..=255,
+/// which would corrupt the field-block and misdirect subsequent parsers.
+///
+/// This is a *probe generator* cap, not a protocol limit.
+const MAX_QPACK_LITERAL_BYTE_LEN: usize = 127;
+
 /// Build a minimal HTTP/3 HEADERS frame with literal (unindexed) fields.
 ///
 /// This uses QPACK static table entries for known pseudo-headers and
 /// literal unindexed encoding for custom headers — no dynamic table
 /// involvement, so it works even with a fresh QPACK state.
+///
+/// Header names and values are truncated to [`MAX_QPACK_LITERAL_BYTE_LEN`]
+/// bytes (127) to prevent a silent `as u8` overflow from producing a
+/// malformed length field in the QPACK field-block.
 fn build_h3_headers_frame(method: &str, path: &str, extra_headers: &[(&str, &str)]) -> Vec<u8> {
     let mut field_block = Vec::new();
     // Required Insert Count = 0, Sign = 0 (no dynamic table references).
@@ -213,9 +229,11 @@ fn build_h3_headers_frame(method: &str, path: &str, extra_headers: &[(&str, &str
             // Literal unindexed: `0001 N XXXX` — name literal, N=0
             field_block.push(0x20); // never-indexed literal name
             let m = ":method".as_bytes();
+            // len is 7 — always fits in single-byte prefix-int. No truncation needed.
             field_block.push(m.len() as u8);
             field_block.extend_from_slice(m);
-            let v = method.as_bytes();
+            // method value — cap to MAX_QPACK_LITERAL_BYTE_LEN to prevent silent as-u8 overflow.
+            let v = &method.as_bytes()[..method.len().min(MAX_QPACK_LITERAL_BYTE_LEN)];
             field_block.push(v.len() as u8);
             field_block.extend_from_slice(v);
         }
@@ -227,7 +245,9 @@ fn build_h3_headers_frame(method: &str, path: &str, extra_headers: &[(&str, &str
         // Literal name reference for :path (static index 1)
         // `01 T N XXXX` where T=1, name=static[1]=:path, value=literal
         field_block.push(0x51); // 0b0101_0001 = name ref static[1]
-        let v = path.as_bytes();
+        // Cap path to MAX_QPACK_LITERAL_BYTE_LEN — values >= 128 bytes would
+        // require multi-byte prefix-int encoding, not the single `as u8` below.
+        let v = &path.as_bytes()[..path.len().min(MAX_QPACK_LITERAL_BYTE_LEN)];
         field_block.push(v.len() as u8);
         field_block.extend_from_slice(v);
     }
@@ -237,10 +257,14 @@ fn build_h3_headers_frame(method: &str, path: &str, extra_headers: &[(&str, &str
     for (name, value) in extra_headers {
         // Literal field line: `0000 N XXXX` where N=0 → 0x00..
         field_block.push(0x37); // literal with name literal, 4-bit prefix
-        let n = name.as_bytes();
+        // Cap name and value at MAX_QPACK_LITERAL_BYTE_LEN bytes each.
+        // The single-byte prefix-int encoding supports 0..=127; values >= 128
+        // would require the multi-byte form and the previous `as u8` cast would
+        // silently truncate them, corrupting the field-block length.
+        let n = &name.as_bytes()[..name.len().min(MAX_QPACK_LITERAL_BYTE_LEN)];
         field_block.push(n.len() as u8);
         field_block.extend_from_slice(n);
-        let v = value.as_bytes();
+        let v = &value.as_bytes()[..value.len().min(MAX_QPACK_LITERAL_BYTE_LEN)];
         field_block.push(v.len() as u8);
         field_block.extend_from_slice(v);
     }
@@ -311,7 +335,7 @@ mod tests {
         let frame = build_h3_headers_frame("POST", "/api", &[]);
         // Should contain 0xD4 (static index 20 = :method POST)
         assert!(
-            frame.iter().any(|&b| b == 0xD4),
+            frame.contains(&0xD4),
             "POST frame must contain static table ref for :method POST (0xD4)"
         );
     }
@@ -320,7 +344,7 @@ mod tests {
     fn h3_headers_frame_get_uses_static_ref() {
         let frame = build_h3_headers_frame("GET", "/", &[]);
         assert!(
-            frame.iter().any(|&b| b == 0xD1),
+            frame.contains(&0xD1),
             "GET frame must contain static table ref for :method GET (0xD1)"
         );
     }
@@ -330,7 +354,7 @@ mod tests {
         let frame = build_h3_headers_frame("GET", "/", &[]);
         // Static index 1 = :path / → 0xC1
         assert!(
-            frame.iter().any(|&b| b == 0xC1),
+            frame.contains(&0xC1),
             "/ path must use static table ref (0xC1)"
         );
     }
@@ -433,5 +457,59 @@ mod tests {
         let payload = b.full_request_early("GET", "/", &[], None);
         let fs = b.replay_bundle(&payload);
         assert!(!fs.frames.is_empty(), "even with count=0, must produce at least 1 frame");
+    }
+
+    // ── §15 hostile-input: as u8 overflow guard on QPACK literal lengths ─────
+
+    /// Pre-fix: `name.len() as u8` and `value.len() as u8` silently truncated
+    /// lengths > 255 to 0 (and misencoded 128-255 range as single-byte), producing
+    /// a field-block with incorrect length fields that would corrupt the QPACK
+    /// decoder's position tracking.
+    ///
+    /// Fix: cap at `MAX_QPACK_LITERAL_BYTE_LEN` (127) before the `as u8` cast.
+    /// The frame must still be produced (this is a probe generator, truncation is
+    /// preferable to panic), but the length byte must accurately reflect the
+    /// emitted bytes.
+    #[test]
+    fn h3_headers_frame_long_header_does_not_overflow_length_byte() {
+        // 200-byte value — would have overflowed u8 and produced length=200-256=0
+        // (actually 200u8 = 0xC8, which is a valid byte but would be misinterpreted
+        // as a Huffman-encoded prefix-int due to bit 7 being set).
+        let long_value = "V".repeat(200);
+        let long_name = format!("x-long-name-{}", "N".repeat(200));
+        let extras = [("x-test", long_value.as_str()), (long_name.as_str(), "v")];
+        let frame = build_h3_headers_frame("GET", "/", &extras);
+        // The frame must be non-empty and the first byte must be 0x01 (HEADERS).
+        assert_eq!(frame[0], 0x01, "HEADERS frame type must be 0x01");
+        // Verify the embedded length bytes (after field_block position 2 for RIC/S)
+        // never exceed MAX_QPACK_LITERAL_BYTE_LEN so the byte cast is safe.
+        // Walk the field_block to find length bytes for literal strings.
+        // We can't parse the full QPACK here without a full decoder, but we can
+        // assert the frame is at least as long as the raw type byte (non-empty).
+        assert!(
+            frame.len() > 2,
+            "frame with long headers must not be empty (length-zero silently dropped content)"
+        );
+        // The key assertion: no byte in the frame should be > 127 in a position
+        // that was set by our string-length push (which is at most 127 now).
+        // Rather than parsing the full field block, confirm that the payload was
+        // NOT zero-length truncated by checking the frame grew vs the empty case.
+        let empty_frame = build_h3_headers_frame("GET", "/", &[]);
+        assert!(
+            frame.len() > empty_frame.len(),
+            "long-header frame must be larger than no-header frame (length byte wasn't zero-zeroed)"
+        );
+    }
+
+    /// Anti-rig: `MAX_QPACK_LITERAL_BYTE_LEN` must stay at 127 (fits in single-byte
+    /// 7-bit prefix-int without the Huffman flag or continuation). Any change that
+    /// sets it >= 128 would re-introduce the `as u8` overflow (lengths 128-255 need
+    /// the multi-byte form; 256+ wraps to 0 and silently discards value bytes).
+    #[test]
+    fn max_qpack_literal_byte_len_is_127() {
+        assert_eq!(
+            MAX_QPACK_LITERAL_BYTE_LEN, 127,
+            "MAX_QPACK_LITERAL_BYTE_LEN must be 127 — values >= 128 require multi-byte prefix-int"
+        );
     }
 }

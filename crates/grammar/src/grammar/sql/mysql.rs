@@ -14,7 +14,7 @@ pub const CONDITIONAL_COMMENTS: &[&str] = &["/*!50000 ", "/*!00000 ", "/*!"];
 /// Generate MySQL-specific mutations for a payload.
 #[must_use]
 pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_mutations);
     let lower = payload.to_ascii_lowercase();
 
     // ── Conditional comments around keywords ──

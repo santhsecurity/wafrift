@@ -1,6 +1,133 @@
 use super::*;
 use std::fs;
 
+/// The shipped default genome must parse and yield the proven generic
+/// seed techniques — else `load_or_default` silently no-ops and a cold
+/// install gets no warm-start (a stub-by-another-name, §11). Pins the
+/// build-time invariant + that a known scan-consumable key is present.
+#[test]
+fn bundled_default_genome_parses_with_proven_keys() {
+    let names = GeneBank::default_seed_winners();
+    assert!(!names.is_empty(), "bundled default must yield seed winners");
+    assert!(
+        names.iter().any(|n| n.contains("UrlEncode")),
+        "expected a url-encode technique in the default: {names:?}"
+    );
+}
+
+/// Cold bank → `load_or_default` materializes the bundled default
+/// (stamped with the detected WAF) and writes it through; an EXISTING
+/// genome is returned untouched (the default never clobbers accumulated
+/// knowledge). This is the warm-start pentesters want on the first scan.
+#[test]
+fn load_or_default_seeds_cold_bank_then_preserves_existing() {
+    let dir = std::env::temp_dir().join(format!(
+        "wafrift-gb-load-or-default-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+
+    {
+        let mut bank = GeneBank::open(&dir).expect("open bank");
+        assert!(bank.load("Cloudflare").is_none(), "precondition: cold bank");
+        let seeded = bank
+            .load_or_default("Cloudflare")
+            .expect("default must seed a cold bank");
+        assert!(!seeded.techniques.is_empty(), "default carries techniques");
+        assert_eq!(seeded.waf_name, "Cloudflare", "stamped with detected WAF");
+    }
+    // Write-through: a fresh handle loads the seeded genome from disk.
+    {
+        let mut bank2 = GeneBank::open(&dir).expect("reopen bank");
+        assert!(
+            bank2.load("Cloudflare").is_some(),
+            "seeded default must persist to disk"
+        );
+    }
+    // Existing genome is NOT replaced by the default.
+    {
+        let mut bank3 = GeneBank::open(&dir).expect("reopen bank");
+        let mut custom = WafGenome::new("MyWAF");
+        custom.merge_session(&[("only::technique".into(), 1, 1)]);
+        bank3.save(&custom).expect("save custom genome");
+        let kept = bank3
+            .load_or_default("MyWAF")
+            .expect("existing genome returned");
+        assert_eq!(
+            kept.techniques.len(),
+            1,
+            "existing genome must not be clobbered by the 17-technique default"
+        );
+        assert_eq!(kept.techniques[0].name, "only::technique");
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Per-WAF-class default routing (§6 GENERALIZATION): a cold bank for a
+/// Cloudflare-fronted target warm-starts from the delivery-vector default
+/// (carries the cloudflare-only `vector::POST-cbor`), while a ModSecurity/CRS
+/// target gets the generic encoding default (CF-only vector absent, but still
+/// non-empty). Pins that `bundled_default_for` is actually consulted, not
+/// bypassed — a regression that routed everything to one default would trip
+/// one of these two assertions.
+#[test]
+fn load_or_default_routes_cloudflare_to_delivery_vectors() {
+    let cf_dir =
+        std::env::temp_dir().join(format!("wafrift-gb-route-cf-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&cf_dir);
+    {
+        let mut bank = GeneBank::open(&cf_dir).expect("open cf bank");
+        let cf = bank
+            .load_or_default("Cloudflare")
+            .expect("cf cold bank seeds");
+        assert!(
+            cf.techniques.iter().any(|t| t.name == "vector::POST-cbor"),
+            "Cloudflare default must carry the delivery-vector set: {:?}",
+            cf.techniques.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+    }
+    let _ = fs::remove_dir_all(&cf_dir);
+
+    // Cloudflare Bot Management (the ML tier) routes to the SAME cloudflare
+    // default — both CF variants (managed-rules + bot-management) get the
+    // delivery-vector set. Pins the second `bundled_default_for` match arm.
+    let bot_dir =
+        std::env::temp_dir().join(format!("wafrift-gb-route-cfbot-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&bot_dir);
+    {
+        let mut bank = GeneBank::open(&bot_dir).expect("open cf-bot bank");
+        let bot = bank
+            .load_or_default("Cloudflare Bot Management")
+            .expect("cf-bot cold bank seeds");
+        assert!(
+            bot.techniques.iter().any(|t| t.name == "vector::POST-cbor"),
+            "Cloudflare Bot Management must also route to the delivery-vector default"
+        );
+    }
+    let _ = fs::remove_dir_all(&bot_dir);
+
+    let ms_dir =
+        std::env::temp_dir().join(format!("wafrift-gb-route-ms-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&ms_dir);
+    {
+        let mut bank = GeneBank::open(&ms_dir).expect("open modsec bank");
+        let ms = bank
+            .load_or_default("ModSecurity")
+            .expect("modsec cold bank seeds");
+        assert!(
+            !ms.techniques.iter().any(|t| t.name == "vector::POST-cbor"),
+            "generic default must NOT carry the CF-only delivery vector: {:?}",
+            ms.techniques.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+        assert!(
+            !ms.techniques.is_empty(),
+            "generic default must still carry techniques"
+        );
+    }
+    let _ = fs::remove_dir_all(&ms_dir);
+}
+
 #[test]
 fn technique_record_success_rate() {
     let rec = TechniqueRecord {

@@ -34,7 +34,7 @@ use crate::distill_cmd::{DistillArgs, run_distill};
 /// Every flag documented here is forwarded verbatim to the ddmin engine in
 /// `distill_cmd::run_distill`.
 #[derive(Args, Debug)]
-pub struct TminArgs {
+pub(crate) struct TminArgs {
     /// Target URL.
     #[arg(value_name = "URL")]
     pub target: String,
@@ -50,6 +50,15 @@ pub struct TminArgs {
     /// and stdin is not a tty.
     #[arg(long)]
     pub payload: Option<String>,
+
+    /// Attack class for semantic-preservation (forwarded to the ddmin engine).
+    /// ddmin keeps only the minimal payload that STILL carries this attack class
+    /// AND still bypasses, so the result can't collapse to a benign byte that
+    /// merely passes the filter. `auto` (default) detects it; `none` disables the
+    /// gate (WAF-bypass only). See `wafrift distill --help`.
+    #[arg(long, default_value = "auto",
+          value_parser = ["auto", "none", "xss", "sql", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql", "xxe", "log4shell", "cve_pocs"])]
+    pub class: String,
 
     /// Output format. `text` prints a short summary; `json` emits a
     /// structured blob compatible with `wafrift distill --format json`.
@@ -76,6 +85,12 @@ pub struct TminArgs {
     /// Default 500.
     #[arg(long, default_value_t = 500)]
     pub max_fires: u32,
+
+    /// Per-request HTTP timeout (seconds). 0 = workspace default.
+    /// R55 pass-18 I1: mirrors every other subcommand's flag so
+    /// `.wafrift.toml`'s `http.timeout_secs` applies here too.
+    #[arg(long, default_value_t = 0)]
+    pub timeout_secs: u64,
 }
 
 impl TminArgs {
@@ -93,9 +108,14 @@ impl TminArgs {
                 if std::io::stdin().is_terminal() {
                     return None;
                 }
-                use std::io::Read;
-                let mut buf = String::new();
-                std::io::stdin().read_to_string(&mut buf).ok()?;
+                // Bounded read: `tmin --payload -` piped from /dev/zero
+                // would OOM with an unbounded read_to_string. Payloads
+                // are attack strings — kilobytes at most. 1 MiB cap
+                // matches MAX_OPERATOR_INPUT_BYTES from safe_body.
+                let buf = crate::safe_body::read_bounded_text_stdin(
+                    crate::safe_body::MAX_OPERATOR_INPUT_BYTES,
+                )
+                .ok()?;
                 buf.trim().to_string()
             }
         };
@@ -103,12 +123,14 @@ impl TminArgs {
             target: self.target,
             param: self.param,
             payload,
+            class: self.class,
             format: self.format,
             delay_ms: self.delay_ms,
             insecure: self.insecure,
             proxy: self.proxy,
             header: self.header,
             max_fires: self.max_fires,
+            timeout_secs: self.timeout_secs,
         })
     }
 }
@@ -117,13 +139,11 @@ impl TminArgs {
 ///
 /// Delegates entirely to `distill_cmd::run_distill`. See that module for
 /// the full ddmin algorithm documentation.
-pub async fn run_tmin(args: TminArgs, cancel: CancellationToken) -> ExitCode {
+pub(crate) async fn run_tmin(args: TminArgs, cancel: CancellationToken) -> ExitCode {
     let distill_args = match args.into_distill_args() {
         Some(a) => a,
         None => {
-            eprintln!(
-                "error: --payload is required (or pipe a payload on stdin)"
-            );
+            eprintln!("error: --payload is required (or pipe a payload on stdin)");
             return ExitCode::from(2);
         }
     };
@@ -143,17 +163,20 @@ mod tests {
             target: "http://target/".into(),
             param: "p".into(),
             payload: Some("<script>alert(1)</script>".into()),
+            class: "xss".into(),
             format: "json".into(),
             delay_ms: 50,
             insecure: true,
             proxy: Some("http://127.0.0.1:8080".into()),
             header: vec!["X-Test: 1".into()],
             max_fires: 200,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().expect("should convert");
         assert_eq!(da.target, "http://target/");
         assert_eq!(da.param, "p");
         assert_eq!(da.payload, "<script>alert(1)</script>");
+        assert_eq!(da.class, "xss", "the --class selector must survive the round-trip");
         assert_eq!(da.format, "json");
         assert_eq!(da.delay_ms, 50);
         assert!(da.insecure);
@@ -169,15 +192,18 @@ mod tests {
             target: "http://localhost/".into(),
             param: "q".into(),
             payload: Some("' OR 1=1--".into()),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: vec![],
             max_fires: 500,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().expect("should convert");
         assert_eq!(da.param, "q");
+        assert_eq!(da.class, "auto");
         assert!(!da.insecure);
         assert!(da.proxy.is_none());
         assert_eq!(da.max_fires, 500);
@@ -193,12 +219,14 @@ mod tests {
             target: "http://target/".into(),
             param: "q".into(),
             payload: None,
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: vec![],
             max_fires: 500,
+            timeout_secs: 0,
         };
         // In a test harness stdin is a tty, so this should be None.
         // (If the test harness pipes stdin, the read would succeed — that
@@ -217,12 +245,14 @@ mod tests {
             target: "http://t/".into(),
             param: "q".into(),
             payload: Some(payload.into()),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: vec![],
             max_fires: 500,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().unwrap();
         assert_eq!(da.payload, payload);
@@ -235,12 +265,14 @@ mod tests {
             target: "http://t/".into(),
             param: "q".into(),
             payload: Some("p".into()),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: vec!["A: 1".into(), "B: 2".into(), "C: 3".into()],
             max_fires: 500,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().unwrap();
         assert_eq!(da.header, vec!["A: 1", "B: 2", "C: 3"]);
@@ -253,12 +285,14 @@ mod tests {
             target: "http://t/".into(),
             param: "q".into(),
             payload: Some("p".into()),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: vec![],
             max_fires: 0,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().unwrap();
         assert_eq!(da.max_fires, 0);
@@ -271,12 +305,14 @@ mod tests {
             target: "http://t/".into(),
             param: "q".into(),
             payload: Some("p".into()),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: vec![],
             max_fires: u32::MAX,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().unwrap();
         assert_eq!(da.max_fires, u32::MAX);
@@ -289,12 +325,14 @@ mod tests {
             target: "http://t/".into(),
             param: "q".into(),
             payload: Some("p".into()),
+            class: "auto".into(),
             format: "json".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: vec![],
             max_fires: 500,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().unwrap();
         assert_eq!(da.format, "json");
@@ -307,12 +345,14 @@ mod tests {
             target: "http://t/".into(),
             param: "q".into(),
             payload: Some("p".into()),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 60_000,
             insecure: false,
             proxy: None,
             header: vec![],
             max_fires: 500,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().unwrap();
         assert_eq!(da.delay_ms, 60_000);
@@ -325,16 +365,47 @@ mod tests {
             target: "http://t/".into(),
             param: "q".into(),
             payload: Some("p".into()),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: Some(String::new()),
             header: vec![],
             max_fires: 500,
+            timeout_secs: 0,
         };
         let da = tmin.into_distill_args().unwrap();
         // The empty proxy string is forwarded — the transport layer decides
         // what to do with it (likely errors, which is also correct).
         assert_eq!(da.proxy, Some(String::new()));
+    }
+
+    // ── OOM / bounded-read boundary test for stdin path ──────────────────────
+
+    /// Anti-rig: read_bounded_text_stdin rejects input exceeding the cap.
+    /// Pins the OOM defence that replaced unbounded stdin().read_to_string()
+    /// in the `tmin --payload -` stdin path.
+    #[test]
+    fn bounded_stdin_read_at_cap_and_over() {
+        // stdin cannot be injected in a unit test, so we test the boundary
+        // predicate via read_bounded_text_file — it uses the identical
+        // chunk-loop with the same cap guard. Covers the tmin stdin path.
+        let cap: usize = 64; // tiny cap for test speed
+        let dir = std::env::temp_dir();
+        let at_path = dir.join("wafrift_tmin_test_at.bin");
+        let over_path = dir.join("wafrift_tmin_test_over.bin");
+
+        std::fs::write(&at_path, vec![b'x'; cap]).expect("write at-cap");
+        let r_at = crate::safe_body::read_bounded_text_file(&at_path, cap);
+        let _ = std::fs::remove_file(&at_path);
+        assert!(r_at.is_ok(), "at-cap must succeed: {r_at:?}");
+
+        std::fs::write(&over_path, vec![b'x'; cap + 1]).expect("write over-cap");
+        let r_over = crate::safe_body::read_bounded_text_file(&over_path, cap);
+        let _ = std::fs::remove_file(&over_path);
+        assert!(
+            matches!(r_over, Err(crate::safe_body::ReadError::Overrun { .. })),
+            "over-cap must be Overrun: {r_over:?}"
+        );
     }
 }

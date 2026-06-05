@@ -116,14 +116,40 @@ Related: CVE-2023-44487 variants, nghttp3 integer handling patches 2024.
 
 ---
 
-### T-09: HTTP/2 Rapid Reset with WAF State Confusion [P2 — RESEARCH ONLY]
-**Status**: Research; wafrift-smuggling already has H2 evasion.
+### T-09: HTTP/2 Rapid Reset Family [P1 — IMPLEMENTED IN `wafrift-smuggling::rapid_reset`]
+**Status**: Implemented at the wire-byte layer. CLI wiring into `wafrift smuggle`
+is the outstanding gap — generators are reachable from library callers and
+tests but not yet from the `--variant` table.
 
-CVE-2023-44487 showed that RST_STREAM immediately after HEADERS (before
-server processes) causes most HTTP/2 servers to discard the stream. WAFs
-that inspect headers before seeing RST may log false positives. Rapid reset
-floods can exhaust WAF connection state tables, causing fail-open behavior
-where subsequent requests bypass inspection.
+Five primitives are materialised as raw HTTP/2 wire bytes (see
+`crates/smuggling/src/rapid_reset.rs`):
+
+1. **Classic rapid reset (CVE-2023-44487)** — `classic_rapid_reset()`,
+   `classic_rapid_reset_burst()`. HEADERS + immediate RST_STREAM, repeated
+   N times. Exhausts server stream-creation work without ever sending DATA.
+2. **MadeYouReset (CVE-2025-8671)** — `made_you_reset()`,
+   `made_you_reset_burst()`. PRIORITY frame referencing a closed/idle
+   stream as the exclusive dependency, then HEADERS on that stream. Servers
+   that process PRIORITY before validating stream liveness emit RST_STREAM
+   internally — the same resource exhaustion without client-side reset
+   pattern that simple rate limiters key on.
+3. **Zero-RTT rapid reset** — `zero_rtt_rapid_reset()`. TLS 1.3 early-data
+   carrying the rapid-reset sequence. WAFs that defer inspection until the
+   handshake completes miss the entire flood.
+4. **Settings storm** — `settings_storm()`, `settings_storm_with_resets()`.
+   Alternating SETTINGS frames forcing the peer to re-apply settings,
+   optionally interleaved with RST_STREAM for compounding state churn.
+5. **Dependency-cycle reset** — `dependency_cycle_reset()`. PRIORITY
+   frames forming a dependency loop, triggering server-side resets per
+   RFC 7540 §5.3.1 ambiguity. Distinct from MadeYouReset: the cycle is
+   the trigger, not a single stream reference.
+
+**Gap (Pass 20 R2)**: none of these are referenced from `smuggle_cmd.rs`'s
+`VARIANTS` table. Operators cannot reach them from `wafrift smuggle probe
+--variant <K>` today — they exist as library functions and are pinned by
+unit tests, but no CLI dispatch wires their `raw_bytes` into the raw
+TcpStream send path. Wiring is a small CLI change (variant entries +
+match arm in `run_probe`), gated as `SafetyTier::Exploit` behind `--unsafe`.
 
 ---
 
@@ -169,10 +195,13 @@ benign (no trailer inspection).
 | Rank | Technique | Impact | Effort | Crate Target |
 |------|-----------|--------|--------|--------------|
 | 1 | T-08: QPACK int overflow | HIGH | HIGH | wafrift-http3-evasion |
-| 2 | T-09: H2 Rapid Reset state exhaust | MED | LOW | wafrift-smuggling |
+| 2 | T-09: H2 Rapid Reset CLI wiring (library DONE — see above) | MED | LOW | wafrift-cli `smuggle_cmd` |
 | 3 | T-10: JWT/QPACK forward ref | HIGH | MED | wafrift-transport |
 | 4 | T-11: QUIC token reuse | MED | MED | wafrift-http3-evasion |
 | 5 | T-12: HTTP/3 trailer injection | MED | LOW | wafrift-http3-evasion |
+| 6 | http3-evasion → transport/strategy wiring (library DONE) | HIGH | MED | wafrift-strategy, wafrift-transport |
+| 7 | HPP at the (name,value) pair layer (replace `UrlStrategy::Hpp` stub) | MED | LOW | wafrift-encoding |
+| 8 | `contextual::encode_in_context` wired into `apply_encoding` | MED | LOW | wafrift-strategy |
 
 ---
 

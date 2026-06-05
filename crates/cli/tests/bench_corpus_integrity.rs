@@ -39,6 +39,7 @@ const REQUIRED_CLASSES: &[&str] = &[
     "xxe",
     "ssrf",
     "nosql",
+    "ssi",
     "log4shell",
     "cve_pocs",
 ];
@@ -245,14 +246,21 @@ fn every_case_has_id_class_and_payload_fields() {
     );
 }
 
-/// Helper: pull `"value"` out of a line shaped like `= "value"` (with
-/// optional whitespace) — sufficient for the well-formed corpus TOML
+/// Helper: pull `"value"` or `'value'` out of a line shaped like
+/// `= "value"` or `= 'value'` (with optional whitespace) — TOML
+/// supports both double-quoted (escapes interpreted) and single-quoted
+/// (literal) string forms. Sufficient for well-formed corpus TOML
 /// files; richer parsing lives in the bench-waf serde deserialiser.
 fn strip_eq_quoted(rest: &str) -> Option<String> {
     let rest = rest.trim_start();
     let rest = rest.strip_prefix('=')?.trim_start();
     if let Some(inner) = rest.strip_prefix('"')
         && let Some(end) = inner.find('"')
+    {
+        return Some(inner[..end].to_string());
+    }
+    if let Some(inner) = rest.strip_prefix('\'')
+        && let Some(end) = inner.find('\'')
     {
         return Some(inner[..end].to_string());
     }

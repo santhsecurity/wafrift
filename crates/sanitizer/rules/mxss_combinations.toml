@@ -1,0 +1,95 @@
+# Tier-B mutation-XSS (mXSS) trigger combinations.
+#
+# Some sanitizers (DOMPurify and friends) correctly remove every <script> tag
+# and on*= handler from their OWN serialized output — yet the BROWSER re-parses
+# that output differently than the sanitizer's parser did, resurrecting script.
+# This "mutation XSS" hinges on HTML foreign-content / raw-text parsing
+# differentials, NOT on a handler the in-model executability check can see. So
+# the L*/SFA miner, which judges executability by <script>/on*= survival, cannot
+# surface these — they need a real browser (scald) to confirm.
+#
+# Each entry names a tag pair that, when BOTH are reachable in the sanitizer's
+# allow/deny model, has historically enabled an mXSS bypass. The decompiler flags
+# the pair as a CANDIDATE (proposed, never asserted executed) for scald to
+# confirm in a live DOM. Extend coverage by adding rows here — never by
+# hardcoding tag names in code.
+#
+# Fields:
+#   root  - the foreign-content / mode-switching element
+#   child - the raw-text / re-parse element reachable under `root`
+#   class - the parsing differential exploited
+#   note  - operator-facing explanation + a representative payload shape
+
+[[mxss]]
+root = "svg"
+child = "style"
+class = "foreign-content-raw-text"
+note = "SVG is foreign content but <style> inside it is parsed as raw text; on re-serialize+reparse the CDATA boundary shifts and markup in the style body becomes live HTML. e.g. <svg><style><img src=x onerror=alert(1)>"
+
+[[mxss]]
+root = "svg"
+child = "a"
+class = "foreign-content-namespace"
+note = "An <a> inside <svg> lives in the SVG namespace where xlink:href=javascript: and case-folding differ from HTML; reparse can yield a clickable HTML anchor with a live scheme."
+
+[[mxss]]
+root = "math"
+child = "mtext"
+class = "mathml-annotation"
+note = "MathML <mtext>/<annotation-xml encoding=text/html> switches the parser into an HTML integration point; sanitized-inert content inside is reparsed as live HTML. The classic DOMPurify <math><mtext> bypass."
+
+[[mxss]]
+root = "math"
+child = "mglyph"
+class = "mathml-integration-point"
+note = "<mglyph>/<malignmark> under <math> are HTML integration points; foreign-to-HTML transitions there have repeatedly produced mXSS in MathML-allowing configs."
+
+[[mxss]]
+root = "noscript"
+child = "style"
+class = "noscript-mode-toggle"
+note = "Whether <noscript> contents parse as text or markup depends on scripting-enabled state, which differs between the sanitizer (scripting off) and the victim browser (scripting on) — the contents flip from inert text to live markup."
+
+[[mxss]]
+root = "template"
+child = "style"
+class = "template-content-fragment"
+note = "<template> parks content in an inert document fragment for the sanitizer but the host page may adopt and render it; raw-text children re-tokenize on adoption."
+
+[[mxss]]
+root = "form"
+child = "math"
+class = "form-foreign-content"
+note = "A <form> wrapping foreign content has produced parser-state confusion (premature form/text boundaries) enabling MathML/SVG mXSS in several historic bypasses."
+
+# ── HTML-spec foreign-content integration points ──────────────────────────────
+# The HTML parsing spec (§13.2.6 "tree construction", foreign content) names
+# exact elements where the parser leaves the SVG/MathML namespace and re-enters
+# the HTML insertion mode. Content the sanitizer judged inert as foreign markup
+# is, at one of these points, re-tokenized as live HTML by the victim browser.
+# These are the structural roots of the best-known DOMPurify namespace-confusion
+# bypasses, so the table must name them explicitly.
+
+[[mxss]]
+root = "math"
+child = "annotation-xml"
+class = "mathml-html-integration-point"
+note = "<annotation-xml encoding=\"text/html\"> (or application/xhtml+xml) under <math> is an HTML integration point per the parsing spec: the parser switches back to HTML and reparses its contents as live markup. This is the element at the heart of the Bentkowski DOMPurify < 2.0.x namespace-confusion bypass — e.g. <math><annotation-xml encoding=text/html><object data=javascript:alert(1)>. Flag whenever both <math> and <annotation-xml> are reachable."
+
+[[mxss]]
+root = "svg"
+child = "foreignObject"
+class = "svg-html-integration-point"
+note = "<foreignObject> is one of the three SVG HTML-integration-point elements (with <desc>,<title>): inside it the parser returns to the HTML namespace, so sanitized-inert SVG content reparses as live HTML. <svg><foreignObject><img src=x onerror=alert(1)> is a canonical reparse vector."
+
+[[mxss]]
+root = "svg"
+child = "desc"
+class = "svg-html-integration-point"
+note = "<desc> is an SVG HTML-integration-point element: content under it is parsed in the HTML insertion mode on reparse, so markup the sanitizer treated as foreign-content text becomes live. Sibling of the <foreignObject>/<title> integration points."
+
+[[mxss]]
+root = "svg"
+child = "title"
+class = "svg-html-integration-point"
+note = "<title> inside <svg> is an SVG HTML-integration-point (distinct from the HTML head <title>): the browser reparses its contents as HTML, resurrecting markup a foreign-content-aware sanitizer left inert."

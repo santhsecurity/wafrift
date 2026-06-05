@@ -53,6 +53,11 @@
 pub mod advisor;
 pub mod ast_mcts;
 pub mod body_padding;
+/// Minimum Bypass Set computer — greedy set-cover on bypassing payloads.
+/// Computes the smallest subset that collectively exercises every WAF rule
+/// class reachable by the full input. Used to produce forensically minimal
+/// payload sets for security reports.
+pub mod min_bypass_set;
 pub mod coverage_feedback;
 pub mod custom_rules;
 pub mod differential;
@@ -89,3 +94,5 @@ pub mod edge_pop_coverage;
 pub mod rule_alphabet;
 pub mod search;
 pub mod types;
+
+mod safe_io;

@@ -1,0 +1,24 @@
+{
+  "waf_name": "default",
+  "techniques": [
+    { "name": "chain::UrlEncode",                  "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "chain::TripleUrlEncode",            "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "chain::HtmlEntityEncode",           "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "chain::IisUnicodeEncode",           "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/case/alternating",         "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/url/single",               "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding::OverlongUtf8",            "total_successes": 12, "total_attempts": 13, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "chain::CaseAlternation",            "total_successes": 13, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding::DoubleUrlEncode",         "total_successes": 13, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/hex",                      "total_successes": 11, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/compression/gzip",         "total_successes": 10, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/unicode/overlong-utf8",    "total_successes":  9, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/unicode/fullwidth",        "total_successes":  8, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/url/percent-prefix",       "total_successes":  8, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/utf7",                     "total_successes":  7, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-json-dupkey",          "total_successes": 12, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-multipart-b64",        "total_successes": 12, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} }
+  ],
+  "targets_scanned": 0,
+  "updated_at": 0
+}

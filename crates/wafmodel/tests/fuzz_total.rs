@@ -59,10 +59,38 @@ proptest! {
             Stage::DoubleUrlDecode,
             Stage::HtmlEntityDecode,
             Stage::JsonUnescape,
+            // Byte-level origin decoders: NUL-strip removes bytes, overlong
+            // folds 2 → 1, base64 folds 4 → 3, hex folds 2 → 1 — all
+            // non-amplifying.
+            Stage::StripNulls,
+            Stage::OverlongUtf8Decode,
+            Stage::Base64Decode,
+            Stage::HexDecode,
         ] {
             let o = st.apply(&input);
             // Decoders do not amplify (DoS guard); identity is exact.
             prop_assert!(o.len() <= input.len().max(1));
+        }
+    }
+
+    /// The origin text-normalizer stages (NFKC / best-fit) are total on
+    /// arbitrary bytes and expand by at most a bounded constant factor, so they
+    /// are not a decompression-bomb DoS vector. NFKC is *not* a non-amplifying
+    /// decoder — a single codepoint can compatibility-decompose to several
+    /// (e.g. `½` → `1⁄2`) — so it is excluded from the loop above and bounded
+    /// here instead. Unicode caps NFKC expansion at a small constant; the 24×
+    /// bound is generous slack while still rejecting unbounded blow-up.
+    #[test]
+    fn normalizer_stages_are_total_and_bounded(
+        input in proptest::collection::vec(any::<u8>(), 0..256),
+    ) {
+        for st in [Stage::NfkcNormalize, Stage::BestFitDownconvert] {
+            let o = st.apply(&input);
+            prop_assert!(
+                o.len() <= input.len() * 24 + 16,
+                "normalizer amplified {} -> {} bytes (>24x): DoS risk",
+                input.len(), o.len()
+            );
         }
     }
 

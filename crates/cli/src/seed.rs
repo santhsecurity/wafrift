@@ -15,14 +15,13 @@
 //!     `--proxy-bank`). Used by the proxy's per-host rotation pool.
 
 use clap::Args;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[derive(Args, Debug)]
-pub struct SeedArgs {
+pub(crate) struct SeedArgs {
     /// Comma-separated technique pool keys to seed. Each key is a string
     /// like `EncodingDoubleUrl`, `GrammarTautology`, `SmugglingClTeBasic`.
     /// Run `wafrift techniques list` for the canonical list.
@@ -52,13 +51,72 @@ pub struct SeedArgs {
     /// Show what would be written and exit 0 without touching disk.
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
+
+    /// Override the technique-name validator. Pre-fix, `seed
+    /// --technique BogusName` was silently persisted into the gene
+    /// bank and produced 0 bypasses on `replay --from-waf <X>`.
+    /// The default behaviour now rejects technique IDs that don't
+    /// start with a known prefix (heavy:, equiv-cegis:, encoding::,
+    /// tamper/, etc.). Set this flag for hand-rolled or plugin-
+    /// supplied IDs that legitimately use a custom prefix.
+    #[arg(long, default_value_t = false)]
+    pub allow_unknown_techniques: bool,
 }
 
-pub fn run_seed(args: SeedArgs) -> ExitCode {
+pub(crate) fn run_seed(args: SeedArgs) -> ExitCode {
     if args.technique.is_empty() {
         eprintln!("error: --technique is required (comma-separated list of pool keys)");
         return ExitCode::from(1);
     }
+
+    // N3 fix (dogfood R29 cohort): pre-fix `seed --technique
+    // NonExistentTechnique` was silently persisted into the gene
+    // bank, then `replay --from-waf <X>` would draw 0 bypasses
+    // because the bogus key never matched a real runtime technique
+    // ID. Validate now that every seeded value LOOKS like a known
+    // technique-ID shape (one of the prefixes the strategy/encoding
+    // engines actually produce). This is conservative — we accept
+    // anything matching the shape and reject the obvious typos. A
+    // strict canonical-list check is infeasible because some
+    // technique IDs (`equiv-cegis:learn:<channel>|<rule>`) are
+    // synthesised at runtime; the prefix check covers the gap.
+    const KNOWN_PREFIXES: &[&str] = &[
+        "light:",
+        "medium:",
+        "heavy:",
+        "equiv-cegis:",
+        "encoding::",
+        "encoding/",
+        "tamper/",
+        "tamper::",
+        "grammar:",
+        "grammar/",
+    ];
+    let mut bad: Vec<&str> = Vec::new();
+    for t in &args.technique {
+        let recognised = KNOWN_PREFIXES.iter().any(|p| t.starts_with(p));
+        if !recognised {
+            bad.push(t);
+        }
+    }
+    if !bad.is_empty() {
+        eprintln!(
+            "error: unrecognised technique ID(s): {} — known prefixes are {}. \
+             Run `wafrift techniques list` for the canonical list. Pass \
+             `--allow-unknown-techniques` to override (e.g. for hand-rolled \
+             plugin IDs).",
+            bad.iter()
+                .map(|s| format!("{s:?}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            KNOWN_PREFIXES.join(", ")
+        );
+        if !args.allow_unknown_techniques {
+            return ExitCode::from(2);
+        }
+        eprintln!("warn: --allow-unknown-techniques set — proceeding with unrecognised IDs");
+    }
+
     match (&args.waf, &args.host) {
         (Some(_), Some(_)) => {
             eprintln!("error: --waf and --host are mutually exclusive");
@@ -122,23 +180,8 @@ fn seed_waf(waf_name: &str, techniques: &[String], dry_run: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-#[derive(Serialize, Deserialize, Default)]
-struct PersistedHostState {
-    #[serde(default)]
-    proven_winners: Vec<String>,
-    #[serde(default)]
-    blocklisted: Vec<String>,
-    #[serde(default)]
-    waf_name: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct PersistedGeneBank {
-    #[serde(default)]
-    schema: u32,
-    #[serde(default)]
-    hosts: HashMap<String, PersistedHostState>,
-}
+// R77 pass-21 §7 DEDUP: canonical schema in wafrift_types.
+use wafrift_types::gene_bank_io::PersistedGeneBank;
 
 fn seed_host(
     host: &str,
@@ -148,9 +191,7 @@ fn seed_host(
 ) -> ExitCode {
     let path = match custom_path {
         Some(p) => p.to_path_buf(),
-        None => match std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-        {
+        None => match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
             // F110: pre-fix consulted `$HOME` only — on Windows that's
             // typically unset and the operator got "$HOME unset" with
             // no hint that `--proxy-bank` was the unblock path. Fall
@@ -178,7 +219,10 @@ fn seed_host(
     }
 
     // Read current gene-bank (if any).
-    let mut bank = match fs::read_to_string(&path) {
+    let mut bank = match crate::safe_body::read_bounded_text_file(
+        &path,
+        crate::safe_body::GENE_BANK_FILE_MAX_BYTES,
+    ) {
         Ok(s) => match serde_json::from_str::<PersistedGeneBank>(&s) {
             Ok(b) => b,
             Err(e) => {

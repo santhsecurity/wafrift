@@ -64,15 +64,15 @@ use std::process::ExitCode;
 
 use clap::Args;
 use colored::Colorize;
-use serde::Serialize;
 #[cfg(test)]
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Args, Debug)]
-pub struct ClusterArgs {
+pub(crate) struct ClusterArgs {
     /// Path to a `wafrift bench-waf --output <FILE>` JSON result.
     /// Pass `-` to read from stdin.
     #[arg(value_name = "FILE")]
@@ -103,7 +103,7 @@ pub(crate) struct BypassRecord {
 
 /// One cluster in the output.
 #[derive(Debug, Serialize)]
-pub struct Cluster {
+pub(crate) struct Cluster {
     pub rule_id: String,
     pub payload_class: String,
     /// The shortest (most readable) technique signature in the group.
@@ -124,46 +124,45 @@ struct ClusterOutput {
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 /// Cap operator-supplied cluster input at 256 MiB. A typo of
-/// `--input /dev/zero` (or a hostile symlink) was an OOM before
-/// this bound existed.
+/// `--input /dev/zero` (or a hostile symlink to a multi-GB file) was an
+/// OOM before this bound existed.
 const CLUSTER_INPUT_MAX_BYTES: usize = 256 * 1024 * 1024;
 
-pub fn run_cluster(args: ClusterArgs) -> ExitCode {
+pub(crate) fn run_cluster(args: ClusterArgs) -> ExitCode {
     // Read input — bounded so an operator typo (e.g. `/dev/zero`)
     // can't OOM the host.
     let raw = if args.input.as_os_str() == "-" {
         match crate::safe_body::read_bounded_text_stdin(CLUSTER_INPUT_MAX_BYTES) {
             Ok(s) => s,
             Err(crate::safe_body::ReadError::Transport(msg)) => {
-                eprintln!("{} read stdin: {msg}", "error:".red().bold());
-                return ExitCode::from(1);
+                return crate::helpers::input_error(format!("read stdin: {msg}"));
             }
-            Err(crate::safe_body::ReadError::Overrun { cap_bytes, observed_bytes }) => {
-                eprintln!(
-                    "{} stdin exceeded {cap_bytes}-byte cap ({observed_bytes} bytes seen)",
-                    "error:".red().bold()
-                );
-                return ExitCode::from(1);
+            Err(crate::safe_body::ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            }) => {
+                return crate::helpers::input_error(format!(
+                    "stdin exceeded {cap_bytes}-byte cap ({observed_bytes} bytes seen)"
+                ));
             }
         }
     } else {
         match crate::safe_body::read_bounded_text_file(&args.input, CLUSTER_INPUT_MAX_BYTES) {
             Ok(s) => s,
             Err(crate::safe_body::ReadError::Transport(msg)) => {
-                eprintln!(
-                    "{} read {}: {msg}",
-                    "error:".red().bold(),
+                return crate::helpers::input_error(format!(
+                    "read {}: {msg}",
                     args.input.display()
-                );
-                return ExitCode::from(1);
+                ));
             }
-            Err(crate::safe_body::ReadError::Overrun { cap_bytes, observed_bytes }) => {
-                eprintln!(
-                    "{} {} exceeded {cap_bytes}-byte cap ({observed_bytes} bytes seen)",
-                    "error:".red().bold(),
+            Err(crate::safe_body::ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            }) => {
+                return crate::helpers::input_error(format!(
+                    "{} exceeded {cap_bytes}-byte cap ({observed_bytes} bytes seen)",
                     args.input.display()
-                );
-                return ExitCode::from(1);
+                ));
             }
         }
     };
@@ -171,16 +170,14 @@ pub fn run_cluster(args: ClusterArgs) -> ExitCode {
     let json: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{} parse JSON: {e}", "error:".red().bold());
-            return ExitCode::from(1);
+            return crate::helpers::input_error(format!("parse JSON: {e}"));
         }
     };
 
     let records = match extract_bypass_records(&json) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{} {e}", "error:".red().bold());
-            return ExitCode::from(1);
+            return crate::helpers::input_error(e);
         }
     };
 
@@ -290,7 +287,7 @@ fn extract_bypass_records(json: &Value) -> Result<Vec<BypassRecord>, String> {
 /// Group `records` into clusters using a two-level approach:
 /// 1. Hard partition by `(rule_id, payload_class)`.
 /// 2. Within each partition, greedy single-linkage by normalized edit distance.
-pub fn cluster_records(records: &[BypassRecord], threshold: f64) -> Vec<Cluster> {
+pub(crate) fn cluster_records(records: &[BypassRecord], threshold: f64) -> Vec<Cluster> {
     // Group by (rule_id, payload_class).
     let mut buckets: HashMap<(String, String), Vec<String>> = HashMap::new();
     for rec in records {
@@ -370,7 +367,7 @@ fn sub_cluster(mut sigs: Vec<String>, threshold: f64) -> Vec<Vec<String>> {
 ///
 /// `0.0` = identical strings; `1.0` = maximally dissimilar (edit distance
 /// equals the longer string's length). Both empty → `0.0`.
-pub fn normalized_levenshtein(a: &str, b: &str) -> f64 {
+pub(crate) fn normalized_levenshtein(a: &str, b: &str) -> f64 {
     if a == b {
         return 0.0;
     }
@@ -397,9 +394,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i;
         for j in 1..=n {
             let cost = usize::from(a[i - 1] != b[j - 1]);
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -450,19 +445,22 @@ pub(crate) struct ClusterOutputDeser {
     pub clusters: Vec<ClusterDeser>,
 }
 
-/// Deserializable mirror of [`Cluster`] for test roundtrips.
+/// Deserializable mirror of [`Cluster`] for test roundtrips. Every
+/// field is asserted on in [`tests::json_output_schema`] — LAW 11:
+/// no `#[allow(dead_code)]` smuggling; if a field is in the public
+/// schema it gets tested.
 #[cfg(test)]
 #[derive(Deserialize)]
 pub(crate) struct ClusterDeser {
     pub rule_id: String,
     pub payload_class: String,
-    /// Present in the JSON output; read by the Deserialize derive for
-    /// schema coverage even though individual tests don't assert on it.
-    #[allow(dead_code)]
+    /// Representative payload string for the cluster (shortest member).
+    /// LAW 12 anti-rig: pinned by `json_output_schema` so a future
+    /// change that drops or renames the field surfaces in tests.
     pub representative: String,
     pub member_count: usize,
-    /// Same as `representative` — captured for schema coverage.
-    #[allow(dead_code)]
+    /// All member technique-signatures in the cluster. LAW 12: same
+    /// pinning as `representative`.
     pub members: Vec<String>,
 }
 
@@ -535,10 +533,7 @@ mod tests {
 
     #[test]
     fn edit_threshold_zero_exact_match_only() {
-        let sigs = vec![
-            "tamper/comment".to_string(),
-            "tamper/commentX".to_string(),
-        ];
+        let sigs = vec!["tamper/comment".to_string(), "tamper/commentX".to_string()];
         let clusters = sub_cluster(sigs, 0.0);
         // Distance is non-zero → 2 separate singletons.
         assert_eq!(clusters.len(), 2);
@@ -561,7 +556,12 @@ mod tests {
 
     #[test]
     fn json_output_schema() {
-        let j = bench_json(vec![make_result("sql_001", "sql", 2, &["tamper/a", "tamper/b"])]);
+        let j = bench_json(vec![make_result(
+            "sql_001",
+            "sql",
+            2,
+            &["tamper/a", "tamper/b"],
+        )]);
         let records = extract_bypass_records(&j).unwrap();
         let clusters = cluster_records(&records, 0.5);
         let out = ClusterOutput {
@@ -574,13 +574,30 @@ mod tests {
         // Deserialize via the public ClusterOutputDeser to exercise the type.
         let deser: ClusterOutputDeser = serde_json::from_str(&s).unwrap();
         assert_eq!(deser.schema_version, 1);
+        assert_eq!(deser.edit_threshold, 0.5);
         assert!(!deser.clusters.is_empty());
         assert!(deser.total_bypasses > 0);
-        // Verify cluster fields via ClusterDeser.
+        // Verify cluster fields via ClusterDeser. Every public schema
+        // field is asserted on — LAW 11 anti-rig (the previous code
+        // had `#[allow(dead_code)]` on `representative` and `members`,
+        // which silently let a schema regression through).
         let first: &ClusterDeser = &deser.clusters[0];
         assert!(!first.rule_id.is_empty());
         assert!(!first.payload_class.is_empty());
         assert!(first.member_count > 0);
+        assert!(
+            !first.representative.is_empty(),
+            "representative MUST be a non-empty signature"
+        );
+        assert_eq!(
+            first.members.len(),
+            first.member_count,
+            "members.len() MUST agree with member_count"
+        );
+        // Every member should be a non-empty technique signature.
+        for m in &first.members {
+            assert!(!m.is_empty(), "member technique-sig was empty: {m:?}");
+        }
     }
 
     // ── Test 7: result with zero bypasses is not counted ─────────────────
@@ -603,7 +620,7 @@ mod tests {
         let sigs = vec![
             "tamper/comment_strip".to_string(),
             "tamper/comment_stripX".to_string(), // 1 insertion → dist=1, norm=1/21
-            "encoding/url/double".to_string(),    // unrelated
+            "encoding/url/double".to_string(),   // unrelated
         ];
         let clusters_strict = sub_cluster(sigs.clone(), 0.01); // must be 3 clusters
         let clusters_loose = sub_cluster(sigs, 0.9); // first two join, third separate
@@ -668,10 +685,10 @@ mod tests {
         assert_eq!(clusters[0].len(), 3);
     }
 
-    /// Round 16 / Bug 42 regression: operator-supplied input must be bounded.
-    /// An unbounded `fs::read_to_string` was an OOM on `--input /dev/zero`
-    /// or a hostile symlink to a multi-GB file. This guard fails loudly if a
-    /// future refactor re-introduces the unbounded read.
+    /// Regression: operator-supplied input must be bounded. An unbounded
+    /// `fs::read_to_string` on `--input` was an OOM on `/dev/zero` or a
+    /// hostile symlink to a multi-GB file. This guard fails loudly if a
+    /// future refactor reintroduces the unbounded read.
     #[test]
     fn cluster_input_read_is_bounded() {
         let src = include_str!("cluster_cmd.rs");
@@ -687,13 +704,18 @@ mod tests {
             src.contains("read_bounded_text_stdin"),
             "cluster_cmd.rs must read stdin through safe_body::read_bounded_text_stdin"
         );
+        // Build needles via concat! so the literal byte sequences don't
+        // appear contiguously in this test file's own source (otherwise
+        // the include_str! self-check trips on its own assertion message).
+        let unbounded_file = concat!("std::fs::read_to_str", "ing(&args.input");
+        let unbounded_stdin = concat!("stdin().read_to_str", "ing");
         assert!(
-            !src.contains("std::fs::read_to_string(&args.input"),
-            "cluster_cmd.rs must NOT call unbounded fs::read_to_string on --input"
+            !src.contains(unbounded_file),
+            "cluster_cmd.rs must NOT call unbounded fs read_to_string on --input"
         );
         assert!(
-            !src.contains("stdin().read_to_string"),
-            "cluster_cmd.rs must NOT call unbounded stdin().read_to_string"
+            !src.contains(unbounded_stdin),
+            "cluster_cmd.rs must NOT call unbounded stdin read_to_string"
         );
     }
 
@@ -718,7 +740,10 @@ mod tests {
         let res = crate::safe_body::read_bounded_text_file(&path, 256);
         let _ = std::fs::remove_file(&path);
         match res {
-            Err(crate::safe_body::ReadError::Overrun { cap_bytes, observed_bytes }) => {
+            Err(crate::safe_body::ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            }) => {
                 assert_eq!(cap_bytes, 256);
                 assert!(observed_bytes > cap_bytes, "observed must exceed cap");
             }

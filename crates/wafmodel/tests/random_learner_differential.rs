@@ -76,7 +76,7 @@ fn body(b: &[u8]) -> Request {
 fn alpha() -> Alphabet {
     Alphabet::new(vec![b'<', b's', b'/'], b'A')
 }
-const SYMS: [u8; 3] = [b'<', b's', b'/'];
+const SYMS: [u8; 3] = *b"<s/";
 
 fn waf(pat_bytes: &[u8]) -> SimRegexWaf {
     let pat = regex::escape(&String::from_utf8_lossy(pat_bytes));

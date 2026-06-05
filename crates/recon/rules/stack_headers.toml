@@ -40,3 +40,56 @@ family = "framework"
 id = "drupal"
 header = "x-generator"
 value_contains = "drupal"
+
+# R73 pass-21 §3 CAPABILITY: WAFs that `wafrift_oracle::markers` knows
+# about but `wafrift_recon` did NOT — leading to `wafrift detect` /
+# `wafrift recon` returning "unknown WAF" while the oracle separately
+# would have flagged the same target. Closing the cross-subsystem
+# drift identified in the innovation+capability audit.
+
+[[rule]]
+family = "waf"
+id = "aws-waf"
+header = "x-amzn-waf-action"
+
+[[rule]]
+family = "waf"
+id = "aws-waf-cloudfront"
+header = "x-amz-cf-id"
+
+[[rule]]
+family = "waf"
+id = "imperva"
+header = "x-iinfo"
+
+[[rule]]
+family = "waf"
+id = "imperva-incap"
+header = "x-cdn"
+value_contains = "incapsula"
+
+[[rule]]
+family = "waf"
+id = "f5-bigip-asm"
+header = "x-asm-ver"
+
+[[rule]]
+family = "waf"
+id = "f5-bigip"
+header = "x-f5-bigip-stat"
+
+[[rule]]
+family = "waf"
+id = "cloudflare-bot-mgmt"
+header = "cf-mitigated"
+
+[[rule]]
+family = "waf"
+id = "bunkerweb"
+header = "server"
+value_contains = "bunkerweb"
+
+[[rule]]
+family = "waf"
+id = "wallarm"
+header = "x-wallarm-mode"

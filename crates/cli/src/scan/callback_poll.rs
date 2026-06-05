@@ -17,7 +17,7 @@ use std::time::Duration;
 /// Pending callback verification — the data scan must hold from
 /// substitution time until the post-fire poll.
 #[derive(Debug, Clone)]
-pub struct CallbackPending {
+pub(crate) struct CallbackPending {
     /// The unique 128-bit base32 token embedded in this scan's payload.
     pub token: String,
     /// The full callback URL (`<base>/<token>`) that the operator
@@ -31,7 +31,7 @@ pub struct CallbackPending {
 
 /// Result of the post-fire poll.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CallbackVerdict {
+pub(crate) enum CallbackVerdict {
     /// The listener confirmed an inbound matched the token —
     /// a blind / stored vuln is confirmed.
     Verified,
@@ -50,7 +50,7 @@ pub enum CallbackVerdict {
 /// Build the management-API check URL for the given listener
 /// base URL + token.
 #[must_use]
-pub fn check_url(base_url: &str, token: &str) -> String {
+pub(crate) fn check_url(base_url: &str, token: &str) -> String {
     format!("{}/_wafrift/check/{token}", base_url.trim_end_matches('/'))
 }
 
@@ -61,7 +61,7 @@ pub fn check_url(base_url: &str, token: &str) -> String {
 /// Uses a FRESH reqwest client (not the session-init one) — the
 /// listener is on operator infrastructure, so replaying auth cookies
 /// at it would be a privacy / leakage footgun.
-pub async fn verify(pending: &CallbackPending, timeout: Duration) -> CallbackVerdict {
+pub(crate) async fn verify(pending: &CallbackPending, timeout: Duration) -> CallbackVerdict {
     let url = check_url(&pending.base_url, &pending.token);
     let client = match reqwest::Client::builder().timeout(timeout).build() {
         Ok(c) => c,

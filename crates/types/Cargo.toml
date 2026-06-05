@@ -11,6 +11,8 @@ categories = ["network-programming", "web-programming"]
 repository.workspace = true
 
 [dependencies]
+base64 = { workspace = true }
+bogon = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

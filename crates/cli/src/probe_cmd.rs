@@ -11,14 +11,14 @@ use wafrift_evolution::differential;
 use crate::helpers::probe_target_label;
 
 #[derive(Args, Debug)]
-pub struct ProbeArgs {
+pub(crate) struct ProbeArgs {
     /// Generate a smaller probe set.
     #[arg(long)]
     pub quick: bool,
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub fn run_probe(args: ProbeArgs) {
+pub(crate) fn run_probe(args: ProbeArgs) {
     let probes = if args.quick {
         differential::generate_quick_probes()
     } else {

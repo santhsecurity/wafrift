@@ -5,8 +5,8 @@
 //! - `transport/src/session.rs` — `load_jar`, `save_jar`, `extract_csrf`, `inject_csrf` had ZERO tests
 
 use authjar::{AuthSession, SessionStore};
-use base64::Engine;
 use std::io::Write;
+use wafrift_transport::jwt::{b64url_encode, decode_b64url_json};
 
 // ──────────────────────────────────────────────
 // JWT adversarial tests
@@ -26,10 +26,7 @@ fn jwt_manipulate_strip_alg_valid_token() {
     assert_eq!(new_token.split('.').count(), 3);
     // Header should decode to alg="none"
     let parts: Vec<_> = new_token.split('.').collect();
-    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(parts[0])
-        .unwrap();
-    let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
+    let header: serde_json::Value = decode_b64url_json(parts[0]).expect("valid base64url JSON");
     assert_eq!(header["alg"], "none");
 }
 
@@ -65,7 +62,7 @@ fn jwt_manipulate_rejects_invalid_base64() {
 
 #[test]
 fn jwt_manipulate_rejects_non_json_header() {
-    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"not json");
+    let b64 = b64url_encode(b"not json");
     let result = wafrift_transport::jwt::manipulate(
         &format!("{b64}.payload.signature"),
         &wafrift_types::session::JwtManipulation::StripAlg,
@@ -79,8 +76,7 @@ fn jwt_manipulate_rejects_oversized_header() {
     // Build a JWT with a 20 KiB header (exceeds 16 KiB limit)
     let huge = "x".repeat(20 * 1024);
     let header = serde_json::json!({ "alg": "none", "extra": &huge });
-    let header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(serde_json::to_vec(&header).unwrap());
+    let header_b64 = b64url_encode(&serde_json::to_vec(&header).unwrap());
     let result = wafrift_transport::jwt::manipulate(
         &format!("{header_b64}.payload.signature"),
         &wafrift_types::session::JwtManipulation::StripAlg,
@@ -124,17 +120,29 @@ fn jwt_manipulate_jwk_embed_valid() {
 }
 
 #[test]
-fn jwt_manipulate_jwk_embed_invalid_json_falls_back_to_null() {
+fn jwt_manipulate_jwk_embed_invalid_json_surfaces_error() {
+    // F129 contract: malformed `--jwk` JSON is reported as a structured
+    // `InvalidToken` error so the operator knows their input was bad.
+    // The pre-F129 behavior silently substituted `jwk: null`, rendering
+    // the JWK-validation probe meaningless because the resulting token
+    // carried null instead of the intended JWK.
     let token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature";
-    let result = wafrift_transport::jwt::manipulate(
+    let err = wafrift_transport::jwt::manipulate(
         token,
         &wafrift_types::session::JwtManipulation::JwkEmbed {
             jwk: "not valid json".into(),
         },
         None,
+    )
+    .unwrap_err();
+    let reason = match err {
+        wafrift_transport::jwt::JwtError::InvalidToken { reason } => reason,
+        other => panic!("expected InvalidToken for malformed --jwk JSON, got {other:?}"),
+    };
+    assert!(
+        reason.contains("--jwk") && reason.contains("not valid JSON"),
+        "error must name the bad flag and the reason: got {reason:?}"
     );
-    // Invalid JWK JSON is replaced with Null, so manipulation still succeeds
-    assert!(result.is_ok());
 }
 
 // ──────────────────────────────────────────────

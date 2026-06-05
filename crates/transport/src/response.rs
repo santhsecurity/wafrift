@@ -15,6 +15,21 @@ pub struct EvasionResponse {
     pub attempts: u32,
 }
 
+/// Cap on the decompressed response body [`EvasionResponse::bytes`] /
+/// [`EvasionResponse::text`] will buffer. reqwest auto-decompresses
+/// gzip/br with NO size cap, so a hostile target can serve a ~1 KB bomb
+/// that expands to gigabytes; we read chunk-by-chunk and stop here.
+/// 64 MiB is orders of magnitude larger than any legitimate WAF block
+/// page or API envelope, small enough that a laptop survives a
+/// retaliatory bomb. Mirrors the transport client's bounded
+/// `read_body_preview_from_response` and `cli::safe_body` (§15
+/// decompression-bomb defence).
+///
+/// §7: the value is the workspace-canonical [`wafrift_types::MAX_RESPONSE_BODY_BYTES`]
+/// (single source shared with encoding/compression + cli/safe_body), so the
+/// three caps can no longer silently drift. The local name is kept.
+const MAX_RESPONSE_BODY_BYTES: usize = wafrift_types::MAX_RESPONSE_BODY_BYTES;
+
 impl EvasionResponse {
     /// Get the HTTP status code.
     #[must_use]
@@ -22,14 +37,35 @@ impl EvasionResponse {
         self.inner.status()
     }
 
-    /// Consume the response and get the body as bytes.
+    /// Consume the response and return the body as bytes, **bounded**
+    /// against a decompression bomb at [`MAX_RESPONSE_BODY_BYTES`].
+    ///
+    /// reqwest auto-decompresses gzip/br with no size cap, so a raw
+    /// `.bytes().await` lets a hostile target OOM the scanner with a tiny
+    /// bomb that expands to gigabytes. We drain chunk-by-chunk and stop at
+    /// the cap; a body that large is an attack, not a WAF page, so
+    /// truncating is the correct, memory-safe outcome (§15).
     pub async fn bytes(self) -> Result<bytes::Bytes, reqwest::Error> {
-        self.inner.bytes().await
+        let mut response = self.inner;
+        let mut acc = bytes::BytesMut::new();
+        while let Some(chunk) = response.chunk().await? {
+            if acc.len().saturating_add(chunk.len()) > MAX_RESPONSE_BODY_BYTES {
+                let remaining = MAX_RESPONSE_BODY_BYTES - acc.len();
+                acc.extend_from_slice(&chunk[..remaining]);
+                break;
+            }
+            acc.extend_from_slice(&chunk[..]);
+        }
+        Ok(acc.freeze())
     }
 
-    /// Consume the response and get the body as text.
+    /// Consume the response and return the body as UTF-8 (lossy), using
+    /// the same decompression-bomb cap as [`bytes`](Self::bytes). Lossy
+    /// rather than charset-aware on purpose: WAF block pages are
+    /// UTF-8/ASCII, and bomb-safety outweighs the rare non-UTF-8 page.
     pub async fn text(self) -> Result<String, reqwest::Error> {
-        self.inner.text().await
+        let bytes = self.bytes().await?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// Get response headers.
@@ -96,8 +132,8 @@ pub fn is_waf_block(status: u16, body: &[u8]) -> bool {
         return false;
     }
 
-    // Body-based detection (first 4 KiB; shared with signal::classify).
-    let body_str = scan_body_lowercase(body, 4096);
+    // Body-based detection (first BLOCK_SCAN_BODY_WINDOW bytes; shared with signal::classify).
+    let body_str = scan_body_lowercase(body, wafrift_types::BLOCK_SCAN_BODY_WINDOW);
 
     // Audit (2026-05-10): removed vendor-name-only indicators
     // (cloudflare, akamai, sucuri, imperva, incapsula) and high-FP
@@ -128,6 +164,24 @@ pub fn is_waf_block(status: u16, body: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §15 anti-rig: the body getters must drain via a bounded chunk loop
+    /// enforcing the cap — never reqwest's unbounded auto-decompressing
+    /// whole-body read. A future "simplification" back to the raw form is
+    /// a decompression-bomb regression and must fail here. (Checks tokens
+    /// unique to the bounded impl so the assertion can't self-satisfy.)
+    #[test]
+    fn evasion_response_body_getters_are_bounded() {
+        let src = include_str!("response.rs");
+        assert!(
+            src.contains("acc.freeze()"),
+            "bytes() must accumulate into a bounded buffer, not a raw inner whole-body read"
+        );
+        assert!(
+            src.contains("chunk[..remaining]"),
+            "the cap must truncate the final chunk (decompression-bomb defence)"
+        );
+    }
 
     // TEST 1-7: Original tests
     #[test]

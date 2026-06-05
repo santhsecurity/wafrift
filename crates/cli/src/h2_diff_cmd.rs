@@ -56,7 +56,7 @@ use crate::helpers::shell_single_quote;
 use crate::parser_diff_common::{body_delta_pct, severity_of};
 
 #[derive(Args, Debug)]
-pub struct H2DiffArgs {
+pub(crate) struct H2DiffArgs {
     /// Target URL — must be HTTPS to exercise H2 (cleartext H2
     /// requires h2c upgrade which reqwest doesn't natively expose;
     /// HTTP URLs fall back to H1-only on both legs and are
@@ -114,7 +114,7 @@ crate::impl_parser_diff_http_args!(H2DiffArgs);
 
 /// Result of one H1-vs-H2 differential probe.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct H2DiffResult {
+pub(crate) struct H2DiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub h1_status: u16,
@@ -132,7 +132,7 @@ pub struct H2DiffResult {
 
 /// Entry point — runs the configured H1/H2 differential probes
 /// against `args.url`.
-pub async fn run_h2_diff(mut args: H2DiffArgs) -> ExitCode {
+pub(crate) async fn run_h2_diff(mut args: H2DiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let h1 = match build_client(false, &args) {
         Ok(c) => c,
@@ -269,10 +269,18 @@ fn build_diff_result(
 }
 
 fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
-    let ua = crate::config::shared_user_agent();
+    let scan_identity = crate::config::shared_scan_browser_headers(None).map_err(|e| {
+        eprintln!(
+            "  {} {e}",
+            "✗ Failed to resolve browser headers:".red().bold()
+        );
+        ExitCode::from(1)
+    })?;
+    let default_headers = scan_identity.headers;
     let mut builder =
-        wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, Some(&ua))
-            .redirect(reqwest::redirect::Policy::limited(5));
+        wafrift_transport::base_client_builder(args.timeout_secs, args.insecure, None)
+            .default_headers(default_headers.clone())
+            .redirect(crate::helpers::safe_redirect_policy(5));
     builder = if want_h2 {
         // HTTPS targets: reqwest negotiates H2 via TLS ALPN as long
         // as both ends advertise h2. For HTTP, prior-knowledge skips
@@ -294,7 +302,7 @@ fn build_client(want_h2: bool, args: &H2DiffArgs) -> Result<Client, ExitCode> {
         builder,
         args.proxy.as_deref(),
         &args.header,
-        None,
+        Some(&default_headers),
     )?;
     builder.build().map_err(|e| {
         eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
@@ -321,8 +329,7 @@ fn with_query(base: &str, new_query: &str) -> String {
 }
 
 fn emit_output(args: &H2DiffArgs, results: &[H2DiffResult]) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
     let h2_errors = results.iter().filter(|r| r.h2_error.is_some()).count();
 
     if args.format == "json" {
@@ -332,10 +339,7 @@ fn emit_output(args: &H2DiffArgs, results: &[H2DiffResult]) {
             "payload": args.payload,
             "probes": results.len(),
             "h2_errors": h2_errors,
-            "divergences": {
-                "high":   high.len(),
-                "medium": medium.len(),
-            },
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -348,8 +352,8 @@ fn emit_output(args: &H2DiffArgs, results: &[H2DiffResult]) {
             "  {} {} probe(s) · {} high, {} medium · {} H2-error(s)",
             "[wafrift h2-diff summary]".bright_cyan().bold(),
             results.len().to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
+            high.to_string().bright_red().bold(),
+            medium.to_string().yellow(),
             h2_errors,
         );
         // Pentest-dogfood UX (2026-05): when every H2 attempt errors,
@@ -523,6 +527,84 @@ mod tests {
         });
         tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
         addr
+    }
+
+    async fn capture_h1_client_request(headers: Vec<String>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut buf = [0u8; 1024];
+                let n = sock.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n")
+                    || request.len() > 16 * 1024
+                {
+                    break;
+                }
+            }
+            let body = "<html>ok</html>";
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            sock.write_all(resp.as_bytes()).await.unwrap();
+            sock.shutdown().await.unwrap();
+            String::from_utf8(request).unwrap()
+        });
+
+        let args = H2DiffArgs {
+            url: format!("http://{addr}/"),
+            param: "q".into(),
+            payload: "safe".into(),
+            delay_ms: 0,
+            timeout_secs: 3,
+            insecure: false,
+            proxy: None,
+            header: headers,
+            format: "json".into(),
+            quiet: true,
+        };
+        let client = build_client(false, &args).expect("build H1 client");
+        client
+            .get(format!("http://{addr}/wire"))
+            .send()
+            .await
+            .expect("send request");
+        server.await.unwrap()
+    }
+
+    fn captured_header<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+        request.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
+
+    #[tokio::test]
+    async fn build_client_merges_operator_headers_with_shared_browser_identity() {
+        let request = capture_h1_client_request(vec!["X-Trace-Probe: h2-diff".into()]).await;
+        let facts = guise::fingerprint::default_profile_facts();
+        assert_eq!(
+            captured_header(&request, "User-Agent"),
+            Some(facts.user_agent)
+        );
+        assert_eq!(
+            captured_header(&request, "Accept-Language"),
+            Some(facts.accept_language)
+        );
+        assert_eq!(
+            captured_header(&request, "Sec-Fetch-Mode"),
+            Some("navigate")
+        );
+        assert_eq!(captured_header(&request, "X-Trace-Probe"), Some("h2-diff"));
     }
 
     #[tokio::test]

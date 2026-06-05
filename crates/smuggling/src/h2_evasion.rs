@@ -333,24 +333,62 @@ pub fn split_payload_across_n_continuations(
     let chunk_len = payload_value.len().div_ceil(n);
     let mut frames: Vec<Vec<(String, String)>> = Vec::new();
     let mut emitted = 0;
+    // Snap a tentative byte offset to the nearest valid UTF-8 char
+    // boundary at OR BELOW `idx`. Without this guard a payload like
+    // "🎉🎉" (8 bytes, 2 chars) with n=3 produces chunk_len=3 and
+    // would slice `payload_value[0..3]` — mid-codepoint of the first
+    // 🎉 (4 bytes) — panicking the process. `is_char_boundary` is
+    // O(1); the inner loop runs at most 3 iterations (max UTF-8
+    // continuation-byte distance).
+    let floor_boundary = |idx: usize| -> usize {
+        let mut i = idx.min(payload_value.len());
+        while i > 0 && !payload_value.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    };
+    let mut cursor = 0usize;
     for i in 0..n {
-        let start = i * chunk_len;
-        if start >= payload_value.len() {
+        if cursor >= payload_value.len() {
             break;
         }
-        let end = (start + chunk_len).min(payload_value.len());
-        // First frame carries the header NAME; subsequent frames
-        // continue the same header value via concatenation — HTTP/2
-        // headers are atomic in the header block but a buggy parser
-        // that re-emits header bytes across frames keeps the value
-        // contiguous.
+        let tentative_end = (cursor + chunk_len).min(payload_value.len());
+        // For the last chunk always take the whole tail; otherwise
+        // snap DOWN to the previous char boundary so we never slice
+        // mid-codepoint. Snapping down (not up) guarantees forward
+        // progress: end > cursor unless the next codepoint is wider
+        // than chunk_len, in which case we widen the chunk by one
+        // codepoint to make progress.
+        let end = if i == n - 1 || tentative_end >= payload_value.len() {
+            payload_value.len()
+        } else {
+            let snapped = floor_boundary(tentative_end);
+            if snapped <= cursor {
+                // chunk_len < bytes-needed-for-next-char. Widen to
+                // include exactly one full char so we still emit
+                // frame i and don't deadlock the loop.
+                let mut e = cursor;
+                while e < payload_value.len() && !payload_value.is_char_boundary(e + 1) {
+                    e += 1;
+                }
+                (e + 1).min(payload_value.len())
+            } else {
+                snapped
+            }
+        };
         let header_name = if i == 0 {
             payload_header.to_string()
         } else {
             format!("x-cont-{i}")
         };
-        frames.push(vec![(header_name, payload_value[start..end].to_string())]);
-        emitted += end - start;
+        // First frame carries the header NAME; subsequent frames
+        // continue the same header value via concatenation — HTTP/2
+        // headers are atomic in the header block but a buggy parser
+        // that re-emits header bytes across frames keeps the value
+        // contiguous.
+        frames.push(vec![(header_name, payload_value[cursor..end].to_string())]);
+        emitted += end - cursor;
+        cursor = end;
     }
     let _ = emitted;
     ContinuationSplit {
@@ -1048,7 +1086,7 @@ pub fn spca_exclusive_weight_storm() -> SpcaTopology {
 /// RFC 7540 does not specify a maximum dependency depth.
 #[must_use]
 pub fn spca_deep_dependency_chain(depth: usize) -> SpcaTopology {
-    let depth = depth.max(1).min(512); // cap at 512 to stay sane on the wire
+    let depth = depth.clamp(1, 512); // cap at 512 to stay sane on the wire
     let mut frames: Vec<H2PriorityFrame> = Vec::with_capacity(depth);
     let mut parent: u32 = 0;
     for i in 0..depth {

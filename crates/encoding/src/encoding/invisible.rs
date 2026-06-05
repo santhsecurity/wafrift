@@ -91,14 +91,12 @@ pub fn variation_selector_pad(input: &str, selector: char) -> String {
 #[must_use]
 pub fn variation_selector_supplementary_pad(input: &str) -> String {
     let mut out = String::with_capacity(input.len() * 5);
-    let mut i: u32 = 0;
-    for c in input.chars() {
+    for (i, c) in (0_u32..).zip(input.chars()) {
         out.push(c);
         let sel_cp = 0xE0100 + (i % 0xF0);
         if let Some(sel) = char::from_u32(sel_cp) {
             out.push(sel);
         }
-        i += 1;
     }
     out
 }
@@ -214,13 +212,26 @@ pub fn parenthesized_letter_encode(input: &str) -> String {
 /// that's no longer the keyword.
 #[must_use]
 pub fn soft_hyphen_inject(input: &str) -> String {
-    let chars: Vec<char> = input.chars().collect();
-    let mut out = String::with_capacity(input.len() + chars.len() * 2);
-    for (i, c) in chars.iter().enumerate() {
-        if i > 0 {
+    // §1 SPEED: replaced Vec<char> collect (heap allocation proportional to
+    // input length) + two-pass enumerate with a single-pass peekable iterator.
+    // The `first` flag replaces the `i > 0` guard without materialising the
+    // full char vec — zero extra allocation beyond the output String.
+    //
+    // Before: 2 heap allocs (Vec + String), O(n) collect, O(n) enumerate.
+    // After:  1 heap alloc (String), O(n) single pass.
+    if input.is_empty() {
+        return String::new();
+    }
+    // U+00AD is 2 bytes in UTF-8; pre-size for N chars + (N-1) soft-hyphens.
+    let char_count = input.chars().count();
+    let mut out = String::with_capacity(input.len() + (char_count.saturating_sub(1)) * 2);
+    let mut first = true;
+    for c in input.chars() {
+        if !first {
             out.push('\u{00AD}');
         }
-        out.push(*c);
+        first = false;
+        out.push(c);
     }
     out
 }

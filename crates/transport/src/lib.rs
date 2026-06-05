@@ -38,11 +38,11 @@
 //! assert!(!is_waf_block(200, b"<html><body>Welcome</body></html>"));
 //! ```
 
+pub mod behavioral_noise;
 pub mod challenge;
 mod client;
 pub mod egress_pool;
 mod http_builder;
-pub mod pool;
 mod response;
 pub mod session_coherence;
 pub mod signal;
@@ -55,7 +55,9 @@ pub use egress_pool::{
     EgressBackend, EgressEntry, EgressError, EgressPool, EgressPoolBuilder, EgressRouter,
     parse_http_proxy_url, parse_socks5_url,
 };
-pub use http_builder::{base_client_builder, base_client_builder_with_egress};
+pub use http_builder::{
+    base_client_builder, base_client_builder_with_egress, safe_redirect_policy,
+};
 pub use response::EvasionResponse;
 pub use response::{is_waf_block, is_waf_block_status, scan_body_lowercase};
 pub use signal::{BlockClass, ResponseProfileDb, ResponseSignal};

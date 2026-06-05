@@ -7,19 +7,34 @@
 //!
 //! Used as a CI gate: exit 3 means "wafrift got worse vs baseline".
 
-use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// `bench-waf --output` JSON blobs in CI are a few MiB for ~1k cases
+/// today; growth headroom is fine. 64 MiB catches `/dev/zero`,
+/// hostile symlinks, and accidental log-file aliasing without
+/// rejecting any legitimate bench output we've ever shipped.
+const BENCH_DIFF_INPUT_MAX_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, clap::Args)]
-pub struct BenchDiffArgs {
+pub(crate) struct BenchDiffArgs {
+    /// R48-I8 fix (dogfood pass 9): operator muscle memory expects
+    /// `wafrift bench-diff <CURRENT> <BASELINE>` to work positional.
+    /// Long-form flags retained for backwards-compat. Either form
+    /// works; mixing them errors via clap's overrides_with.
+    #[arg(value_name = "CURRENT", conflicts_with = "current")]
+    pub current_positional: Option<PathBuf>,
+
+    #[arg(value_name = "BASELINE", conflicts_with = "baseline")]
+    pub baseline_positional: Option<PathBuf>,
+
     /// JSON output from the new bench-waf run.
-    #[arg(long)]
-    pub current: PathBuf,
+    #[arg(long, required_unless_present = "current_positional")]
+    pub current: Option<PathBuf>,
 
     /// JSON output from the prior baseline run.
-    #[arg(long)]
-    pub baseline: PathBuf,
+    #[arg(long, required_unless_present = "baseline_positional")]
+    pub baseline: Option<PathBuf>,
 
     /// Regression threshold: a drop of this many percentage points in
     /// `evaded_summary.overall_bypass_rate` triggers exit 3. Default 2pp
@@ -32,20 +47,40 @@ pub struct BenchDiffArgs {
     /// methodology.md.
     #[arg(long, default_value_t = 0.95)]
     pub raw_block_floor: f64,
+
+    /// Output format. `text` (default) prints the human-readable
+    /// table; `json` emits a structured blob with all rates,
+    /// drop_pp, regression flag, and any stack-mismatch warning
+    /// so CI can act on the result without parsing stderr.
+    /// R46-I2 / R46-I8 fix (dogfood pass 7): pre-fix --quiet
+    /// emitted the human text table; consumers piping to jq broke.
+    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    pub format: String,
 }
 
-pub fn run_bench_diff(args: BenchDiffArgs, quiet: bool) -> ExitCode {
-    let cur = match load(&args.current) {
+pub(crate) fn run_bench_diff(args: BenchDiffArgs) -> ExitCode {
+    // R48-I8: resolve positional vs --long-flag forms. clap
+    // guarantees exactly one of each via `required_unless_present`
+    // + `conflicts_with`, so both `or` paths are reachable.
+    let current_path = match args.current.as_ref().or(args.current_positional.as_ref()) {
+        Some(p) => p.clone(),
+        None => unreachable!("clap guarantees one of current / current_positional"),
+    };
+    let baseline_path = match args.baseline.as_ref().or(args.baseline_positional.as_ref()) {
+        Some(p) => p.clone(),
+        None => unreachable!("clap guarantees one of baseline / baseline_positional"),
+    };
+    let cur = match load(&current_path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: read {}: {e}. Fix: verify the file path and that the bench-waf --output file exists.", args.current.display());
+            eprintln!("error: read {}: {e}", current_path.display());
             return ExitCode::from(1);
         }
     };
-    let base = match load(&args.baseline) {
+    let base = match load(&baseline_path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: read {}: {e}. Fix: verify the file path and that the bench-waf --output file exists.", args.baseline.display());
+            eprintln!("error: read {}: {e}", baseline_path.display());
             return ExitCode::from(1);
         }
     };
@@ -59,16 +94,33 @@ pub fn run_bench_diff(args: BenchDiffArgs, quiet: bool) -> ExitCode {
             || v.get("evade_mode").is_some()
             || v.get("results").is_some()
     };
-    if !looks_like_bench(&cur) {
+    // R45-tail fix (dogfood): if BOTH inputs lack the bench-waf
+    // shape, the comparison is definitely meaningless. Exit 2
+    // instead of issuing a warning and proceeding to print zeroes
+    // — a CI gate using bench-diff exit code as the regression
+    // signal was passing on totally bogus files.
+    let cur_ok = looks_like_bench(&cur);
+    let base_ok = looks_like_bench(&base);
+    if !cur_ok && !base_ok {
+        eprintln!(
+            "error: neither {} nor {} looks like a bench-waf --output file \
+             (both missing raw_block_rate / evade_mode / results). Refusing \
+             to print a zero diff for non-bench inputs.",
+            current_path.display(),
+            baseline_path.display()
+        );
+        return ExitCode::from(2);
+    }
+    if !cur_ok {
         eprintln!(
             "WARNING: {} does not look like a bench-waf --output file (missing raw_block_rate / evade_mode / results). Comparison may be meaningless.",
-            args.current.display()
+            current_path.display()
         );
     }
-    if !looks_like_bench(&base) {
+    if !base_ok {
         eprintln!(
             "WARNING: {} does not look like a bench-waf --output file (missing raw_block_rate / evade_mode / results). Comparison may be meaningless.",
-            args.baseline.display()
+            baseline_path.display()
         );
     }
 
@@ -92,50 +144,52 @@ pub fn run_bench_diff(args: BenchDiffArgs, quiet: bool) -> ExitCode {
     let drop_pp = (base_bypass - cur_bypass) * 100.0;
 
     let mut regression = false;
+    let stack_mismatch = cur_raw < args.raw_block_floor;
 
-    if drop_pp >= args.bypass_drop_pp {
+    if args.format == "text" {
+        println!("baseline overall bypass: {:.2}%", base_bypass * 100.0);
+        println!("current  overall bypass: {:.2}%", cur_bypass * 100.0);
+        println!("delta:                   {:+.2}pp", -drop_pp);
+        println!("baseline raw-block:      {:.2}%", base_raw * 100.0);
+        println!("current  raw-block:      {:.2}%", cur_raw * 100.0);
+    }
+
+    if drop_pp > args.bypass_drop_pp {
+        if args.format == "text" {
+            eprintln!(
+                "REGRESSION: bypass rate fell {:.2}pp (threshold {:.2}pp).",
+                drop_pp, args.bypass_drop_pp
+            );
+        }
         regression = true;
     }
 
-    let stack_changed = cur_raw < args.raw_block_floor;
-
-    if quiet {
-        println!("{}", json!({
-            "schema_version": 1,
-            "regression": regression,
-            "delta_pp": -drop_pp,
-            "baseline_bypass": base_bypass,
-            "current_bypass": cur_bypass,
-            "baseline_raw_block": base_raw,
-            "current_raw_block": cur_raw,
-            "stack_changed": stack_changed,
-        }));
-        if regression {
-            return ExitCode::from(3);
-        }
-        return ExitCode::SUCCESS;
-    }
-
-    println!("baseline overall bypass: {:.2}%", base_bypass * 100.0);
-    println!("current  overall bypass: {:.2}%", cur_bypass * 100.0);
-    println!("delta:                   {:+.2}pp", -drop_pp);
-    println!("baseline raw-block:      {:.2}%", base_raw * 100.0);
-    println!("current  raw-block:      {:.2}%", cur_raw * 100.0);
-
-    if regression {
-        eprintln!(
-            "REGRESSION: bypass rate fell {:.2}pp (threshold {:.2}pp).",
-            drop_pp, args.bypass_drop_pp
-        );
-    }
-
-    if stack_changed {
+    if stack_mismatch && args.format == "text" {
         eprintln!(
             "WARNING: current raw-block-rate {:.2}% < floor {:.2}% — \
              the WAF stack itself may have changed (not a wafrift bug).",
             cur_raw * 100.0,
             args.raw_block_floor * 100.0
         );
+    }
+
+    if args.format == "json" {
+        // R46-I8 fix: everything the operator might check goes into
+        // ONE structured object on stdout so CI can `| jq` without
+        // also tee'ing stderr.
+        let obj = serde_json::json!({
+            "schema_version": 1,
+            "baseline_bypass_rate": base_bypass,
+            "current_bypass_rate": cur_bypass,
+            "delta_pp": -drop_pp,
+            "baseline_raw_block_rate": base_raw,
+            "current_raw_block_rate": cur_raw,
+            "bypass_drop_pp_threshold": args.bypass_drop_pp,
+            "raw_block_floor": args.raw_block_floor,
+            "regression": regression,
+            "stack_mismatch_warning": stack_mismatch,
+        });
+        println!("{}", serde_json::to_string(&obj).unwrap_or_default());
     }
 
     if regression {
@@ -147,29 +201,8 @@ pub fn run_bench_diff(args: BenchDiffArgs, quiet: bool) -> ExitCode {
 }
 
 fn load(path: &std::path::Path) -> Result<serde_json::Value, String> {
-    // Pre-fix this was unbounded `std::fs::read_to_string` — an
-    // operator typo (`--baseline /dev/zero`) or a hostile symlink
-    // would OOM the bench-diff tool. A bench JSON is typically a few
-    // megabytes; 256 MiB is generous even for many-strategy heavy runs.
-    const BENCH_RESULT_MAX_BYTES: usize = 256 * 1024 * 1024;
-    let s = match crate::safe_body::read_bounded_text_file(
-        path,
-        BENCH_RESULT_MAX_BYTES,
-    ) {
-        Ok(s) => s,
-        Err(crate::safe_body::ReadError::Transport(msg)) => return Err(msg),
-        Err(crate::safe_body::ReadError::Overrun {
-            cap_bytes,
-            observed_bytes,
-        }) => {
-            return Err(format!(
-                "bench result {} exceeds {} MiB cap ({} bytes observed)",
-                path.display(),
-                cap_bytes / (1024 * 1024),
-                observed_bytes
-            ));
-        }
-    };
+    let s = crate::safe_body::read_bounded_text_file(path, BENCH_DIFF_INPUT_MAX_BYTES)
+        .map_err(|e| e.to_string())?;
     serde_json::from_str(&s).map_err(|e| e.to_string())
 }
 
@@ -214,11 +247,14 @@ mod tests {
             r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.40}}"#,
         );
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: base,
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(base),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
-        }, false);
+            format: "text".into(),
+        });
         // ExitCode does not impl PartialEq; canonicalize via debug.
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(3)));
     }
@@ -238,11 +274,14 @@ mod tests {
             r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.49}}"#,
         );
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: base,
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(base),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
-        }, false);
+            format: "text".into(),
+        });
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 
@@ -264,10 +303,13 @@ mod tests {
             r#"{"raw_block_rate":0.80,"evaded_summary":{"overall_bypass_rate":0.50}}"#,
         );
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: base,
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(base),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
+            format: "text".into(),
         });
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
@@ -284,10 +326,13 @@ mod tests {
         );
         write(&base, "not json at all");
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: base,
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(base),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
+            format: "text".into(),
         });
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(1)));
     }
@@ -302,10 +347,13 @@ mod tests {
             r#"{"raw_block_rate":1.0,"evaded_summary":{"overall_bypass_rate":0.5}}"#,
         );
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: dir.join("does-not-exist.json"),
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(dir.join("does-not-exist.json")),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
+            format: "text".into(),
         });
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(1)));
     }
@@ -325,21 +373,25 @@ mod tests {
             r#"{"raw_block_rate":1.0,"evade_mode":true,"evaded_summary":{"overall_bypass_rate":0.10}}"#,
         );
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: base,
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(base),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
+            format: "text".into(),
         });
         // base_bypass=0, cur_bypass=0.10 → drop_pp negative → no regression.
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 
     #[test]
-    fn non_bench_files_still_return_success_not_panic() {
+    fn non_bench_files_are_rejected_not_silently_zero_diffed() {
         // Both files are valid JSON but lack every bench-waf field.
-        // The command should complete (exit 0) and not panic — the
-        // warning is emitted but can't be asserted here without
-        // capturing stderr. The important invariant is: no crash.
+        // Pre-hardening this silently returned a 0% diff; that turned
+        // `wafrift bench-diff` into a CI green stamp for any unrelated
+        // JSON pair. New contract: refuse with exit 2 (bad-input) so
+        // the gate can never be tricked by malformed artifacts.
         let dir = std::env::temp_dir().join("wafrift_bench_diff_test_non_bench");
         let _ = std::fs::create_dir_all(&dir);
         let cur = dir.join("cur.json");
@@ -347,13 +399,16 @@ mod tests {
         write(&cur, r#"{"completely":"unrelated","data":42}"#);
         write(&base, r#"{"also":"unrelated"}"#);
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: base,
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(base),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
+            format: "text".into(),
         });
-        // Both sides 0.00% → no regression, exits 0.
-        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        // Bad-input exit code (anti-rig: never silently 0).
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::from(2)));
     }
 
     #[test]
@@ -373,12 +428,49 @@ mod tests {
         );
         write(&base, r#"{"raw_block_rate":1.0}"#); // no evaded_summary
         let code = run_bench_diff(BenchDiffArgs {
-            current: cur,
-            baseline: base,
+            current_positional: None,
+            baseline_positional: None,
+            current: Some(cur),
+            baseline: Some(base),
             bypass_drop_pp: 2.0,
             raw_block_floor: 0.95,
+            format: "text".into(),
         });
         // base_bypass = 0 (missing), cur_bypass = 0.30 → no regression.
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    // ── Round 18: bounded bench-diff input reads ─────────────────────
+    //
+    // `bench-diff --current` / `--baseline` previously slurped via
+    // std::fs::read_to_string and OOMed on /dev/zero / multi-GB
+    // symlinks. Must go through safe_body::read_bounded_text_file
+    // with BENCH_DIFF_INPUT_MAX_BYTES.
+
+    #[test]
+    fn bench_diff_input_load_is_bounded() {
+        let src = include_str!("bench_diff.rs");
+        let needle = "safe_body::read_bounded_text_file(path, BENCH_DIFF_INPUT_MAX_BYTES)";
+        assert!(
+            src.contains(needle),
+            "bench_diff.rs `load` must use bounded reader with BENCH_DIFF_INPUT_MAX_BYTES"
+        );
+        let banned = concat!(
+            "std::fs::",
+            "read_to_",
+            "string(path).map_err(|e| e.to_string())"
+        );
+        assert!(
+            !src.contains(banned),
+            "raw unbounded fs read of bench-diff input path reintroduced — OOM regression"
+        );
+    }
+
+    #[test]
+    fn bench_diff_cap_is_sane() {
+        assert!(
+            super::BENCH_DIFF_INPUT_MAX_BYTES >= 16 * 1024 * 1024,
+            "BENCH_DIFF_INPUT_MAX_BYTES tightened below 16 MiB — could reject legitimate bench outputs"
+        );
     }
 }

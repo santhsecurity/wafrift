@@ -56,11 +56,10 @@ use colored::Colorize;
 use serde_json::json;
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
 use crate::parser_diff_common::{body_delta_pct, severity_of};
 
 #[derive(Args, Debug)]
-pub struct QueryDiffArgs {
+pub(crate) struct QueryDiffArgs {
     /// Target URL. The path is fixed; we vary only the query string.
     /// Pick a route the operator suspects the WAF gates via
     /// query-param inspection (search, lookup, login).
@@ -106,7 +105,7 @@ pub struct QueryDiffArgs {
 
 /// One query-parse-disagreement probe.
 #[derive(Debug, Clone)]
-pub struct QueryDisagreement {
+pub(crate) struct QueryDisagreement {
     /// Stable short identifier.
     pub kind: &'static str,
     /// Human description.
@@ -117,7 +116,7 @@ pub struct QueryDisagreement {
 
 /// Result of one query-diff probe.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct QueryDiffResult {
+pub(crate) struct QueryDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub query: String,
@@ -135,7 +134,7 @@ pub struct QueryDiffResult {
 /// interpolated into the "attack" slot of every variant so the
 /// operator can grep responses for it.
 #[must_use]
-pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisagreement> {
+pub(crate) fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisagreement> {
     let mut out = Vec::new();
 
     // ── 1. HPP — duplicate parameter ─────────────────────────
@@ -243,7 +242,7 @@ pub fn generate_query_variants(param: &str, attack_token: &str) -> Vec<QueryDisa
     out
 }
 
-pub async fn run_query_diff(mut args: QueryDiffArgs) -> ExitCode {
+pub(crate) async fn run_query_diff(mut args: QueryDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
@@ -327,7 +326,11 @@ pub async fn run_query_diff(mut args: QueryDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = sem.clone().acquire_owned().await.unwrap();
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let url = url_arc.clone();
         let counter = counter.clone();
@@ -346,6 +349,7 @@ pub async fn run_query_diff(mut args: QueryDiffArgs) -> ExitCode {
 
     let mut results: Vec<QueryDiffResult> = Vec::new();
     let mut errors = 0u32;
+    let mut error_details: Vec<String> = Vec::new();
     for h in handles {
         let (variant, outcome) = h.await.unwrap_or_else(|e| {
             (
@@ -376,11 +380,21 @@ pub async fn run_query_diff(mut args: QueryDiffArgs) -> ExitCode {
                     severity,
                 });
             }
-            Err(_) => errors += 1,
+            Err(e) => {
+                errors += 1;
+                error_details.push(format!("{} (q={}): {e}", variant.kind, variant.query));
+            }
         }
     }
 
-    emit_output(&args, &results, baseline_status, baseline_body_len, errors);
+    emit_output(
+        &args,
+        &results,
+        baseline_status,
+        baseline_body_len,
+        errors,
+        &error_details,
+    );
     ExitCode::SUCCESS
 }
 
@@ -389,7 +403,7 @@ crate::impl_parser_diff_http_args!(QueryDiffArgs);
 use crate::parser_diff_common::fire_get_status_len as fire_get;
 
 fn render_curl(url: &str) -> String {
-    format!("curl -i {}", shell_single_quote(url))
+    crate::helpers::render_simple_curl(None, url, &[], None)
 }
 
 fn emit_output(
@@ -398,9 +412,9 @@ fn emit_output(
     baseline_status: u16,
     baseline_body_len: usize,
     errors: u32,
+    error_details: &[String],
 ) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
@@ -410,10 +424,8 @@ fn emit_output(
             "baseline_body_len": baseline_body_len,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high": high.len(),
-                "medium": medium.len(),
-            },
+            "error_details": error_details,
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -421,14 +433,12 @@ fn emit_output(
     }
 
     if !args.quiet {
-        println!();
-        println!(
-            "  {} {} divergence(s) — {} high, {} medium · {} error(s)",
-            "[wafrift query-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
-            errors
+        crate::parser_diff_common::print_text_summary(
+            "query-diff",
+            "divergence(s)",
+            high,
+            medium,
+            errors,
         );
     }
 
@@ -436,14 +446,12 @@ fn emit_output(
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
         println!("  [{badge}] {} — {}", r.kind.bold(), r.description);
-        println!(
-            "    {} baseline HTTP {} ({} bytes) → probe HTTP {} ({} bytes, Δ {:+.1}%)",
-            "↘".bright_black(),
+        crate::parser_diff_common::print_baseline_probe_arrow(
             r.baseline_status,
             r.baseline_body_len,
             r.probe_status,
             r.probe_body_len,
-            r.body_delta_pct
+            r.body_delta_pct,
         );
         println!("    query: {}", r.query);
         println!("    {}", r.curl_cmd);

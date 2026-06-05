@@ -179,13 +179,14 @@ impl IntelligenceLoop {
             return LoopAction::Terminate(TerminationReason::BudgetExhausted);
         }
 
-        // Handle target errors
-        if let Feedback::TargetError(ref msg) = feedback {
-            let _ = self.evolution.record_target_error(msg.clone());
-            if !self.evolution.target_health.is_healthy() {
-                return LoopAction::Terminate(TerminationReason::TargetHealthCritical);
-            }
-            // Backoff implicitly handled by caller observing returned delay
+        // Handle target errors. record_target_error returns Err exactly when
+        // health is critical, so we use its return value directly instead of
+        // re-querying is_healthy() — no computed-but-discarded result.
+        // Backoff implicitly handled by caller observing returned delay.
+        if let Feedback::TargetError(ref msg) = feedback
+            && self.evolution.record_target_error(msg.clone()).is_err()
+        {
+            return LoopAction::Terminate(TerminationReason::TargetHealthCritical);
         }
 
         match self.phase {

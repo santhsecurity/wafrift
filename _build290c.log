@@ -1,0 +1,59 @@
+===GRAMMAR===
+
+PAYLOAD
+------wafriftEQUIVb0undary--
+
+  left: 2
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    grammar::equiv::delivery_api_tests::multipart_structural_fields_strip_injection_bytes
+
+test result: FAILED. 592 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+error: test failed, to rerun pass `-p wafrift-grammar --lib`
+G=101
+===EVOLUTION===
+test evolution::engine_tests::multiple_generations_converge ... ok
+test body_padding::tests::pathological_size_clamps_to_max ... ok
+test search::novelty::tests::eval_counter_ids_are_unique_across_generations ... ok
+test evolution::engine_tests::checkpoint_load_rejects_oversized_file ... ok
+test rule_corpus::tests::mark_drift_updates_timestamp ... ok
+
+test result: ok. 515 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+
+E=0
+===CLI-BINS===
+test session_init::tests::establish_set_cookie_overrides_curl_supplied_value_by_name ... ok
+test smuggle_cmd::tests::time_first_byte_returns_quickly_when_server_responds ... ok
+test model_evade_cmd::tests::lstar_budgeted_learns_simple_boundary ... ok
+test session_init::tests::establish_carries_curl_cookie_forward ... ok
+test smuggle_cmd::tests::time_first_byte_returns_timeout_value_when_server_silent ... ok
+test listener_cmd::tests::end_to_end_huge_content_length_does_not_pre_allocate ... ok
+test listener_cmd::tests::end_to_end_callback_with_matching_token_in_path ... ok
+test listener_cmd::tests::end_to_end_negative_content_length_does_not_crash ... ok
+test listener_cmd::tests::end_to_end_one_byte_above_cap_truncates_one_byte ... ok
+test listener_cmd::tests::management_check_does_not_record_itself_as_a_callback ... ok
+test listener_cmd::tests::registry_matched_count_excludes_unmatched_callbacks ... ok
+test session_init::tests::establish_strips_setcookie_attributes_keeps_only_name_value ... ok
+test session_init::tests::establish_summary_names_status_and_cookie_count ... ok
+test session_init::tests::establish_from_file_full_e2e_with_real_disk_curl_file ... ok
+
+failures:
+
+---- hunt_cmd::tests::round_runner_overwrites_its_preclaimed_tmp_output stdout ----
+
+thread 'hunt_cmd::tests::round_runner_overwrites_its_preclaimed_tmp_output' (1663576) panicked at crates/cli/src/hunt_cmd.rs:904:9:
+hunt force_overwrite reverted to false — every round's output is rejected (0 bypasses)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    hunt_cmd::tests::round_runner_overwrites_its_preclaimed_tmp_output
+
+test result: FAILED. 1667 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.40s
+
+error: test failed, to rerun pass `-p wafrift-cli --bin wafrift`
+C=101

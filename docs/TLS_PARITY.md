@@ -26,13 +26,19 @@ cargo build -p wafrift-cli --features wafrift-transport/tls-impersonate
 Then drive it:
 
 ```bash
-# Scan with Chrome 131's TLS stack
-wafrift scan --target https://target.com/x --payload "' OR 1=1--" \
-    --tls-impersonate chrome131
-
 # Proxy mode — every upstream request leaves the box wearing
-# Firefox 133's ClientHello
+# Firefox 133's ClientHello. This is the path that actually wires
+# BoringSSL impersonation today.
 wafrift-proxy --listen 127.0.0.1:8080 --tls-impersonate firefox133
+
+# Then route `wafrift scan` (and any other client) through the
+# proxy so its outbound traffic inherits the impersonated TLS:
+wafrift scan --target https://target.com/x --payload "' OR 1=1--" \
+    --proxy http://127.0.0.1:8080
+
+# NOTE: `wafrift scan --stealth-browser chrome` selects canonical
+# browser HTTP headers for the reqwest/rustls scan path. Route through the
+# proxy when the scan must inherit wire-identical browser TLS.
 ```
 
 Supported profile names: `chrome131`, `chrome120`, `edge131`,

@@ -68,11 +68,10 @@ use reqwest::Client;
 use serde_json::json;
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
 use crate::parser_diff_common::{body_delta_pct, severity_of};
 
 #[derive(Args, Debug)]
-pub struct BodyDiffArgs {
+pub(crate) struct BodyDiffArgs {
     /// Target URL. We POST every variant body to this URL. Pick a
     /// route the operator SUSPECTS the WAF guards via body
     /// inspection (login, search, RPC endpoints).
@@ -124,7 +123,7 @@ pub struct BodyDiffArgs {
 
 /// One body-parse-disagreement probe.
 #[derive(Debug, Clone)]
-pub struct BodyDisagreement {
+pub(crate) struct BodyDisagreement {
     /// Stable short identifier (`json-dup-key-last-wins`,
     /// `json-bom-prefix`, `charset-utf7`, `form-hpp-body`,
     /// `multipart-boundary-collision`, `json-as-form`,
@@ -140,7 +139,7 @@ pub struct BodyDisagreement {
 
 /// Result of one body-diff probe.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct BodyDiffResult {
+pub(crate) struct BodyDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub content_type: String,
@@ -159,7 +158,7 @@ pub struct BodyDiffResult {
 /// every variant body so the operator can grep the response /
 /// reflection for it.
 #[must_use]
-pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
+pub(crate) fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
     let mut out = Vec::new();
 
     // ── 1. JSON dup-key precedence ────────────────────────────
@@ -260,7 +259,7 @@ pub fn generate_body_variants(attack_token: &str) -> Vec<BodyDisagreement> {
 }
 
 /// Run the body-diff scanner.
-pub async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
+pub(crate) async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
@@ -315,13 +314,16 @@ pub async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = match crate::helpers::acquire_diff_permit(&sem, "body-diff").await {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("{} {e}", "error:".red());
-                return ExitCode::from(1);
-            }
-        };
+        // META §14: all 8 parser-diff commands use this identical semaphore
+        // acquire pattern. The `expect` is infallible (local semaphore, never
+        // closed). If this ever fires in production it means the semaphore was
+        // moved into an async block that outlives the arc — that's the structural
+        // bug, not the expect. Search "semaphore is never closed" to find all 8.
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let url = url_arc.clone();
         let counter = counter.clone();
@@ -339,6 +341,7 @@ pub async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
 
     let mut results: Vec<BodyDiffResult> = Vec::new();
     let mut errors = 0u32;
+    let mut error_details: Vec<String> = Vec::new();
     for h in handles {
         let (variant, outcome) = h.await.unwrap_or_else(|e| {
             (
@@ -370,11 +373,24 @@ pub async fn run_body_diff(mut args: BodyDiffArgs) -> ExitCode {
                     severity,
                 });
             }
-            Err(_) => errors += 1,
+            Err(e) => {
+                errors += 1;
+                error_details.push(format!(
+                    "{} (ct={}): {e}",
+                    variant.kind, variant.content_type
+                ));
+            }
         }
     }
 
-    emit_output(&args, &results, baseline_status, baseline_body_len, errors);
+    emit_output(
+        &args,
+        &results,
+        baseline_status,
+        baseline_body_len,
+        errors,
+        &error_details,
+    );
     ExitCode::SUCCESS
 }
 
@@ -394,22 +410,15 @@ async fn fire_body(
         .await
         .map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?.to_vec();
+    // §15 OOM / decompression-bomb: cap the body read.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok((status, body.len(), body))
 }
 
 fn render_curl(url: &str, content_type: &str, body: &[u8]) -> String {
-    let mut out = String::from("curl -i -X POST ");
-    out.push_str("-H ");
-    out.push_str(&shell_single_quote(&format!(
-        "Content-Type: {content_type}"
-    )));
-    out.push(' ');
-    out.push_str("--data-binary ");
-    out.push_str(&shell_single_quote(&String::from_utf8_lossy(body)));
-    out.push(' ');
-    out.push_str(&shell_single_quote(url));
-    out
+    crate::helpers::render_simple_curl(Some("POST"), url, &[], Some((content_type, body)))
 }
 
 fn emit_output(
@@ -418,9 +427,9 @@ fn emit_output(
     baseline_status: u16,
     baseline_body_len: usize,
     errors: u32,
+    error_details: &[String],
 ) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
@@ -429,10 +438,8 @@ fn emit_output(
             "baseline_body_len": baseline_body_len,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high": high.len(),
-                "medium": medium.len(),
-            },
+            "error_details": error_details,
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -440,14 +447,12 @@ fn emit_output(
     }
 
     if !args.quiet {
-        println!();
-        println!(
-            "  {} {} divergence(s) — {} high, {} medium · {} error(s)",
-            "[wafrift body-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
-            errors
+        crate::parser_diff_common::print_text_summary(
+            "body-diff",
+            "divergence(s)",
+            high,
+            medium,
+            errors,
         );
     }
 
@@ -455,14 +460,12 @@ fn emit_output(
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
         println!("  [{badge}] {} — {}", r.kind.bold(), r.description);
-        println!(
-            "    {} baseline HTTP {} ({} bytes) → probe HTTP {} ({} bytes, Δ {:+.1}%)",
-            "↘".bright_black(),
+        crate::parser_diff_common::print_baseline_probe_arrow(
             r.baseline_status,
             r.baseline_body_len,
             r.probe_status,
             r.probe_body_len,
-            r.body_delta_pct
+            r.body_delta_pct,
         );
         println!("    Content-Type: {}", r.content_type);
         println!("    {}", r.curl_cmd);
@@ -639,7 +642,7 @@ mod tests {
             // 30s: under heavy parallel test load (1362+ tests), Windows
             // loopback connect + mock scheduling can take 10+ seconds when
             // the tokio event loop is CPU-starved. 8s was too tight.
-            timeout_secs: 30,
+            timeout_secs: wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             insecure: false,
             proxy: None,
             header: Vec::new(),

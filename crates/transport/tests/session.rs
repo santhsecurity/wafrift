@@ -134,21 +134,43 @@ fn inject_csrf_body_rejects_json() {
     req.headers
         .push(("Content-Type".into(), "application/json".into()));
     let err = inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
-    assert!(matches!(err, SessionError::CsrfInjectIncompatibleBody { .. }));
+    assert!(matches!(
+        err,
+        SessionError::CsrfInjectIncompatibleBody { .. }
+    ));
 }
 
 // ── Cookie jar persistence ─────────────────────────────────────────────────
 
+/// Return a collision-resistant tmp path for jar-persistence tests.
+/// PID + nanosecond timestamp avoids races when `cargo test` parallelises
+/// across multiple test processes on the same machine.
+fn jar_tmp(label: &str, ext: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "wafrift-jar-{}-{}-{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+        label,
+        ext,
+    ))
+}
+
 #[test]
 fn load_jar_nonexistent_creates_empty() {
-    let path = std::path::Path::new("/tmp/wafrift_nonexistent_cookie_jar_12345.txt");
-    let store = load_jar(path).unwrap();
+    // Use a collision-resistant path so parallel test runs cannot
+    // accidentally share this "nonexistent" path.
+    let path = jar_tmp("nonexistent", "txt");
+    let _ = std::fs::remove_file(&path); // ensure it truly doesn't exist
+    let store = load_jar(&path).unwrap();
     assert!(store.is_empty());
 }
 
 #[test]
 fn save_and_load_jar_roundtrip() {
-    let tmp = std::env::temp_dir().join("wafrift_cookie_jar_test.json");
+    let tmp = jar_tmp("roundtrip", "json");
     let _ = std::fs::remove_file(&tmp);
 
     let mut store = SessionStore::new();
@@ -170,7 +192,7 @@ fn save_and_load_jar_roundtrip() {
 
 #[test]
 fn save_jar_creates_file() {
-    let tmp = std::env::temp_dir().join("wafrift_cookie_jar_create_test.json");
+    let tmp = jar_tmp("create", "json");
     let _ = std::fs::remove_file(&tmp);
 
     let mut store = SessionStore::new();

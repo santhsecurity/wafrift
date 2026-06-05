@@ -41,13 +41,14 @@ pub mod ensemble_dilution;
 pub mod equiv_bridge;
 pub mod equiv_query;
 pub mod error;
-pub mod fingerprint;
+pub mod filter_profile;
 pub mod harden;
 pub mod learn;
 pub mod mine;
 pub mod mlwaf;
 pub mod normalize;
 pub mod oracle;
+pub mod origin_probe;
 pub mod outcome;
 pub mod sfa;
 pub mod solve;
@@ -59,7 +60,11 @@ pub use canon::{CanonView, Channel, Segment, canonicalize};
 pub use equiv_bridge::{norm_mismatch_members, sink_for_tag, solution_member};
 pub use equiv_query::{ChainedEq, PacBound, SampledEq, UcbBanditEq, WMethodEq};
 pub use error::{Result, WafModelError};
-pub use fingerprint::{Candidate, Fingerprinter, Identification, default_battery};
+pub use ensemble_dilution::RuleGroup;
+pub use filter_profile::{
+    DecodeGap, FilterProfile, TokenFinding, TokenProbe, Verdict, battery_from_toml,
+    characterize, default_battery as default_filter_battery, probe_decode_gaps,
+};
 pub use harden::{ClosureReport, synthesize_closure};
 pub use learn::{
     Alphabet, BoundedExhaustiveEq, EquivalenceOracle, LearnReport, kv_learn, l_star,
@@ -69,6 +74,9 @@ pub use mine::{attack_grammar, mine_bypasses, minimal_bypass, waf_diff};
 pub use mlwaf::{MlEvasion, MlWaf, evade_ml};
 pub use normalize::{Transform, apply_chain};
 pub use oracle::{ChannelSet, FnOracle, Rule, SimRegexWaf, WafOracle};
+pub use origin_probe::{
+    FnReflector, OriginScan, ReflectionOracle, detect_origin_normalization, scan_origin,
+};
 pub use outcome::Outcome;
 pub use sfa::{BytePred, Sfa, StateId};
 pub use solve::{Solution, solve_bypass};

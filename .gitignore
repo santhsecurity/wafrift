@@ -87,6 +87,11 @@ SCOREBOARD*.md
 !LICENSE-MIT
 # ── Santh-internal artifacts (END) ──
 
+# Lowercase 'legendary-*.md' planning/audit docs — the managed block above
+# only matches uppercase *LEGENDARY*, so these slip through. They stay in the
+# outer Santh backup but must never ship in the public wafrift repo.
+legendary-*.md
+
 # Per-session dogfood scratch + Python __pycache__ — never commit.
 .tmp_*
 __pycache__/

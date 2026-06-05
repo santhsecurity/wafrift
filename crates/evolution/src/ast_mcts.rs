@@ -382,36 +382,36 @@ fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
             }
         }
         RuleId::BETWEEN_EQ => {
-            if let Expr::BinaryOp { op: BinaryOperator::Eq, left, right } = e {
-                if !is_synthetic_column(left) {
-                    if *counter == target {
-                        *e = Expr::Between {
-                            expr: left.clone(),
-                            negated: false,
-                            low: right.clone(),
-                            high: right.clone(),
-                        };
-                        *counter += 1;
-                        return true;
-                    }
+            if let Expr::BinaryOp { op: BinaryOperator::Eq, left, right } = e
+                && !is_synthetic_column(left)
+            {
+                if *counter == target {
+                    *e = Expr::Between {
+                        expr: left.clone(),
+                        negated: false,
+                        low: right.clone(),
+                        high: right.clone(),
+                    };
                     *counter += 1;
+                    return true;
                 }
+                *counter += 1;
             }
         }
         RuleId::IN_SINGLE => {
-            if let Expr::BinaryOp { op: BinaryOperator::Eq, left, right } = e {
-                if !is_synthetic_column(left) {
-                    if *counter == target {
-                        *e = Expr::InList {
-                            expr: left.clone(),
-                            list: vec![(**right).clone()],
-                            negated: false,
-                        };
-                        *counter += 1;
-                        return true;
-                    }
+            if let Expr::BinaryOp { op: BinaryOperator::Eq, left, right } = e
+                && !is_synthetic_column(left)
+            {
+                if *counter == target {
+                    *e = Expr::InList {
+                        expr: left.clone(),
+                        list: vec![(**right).clone()],
+                        negated: false,
+                    };
                     *counter += 1;
+                    return true;
                 }
+                *counter += 1;
             }
         }
         RuleId::COMMUTE_OR => {
@@ -486,32 +486,32 @@ fn apply_text_rule(fragment: &str, rule: RuleId, position: u8) -> Option<String>
         }
         RuleId::HEX_LITERAL => {
             // Convert the first single-quoted string literal to 0x<hex>.
-            if let Some(start) = fragment.find('\'') {
-                if let Some(end) = fragment[start + 1..].find('\'') {
-                    let s = &fragment[start + 1..start + 1 + end];
-                    let hex: String = s.bytes().map(|b| format!("{b:02X}")).collect();
-                    let replaced = format!("{}0x{hex}{}", &fragment[..start], &fragment[start + 1 + end + 1..]);
-                    return Some(replaced);
-                }
+            if let Some(start) = fragment.find('\'')
+                && let Some(end) = fragment[start + 1..].find('\'')
+            {
+                let s = &fragment[start + 1..start + 1 + end];
+                let hex: String = s.bytes().map(|b| format!("{b:02X}")).collect();
+                let replaced = format!("{}0x{hex}{}", &fragment[..start], &fragment[start + 1 + end + 1..]);
+                return Some(replaced);
             }
             None
         }
         RuleId::CHAR_CONCAT => {
             // Explode a single-quoted string to CHAR(n1)||CHAR(n2)||…
-            if let Some(start) = fragment.find('\'') {
-                if let Some(end) = fragment[start + 1..].find('\'') {
-                    let s = &fragment[start + 1..start + 1 + end];
-                    if s.is_empty() {
-                        return None;
-                    }
-                    let chars: String = s
-                        .bytes()
-                        .map(|b| format!("CHAR({b})"))
-                        .collect::<Vec<_>>()
-                        .join("||");
-                    let replaced = format!("{}{chars}{}", &fragment[..start], &fragment[start + 1 + end + 1..]);
-                    return Some(replaced);
+            if let Some(start) = fragment.find('\'')
+                && let Some(end) = fragment[start + 1..].find('\'')
+            {
+                let s = &fragment[start + 1..start + 1 + end];
+                if s.is_empty() {
+                    return None;
                 }
+                let chars: String = s
+                    .bytes()
+                    .map(|b| format!("CHAR({b})"))
+                    .collect::<Vec<_>>()
+                    .join("||");
+                let replaced = format!("{}{chars}{}", &fragment[..start], &fragment[start + 1 + end + 1..]);
+                return Some(replaced);
             }
             None
         }
@@ -612,7 +612,14 @@ pub fn mcts_search<O: AstMctsOracle>(
                 .then_with(|| a_key.rule.0.cmp(&b_key.rule.0))
                 .then_with(|| a_key.position.cmp(&b_key.position))
         });
-        let action = *ranked[0].0;
+        // `ranked` is non-empty because `arms` is non-empty (guarded above).
+        // Use `first()` instead of `[0]` to avoid a panic if the invariant
+        // is ever broken by a future refactor.
+        let Some((top_action, _)) = ranked.first() else {
+            debug_assert!(false, "run_mcts: ranked must be non-empty here");
+            break;
+        };
+        let action = **top_action;
 
         // Rollout: generate candidate and query oracle.
         let candidate_payload =
@@ -625,8 +632,14 @@ pub fn mcts_search<O: AstMctsOracle>(
         // Reward: 1.0 if oracle did NOT block (bypass), 0.0 if blocked.
         let reward = if blocked { 0.0 } else { 1.0 };
 
-        // Backpropagation.
-        let arm = arms.get_mut(&action).unwrap();
+        // Backpropagation. `action` was just selected from `arms`, so
+        // `get_mut` is always Some — use `if let` with a debug_assert
+        // so a future refactor that breaks this invariant fails loudly
+        // in test builds instead of panicking in production.
+        let Some(arm) = arms.get_mut(&action) else {
+            debug_assert!(false, "run_mcts: selected action must be in arms");
+            break;
+        };
         arm.visits += 1.0;
         arm.total_reward += reward;
 
@@ -706,7 +719,10 @@ fn mcts_text_only<O: AstMctsOracle>(
     let mut bypass_found = false;
 
     while oracle_queries < budget && !bypass_found {
-        let action = *arms
+        // `arms` is non-empty (guarded above); `max_by` on a non-empty
+        // BTreeMap iterator always returns Some. Use a debug_assert to
+        // document this invariant instead of silently panicking.
+        let Some(action_ref) = arms
             .iter()
             .max_by(|(_, a), (_, b)| {
                 a.ucb1(total_visits + 1.0, c)
@@ -714,14 +730,23 @@ fn mcts_text_only<O: AstMctsOracle>(
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(k, _)| k)
-            .unwrap();
+        else {
+            debug_assert!(false, "mcts_text_only: arms must be non-empty here");
+            break;
+        };
+        let action = *action_ref;
         let candidate = apply_text_rule(payload, action.rule, action.position)
             .unwrap_or_else(|| payload.to_string());
         let blocked = oracle.eval(&candidate);
         oracle_queries += 1;
         total_visits += 1.0;
         let reward = if blocked { 0.0 } else { 1.0 };
-        let arm = arms.get_mut(&action).unwrap();
+        // `action` was selected from `arms`, so `get_mut` is always Some.
+        // Use `if let` with a debug_assert to avoid a panic on a logic bug.
+        let Some(arm) = arms.get_mut(&action) else {
+            debug_assert!(false, "mcts_text_only: selected action must be in arms");
+            break;
+        };
         arm.visits += 1.0;
         arm.total_reward += reward;
         if !blocked {
@@ -1017,5 +1042,56 @@ mod tests {
     fn mcts_rule_id_all_unique() {
         let ids: std::collections::HashSet<u8> = RuleId::ALL.iter().map(|r| r.0).collect();
         assert_eq!(ids.len(), RuleId::ALL.len(), "all rule IDs must be unique");
+    }
+
+    /// Regression guard for the formerly-panicking `ranked.first()` /
+    /// `arms.get_mut(&action)` paths in `run_mcts`.
+    ///
+    /// Pre-fix: `ranked[0]` would panic on an empty Vec (logic-invariant
+    /// violation) and `arms.get_mut(&action).unwrap()` would panic if
+    /// `action` was somehow not in `arms`. The fix replaces both with
+    /// `if let` + `debug_assert!` + `break`.
+    ///
+    /// This test drives `mcts_search` on a valid SQL payload at various
+    /// budgets and verifies it never panics and always returns a coherent
+    /// result — the invariant holds on every iteration.
+    #[test]
+    fn run_mcts_no_panic_on_valid_sql_across_budgets() {
+        for budget in [1u64, 2, 5, 16, 32] {
+            let mut oracle = AlwaysBlockedOracle;
+            let result = mcts_search("1=1", budget, f64::sqrt(2.0), &mut oracle);
+            assert!(
+                result.is_some(),
+                "mcts_search on '1=1' with budget={budget} must return Some"
+            );
+            let r = result.unwrap();
+            assert!(
+                r.oracle_queries <= budget,
+                "oracle_queries ({}) must not exceed budget ({budget})",
+                r.oracle_queries
+            );
+        }
+    }
+
+    /// Regression guard for the `mcts_text_only` `arms.iter().max_by(...)
+    /// .map(|(k,_)| k).unwrap()` path (now replaced with `if let`).
+    ///
+    /// A non-SQL payload forces the AST path to fall back to text-only
+    /// MCTS — which is where the formerly-panicking `.unwrap()` lived.
+    /// With a non-zero budget and at least one applicable text rule,
+    /// the formerly-panicking path is exercised.
+    #[test]
+    fn mcts_text_only_no_panic_on_non_sql_payload() {
+        // "UNION SELECT" is not parseable as a bare SQL expression,
+        // so `run_mcts` falls back to `mcts_text_only`. The text
+        // rules (COMMENT_INSERT, ALIAS_SUBST, etc.) DO apply to this
+        // string, so `arms` is non-empty and the loop body runs.
+        let mut oracle = AlwaysBlockedOracle;
+        let result = mcts_search("UNION SELECT", 20, f64::sqrt(2.0), &mut oracle);
+        // May return None if no text rule applies or Some with a result.
+        // The key assertion is that it does NOT panic.
+        if let Some(r) = result {
+            assert!(r.oracle_queries <= 20);
+        }
     }
 }

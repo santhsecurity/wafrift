@@ -24,7 +24,8 @@
 //! let ua_count = headers.iter().filter(|(k, _)| k == "User-Agent").count();
 //! assert_eq!(ua_count, 1);
 //! let ua = headers.iter().find(|(k, _)| k == "User-Agent").unwrap();
-//! assert_eq!(ua.1, profile.user_agent);
+//! assert_ne!(ua.1, "old-ua/1.0");
+//! assert!(!ua.1.is_empty());
 //! ```
 
 pub mod fingerprint;

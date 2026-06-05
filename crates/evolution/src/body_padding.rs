@@ -717,4 +717,195 @@ mod tests {
         // Same-seed determinism preserved.
         assert_eq!(a, fill_with_seed(256, 0xAAAA_AAAA));
     }
+
+    // ── fill(0): zero-length fill ─────────────────────────────────────────
+
+    #[test]
+    fn fill_zero_returns_empty() {
+        let v = fill(0);
+        assert!(v.is_empty(), "fill(0) must return empty vec");
+    }
+
+    #[test]
+    fn fill_with_seed_zero_n_returns_empty() {
+        let v = fill_with_seed(0, 0xDEAD);
+        assert!(v.is_empty());
+    }
+
+    // ── text/xml: non-empty body → SkippedOpaque ─────────────────────────
+
+    #[test]
+    fn text_xml_nonempty_body_returns_skipped_opaque() {
+        let xml_body = b"<?xml version=\"1.0\"?><root><elem>value</elem></root>";
+        let out = pad(xml_body, "text/xml", 8 * 1024);
+        assert_eq!(
+            out,
+            PadOutcome::SkippedOpaque,
+            "non-empty text/xml body must not be padded — would corrupt XML structure"
+        );
+    }
+
+    #[test]
+    fn application_xml_nonempty_body_returns_skipped_opaque() {
+        let xml_body = b"<Envelope><Body><req/></Body></Envelope>";
+        let out = pad(xml_body, "application/xml", 8 * 1024);
+        assert_eq!(
+            out,
+            PadOutcome::SkippedOpaque,
+            "non-empty application/xml body must be SkippedOpaque"
+        );
+    }
+
+    // ── text/xml: empty body → pad_form applied ───────────────────────────
+
+    #[test]
+    fn text_xml_empty_body_applies_form_padding() {
+        // Empty text/xml body: the pad() function calls pad_form(b"", …)
+        // which produces _wafrift_pad=<filler>.
+        let out = pad(b"", "text/xml", 8 * 1024);
+        let PadOutcome::Padded { bytes, added } = out else {
+            panic!("empty text/xml must produce Padded, got {out:?}");
+        };
+        assert!(added >= 8 * 1024, "added={added}");
+        assert!(
+            bytes.starts_with(b"_wafrift_pad="),
+            "empty text/xml padding must use form-key prefix"
+        );
+    }
+
+    #[test]
+    fn application_xml_empty_body_applies_form_padding() {
+        let out = pad(b"", "application/xml", 8 * 1024);
+        assert!(
+            matches!(out, PadOutcome::Padded { .. }),
+            "empty application/xml must produce Padded"
+        );
+    }
+
+    // ── text/plain non-empty → SkippedOpaque ─────────────────────────────
+
+    #[test]
+    fn text_plain_nonempty_body_returns_skipped_opaque() {
+        let out = pad(b"hello world", "text/plain", 8 * 1024);
+        assert_eq!(out, PadOutcome::SkippedOpaque);
+    }
+
+    // ── known_threshold_values() correctness ─────────────────────────────
+
+    #[test]
+    fn known_threshold_values_contains_expected_numbers() {
+        let values = known_threshold_values();
+        // Pin the documented WAF thresholds.
+        assert!(values.contains(&(8 * 1024)), "must include 8 KiB (cloudflare-pro / aws-waf)");
+        assert!(values.contains(&(64 * 1024)), "must include 64 KiB (aws-waf-extended)");
+        assert!(values.contains(&(128 * 1024)), "must include 128 KiB (cloudflare-enterprise / imperva / modsecurity)");
+        assert!(values.contains(&(65 * 1024)), "must include 65 KiB (naxsi-default)");
+    }
+
+    #[test]
+    fn known_threshold_values_matches_known_thresholds() {
+        let from_pairs: std::collections::HashSet<usize> =
+            known_thresholds().into_iter().map(|(_, v)| v).collect();
+        let from_fn = known_threshold_values();
+        assert_eq!(
+            from_pairs, from_fn,
+            "known_threshold_values() must match the values from known_thresholds()"
+        );
+    }
+
+    // ── extract_boundary: multibyte character safety ──────────────────────
+
+    #[test]
+    fn extract_boundary_multibyte_at_byte_9_does_not_panic() {
+        // A multibyte UTF-8 character (e.g. ≡ = 3 bytes: 0xE2, 0x89, 0xA1) that
+        // straddles byte position 9 would panic under p[..9] (now uses p.get(..9)).
+        // The Content-Type param looks like: "boundary≡abc" where ≡ starts at byte 8.
+        // "boundary" is 8 bytes; the fallback case-insensitive check does `p.get(..9)`.
+        // We construct a value where the slice would fall mid-codepoint.
+        let ct = "multipart/form-data; \u{2261}boundary=abc"; // ≡ before "boundary"
+        let boundary = extract_boundary(ct);
+        // This particular input won't match any prefix, but must not panic.
+        let _ = boundary; // either Some or None — we only care it doesn't panic.
+
+        // Also test a real multibyte in the boundary= value position.
+        let ct2 = "multipart/form-data; boundary=\u{2261}abc"; // ≡ in boundary value
+        let boundary2 = extract_boundary(ct2);
+        // The value "\u{2261}abc" should be returned if the prefix matches.
+        assert!(boundary2.is_some(), "unicode in boundary value must be preserved");
+    }
+
+    #[test]
+    fn extract_boundary_with_unicode_before_byte_9_does_not_panic() {
+        // A multi-byte char (3 bytes) placed at byte 6 of the param name
+        // would cause `p.get(..9)` to return None safely (non-char boundary).
+        // "bound\u{2261}y=" — "bound" = 5 bytes, ≡ = 3 bytes (bytes 5-7), "y=" starts at 8.
+        let ct = "multipart/form-data; bound\u{2261}y=myfence";
+        let _ = extract_boundary(ct); // must not panic
+    }
+
+    // ── pad_multipart: body not starting with boundary → SkippedOpaque ───
+
+    #[test]
+    fn pad_multipart_body_not_starting_with_boundary_is_skipped() {
+        // A multipart body that doesn't start with --<boundary> is malformed.
+        // pad_multipart must return SkippedOpaque rather than corrupting it.
+        let boundary = "abc123";
+        let malformed_body = b"this body does not start with the boundary";
+        let ct = format!("multipart/form-data; boundary={boundary}");
+        let out = pad(malformed_body, &ct, 16 * 1024);
+        assert_eq!(
+            out,
+            PadOutcome::SkippedOpaque,
+            "malformed multipart (body missing leading boundary) must be SkippedOpaque"
+        );
+    }
+
+    // ── looks_padded for multipart ────────────────────────────────────────
+
+    #[test]
+    fn looks_padded_detects_multipart_shape() {
+        let boundary = "fence42";
+        let body = format!("--{boundary}\r\n\r\n--{boundary}--\r\n");
+        let ct = format!("multipart/form-data; boundary={boundary}");
+        let out = pad(body.as_bytes(), &ct, 8 * 1024);
+        if let PadOutcome::Padded { bytes, .. } = out {
+            assert!(
+                looks_padded(&bytes),
+                "looks_padded must detect multipart padding"
+            );
+        }
+    }
+
+    // ── MIN_USEFUL_PAD / MAX_USEFUL_PAD constant anti-rig ─────────────────
+
+    #[test]
+    fn min_useful_pad_is_4_kib() {
+        assert_eq!(MIN_USEFUL_PAD, 4 * 1024, "MIN_USEFUL_PAD must be 4 KiB");
+    }
+
+    #[test]
+    fn max_useful_pad_is_8_mib() {
+        assert_eq!(MAX_USEFUL_PAD, 8 * 1024 * 1024, "MAX_USEFUL_PAD must be 8 MiB");
+    }
+
+    #[test]
+    fn pad_at_exactly_min_useful_pad_produces_padded() {
+        // requested_bytes == MIN_USEFUL_PAD should NOT be SkippedTooSmall
+        // (the guard is `< MIN_USEFUL_PAD`, not `<=`).
+        let out = pad(b"", "application/json", MIN_USEFUL_PAD);
+        assert!(
+            matches!(out, PadOutcome::Padded { .. }),
+            "exactly MIN_USEFUL_PAD must produce Padded, not SkippedTooSmall"
+        );
+    }
+
+    #[test]
+    fn pad_one_below_min_useful_pad_is_too_small() {
+        let out = pad(b"", "application/json", MIN_USEFUL_PAD - 1);
+        assert_eq!(
+            out,
+            PadOutcome::SkippedTooSmall,
+            "one byte below MIN_USEFUL_PAD must be SkippedTooSmall"
+        );
+    }
 }

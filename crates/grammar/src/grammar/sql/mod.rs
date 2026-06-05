@@ -36,6 +36,7 @@ pub mod tautology;
 pub mod union;
 
 pub use common::SqlMutation;
+use wafrift_types::hash::{FNV_OFFSET_64, FNV_PRIME_64};
 
 use crate::grammar::sql::blind::{
     boolean_blind_mutations, error_blind_mutations, json_xml_mutations, order_by_probes,
@@ -69,7 +70,10 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
         return Vec::new();
     }
 
-    let mut results = Vec::new();
+    // §1 SPEED: pre-size to the max mutation count to avoid reallocs
+    // as mutation groups are extended. `max_mutations` is a tight upper
+    // bound on the final len so the capacity is never wasted.
+    let mut results = Vec::with_capacity(max_mutations);
     let lower = payload.to_ascii_lowercase();
 
     // Priority 1: quote-free / comment-free rewrites (Naxsi, AWS WAF
@@ -349,18 +353,25 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     // at least one significant token of the original — checked after
     // stripping SQL comments + whitespace so legitimate
     // comment-injection evasions (`extr/**/actvalue`) still pass.
-    if is_structured_attack(payload) {
-        let markers = significant_tokens(payload);
-        if !markers.is_empty() {
-            results.retain(|m| {
-                let norm = strip_sql_comments_ws(&m.payload);
-                let var_tokens: std::collections::HashSet<String> = norm
-                    .split(|c: char| !c.is_ascii_alphanumeric())
-                    .filter(|t| t.len() >= 4)
-                    .map(str::to_ascii_lowercase)
-                    .collect();
-                markers.iter().any(|mk| var_tokens.contains(mk))
-            });
+    //
+    // §1 SPEED: strip_sql_comments_ws(payload) is now called ONCE and
+    // shared between is_structured_attack and significant_tokens — the
+    // old code called it twice for every structured payload.
+    {
+        let stripped_payload = strip_sql_comments_ws(payload);
+        if is_structured_attack_stripped(&stripped_payload) {
+            let markers = significant_tokens(&stripped_payload);
+            if !markers.is_empty() {
+                results.retain(|m| {
+                    let norm = strip_sql_comments_ws(&m.payload);
+                    let var_tokens: std::collections::HashSet<String> = norm
+                        .split(|c: char| !c.is_ascii_alphanumeric())
+                        .filter(|t| t.len() >= 4)
+                        .map(str::to_ascii_lowercase)
+                        .collect();
+                    markers.iter().any(|mk| var_tokens.contains(mk))
+                });
+            }
         }
     }
 
@@ -369,6 +380,65 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     // public contract promises at most `max_mutations` results.
     results.truncate(max_mutations);
     results
+}
+
+/// STRUCTURED attack token set — the canonical single copy, shared by both
+/// `is_structured_attack` and `is_structured_attack_stripped` via delegation.
+/// §7 DEDUP: one definition, two callers.
+const STRUCTURED_TOKENS: &[&str] = &[
+    "union",
+    "select",
+    "sleep(",
+    "benchmark(",
+    "waitfor",
+    "extractvalue",
+    "updatexml",
+    "load_file",
+    "into outfile",
+    "into dumpfile",
+    ";",
+    "insert ",
+    "update ",
+    "delete ",
+    "drop ",
+    "exec ",
+    "xp_",
+    "sp_",
+    "pg_sleep",
+    "dbms_",
+    "utl_",
+    "case when",
+    "regexp ",
+    "rlike ",
+    "@@",
+    "0x",
+    "char(",
+    "chr(",
+    "concat",
+    "ascii(",
+    "substring",
+    "substr(",
+    "hex(",
+    "unhex(",
+    "if(",
+    "floor(",
+    "rand(",
+    "count(",
+    "group by",
+    "having ",
+    "procedure ",
+];
+
+/// Internal variant operating on an already-lowercased-and-stripped string.
+///
+/// Called from the anti-rig gate in `mutate()` where the stripped form is
+/// shared between the structured-attack test and `significant_tokens`, saving
+/// one `strip_sql_comments_ws` allocation per call.
+///
+/// §1 SPEED: `strip_sql_comments_ws(payload)` is called ONCE in the anti-rig gate
+/// and reused — old code called it twice (once per fn) for every structured payload.
+fn is_structured_attack_stripped(s: &str) -> bool {
+    STRUCTURED_TOKENS.iter().any(|m| s.contains(m))
 }
 
 /// True when the payload is a STRUCTURED attack: it has a data-
@@ -391,58 +461,19 @@ pub fn mutate(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
 /// treated as a tautology and its payload replaced by `'+0+'`.
 pub(crate) fn is_structured_attack(payload: &str) -> bool {
     let s = strip_sql_comments_ws(payload);
-    const STRUCTURED: &[&str] = &[
-        "union",
-        "select",
-        "sleep(",
-        "benchmark(",
-        "waitfor",
-        "extractvalue",
-        "updatexml",
-        "load_file",
-        "into outfile",
-        "into dumpfile",
-        ";",
-        "insert ",
-        "update ",
-        "delete ",
-        "drop ",
-        "exec ",
-        "xp_",
-        "sp_",
-        "pg_sleep",
-        "dbms_",
-        "utl_",
-        "case when",
-        "regexp ",
-        "rlike ",
-        "@@",
-        "0x",
-        "char(",
-        "chr(",
-        "concat",
-        "ascii(",
-        "substring",
-        "substr(",
-        "hex(",
-        "unhex(",
-        "if(",
-        "floor(",
-        "rand(",
-        "count(",
-        "group by",
-        "having ",
-        "procedure ",
-    ];
-    STRUCTURED.iter().any(|m| s.contains(m))
+    is_structured_attack_stripped(&s)
 }
 
 /// Significant lowercase tokens (alphanumeric runs ≥ 4 chars) of a
 /// payload — the attack's class-defining vocabulary
 /// (`extractvalue`, `union`, `select`, `concat`, `sleep`, …). A real
 /// evasion preserves at least one; a canned substitution carries none.
-fn significant_tokens(payload: &str) -> std::collections::HashSet<String> {
-    strip_sql_comments_ws(payload)
+///
+/// §1 SPEED: accepts a pre-stripped string to avoid calling strip_sql_comments_ws
+/// twice (once in is_structured_attack, once here) on the same payload. The caller
+/// in `mutate()` that uses both passes the stripped form directly.
+fn significant_tokens(stripped: &str) -> std::collections::HashSet<String> {
+    stripped
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|t| t.len() >= 4 && t.chars().any(|c| c.is_ascii_alphabetic()))
         .map(str::to_ascii_lowercase)
@@ -452,6 +483,12 @@ fn significant_tokens(payload: &str) -> std::collections::HashSet<String> {
 /// Lowercased copy with SQL comments removed and whitespace collapsed,
 /// so comment-injection evasions (`UN/**/ION`, `sel--\nect`) normalise
 /// back to the keyword they evade rather than reading as a new token.
+///
+/// §1 SPEED: single-pass implementation — bytes are lowercased inline as they
+/// are pushed to `out`, avoiding the old two-pass approach (build ASCII string
+/// byte-by-byte then call `out.to_ascii_lowercase()` on the whole allocation).
+/// For a 70-byte payload the old code allocated one 70-byte String then created
+/// a second 70-byte lowercased clone; the new path writes lowercase directly.
 fn strip_sql_comments_ws(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let b = s.as_bytes();
@@ -470,11 +507,12 @@ fn strip_sql_comments_ws(s: &str) -> String {
                 i += 1;
             }
         } else {
-            out.push(b[i] as char);
+            // Inline lowercase — eliminates the second `to_ascii_lowercase()` pass.
+            out.push(b[i].to_ascii_lowercase() as char);
             i += 1;
         }
     }
-    out.to_ascii_lowercase()
+    out
 }
 
 fn extend_strings_until_limit(
@@ -586,13 +624,13 @@ fn push_combined_whitespace_mutations(
     // byte-identical mutations while still rotating across the
     // available bases and whitespace alternatives.
     let n_combined = (max_mutations - results.len()).min(5);
-    let seed: u64 = payload.bytes().fold(0xcbf2_9ce4_8422_2325, |acc, b| {
-        (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    let seed: u64 = payload.bytes().fold(FNV_OFFSET_64, |acc, b| {
+        (acc ^ u64::from(b)).wrapping_mul(FNV_PRIME_64)
     });
     for iter in 0..n_combined {
         let mix = seed
             .wrapping_add(iter as u64)
-            .wrapping_mul(0x0000_0100_0000_01b3);
+            .wrapping_mul(FNV_PRIME_64);
         let base_index = (mix as usize) % results.len();
         let ws_range = WHITESPACE_ALTERNATIVES.len() - 1; // 1..len()
         let whitespace_index = 1 + ((mix.rotate_left(17) as usize) % ws_range);

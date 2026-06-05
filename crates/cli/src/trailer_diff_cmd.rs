@@ -59,7 +59,7 @@ use crate::parser_diff_common::{body_delta_pct, severity_of};
 // ── CLI args ─────────────────────────────────────────────────────────────────
 
 #[derive(Args, Debug)]
-pub struct TrailerDiffArgs {
+pub(crate) struct TrailerDiffArgs {
     /// Target URL. Must be an `http://` or `https://` URL. The probe
     /// is a chunked POST to this exact path — no redirect following
     /// (redirects would lose the chunked framing). Named flag (not
@@ -101,7 +101,7 @@ pub struct TrailerDiffArgs {
 
 /// The response summary we care about for the diff.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ProbeResponse {
+pub(crate) struct ProbeResponse {
     pub status: u16,
     pub body_len: usize,
     pub server: String,
@@ -109,7 +109,7 @@ pub struct ProbeResponse {
 
 /// The full comparison result.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct TrailerDiffResult {
+pub(crate) struct TrailerDiffResult {
     pub target: String,
     pub header_name: String,
     pub payload: String,
@@ -126,7 +126,7 @@ pub struct TrailerDiffResult {
 /// run regardless of whether a divergence was found (divergence is
 /// informational, not a process error). Returns exit 1 on setup or
 /// transport failures.
-pub async fn run_trailer_diff(mut args: TrailerDiffArgs) -> ExitCode {
+pub(crate) async fn run_trailer_diff(mut args: TrailerDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     if args.format == "text" {
         eprintln!(
@@ -223,7 +223,7 @@ pub async fn run_trailer_diff(mut args: TrailerDiffArgs) -> ExitCode {
 // ── URL parsing ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub struct ParsedUrl {
+pub(crate) struct ParsedUrl {
     pub scheme: Scheme,
     pub host: String,
     pub port: u16,
@@ -231,7 +231,7 @@ pub struct ParsedUrl {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Scheme {
+pub(crate) enum Scheme {
     Http,
     Https,
 }
@@ -297,7 +297,7 @@ fn default_port(scheme: &Scheme) -> u16 {
 // ── Raw request builder ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequestKind {
+pub(crate) enum RequestKind {
     /// Declares `Trailer: <H>` in headers but sends NO trailer.
     Baseline,
     /// Declares `Trailer: <H>` in headers AND sends `<H>: <P>` as trailer.
@@ -325,7 +325,7 @@ pub enum RequestKind {
 ///
 /// The baseline is identical but omits the `<H>: <payload>` trailer line —
 /// it terminates with `0\r\n\r\n`.
-pub fn build_chunked_request(
+pub(crate) fn build_chunked_request(
     parsed: &ParsedUrl,
     header_name: &str,
     payload: &str,
@@ -509,13 +509,9 @@ fn parse_http_response(bytes: &[u8]) -> Result<ProbeResponse, String> {
     let first_line = text.lines().next().unwrap_or("").trim();
 
     // "HTTP/1.1 200 OK"  or  "HTTP/1.0 404 Not Found"
-    let status: u16 = first_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| {
-            format!("could not parse HTTP status from response (first line: {first_line:?})")
-        })?;
+    let status: u16 = crate::helpers::http_status_from_raw(bytes).ok_or_else(|| {
+        format!("could not parse HTTP status from response (first line: {first_line:?})")
+    })?;
 
     // Find the header/body split.
     let header_end = if let Some(i) = find_header_end(bytes) {
@@ -665,11 +661,7 @@ fn emit_output(format: &str, result: &TrailerDiffResult) {
 
     // Text output.
     println!();
-    let badge = match result.severity {
-        "high" => "high".bright_red().bold(),
-        "medium" => "medium".yellow().bold(),
-        _ => "none".bright_black(),
-    };
+    let badge = crate::parser_diff_common::severity_badge(result.severity);
     println!(
         "  [{}] trailer-diff result for {}",
         badge,

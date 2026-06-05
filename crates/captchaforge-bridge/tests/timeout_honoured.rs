@@ -6,9 +6,9 @@
 //!
 //! The contract under test is "the timeout is HONOURED — the call
 //! does not hang" (a real timeout failure means waiting on the
-//! Chromium launch / solver for tens of seconds or unboundedly). The
+//! browser launch / solver for tens of seconds or unboundedly). The
 //! slack must therefore be large enough to absorb shared-CI scheduling
-//! latency (process spawn + a failed/cold Chromium launch + tokio
+//! latency (process spawn + a failed/cold browser launch + tokio
 //! wake-up under load is routinely > 1 s) yet far below a genuine
 //! hang. A tight 200 ms slack made this flaky on loaded runners
 //! (false-RED with no code defect — d74bd0f, no Rust change); the
@@ -34,11 +34,12 @@ async fn timeout_honoured_against_unresponsive_html() {
         solve_timeout_ms: TIMEOUT_MS,
         headless: true,
         no_sandbox: false,
+        navigate_first: false,
     };
 
     // An HTML page with no captcha widgets and no external resources —
     // the browser would load it instantly, the solver chain returns
-    // None quickly, but if Chromium is unavailable the launch fails
+    // None quickly, but if Firefox is unavailable the launch fails
     // fast too. Either way the function must not outlive the budget.
     let html = "<html><head><title>WAF challenge</title></head><body>\
                 <p>Please wait while we verify your browser...</p>\

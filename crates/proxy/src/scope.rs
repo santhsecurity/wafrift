@@ -11,7 +11,7 @@
 //! characters and `?` matches exactly one. Comparisons are case-
 //! insensitive against the host and path components. No regex deps.
 
-use wafrift_types::Method;
+use wafrift_types::{Method, glob_match};
 
 /// Compiled scope predicate evaluated on every proxied request.
 #[derive(Debug, Clone, Default)]
@@ -114,26 +114,9 @@ fn strip_port(host: &str) -> &str {
     }
 }
 
-/// Tiny ASCII glob matcher: `*` matches any run, `?` matches exactly one
-/// byte, everything else is a case-insensitive literal. No escape rules
-/// — keep the grammar simple so operators don't have to learn regex.
-#[must_use]
-pub fn glob_match(pattern: &str, s: &str) -> bool {
-    glob_recurse(pattern.as_bytes(), s.as_bytes())
-}
-
-fn glob_recurse(p: &[u8], s: &[u8]) -> bool {
-    match (p.first(), s.first()) {
-        (None, None) => true,
-        (Some(b'*'), _) => {
-            // Greedy: try matching zero, then 1, 2, ... characters.
-            glob_recurse(&p[1..], s) || (!s.is_empty() && glob_recurse(p, &s[1..]))
-        }
-        (Some(b'?'), Some(_)) => glob_recurse(&p[1..], &s[1..]),
-        (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => glob_recurse(&p[1..], &s[1..]),
-        _ => false,
-    }
-}
+// `glob_match` is re-exported from wafrift-types so there is one
+// canonical O(|p|·|s|) iterative implementation shared with the CLI
+// report filter. See wafrift_types::glob_match for the full doc.
 
 #[cfg(test)]
 mod tests {
@@ -310,5 +293,73 @@ mod tests {
             vec![],
         );
         assert!(!f.allows("admin.internal:9000", "/", &Method::from("GET")));
+    }
+
+    // -- §12 boundary and edge-case tests ----------------------------------
+
+    #[test]
+    fn empty_pattern_only_matches_empty_string() {
+        assert!(glob_match("", ""));
+        assert!(!glob_match("", "a"));
+        assert!(!glob_match("", "abc"));
+    }
+
+    #[test]
+    fn star_pattern_matches_any_string() {
+        assert!(glob_match("*", ""));
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("*", "a.b.c.d.e"));
+    }
+
+    #[test]
+    fn question_does_not_match_empty() {
+        // `?` matches exactly ONE character -- empty string must fail.
+        assert!(!glob_match("?", ""));
+        assert!(glob_match("?", "x"));
+        assert!(!glob_match("?", "xy"));
+    }
+
+    #[test]
+    fn glob_with_no_wildcards_is_exact_case_insensitive_match() {
+        assert!(glob_match("example.com", "EXAMPLE.COM"));
+        assert!(!glob_match("example.com", "example.net"));
+        assert!(!glob_match("example.com", "example.comm"));
+    }
+
+    #[test]
+    fn glob_double_star_acts_as_two_separate_wildcards() {
+        // `**` is treated as two adjacent stars in this glob engine.
+        // The result should match at least as broadly as a single `*`.
+        assert!(glob_match("**", "anything"));
+        assert!(glob_match("a**b", "ab"));
+        assert!(glob_match("a**b", "aXXb"));
+    }
+
+    /// ReDoS guard — attacker-controlled host/path as subject.
+    ///
+    /// The OLD recursive impl was O(|s|^k) with k wildcards. A pattern
+    /// like `*a*a*a*a*a*a` (6 wildcards) against `bbbbbbbbbbbbbbbb`
+    /// (16 bytes) would require ~16^6 ≈ 16M recursive calls. With 30
+    /// wildcards and a 128-byte non-matching subject that is 128^30 —
+    /// effectively infinite. The iterative two-pointer algorithm is
+    /// O(|p|·|s|) = O(30×128) = 3840 steps.
+    ///
+    /// This test uses 30 `*a` pairs (30 wildcards) and a 128-byte
+    /// all-`b` subject — the worst-case combination for the old impl —
+    /// and asserts completion in under 100 ms (the iterative impl
+    /// completes in microseconds on any modern CPU).
+    #[test]
+    fn glob_match_benchmark_worst_case_does_not_hang() {
+        let start = std::time::Instant::now();
+        // 30 interleaved wildcards; subject is 128 non-matching bytes.
+        let pattern = "*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a";
+        let subject = "b".repeat(128);
+        let result = glob_match(pattern, &subject);
+        let elapsed = start.elapsed();
+        assert!(!result, "expected no match on all-b subject");
+        assert!(
+            elapsed.as_millis() < 100,
+            "glob_match took {elapsed:?} — iterative O(|p|·|s|) impl required, not recursive"
+        );
     }
 }

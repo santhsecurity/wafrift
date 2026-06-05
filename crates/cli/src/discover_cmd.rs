@@ -16,8 +16,20 @@ use wafrift_recon::discovery::openapi::{DiscoveryError, from_openapi};
 use wafrift_recon::discovery::param_miner::{MiningConfig, mine_params};
 use wafrift_types::discovery::DiscoveredEndpoint;
 
+/// OpenAPI/Swagger specs in the wild are kilobytes to a couple of
+/// megabytes. 16 MiB is generous (catches `--spec /dev/zero`, a
+/// hostile symlink, or a runaway-generated spec) without blocking
+/// any legitimate document.
+const OPENAPI_SPEC_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Param-mining wordlists CAN be large — rockyou.txt is ~130 MiB,
+/// SecLists has files up to ~200 MiB. 256 MiB matches cluster_cmd's
+/// bench-grade cap: real wordlists fit; `--wordlist /dev/zero` /
+/// multi-GB accident / symlink trap do not.
+const WORDLIST_MAX_BYTES: usize = 256 * 1024 * 1024;
+
 #[derive(Args, Debug)]
-pub struct DiscoverArgs {
+pub(crate) struct DiscoverArgs {
     /// Target URL (used by --introspect and --mine-params).
     /// Required when either of those modes is enabled. Ignored by --spec.
     /// Accepts `--url` as an alias for consistency with every other
@@ -56,7 +68,7 @@ pub struct DiscoverArgs {
     pub concurrency: usize,
 
     /// Per-worker delay between consecutive --mine-params probes (ms).
-    #[arg(long, default_value_t = 50)]
+    #[arg(long, default_value_t = crate::DEFAULT_DELAY_MS)]
     pub delay_ms: u64,
 
     /// Number of baseline requests for --mine-params (default 5). More
@@ -81,9 +93,29 @@ pub struct DiscoverArgs {
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
 
-    /// Write JSON output to this file instead of stdout.
+    /// Write JSON output to this file instead of stdout. Refuses
+    /// to clobber an existing file unless `--force-overwrite` is
+    /// set (R50 pass-12 I7).
     #[arg(long)]
     pub output: Option<PathBuf>,
+
+    /// Override the --output overwrite guard.
+    #[arg(long, default_value_t = false)]
+    pub force_overwrite: bool,
+
+    /// Per-request HTTP timeout in seconds for introspect / mine-params
+    /// probes. 0 = use `DEFAULT_REQUEST_TIMEOUT_SECS`. Can be overridden
+    /// by `.wafrift.toml`'s `http.timeout_secs` when the flag is not
+    /// passed explicitly.
+    #[arg(long, default_value_t = 0)]
+    pub timeout_secs: u64,
+
+    /// Disable TLS certificate verification for HTTPS targets.
+    /// Equivalent to `curl --insecure`. Can be overridden by
+    /// `.wafrift.toml`'s `http.insecure` when the flag is not
+    /// passed explicitly.
+    #[arg(long, default_value_t = false)]
+    pub insecure: bool,
 }
 
 #[derive(Serialize)]
@@ -97,7 +129,7 @@ struct DiscoverReport<'a> {
 
 const DISCOVER_SCHEMA_VERSION: u32 = 1;
 
-pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
+pub(crate) fn run_discover(mut args: DiscoverArgs) -> ExitCode {
     if let Some(ref t) = args.target.clone() {
         args.target = Some(crate::helpers::normalize_target_url(t));
     }
@@ -120,15 +152,13 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: tokio runtime: {e}");
-            return ExitCode::from(1);
-        }
-    };
+    // §7 DEDUPLICATION: delegate to the canonical runtime helper so the
+    // 6-line match-Runtime::new boilerplate lives in exactly one place.
+    crate::helpers::block_on_with_runtime(run_discover_async(args))
+}
 
-    rt.block_on(async {
+async fn run_discover_async(args: DiscoverArgs) -> ExitCode {
+    {
         let mut endpoints = Vec::new();
         let mut sources: Vec<&'static str> = Vec::new();
         // Track per-source failures so a silent `warn:` from one
@@ -141,27 +171,60 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
 
         if let Some(spec_path) = &args.spec {
             sources.push("openapi");
-            let raw = match std::fs::read_to_string(spec_path) {
+            #[rustfmt::skip]
+            let raw_result = crate::safe_body::read_bounded_text_file(
+                spec_path,
+                OPENAPI_SPEC_MAX_BYTES,
+            );
+            let raw = match raw_result {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("error: read {}: {e}", spec_path.display());
-                    return ExitCode::from(1);
+                    return crate::helpers::input_error(format!(
+                        "read {}: {e}",
+                        spec_path.display()
+                    ));
                 }
             };
             match from_openapi(&raw) {
                 Ok(eps) => endpoints.extend(eps),
                 Err(e) => {
-                    eprintln!("error: parse {}: {e}", spec_path.display());
-                    return ExitCode::from(1);
+                    return crate::helpers::input_error(format!(
+                        "parse {}: {e}",
+                        spec_path.display()
+                    ));
                 }
             }
         }
 
         if args.introspect || args.mine_params {
-            // Build a reqwest client with a sensible default timeout —
-            // recon shouldn't hang on a slow upstream.
+            // Build a reqwest client: honour --timeout-secs / --insecure
+            // flags (and their .wafrift.toml equivalents applied before
+            // run_discover is called). Fall back to DEFAULT_REQUEST_TIMEOUT_SECS
+            // when the flag was left at 0 so recon doesn't hang on a slow
+            // upstream without an explicit cap.
+            let timeout_secs = if args.timeout_secs > 0 {
+                args.timeout_secs
+            } else {
+                wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS
+            };
+            let scan_identity = match crate::config::shared_scan_browser_headers(None) {
+                Ok(identity) => identity,
+                Err(e) => {
+                    eprintln!("error: build shared browser headers: {e}");
+                    return ExitCode::from(1);
+                }
+            };
             let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(timeout_secs))
+                .danger_accept_invalid_certs(args.insecure)
+                // §15 SSRF: don't follow redirects. Without this, reqwest's
+                // default chases up to 10 redirects to ANY host, so a discovery
+                // target answering `302 → http://169.254.169.254/` walks the
+                // introspection/param-mining probes into cloud metadata /
+                // RFC1918. Discovery wants the target's DIRECT response anyway
+                // (a redirect would also confound param-mining's length diff).
+                .redirect(reqwest::redirect::Policy::none())
+                .default_headers(scan_identity.headers)
                 .build()
             {
                 Ok(c) => c,
@@ -198,7 +261,10 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
                     eprintln!("error: --wordlist is required for --mine-params");
                     return ExitCode::from(1);
                 };
-                let words = match std::fs::read_to_string(words_path) {
+                let words = match crate::safe_body::read_bounded_text_file(
+                    words_path,
+                    WORDLIST_MAX_BYTES,
+                ) {
                     Ok(s) => s
                         .lines()
                         .map(str::trim)
@@ -206,8 +272,10 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
                         .map(str::to_string)
                         .collect::<Vec<_>>(),
                     Err(e) => {
-                        eprintln!("error: read wordlist {}: {e}", words_path.display());
-                        return ExitCode::from(1);
+                        return crate::helpers::input_error(format!(
+                            "read wordlist {}: {e}",
+                            words_path.display()
+                        ));
                     }
                 };
                 if words.is_empty() {
@@ -245,10 +313,8 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
         let merged = {
             use std::collections::HashMap;
             let mut order: Vec<(wafrift_types::Method, String)> = Vec::new();
-            let mut by_key: HashMap<
-                (wafrift_types::Method, String),
-                DiscoveredEndpoint,
-            > = HashMap::new();
+            let mut by_key: HashMap<(wafrift_types::Method, String), DiscoveredEndpoint> =
+                HashMap::new();
             for ep in endpoints.drain(..) {
                 let key = (ep.method.clone(), ep.url.clone());
                 if let Some(existing) = by_key.get_mut(&key) {
@@ -266,7 +332,10 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
                     by_key.insert(key, ep);
                 }
             }
-            order.into_iter().filter_map(|k| by_key.remove(&k)).collect::<Vec<_>>()
+            order
+                .into_iter()
+                .filter_map(|k| by_key.remove(&k))
+                .collect::<Vec<_>>()
         };
         endpoints = merged;
 
@@ -298,21 +367,36 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
                 };
                 match serde_json::to_string_pretty(&report) {
                     Ok(s) => match args.output.as_ref() {
-                        Some(p) => match std::fs::write(p, &s) {
-                            Ok(()) => {
-                                eprintln!(
-                                    "wrote {} bytes ({} endpoint(s)) → {}",
-                                    s.len(),
-                                    report.endpoints.len(),
-                                    p.display()
-                                );
-                                ok_exit
+                        Some(p) => {
+                            // R50 pass-12 I7 (CLAUDE.md §7 + §15):
+                            // shared overwrite guard. Pre-fix
+                            // discover --output silently clobbered
+                            // an existing file; CI pipelines that
+                            // re-ran discover overwrote their first
+                            // result with no warning.
+                            if let Err(msg) = crate::helpers::confirm_output_overwrite_safe(
+                                p,
+                                args.force_overwrite,
+                            ) {
+                                eprintln!("error: {msg}");
+                                return ExitCode::from(2);
                             }
-                            Err(e) => {
-                                eprintln!("error: write {}: {e}", p.display());
-                                ExitCode::from(1)
+                            match std::fs::write(p, &s) {
+                                Ok(()) => {
+                                    eprintln!(
+                                        "wrote {} bytes ({} endpoint(s)) → {}",
+                                        s.len(),
+                                        report.endpoints.len(),
+                                        p.display()
+                                    );
+                                    ok_exit
+                                }
+                                Err(e) => {
+                                    eprintln!("error: write {}: {e}", p.display());
+                                    ExitCode::from(1)
+                                }
                             }
-                        },
+                        }
                         None => {
                             println!("{s}");
                             ok_exit
@@ -365,5 +449,117 @@ pub fn run_discover(mut args: DiscoverArgs) -> ExitCode {
                 }
             }
         }
-    })
+    }
+}
+
+#[cfg(test)]
+mod round17_bounded_input_tests {
+    //! Round 17 regression: `discover --spec <PATH>` and
+    //! `discover --wordlist <PATH>` previously slurped the operator-
+    //! supplied file with `std::fs::read_to_string`, which OOMs the
+    //! process on `--spec /dev/zero`, a hostile symlink to a
+    //! multi-GB file, or any rockyou-sized accident. Both reads
+    //! must go through `safe_body::read_bounded_text_file` with
+    //! the per-source caps defined above.
+    //!
+    //! Both tests use `concat!()` to embed the needle so the test
+    //! source itself does not contain the literal string being
+    //! searched for — without that, the assertion would be a
+    //! tautology (test source contains needle, src contains test
+    //! source, src "contains" needle).
+    use super::{OPENAPI_SPEC_MAX_BYTES, WORDLIST_MAX_BYTES};
+
+    #[test]
+    fn discover_spec_read_is_bounded() {
+        let src = include_str!("discover_cmd.rs");
+        let needle = concat!(
+            "safe_body::read_bounded_text_file(\n",
+            "                spec_path,\n",
+            "                OPENAPI_SPEC_MAX_BYTES,\n",
+            "            )"
+        );
+        assert!(
+            src.contains(needle),
+            "discover_cmd.rs must read --spec through bounded reader \
+             with OPENAPI_SPEC_MAX_BYTES — unbounded read regression"
+        );
+        // concat!() avoids embedding the literal in the test source,
+        // which would otherwise be a tautology via include_str! self-
+        // reference.
+        let banned = concat!("std::fs::", "read_to_", "string(spec_", "path)");
+        assert!(
+            !src.contains(banned),
+            "raw unbounded fs read of spec_path reintroduced — OOM regression"
+        );
+    }
+
+    #[test]
+    fn discover_wordlist_read_is_bounded() {
+        let src = include_str!("discover_cmd.rs");
+        let needle = concat!(
+            "safe_body::read_bounded_text_file(\n",
+            "                    words_path,\n",
+            "                    WORDLIST_MAX_BYTES,\n",
+            "                )"
+        );
+        assert!(
+            src.contains(needle),
+            "discover_cmd.rs must read --wordlist through bounded reader \
+             with WORDLIST_MAX_BYTES — unbounded read regression"
+        );
+        let banned = concat!("std::fs::", "read_to_", "string(words_", "path)");
+        assert!(
+            !src.contains(banned),
+            "raw unbounded fs read of words_path reintroduced — OOM regression"
+        );
+    }
+
+    #[test]
+    fn bounded_file_read_reports_overrun_when_cap_exceeded() {
+        // Sanity: confirm the primitive we depend on actually
+        // refuses to slurp past its cap. If safe_body ever loses
+        // the Overrun behaviour, both fixes above become silent
+        // no-ops — this test catches that.
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "wafrift-discover-overrun-{}-{}.bin",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        {
+            let mut f = std::fs::File::create(&path).expect("create tmp");
+            f.write_all(&vec![b'a'; 4096]).expect("write tmp");
+        }
+        let res = crate::safe_body::read_bounded_text_file(&path, 256);
+        let _ = std::fs::remove_file(&path);
+        match res {
+            Err(crate::safe_body::ReadError::Overrun {
+                cap_bytes,
+                observed_bytes,
+            }) => {
+                assert_eq!(cap_bytes, 256);
+                assert!(observed_bytes > cap_bytes, "observed must exceed cap");
+            }
+            other => panic!("expected Overrun, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn caps_are_sane_for_real_world_inputs() {
+        // OpenAPI: typical specs are <10 MiB even for huge schemas.
+        // Wordlist: rockyou.txt = ~133 MiB. Both caps must comfortably
+        // exceed those — if anyone ever tightens them below, fail loud.
+        assert!(
+            OPENAPI_SPEC_MAX_BYTES >= 8 * 1024 * 1024,
+            "OPENAPI_SPEC_MAX_BYTES tightened below 8 MiB — would reject legitimate specs"
+        );
+        assert!(
+            WORDLIST_MAX_BYTES >= 200 * 1024 * 1024,
+            "WORDLIST_MAX_BYTES tightened below 200 MiB — would reject rockyou-sized wordlists"
+        );
+    }
 }

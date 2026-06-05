@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::process::ExitCode;
 
 #[derive(Debug, clap::Args)]
-pub struct OriginHintsArgs {
+pub(crate) struct OriginHintsArgs {
     /// Hostname only (e.g. `api.example.com`), not a full URL. Accepted
     /// as the first positional argument (`wafrift origin-hints
     /// api.example.com`); on equal footing with `--host` (kept for
@@ -100,19 +100,20 @@ async fn resolve_ips(hostname: &str) -> Result<Vec<IpAddr>, String> {
     Ok(out)
 }
 
-pub fn run_origin_hints(args: OriginHintsArgs, quiet: bool) -> ExitCode {
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-    match rt.block_on(run_async(&args, quiet)) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("{} {e}. Fix: verify the hostname is resolvable and try again.", "error:".red().bold());
-            ExitCode::from(1)
+pub(crate) fn run_origin_hints(args: OriginHintsArgs) -> ExitCode {
+    crate::helpers::block_on_with_runtime(async move {
+        match run_async(&args).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{} {e}", "error:".red().bold());
+                ExitCode::from(1)
+            }
         }
-    }
+    })
 }
 
-async fn run_async(args: &OriginHintsArgs, quiet: bool) -> Result<(), String> {
-    let host = normalize_host(&args.host)?;
+async fn run_async(args: &OriginHintsArgs) -> Result<(), String> {
+    let host = normalize_host(args.resolved_host())?;
     let ips = resolve_ips(&host).await?;
 
     if ips.is_empty() {
@@ -122,11 +123,10 @@ async fn run_async(args: &OriginHintsArgs, quiet: bool) -> Result<(), String> {
     let first_ip = ips[0];
     let origin_bypass_example = json!({ &host: first_ip.to_string() });
 
-    if quiet || args.format == "json" {
+    if args.format == "json" {
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
-                "schema_version": 1,
                 "host": host,
                 "ips": ips.iter().map(std::string::ToString::to_string).collect::<Vec<_>>(),
                 "origin_bypass_example": origin_bypass_example,

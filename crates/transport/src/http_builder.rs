@@ -63,8 +63,7 @@ pub fn base_client_builder(
         Err(_) => {
             // Unreachable: no-pool path cannot return EgressError.
             // Return a sensibly configured builder rather than panic.
-            ClientBuilder::new()
-                .timeout(Duration::from_secs(timeout_secs.max(MIN_TIMEOUT_SECS)))
+            ClientBuilder::new().timeout(Duration::from_secs(timeout_secs.max(MIN_TIMEOUT_SECS)))
         }
     }
 }
@@ -100,9 +99,310 @@ pub fn base_client_builder_with_egress(
     Ok(b)
 }
 
+/// SSRF-safe redirect policy shared by every wafrift HTTP client that
+/// follows redirects. reqwest's `Policy::limited` follows redirects to
+/// ANY host — a hostile target can `302 Location: http://169.254.169.254/`
+/// and exfil cloud metadata, or pivot into RFC1918, through the scanner.
+/// This caps hops, refuses a redirect INTO a bogon IP literal (loopback /
+/// RFC1918 / link-local metadata / IPv6 ULA, via the canonical
+/// `wafrift_types::ip_addr_is_bogon`) — *unless the hop originates from a
+/// bogon already*, i.e. the operator deliberately chose to scan a
+/// private/loopback lab (the cross-origin guard below still pins the follow
+/// to the identical origin, so this can never pivot to a different internal
+/// host/port) — and stops cross-origin hops (reqwest can't strip auth from
+/// the next request, so the safe move is to halt and let the caller observe
+/// the 302 without leaking Cookie/Authorization to a third party).
+///
+/// Canonical home (§7 DEDUPLICATION): `cli::helpers::safe_redirect_policy`
+/// delegates here, so there is exactly ONE implementation — in the HTTP
+/// layer where it belongs — protecting the core `EvasionClient`, not just
+/// the CLI commands that build their own clients (§15 SSRF). The decision
+/// is factored into the pure [`redirect_decision`] so the SSRF logic is
+/// unit-testable — `reqwest::redirect::Attempt` has no public constructor,
+/// but `reqwest::Url` does.
+#[must_use]
+pub fn safe_redirect_policy(max_hops: usize) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        match redirect_decision(
+            attempt.previous().last(),
+            attempt.url(),
+            attempt.previous().len(),
+            max_hops,
+        ) {
+            RedirectDecision::Follow => attempt.follow(),
+            RedirectDecision::Stop => attempt.stop(),
+            RedirectDecision::Error(msg) => attempt.error(msg),
+        }
+    })
+}
+
+/// What [`safe_redirect_policy`] decides for one redirect hop. Extracted
+/// from the policy closure so the SSRF logic is unit-testable: the
+/// `reqwest::redirect::Attempt` handed to the closure has no public
+/// constructor, but the `Url`s this function takes are freely constructable.
+#[derive(Debug, PartialEq, Eq)]
+enum RedirectDecision {
+    /// Follow the redirect — same-origin, within the hop cap, not an SSRF pivot.
+    Follow,
+    /// Halt WITHOUT erroring — observe the 302 but do not follow (cross-origin
+    /// hops, to avoid leaking auth headers to a third party).
+    Stop,
+    /// Refuse with an error — hop-cap exceeded, or an SSRF pivot into a bogon.
+    Error(String),
+}
+
+/// True when `u`'s host is an IP literal in a bogon range (loopback /
+/// RFC1918 / link-local metadata / IPv6 ULA). Hostnames — even ones that
+/// would resolve to a bogon — return `false` here; the cross-origin guard
+/// in [`redirect_decision`] is what stops hostname-based pivots, since any
+/// redirect to a *different* host is cross-origin and halted regardless.
+fn is_bogon_literal(u: &reqwest::Url) -> bool {
+    u.host_str()
+        .and_then(|h| h.parse::<std::net::IpAddr>().ok())
+        .is_some_and(wafrift_types::ip_addr_is_bogon)
+}
+
+/// Pure decision core of [`safe_redirect_policy`]. `prev` is the URL that
+/// issued this redirect (the hop we are coming FROM); `next` is the
+/// `Location` target; `hops_so_far` is the number of prior hops. See
+/// [`safe_redirect_policy`] for the full security rationale.
+fn redirect_decision(
+    prev: Option<&reqwest::Url>,
+    next: &reqwest::Url,
+    hops_so_far: usize,
+    max_hops: usize,
+) -> RedirectDecision {
+    if hops_so_far >= max_hops {
+        return RedirectDecision::Error(format!("too many redirects (cap {max_hops})"));
+    }
+    // Refuse a hop INTO a bogon literal, except when we are already on a
+    // bogon (deliberate lab scan of a private/loopback range the operator
+    // chose and gated via `assert_permitted`). The cross-origin guard below
+    // still pins the follow to the identical origin, so "already on a bogon"
+    // can only ever stay on that exact host:port — never a pivot to a
+    // different internal service.
+    if is_bogon_literal(next) && !prev.is_some_and(is_bogon_literal) {
+        let ip = next.host_str().unwrap_or("?");
+        return RedirectDecision::Error(format!(
+            "refusing redirect to bogon address {ip} (SSRF defence)"
+        ));
+    }
+    // Cross-origin guard: reqwest's Attempt API can't strip auth from the
+    // next hop, so a cross-origin redirect could leak Cookie / Authorization
+    // to a third party. Halt rather than follow.
+    let prev_origin = prev.and_then(redirect_origin_triple);
+    let next_origin = redirect_origin_triple(next);
+    if let (Some(prev_o), Some(next_o)) = (prev_origin, next_origin)
+        && prev_o != next_o
+    {
+        return RedirectDecision::Stop;
+    }
+    RedirectDecision::Follow
+}
+
+/// `(scheme, lowercased-host, port)` — two URLs are same-origin iff these
+/// match. `None` when the URL has no host or no derivable port.
+fn redirect_origin_triple(u: &reqwest::Url) -> Option<(String, String, u16)> {
+    let host = u.host_str()?.to_ascii_lowercase();
+    let port = u.port_or_known_default()?;
+    Some((u.scheme().to_string(), host, port))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirect_origin_triple_normalizes_host_case() {
+        let u: reqwest::Url = "https://Example.COM:8443/p".parse().unwrap();
+        let triple = redirect_origin_triple(&u).expect("has host + port");
+        assert_eq!(triple.0, "https");
+        assert_eq!(triple.1, "example.com");
+        assert_eq!(triple.2, 8443);
+    }
+
+    #[test]
+    fn redirect_origin_triple_uses_scheme_default_port() {
+        // No explicit port: the scheme's default (443 https / 80 http) must
+        // populate so same-origin comparisons don't false-mismatch
+        // `https://x/` vs `https://x:443/`.
+        let u: reqwest::Url = "https://example.com/p".parse().unwrap();
+        let triple = redirect_origin_triple(&u).expect("scheme default port");
+        assert_eq!(triple.2, 443);
+    }
+
+    #[test]
+    fn safe_redirect_policy_builds_and_composes() {
+        // `reqwest::redirect::Attempt` has no public constructor, so the
+        // policy CLOSURE can't be invoked directly — but its decision logic
+        // is tested via `redirect_decision` below. Here we pin only that the
+        // policy constructs and composes onto a builder (catches a signature
+        // / API-drift regression).
+        let _ = safe_redirect_policy(5);
+        let _ = base_client_builder(30, false, None)
+            .redirect(safe_redirect_policy(5))
+            .build()
+            .unwrap();
+    }
+
+    // ── SSRF redirect decision (pure-core unit tests) ──────────────────
+    // These exercise `redirect_decision` directly. `Url` is freely
+    // constructable, so the security logic the policy closure runs is now
+    // fully covered (it had ZERO behavioural coverage before the extract).
+
+    fn url(s: &str) -> reqwest::Url {
+        s.parse().expect("test url parses")
+    }
+
+    #[test]
+    fn redirect_refuses_public_to_metadata_ip() {
+        // The canonical SSRF pivot: a public origin 302s to the cloud
+        // metadata IP. Must be refused with an error.
+        let d = redirect_decision(
+            Some(&url("https://example.com/")),
+            &url("http://169.254.169.254/latest/meta-data/"),
+            0,
+            5,
+        );
+        assert!(matches!(d, RedirectDecision::Error(_)), "got {d:?}");
+    }
+
+    #[test]
+    fn redirect_refuses_public_to_rfc1918_literal() {
+        let d = redirect_decision(
+            Some(&url("https://example.com/")),
+            &url("http://10.0.0.1/"),
+            0,
+            5,
+        );
+        assert!(matches!(d, RedirectDecision::Error(_)), "got {d:?}");
+    }
+
+    #[test]
+    fn redirect_refuses_public_to_loopback_literal() {
+        let d = redirect_decision(
+            Some(&url("https://example.com/")),
+            &url("http://127.0.0.1:8080/"),
+            0,
+            5,
+        );
+        assert!(matches!(d, RedirectDecision::Error(_)), "got {d:?}");
+    }
+
+    #[test]
+    fn redirect_refuses_bogon_even_with_no_previous() {
+        // No recorded previous URL ⇒ prev is not a bogon ⇒ the SSRF refusal
+        // still stands. (Belt-and-suspenders: the first hop should never be
+        // a redirect anyway.)
+        let d = redirect_decision(None, &url("http://169.254.169.254/"), 0, 5);
+        assert!(matches!(d, RedirectDecision::Error(_)), "got {d:?}");
+    }
+
+    #[test]
+    fn redirect_stops_cross_origin_public() {
+        // Cross-origin public→public: HALT (don't leak auth), not an error.
+        let d = redirect_decision(
+            Some(&url("https://a.example/")),
+            &url("https://b.example/"),
+            0,
+            5,
+        );
+        assert_eq!(d, RedirectDecision::Stop);
+    }
+
+    #[test]
+    fn redirect_follows_same_origin_public() {
+        let d = redirect_decision(
+            Some(&url("https://a.example/x")),
+            &url("https://a.example/y"),
+            0,
+            5,
+        );
+        assert_eq!(d, RedirectDecision::Follow);
+    }
+
+    #[test]
+    fn redirect_follows_same_origin_loopback_lab() {
+        // Operator deliberately scanning a loopback lab: a same-origin
+        // redirect within it must be FOLLOWED (it was wrongly refused before
+        // the prev-bogon refinement). `assert_permitted` already gated this.
+        let d = redirect_decision(
+            Some(&url("http://127.0.0.1:8080/login")),
+            &url("http://127.0.0.1:8080/dashboard"),
+            0,
+            5,
+        );
+        assert_eq!(d, RedirectDecision::Follow);
+    }
+
+    #[test]
+    fn redirect_follows_same_origin_rfc1918_lab() {
+        let d = redirect_decision(
+            Some(&url("http://10.0.0.1/a")),
+            &url("http://10.0.0.1/b"),
+            0,
+            5,
+        );
+        assert_eq!(d, RedirectDecision::Follow);
+    }
+
+    #[test]
+    fn redirect_stops_bogon_to_different_bogon_port() {
+        // Even FROM a bogon, a hop to a different origin (port change →
+        // Elasticsearch on :9200) is cross-origin → HALT. No intra-lab pivot.
+        let d = redirect_decision(
+            Some(&url("http://10.0.0.1/")),
+            &url("http://10.0.0.1:9200/_cat/indices"),
+            0,
+            5,
+        );
+        assert_eq!(d, RedirectDecision::Stop);
+    }
+
+    #[test]
+    fn redirect_stops_bogon_to_different_bogon_host() {
+        let d = redirect_decision(
+            Some(&url("http://10.0.0.1/")),
+            &url("http://192.168.1.1/"),
+            0,
+            5,
+        );
+        assert_eq!(d, RedirectDecision::Stop);
+    }
+
+    #[test]
+    fn redirect_refuses_when_over_hop_cap() {
+        // hops_so_far >= max_hops → error regardless of target.
+        let d = redirect_decision(
+            Some(&url("https://a.example/")),
+            &url("https://a.example/next"),
+            5,
+            5,
+        );
+        assert!(matches!(d, RedirectDecision::Error(_)), "got {d:?}");
+    }
+
+    #[test]
+    fn redirect_no_prev_follows_non_bogon_target() {
+        // No previous URL: same-origin compare is skipped (prev_origin None)
+        // → follow a non-bogon target.
+        let d = redirect_decision(None, &url("https://a.example/"), 0, 5);
+        assert_eq!(d, RedirectDecision::Follow);
+    }
+
+    #[test]
+    fn redirect_hostname_loopback_follows_same_origin() {
+        // "localhost" is not an IP literal, so the bogon-literal check never
+        // fires; a same-origin localhost→localhost redirect follows (lab via
+        // hostname). A different host would be cross-origin → Stop.
+        let d = redirect_decision(
+            Some(&url("http://localhost:3000/a")),
+            &url("http://localhost:3000/b"),
+            0,
+            5,
+        );
+        assert_eq!(d, RedirectDecision::Follow);
+    }
 
     #[test]
     fn base_builder_compiles_with_minimal_inputs() {
@@ -155,7 +455,10 @@ mod tests {
         // (1 s) rather than forwarding a 0 that silently kills all I/O.
         let b = base_client_builder(0, false, None);
         // The builder must succeed (no panic, no error).
-        assert!(b.build().is_ok(), "timeout=0 must not produce a broken builder");
+        assert!(
+            b.build().is_ok(),
+            "timeout=0 must not produce a broken builder"
+        );
     }
 
     #[test]
@@ -170,7 +473,10 @@ mod tests {
         // Duration::from_secs(u64::MAX) is ~585 billion years — reqwest
         // accepts it. The builder must not panic on overflow arithmetic.
         let b = base_client_builder(u64::MAX, false, None);
-        assert!(b.build().is_ok(), "u64::MAX timeout must not cause overflow panic");
+        assert!(
+            b.build().is_ok(),
+            "u64::MAX timeout must not cause overflow panic"
+        );
     }
 
     #[test]
@@ -181,8 +487,7 @@ mod tests {
             .expect("valid url")
             .build()
             .unwrap();
-        let b = base_client_builder_with_egress(0, false, None, Some(&pool), "target.com")
-            .unwrap();
+        let b = base_client_builder_with_egress(0, false, None, Some(&pool), "target.com").unwrap();
         assert!(b.build().is_ok());
     }
 
@@ -197,8 +502,7 @@ mod tests {
     fn empty_target_host_with_no_pool_is_ok() {
         // Empty target_host is fine when egress_pool is None — the host
         // field is only used when a pool is present.
-        let b = base_client_builder_with_egress(30, false, None, None, "")
-            .unwrap();
+        let b = base_client_builder_with_egress(30, false, None, None, "").unwrap();
         assert!(b.build().is_ok());
     }
 }

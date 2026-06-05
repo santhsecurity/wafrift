@@ -69,6 +69,17 @@ const BODY_ONLY_MIN_CONFIDENCE: f64 = 0.5;
 /// Authors who genuinely need case-sensitive matching can opt out with
 /// an inline `(?-i)` flag — preserved verbatim because we only prepend
 /// when the pattern doesn't already declare an outer case flag.
+/// Compilation size cap — workspace-canonical value from
+/// [`wafrift_types::REGEX_NFA_SIZE_LIMIT`].
+///
+/// `Regex::new` (and `RegexSet::new`) are linear-time at *match* time but
+/// have no built-in bound on *compile* time.  A pattern like `(a?){200}`,
+/// which is only 10 bytes and trivially passes `MAX_REGEX_PATTERN_LEN`,
+/// causes O(2^N) NFA expansion during `RegexBuilder::build()`.
+/// `size_limit` caps the compiled NFA byte-size and converts the
+/// exponential-compile-time attack into a fast, controlled error.
+const REGEX_COMPILE_SIZE_LIMIT: usize = wafrift_types::REGEX_NFA_SIZE_LIMIT;
+
 fn compile_ci_regex(pattern: &str, kind: &str) -> Result<Regex, String> {
     // Look for an `i` flag (positive or negated) anywhere in the
     // first `(?FLAGS)` or `(?FLAGS:...)` group, not just at exact
@@ -87,7 +98,7 @@ fn compile_ci_regex(pattern: &str, kind: &str) -> Result<Regex, String> {
     // flag.
     let has_outer_case_flag = pattern.starts_with("(?")
         && pattern[2..]
-            .split(|c: char| c == ':' || c == ')')
+            .split([':', ')'])
             .next()
             .is_some_and(|flags| flags.contains('i'));
     let full = if has_outer_case_flag {
@@ -95,7 +106,14 @@ fn compile_ci_regex(pattern: &str, kind: &str) -> Result<Regex, String> {
     } else {
         format!("(?i){pattern}")
     };
-    Regex::new(&full).map_err(|e| format!("bad {kind} regex '{pattern}': {e}"))
+    // Use RegexBuilder with size_limit to cap compile-time NFA explosion.
+    // A length-bounded pattern (MAX_REGEX_PATTERN_LEN = 4096 bytes) can
+    // still cause O(2^N) NFA expansion (e.g. `(a?){200}`). size_limit
+    // converts that into a fast Err rather than a hang.
+    regex::RegexBuilder::new(&full)
+        .size_limit(REGEX_COMPILE_SIZE_LIMIT)
+        .build()
+        .map_err(|e| format!("bad {kind} regex '{pattern}': {e}"))
 }
 
 /// Strip a leading `(?...)` inline-flag group from a regex source.
@@ -484,9 +502,16 @@ impl RuleEngine {
         }
 
         if !patterns.is_empty() {
-            let set = RegexSet::new(&patterns).map_err(|e| {
-                DetectRulesError::Parse(format!("failed to compile body RegexSet: {e}"))
-            })?;
+            // Apply the same NFA-explosion guard used by individual regexes.
+            // RegexSetBuilder::size_limit caps the *total* NFA byte size
+            // across all patterns in the set, preventing a crafted rule file
+            // from causing compile-time hang via deeply-nested alternation.
+            let set = regex::RegexSetBuilder::new(&patterns)
+                .size_limit(REGEX_COMPILE_SIZE_LIMIT)
+                .build()
+                .map_err(|e| {
+                    DetectRulesError::Parse(format!("failed to compile body RegexSet: {e}"))
+                })?;
             self.body_regex_set = Some(set);
         }
 
@@ -1505,5 +1530,127 @@ weight = 0.6
             names_a, names_b,
             "case randomization changed detection result"
         );
+    }
+
+    // ── ReDoS / compile-time explosion defence ────────────────────────────
+    //
+    // §15 AUDIT HUNTS axis 3 (ReDoS / algorithmic complexity).
+    //
+    // A length-bounded pattern (MAX_REGEX_PATTERN_LEN = 4096 bytes) can
+    // still cause O(N^M) NFA state explosion at compile time even for short
+    // patterns.  The attack pattern `(.{1,100}){50}` is 14 bytes (well within
+    // 4096) but requires the regex NFA to track an exponential number of
+    // positions, blowing past the 4 MiB NFA-byte cap in REGEX_COMPILE_SIZE_LIMIT.
+    //
+    // These tests pin the size_limit guard — if someone reverts
+    // compile_ci_regex to bare `Regex::new`, the explosion test will
+    // either hang indefinitely or compile without error (disabling the
+    // protection), and the error-not-panic tests will then falsely pass.
+    //
+    // Verified empirically: `(.{1,100}){50}` returns Err with size_limit=4MB,
+    // and compiles successfully with size_limit=usize::MAX (no hang — the regex
+    // crate uses a lazy DFA, so match time is safe; only compile time blows up).
+
+    #[test]
+    fn redos_explosion_pattern_is_rejected_not_hung() {
+        // `(.{1,100}){50}` is the NFA-explosion pattern verified against
+        // REGEX_COMPILE_SIZE_LIMIT (4 MiB). It is 14 bytes — well within
+        // MAX_REGEX_PATTERN_LEN — but creates an NFA that exceeds the cap.
+        // With size_limit enforced: returns Err in microseconds.
+        // Without size_limit: compiles successfully (lazy DFA; no hang at
+        // match time) — which is exactly the unguarded case we're sealing.
+        let pat = r"(.{1,100}){50}";
+        let result = compile_ci_regex(pat, "header");
+        // Must be an error (size_limit exceeded).
+        assert!(
+            result.is_err(),
+            "NFA-explosion pattern `{pat}` must be rejected by size_limit"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("header"),
+            "error must name the regex kind; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn redos_explosion_in_rule_file_is_rejected_with_error() {
+        // A rule file containing a NFA-explosion header_regex must produce
+        // a compile error from load_from_str — not silent success.
+        let toml = r#"
+[[waf]]
+name = "ExplosionWAF"
+vendor = "test"
+confidence_threshold = 0.3
+
+[[waf.signature]]
+header_regex = "(.{1,100}){50}"
+weight = 0.5
+"#;
+        let mut engine = RuleEngine::default();
+        let result = engine.load_from_str(toml);
+        assert!(
+            result.is_err(),
+            "NFA-explosion header_regex must surface as load error"
+        );
+    }
+
+    #[test]
+    fn redos_explosion_in_body_regex_set_is_rejected_with_error() {
+        // A body_regex NFA-explosion pattern must be caught by either
+        // the per-rule compile step OR compile_body_regex_set.
+        // The per-rule step uses compile_ci_regex (has size_limit);
+        // compile_body_regex_set uses RegexSetBuilder (also has size_limit).
+        // Both paths must reject the pattern — neither may silently succeed.
+        let toml = r#"
+[[waf]]
+name = "BodyExplosionWAF"
+vendor = "test"
+confidence_threshold = 0.3
+
+[[waf.signature]]
+body_regex = "(.{1,100}){50}"
+weight = 0.5
+"#;
+        let mut engine = RuleEngine::default();
+        // load_from_str compiles individual regexes (compile_ci_regex path).
+        // This should already fail because compile_ci_regex has size_limit.
+        let load_result = engine.load_from_str(toml);
+        if load_result.is_ok() {
+            // If the per-rule path somehow didn't catch it, compile_body_regex_set
+            // (RegexSetBuilder path) must.
+            let set_result = engine.compile_body_regex_set();
+            assert!(
+                set_result.is_err(),
+                "NFA-explosion body_regex must surface as error from compile_body_regex_set"
+            );
+        }
+        // Either path produces an error — the load_from_str path should fire first.
+        assert!(
+            load_result.is_err(),
+            "NFA-explosion body_regex must be caught by per-rule compile step"
+        );
+    }
+
+    #[test]
+    fn benign_patterns_still_compile_after_size_limit_applied() {
+        // Regression guard: the size_limit must not break normal patterns.
+        // Test a representative sample of patterns from real WAF rules.
+        let patterns = [
+            "cloudflare",
+            r"cache-[a-z]{3}[0-9]+-[A-Z]{3}",
+            r"X-Sucuri-ID",
+            r"(\d{1,3}\.){3}\d{1,3}",
+            r"(?i)blocked by",
+            r"(?-i)BinarySec",
+        ];
+        for pat in &patterns {
+            let result = compile_ci_regex(pat, "header");
+            assert!(
+                result.is_ok(),
+                "benign pattern `{pat}` must still compile after size_limit: {:?}",
+                result.err()
+            );
+        }
     }
 }

@@ -182,19 +182,11 @@ fn is_known_keyword(token: &str) -> bool {
     KNOWN_KEYWORDS.contains(&token)
 }
 
-// FNV-1a 64-bit hash — deterministic, dependency-free.
-const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-const FNV_PRIME: u64 = 0x100000001b3;
-
-fn fnv1a_byte(h: u64, b: u8) -> u64 {
-    (h ^ (b as u64)).wrapping_mul(FNV_PRIME)
-}
-
-fn fnv1a_bytes(h: &mut u64, bytes: &[u8]) {
-    for &b in bytes {
-        *h = fnv1a_byte(*h, b);
-    }
-}
+// FNV-1a 64-bit hash — delegates to `wafrift_types::hash`, the
+// canonical single home for this primitive. Pre-pass-21 each of three
+// crates carried byte-for-byte identical copies of these constants and
+// loop, ripe for silent drift. R57 §7 DEDUP.
+use wafrift_types::hash::{FNV_OFFSET_64 as FNV_OFFSET, fnv1a_64_extend as fnv1a_bytes, fnv1a_64_step as fnv1a_byte};
 
 /// Local cache of known HackerOne reports + their structural
 /// fingerprints. Operator preloads from public CumulusFire writeups.
@@ -247,33 +239,25 @@ impl H1Archive {
     /// state; we never crash because of bad JSON).
     #[must_use]
     pub fn load_or_default(path: &std::path::Path) -> Self {
-        let Ok(raw) = std::fs::read_to_string(path) else {
+        // H1 archives accumulate across hunts but stay JSON-compact;
+        // 64 MiB caps the OOM surface without rejecting any
+        // legitimate mature archive.
+        const H1_ARCHIVE_MAX_BYTES: usize = 64 * 1024 * 1024;
+        let Ok(raw) = crate::safe_io::read_capped_text(path, H1_ARCHIVE_MAX_BYTES) else {
             return Self::default();
         };
         serde_json::from_str(&raw).unwrap_or_default()
     }
 
     /// Save atomically via tempfile + rename.
+    ///
+    /// R55 pass-19 I4 (CLAUDE.md §7 DEDUP): delegates to
+    /// `wafrift_types::loaders::write_atomic` so the atomic-write
+    /// recipe lives in one place.
     pub fn save_atomic(&self, path: &std::path::Path) -> std::io::Result<()> {
         let body = serde_json::to_vec_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut tmp = path.to_path_buf();
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "h1-archive".to_string());
-        tmp.set_file_name(format!("{name}.tmp"));
-        {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(&body)?;
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+        wafrift_types::loaders::write_atomic(path, &body)
     }
 }
 

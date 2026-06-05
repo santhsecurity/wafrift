@@ -253,6 +253,8 @@ async fn run_phase_with_empty_payloads_returns_zero_deltas() {
         scan_text: false,
         delay: Duration::ZERO,
         variant_id_base: 0,
+        fires_so_far: 0,
+        max_fires: 0, // 0 = unlimited
     })
     .await;
     assert_eq!(outcome.total_fired_delta, 0);
@@ -431,6 +433,8 @@ async fn run_phase_exits_immediately_when_cancelled() {
         scan_text: false,
         delay: Duration::ZERO,
         variant_id_base: 0,
+        fires_so_far: 0,
+        max_fires: 0, // 0 = unlimited
     })
     .await;
     // Cancelled before any fire — total_fired_delta stays 0
@@ -987,6 +991,8 @@ fn variant_id_base_zero_yields_first_variant_id_one() {
         scan_text: false,
         delay: Duration::ZERO,
         variant_id_base: 0,
+        fires_so_far: 0,
+        max_fires: 0, // 0 = unlimited
     }
     .variant_id_base;
 }
@@ -1012,6 +1018,8 @@ async fn run_phase_tags_rescue_bypasses_distinctly_from_top_bypasses() {
         scan_text: false,
         delay: Duration::ZERO,
         variant_id_base: 100,
+        fires_so_far: 0,
+        max_fires: 0, // 0 = unlimited
     })
     .await;
     // The dead-target path produces errors / nothing actionable;

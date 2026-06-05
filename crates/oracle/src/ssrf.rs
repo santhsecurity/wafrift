@@ -178,9 +178,7 @@ fn extract_authority(payload: &str) -> Option<&str> {
     let scheme_end = payload.find("://")?;
     let auth_start = scheme_end + 3;
     let rest = payload.get(auth_start..)?;
-    let end = rest
-        .find(|c: char| matches!(c, '/' | '?' | '#'))
-        .unwrap_or(rest.len());
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     Some(&rest[..end])
 }
 

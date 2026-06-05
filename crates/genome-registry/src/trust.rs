@@ -11,6 +11,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::signing::{RegistryError, VerifyingKeyHex};
 
+/// UTF-8 text reader with the cap enforced DURING the read (so a
+/// symlink to `/dev/zero` cannot evade the size gate the way it
+/// would with a `metadata()`-then-`read()` pattern).
+fn read_capped_trust_text(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::Read;
+    let f = std::fs::File::open(path)?;
+    let mut limited = f.take(max_bytes + 1);
+    let mut buf = Vec::with_capacity(8 * 1024);
+    limited.read_to_end(&mut buf)?;
+    if (buf.len() as u64) > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{}: trust list exceeds {}-byte cap",
+                path.display(),
+                max_bytes,
+            ),
+        ));
+    }
+    String::from_utf8(buf).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{}: trust list is not valid UTF-8: {e}", path.display()),
+        )
+    })
+}
+
 /// One trusted publisher.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Publisher {
@@ -89,7 +116,11 @@ impl TrustList {
 
     /// Load from a file. Missing file → empty trust list (not an error).
     pub fn load(path: &Path) -> Result<Self, RegistryError> {
-        let body = match std::fs::read_to_string(path) {
+        // Trust lists are small — a few keys + metadata. 1 MiB caps
+        // the OOM surface tightly while accommodating any realistic
+        // operator key roster.
+        const TRUST_LIST_MAX_BYTES: u64 = 1024 * 1024;
+        let body = match read_capped_trust_text(path, TRUST_LIST_MAX_BYTES) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self::new());

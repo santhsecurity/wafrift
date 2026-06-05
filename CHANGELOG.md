@@ -4,6 +4,335 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ## [Unreleased]
 
+### Added — default genome warm-start bank
+
+A brand-new install no longer starts cold. `wafrift scan` against a WAF
+with no prior history now warm-starts from a bundled default genome of
+proven *generic* technique-records (URL / case / HTML-entity / overlong-
+UTF8 encodings, content-type delivery vectors), so the first scan fires
+known winners instead of discovering from zero. Materialized write-through
+via `GeneBank::load_or_default` under `~/.wafrift/genomes/`; an operator's
+existing genome is never clobbered. Shipped content is technique-keys +
+priors only — never target-specific payloads.
+
+The default is now **WAF-class-aware** (§6 GENERALIZATION): a Cloudflare-
+fronted target (`load_or_default` routes by `WafClass`) warm-starts from a
+delivery-vector-heavy Cloudflare set (JSON dup-key / multipart / CBOR / YAML
+content-type confusion + overlong-UTF8 / hex), while CRS / ModSec / Coraza /
+naxsi / unknown targets get the broadly-effective generic encodings. Adding a
+new class default is one JSON file + one match arm.
+
+### Added — `ml-evasion` strategy (ML-WAF boundary attack in the autonomous loop)
+
+`wafrift bench-waf --strategies ml-evasion --waf-name "<WAF>"` (and
+`wafrift hunt --waf-name "<WAF>"`, which auto-adds it) route ML-backed
+targets — AWS/Cloudflare/Akamai bot-management, Datadome — through a
+manifold-projected **structural-mutation** strategy, the paradigm-correct
+shape for a learned classifier (rule-decompilation like `equiv-cegis` doesn't
+apply to a WAF with no rules). Each candidate is a semantics-preserving
+mutation of the payload that must stay a *working* attack
+(`wafmodel::is_attack_payload` is the manifold projection — a mutation that
+stops being an attack is a discarded sample, never a counted bypass); the
+candidate is fired at the live target and only verified bypasses are credited.
+A non-ML-backed `--waf-name` (or none) makes it a clean no-op. The full
+*adaptive* decision-boundary descent (`wafmodel::evade_ml`, contract-tested),
+which chooses each next mutation from live block/allow feedback, is a tracked
+frontier upgrade (`docs/legendary-todo.md`).
+
+### Changed — `scan --corpus`: "scan pointed at bench" (one CLI, two modes)
+
+`wafrift scan --corpus <dir>` now runs the corpus-wide WAF bench measurement
+(raw block-rate + verified bypass-rate) instead of a single-payload scan — the
+same measurement `bench-waf` performs, so the normal CLI is "pointed at bench"
+and the dev/QA `bench-waf` command stays hidden. **Metric-safe:** it delegates
+to the UNCHANGED `run_bench_waf` engine (the anti-rig bypass-rate core is
+untouched), mapping the scan target / timeout / `--i-have-permission` across,
+and gates non-allowlisted targets exactly like the bench-waf arm (§15).
+`--payload` is ignored in this mode; single-payload scan is unchanged.
+
+### Changed — unified `wafrift diff <kind>` surface
+
+The eleven parser-disagreement commands (`parser-diff`, `header-diff`,
+`body-diff`, `query-diff`, `cache-diff`, `h2-diff`, `method-diff`,
+`gql-diff`, `jwt-diff`, `cors-diff`, `trailer-diff`) plus the `attack`
+orchestrator are now grouped under one verb — `wafrift diff <kind>`
+(`diff header`, `diff all`, …). Top-level `--help` drops from 53 to 41
+commands. **Backwards-compatible (LAW 2):** every flat name and `attack`
+keep working as deprecated hidden aliases — no existing script, pipeline,
+or doc breaks. The `tmin` alias of `distill` was likewise hidden.
+
+The dev/QA benchmark commands `bench-waf`, `bench-diff`, and `corpus` are
+also hidden from the top-level menu — they're tooling, not pentester
+commands (still callable, LAW 2; the bench harness / CI / `hunt`-internals
+are unaffected). Net visible surface: **53 → 38** commands.
+
+### Fixed
+
+- **`bench-waf` permission gate (§15 / least-privilege).** `bench-waf` fired
+  attack payloads at any `--base-url` with no acknowledgment, unlike `scan` /
+  `hunt` (which gate non-allowlisted targets behind `--i-have-permission`) —
+  an inconsistency surfaced by dogfooding. It now reuses the canonical
+  `permission::assert_permitted` to refuse (exit 2) a non-allowlisted explicit
+  `--base-url` without `--i-have-permission`. Lab / CI / CumulusFire targets are
+  on the built-in allowlist (unaffected); only external explicit targets now
+  require the flag. Gated in the CLI dispatch arm — `hunt`'s internal bench
+  rounds gate at the campaign level.
+
+- **Unbounded rule-corpus `blocked` growth (§15) + O(n²) dedup + 62 MB saves
+  (§1).** A hunted per-target corpus accumulated *every unique blocked payload*
+  per rule bucket with no count cap — the live CumulusFire corpus reached 62 MB,
+  creeping toward the 128 MiB load cap (past which `load_or_default` silently
+  drops the whole corpus), while each `save_atomic` rewrote all 62 MB and the
+  per-insert dedup scanned the whole bucket (O(n²) over a long hunt). Blocked
+  payloads are a rule-coverage *sample*, not harvest material, so
+  `record_block` now caps them at 512/bucket (bypasses stay uncapped) and
+  `load_or_default` truncates over-cap buckets — an existing bloated corpus
+  self-reclaims on the next save. Found by dogfooding the live hunt corpus (§13).
+
+- **Redirect-SSRF on the core `EvasionClient`.** The main evasion client
+  followed redirects via bare `reqwest::redirect::Policy::limited` — no
+  bogon check — so a hostile target could `302 → http://169.254.169.254/`
+  and pull cloud metadata (or pivot into RFC1918) through the scanner, even
+  though the CLI diff commands already bogon-guarded theirs. The canonical
+  `safe_redirect_policy` (bogon-refusal + cross-origin halt + hop cap) now
+  lives in `wafrift-transport` (§7: one impl, in the HTTP layer where it
+  belongs); `EvasionClient` uses it and `cli::helpers` delegates to it.
+  Legit redirects to the real origin still follow — only metadata /
+  internal / cross-origin hops are refused. (§15 SSRF.)
+- **Decompression-bomb defence on the public `EvasionResponse`.**
+  `EvasionResponse::bytes()` / `text()` did a raw, unbounded
+  `reqwest::Response::bytes()/.text()` — and reqwest auto-decompresses
+  gzip/br with no size cap, so a hostile target could OOM the scanner with
+  a ~1 KB bomb that expands to gigabytes. They now drain chunk-by-chunk,
+  capped at 64 MiB (matching the transport client's internal bounded
+  reader); a source-level anti-rig test pins the bound against regression.
+  (§15 — the one public reader that bypassed the codebase's own rule.)
+- Stale `wafrift_strategy` doctest imported `EvasionConfig` from the wrong
+  crate; corrected to `wafrift_types::EvasionConfig` so the example (an
+  executable contract) compiles again.
+- `equiv-cegis` learn phase — header-channel membership queries carrying
+  RFC 7230 obs-text (high-byte) payloads were rejected by reqwest's
+  `&str` header path as "builder errors", silently dropping that L\*
+  learning signal (observed flooding live `hunt` runs). They now build
+  via `HeaderValue::from_bytes`, so high-byte evasion payloads form real
+  queries; only genuinely-unsendable NUL/CR/LF are excluded.
+
+### Internal
+
+- §7 dedup: the `SystemTime::now()…as_secs().unwrap_or(0)` idiom
+  (5 hand-rolled copies in `hunt_cmd`) collapsed into a single
+  `helpers::now_unix_secs()`.
+- §7 dedup / §4 elegance: the 22 copy-pasted diff-family dispatch blocks in
+  `main.rs` (each: layer `.wafrift.toml` http defaults → `block_on` the async
+  runner — once per flat `<kind>-diff` alias AND once per `diff <kind>`
+  subcommand) collapsed into a single generic `run_http_diff` helper, so the
+  layering rule lives in one place. Pure-internal; the CLI surface and every
+  command's behaviour are byte-identical (manpage-sync + e2e pin it).
+- §11: removed `wafrift_strategy::evade_ml_backed` — a test-only pub wrapper
+  with no production caller (scan/bench route via
+  `apply_ml_evasion_if_applicable` through `ml_evasion_probe_payload`). Dropped
+  the fn + re-export + 3 redundant tests; re-pointed the 4 `mlwaf_routing`
+  integration tests. The `EvasionResult` adapter is re-addable trivially if the
+  proxy ever needs request-level ML-evasion.
+
+## [0.3.0] - 2026-05-28
+
+### Added — Bounty-harvest pipeline (`wafrift harvest` + `wafrift submit`)
+
+`hunt` and `bench-waf` now record every confirmed bypass's winning wire
+payload + response evidence to a per-target corpus under `~/.wafrift`
+(across the `equiv`, `equiv-adaptive`, and `equiv-cegis` strategies plus
+the payload-mutation strategies — previously only the latter recorded).
+Two new commands turn that corpus into reviewed bounty submissions:
+
+- `wafrift harvest` — dedupes the corpus, RE-VERIFIES each candidate
+  against the live target (capturing a fresh request + response so the
+  report carries proof, not a stale hit), and writes one review-ready
+  HackerOne Markdown report per still-working bypass. Control-byte
+  payloads get byte-exact `$'…'` curl reproductions; a corrupt corpus is
+  a hard error (never silently treated as empty). NEVER submits.
+- `wafrift submit --report <file> --confirm` — files exactly ONE reviewed
+  report; dry-run without `--confirm`; refuses unverified reports. There
+  is no automatic or batch submission path (bounty-program ban risk).
+
+### Removed
+
+- `hunt --auto-submit` / `--dry-run-submit` and the 24h auto-file loop.
+  Auto-filing machine-generated reports at a bounty program is a fast
+  ban; filing is now the deliberate, one-at-a-time `wafrift submit` step.
+
+### Fixed
+
+- `trailer-diff --url https://…` no longer panics ("no process-level
+  CryptoProvider available", exit 101) on the first https target — the
+  rustls crypto provider is now installed once at startup, covering all
+  raw-TLS paths (trailer-diff / ja3-diff / scan).
+- `body-diff` / `query-diff` `--format json` now include an
+  `error_details` array (probe identity + message), not just an error
+  count, so CI consumers can see which probes failed and why.
+
+### Added — Info-gain payload scheduler (`bench-waf --budget` / `--history-file` / `--fair-class` / `--list-schedule` / `--history-merge`)
+
+Operators with capped request budgets now get the most informative
+payloads first. Five new flags on `wafrift bench-waf`:
+
+- `--budget N` — cap the corpus to the top-N payloads ranked by
+  expected info gain. Cold-start payloads (no prior observations)
+  start with maximum entropy = 1 bit and naturally lead the schedule;
+  payloads with biased history (always-blocked or always-passing)
+  fall to the tail.
+- `--history-file PATH` — persist Beta-Bernoulli posteriors across
+  runs. The file is JSON-shaped per `info_gain_sched::History`;
+  missing file → cold start; written atomically via `write_atomic`
+  at end of run with the current run's observations folded in.
+  Updated independently of `--budget`, so an operator can build
+  history during full-corpus runs and use `--budget` later to scope
+  down a follow-up.
+- `--fair-class` — enforce per-class fairness when `--budget` would
+  otherwise produce a class-skewed schedule (e.g. 95%-SQL corpus
+  → all-SQL schedule). Each class receives `budget / num_classes`
+  slots; within each class payloads are ordered by descending info
+  gain.
+- `--list-schedule` — preview the schedule that the current args
+  would run WITHOUT firing any HTTP request. Prints a table of
+  `rank, id, info_gain, theta, theta_ci_95, n_trials` (text by
+  default; JSON array of `ScheduleEntry` with `--format json`).
+  Pairs with `--history-file` to debug what the next real bench
+  would actually pick before spending request budget.
+- `--history-merge PATH` (repeatable) — fold additional history
+  JSON files into the working history before scheduling. Useful
+  for operators running parallel WAF assessments who want to
+  aggregate posteriors via `History::merge`.
+
+The selection criterion is the binary Shannon entropy of the
+estimated block probability, shared with bench-waf's C-14 case
+quality scoring via the new `wafrift_types::entropy::{binary_shannon,
+shannon}` primitives (single canonical home, satisfying CLAUDE.md §7
+DEDUP). The diagnostic preview path also surfaces Wald 95% credible
+intervals on theta via `PayloadStats::theta_ci_95` so operators
+can distinguish "I'm confident at 0.5" from "I have 2 trials at 0.5".
+
+Tests: 62 unit (`info_gain_sched::tests`), 19 unit
+(`entropy::tests`), 22 e2e (`info_gain_sched_e2e.rs`) — 103 total.
+The triangle — `--help` documents every flag, integration tests parse
+every flag and exercise the preview JSON shape, and the schedule
+reaches the bench loop via `run_bench_waf_async`'s filter branch —
+closes per §9 WIRING. Hot-path sort switched to `sort_unstable_by`
+with pre-computed `(info_gain, n_trials)` keys (~7% improvement on
+10k-payload corpora) per §1 SPEED. Magic numbers `Z_SCORE_95` and
+`BETA11_PRIOR_PSEUDO_TRIALS` named per §6 GENERALIZATION. `shannon`
+n-ary hardened to skip `p > 1` and clamp to `>= 0` per §15 AUDIT
+(prevents negative-entropy poisoning of sort keys). Schedule
+execution preserves info-gain order in the bench loop so an operator
+who Ctrl-C's mid-bench gets the most-informative results first.
+
+### Changed — §7 DEDUP: extract `wafrift()` test helper into `tests/common/mod.rs`
+
+38 e2e test files each carried a byte-for-byte copy of:
+```rust
+fn wafrift(args: &[&str]) -> (i32, String, String) { ... }
+```
+The canonical definition now lives in `crates/cli/tests/common/mod.rs`
+alongside the existing `wait_for_server` helper. Each test file now:
+- declares `mod common; use common::wafrift;`
+- drops the local definition and the now-unused `use std::process::Command;`
+A single tuning of the binary invocation (env var, timeout policy,
+arg prefix) now propagates to all 38 tests atomically.
+
+### Changed — §1 SPEED: pre-size mutation Vecs in grammar equiv modules
+
+10 `generate()` functions in `crates/grammar/src/grammar/equiv/` each
+allocated `Vec::new()` for their output and for the inner-loop `rules`
+Vec (up to 8 tags per iteration, allocated on every attempt):
+- `let mut out: Vec<EquivPayload> = Vec::new()` → `Vec::with_capacity(cfg.max)`
+- `let mut rules: Vec<&'static str> = Vec::new()` → `Vec::with_capacity(8)`
+Also applied to `path_traversal.rs` and `unicode_norm.rs`.
+
+### Changed — §6 GENERALIZATION: name the attempt-budget constants
+
+The loop termination `attempts < cfg.max * 24 + 64` was a bare magic
+number repeated in 10 `generate()` functions. Two named constants in
+`equiv/mod.rs` replace all 10 occurrences:
+- `ATTEMPT_BUDGET_MULTIPLIER = 24`
+- `ATTEMPT_BUDGET_FLOOR = 64`
+A tuning now lands in one place and propagates everywhere.
+
+### Changed — §1 SPEED: eliminate Vec allocation in `sql/strings.rs`
+
+`CHAR(...)`, `CHR(...)`, and `NCHAR(...)` string-split variants each
+used `collect::<Vec<_>>().join(sep)` — allocating a 10-element Vec
+just to join it. Replaced by `char_fn_join` helper that writes
+directly to a pre-sized `String` via `write!`. Zero intermediate Vec.
+
+### Added — §11 UTILIZATION / §4 INNOVATION: wire CfgMutator into mutation pipeline
+
+`cfg_convergence::CfgMutator` (BWAFSQLi-paper Boltzmann-annealing
+grammar) was a complete implementation with zero production callers.
+Now wired into `mutate_as(PayloadType::Sql)` and
+`mutate_as(PayloadType::Xss)`:
+- SQL: emits up to 4 CFG variants (boolean-OR, boolean-AND,
+  string-terminator, numeric-OR templates)
+- XSS: emits up to 3 CFG variants (img-onerror, svg-onload,
+  details-toggle templates)
+Seeds are FNV-folded from the payload for determinism across runs.
+4 new tests pin the anti-rig invariants.
+
+### Fixed — §11 UTILIZATION: CFG convergence variants now reliably appear in output
+
+Two bugs prevented `CfgMutator` from ever emitting variants in practice:
+
+1. **Budget starvation**: `sql::mutate()` / `xss::mutate()` were called
+   with the full `max_mutations` budget, leaving zero slots for the CFG
+   block (which was guarded by `results.len() < max_mutations`). Fixed
+   by reserving 4 slots for SQL CFG and 3 slots for XSS CFG before
+   calling the base mutators (`base_budget = max_mutations.saturating_sub(N)`).
+
+2. **Boltzmann overflow → wrong fallback**: when `temperature ≤ min_temp`
+   and a production had a high bypass score (e.g. 20.0), the Boltzmann
+   weight `exp(20.0 / 0.01) = exp(2000)` overflowed to `+Inf`. The
+   original fallback was **uniform** random sampling, which broke the
+   convergence guarantee. Fixed: overflow path now does **argmax**
+   (same as T=0), which is the semantically-correct cold-temperature
+   behaviour.
+
+3. **Invalid XSS `{tag_open}` productions**: `%3C`, `\x3c`, `<`,
+   `&#60;`, `&lt;` were in the default XSS productions but are
+   encoding-layer forms, not raw grammar mutations. The
+   `still_executes_xss` oracle validator doesn't normalise these
+   (only `\uXXXX` JS escapes are handled), so those forms always
+   failed semantic validation. Replaced with literal `<`, `\t<`,
+   ` <`, `\n<` variants.
+
+4. **Unicode-norm XSS variants missing semantic filter**: the
+   `unicode_norm::mutate` block in the XSS arm of `mutate_as` was not
+   validating with `still_executes_xss`. Fullwidth-Unicode variants
+   (e.g. `ｆｅｔｃｈ`) don't preserve structured exfil markers in the
+   oracle normaliser, causing them to fail the scald soundness invariant.
+   Fixed by adding `equiv::xss::still_executes_xss` filter before push.
+
+### Changed — §8 ARCHITECTURE: narrow pub(crate) visibility for internal grammar modules
+
+Three grammar sub-modules have zero external callers (neither from
+other crates nor from integration tests) — narrowed to `pub(crate)`:
+- `grammar::jndi` — internal dispatch target in `mutate_as`
+- `grammar::ssi` — internal dispatch target in `mutate_as`
+- `grammar::unicode_norm` — internal to the XSS arm of `mutate_as`
+
+`cfg_convergence` was also narrowed (`pub(crate)`) since no downstream
+crate imports `wafrift_grammar::grammar::cfg_convergence::*`.
+
+### Changed — §1 SPEED: `synthesize()` featurize calls O(2 log N) → O(N)
+
+`wafmodel::synthesize()` used `Iterator::min_by` with a closure that
+called `featurize()` **twice per comparison** (O(2 log N) total, ~120
+calls for N=52 candidates). Replaced with a `.map(score)` + `.reduce`
+pattern that featurizes each candidate exactly once (O(N)).
+
+### Changed — §1 SPEED: pre-size `pipelines` Vec in strategy/planner.rs
+
+`plan_pipelines()` allocated `Vec::new()` for a collection capped at 4
+entries (1 cached + 3 preset). Changed to `Vec::with_capacity(4)`.
+
 ### Added — `pg_chr_decompose` tamper (Postgres/Oracle CHR() + pipe-concat)
 
 26th builtin `TamperStrategy`. Sibling to `sql_char_decompose` targeting
@@ -1093,6 +1422,45 @@ into report tooling, and a `curl -i` reproducer per finding.
   family (one classification rule change reaches every
   sub-command in one edit).
 
+### Added — Oracle feedback loop + stateful grammar API (R56 pass-21)
+
+- `CfgMutatorState` — public struct (`wafrift-grammar`) holding
+  persistent SQL and XSS `CfgMutator` instances. Pass it across
+  probe rounds so Boltzmann bypass scores accumulate; bypassing
+  productions get `+5.0`, blocked ones get `-1.0` per `feedback()`.
+- `mutate_as_with_state(payload, type, max, &mut CfgMutatorState)`
+  — stateful variant of `mutate_as`; uses the persistent mutators
+  from `state` rather than building fresh ones per call. The
+  original `mutate_as` is unchanged (LAW 2).
+- `feedback(state, payload_type, rules_applied, bypassed)` — wire
+  probe results back into the convergence-annealing scores. Only
+  rules with `cfg_` prefix are rewarded; non-CFG rules are ignored.
+- Re-exported `CfgMutatorState`, `mutate_as_with_state`, `feedback`
+  at the crate root of `wafrift-grammar` so callers don't need to
+  import the internal `grammar::cfg_convergence` module.
+- 8 new tests covering: SQL/XSS stateful variants, cfg variant
+  inclusion, reward score mutation, temperature persistence across
+  calls, type contract equivalence, non-CFG rule no-op, and
+  `Default` == `new()`.
+
+### Fixed — SSRF redirect gaps (R56 pass-20/21)
+
+- `bank_registry::build_registry_client` — added
+  `safe_redirect_policy(5)`. The registry URL is operator-supplied;
+  a hostile registry returning `302 → 169.254.169.254/` would have
+  been followed under reqwest's default `Policy::limited(10)`.
+- `bench_waf` — added `safe_redirect_policy(5)` to the bench HTTP
+  client (closed in R56 pass-20; previous session).
+- `discover_cmd` — wired `HasHttpConfig` impl + `--timeout-secs` /
+  `--insecure` flags + `apply_http_defaults` dispatch (closed in
+  R56 pass-20).
+
+### Fixed — WIRING / §9 coherence (R56 pass-20)
+
+- `--report-layers` text panel now surfaces `retry_after_responses`
+  / `max_retry_after_obeyed_ms` alongside the layer summary.
+  GAP_CLOSURE_ROADMAP item 7 marked CLOSED.
+
 ### Removed — doc + dead-code clutter
 
 - Deleted `docs/archive/` (4 files, ~2699 lines of stale planning
@@ -1108,6 +1476,9 @@ into report tooling, and a `curl -i` reproducer per finding.
   on the three Registry methods only used in tests.
 - Trimmed `raw_request.rs` module-level `#![allow(dead_code)]`
   (the parse side now has a real caller: `scan -r` mode).
+- Removed `#[allow(dead_code)]` from `CfgMutator::reward`,
+  `reward_by_name`, `batch_expand`, and `Production::name` — all
+  now have live non-test callers via `CfgMutatorState`.
 
 ## [0.2.17] — 2026-05-18
 

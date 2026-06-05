@@ -590,6 +590,22 @@ mod tests {
         assert!(matches!(result, Err(EncodeError::PayloadTooLarge { .. })));
     }
 
+    /// R55 pass-19 I6 (CLAUDE.md §12 TESTING boundary): the gate is
+    /// `payload.len() > MAX_PAYLOAD_SIZE` (strictly greater-than), so
+    /// a payload of exactly `MAX_PAYLOAD_SIZE` MUST succeed. Anti-rig:
+    /// if someone changes the comparison to `>=`, this test fails
+    /// instantly. The complementary `> MAX_PAYLOAD_SIZE + 1` case is
+    /// pinned by `encode_payload_too_large_fails`.
+    #[test]
+    fn encode_at_exact_max_payload_size_succeeds() {
+        let at_limit = vec![b'X'; MAX_PAYLOAD_SIZE];
+        let result = encode(&at_limit, Strategy::UrlEncode);
+        assert!(
+            result.is_ok(),
+            "boundary contract: exactly MAX_PAYLOAD_SIZE bytes must encode, got {result:?}"
+        );
+    }
+
     #[test]
     fn all_strategies_non_empty() {
         let strategies = all_strategies();

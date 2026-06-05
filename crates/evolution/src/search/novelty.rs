@@ -3,10 +3,10 @@ use crate::evolution::{Chromosome, GenePool, population::random_chromosome};
 use crate::lineage::Lineage;
 use crate::search::{EvalCandidate, SearchAlgorithm, fitness_cmp};
 use crate::types::{Budget, EvolutionError, OracleVerdict, SearchStats};
-use rand::Rng;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use wafrift_types::pick::pick_ref_from_rng;
 
 /// Novelty search with k-NN behavioral distance archive.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,7 +63,7 @@ impl NoveltySearch {
         if self.population.is_empty() {
             return random_chromosome(&self.gene_pool, rng);
         }
-        let parent = &self.population[rng.gen_range(0..self.population.len())];
+        let parent = pick_ref_from_rng(&self.population, rng).unwrap_or(&self.population[0]);
         let mut child = parent.clone();
         let log = mutate_with_log(&mut child, &self.gene_pool, 0.3, rng);
         child.lineage = Lineage::mutation(parent, log, self.generation);

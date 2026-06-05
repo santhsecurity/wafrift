@@ -44,6 +44,16 @@ urlencoding = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
 serde_json = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+# Integration tests use the multipart smuggle probes alongside the
+# encoding-crate probes to verify the workspace-wide SmuggleProbe
+# trait works across families. Dev-only so production builds stay
+# decoupled.
+wafrift-content-type = { workspace = true }
+
+[[bench]]
+name = "encoding_hot_paths"
+harness = false
 
 [lints]
 workspace = true

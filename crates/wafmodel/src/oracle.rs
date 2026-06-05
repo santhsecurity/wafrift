@@ -25,6 +25,7 @@ use crate::normalize::{Transform, apply_chain};
 use crate::outcome::Outcome;
 use regex::bytes::Regex;
 use wafrift_types::Request;
+use wafrift_types::hash::{FNV_OFFSET_64, FNV_PRIME_64};
 
 /// The oracle abstraction the active learner is generic over.
 pub trait WafOracle {
@@ -138,10 +139,10 @@ impl SimRegexWaf {
             .map(|r| format!("{}|{}|{}", r.id, r.pattern.as_str(), r.score))
             .collect();
         lines.sort();
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut h: u64 = FNV_OFFSET_64;
         for byte in format!("t={};{}", self.threshold, lines.join("\n")).bytes() {
             h ^= u64::from(byte);
-            h = h.wrapping_mul(0x0000_0100_0000_01B3);
+            h = h.wrapping_mul(FNV_PRIME_64);
         }
         format!("{h:016x}")
     }
@@ -215,11 +216,38 @@ impl SimRegexWaf {
         let doc: Doc = toml::from_str(src)
             .map_err(|e| WafModelError::Artifact(format!("ruleset TOML: {e}")))?;
         let mut rules = Vec::with_capacity(doc.rule.len());
+        // R48 pass-10 I7 (CLAUDE.md §15 AUDIT/ReDoS): cap pattern
+        // length and use RegexBuilder.size_limit() so a crafted
+        // ruleset cannot drive Regex::new into exponential compile
+        // time or stack overflow via deeply nested alternation
+        // (e.g. `(a?){200}`). The runtime regex crate is linear-
+        // time on match, but compilation is not bounded by default.
+        //
+        // MAX_PATTERN_LEN is intentionally larger (16 KiB) than the
+        // detect crate's 4096-byte cap: wafmodel loads operator-
+        // supplied CRS rulesets where individual patterns (e.g. long
+        // keyword-alternation chains) legitimately exceed 4 KiB.
+        // REGEX_NFA_SIZE_LIMIT is the workspace-canonical 4 MiB NFA
+        // cap (wafrift_types::REGEX_NFA_SIZE_LIMIT), shared with
+        // wafrift-detect so the ReDoS protection level is uniform.
+        const MAX_PATTERN_LEN: usize = 16 * 1024;
         for r in doc.rule {
-            let pattern = Regex::new(&r.pattern).map_err(|source| WafModelError::BadRule {
-                rule: r.id.clone(),
-                source,
-            })?;
+            if r.pattern.len() > MAX_PATTERN_LEN {
+                return Err(WafModelError::Artifact(format!(
+                    "rule {} pattern is {} bytes; max {} (defends against \
+                     hostile ruleset compile-time blowup)",
+                    r.id,
+                    r.pattern.len(),
+                    MAX_PATTERN_LEN
+                )));
+            }
+            let pattern = regex::bytes::RegexBuilder::new(&r.pattern)
+                .size_limit(wafrift_types::REGEX_NFA_SIZE_LIMIT)
+                .build()
+                .map_err(|source| WafModelError::BadRule {
+                    rule: r.id.clone(),
+                    source,
+                })?;
             rules.push(Rule {
                 id: r.id,
                 channels: r.channels.into_iter().collect(),

@@ -14,10 +14,6 @@
 //! `previously_blocked` is re-queued so the strategy can retry payloads that
 //! were blocked under the old regime.
 
-use lru::LruCache;
-use parking_lot::Mutex;
-use std::num::NonZeroUsize;
-use std::sync::Arc;
 use wafrift_content_type as content_type;
 use wafrift_encoding::encoding;
 use wafrift_types::Technique;
@@ -44,7 +40,12 @@ const DRIFT_BLOCK_LIMIT: u32 = 2;
 /// Hard cap on `prioritized_techniques` and `avoided_techniques` so a
 /// long-running scan that ingests many adversarial WAF profiles cannot
 /// grow `HostState` memory without bound. Audit (2026-05-10).
-const MAX_HINTS_PER_LIST: usize = 200;
+///
+/// Canonical source: [`wafrift_types::HOST_TECHNIQUE_HINTS_CAP`].
+/// `wafrift-transport` enforces the same cap when merging inbound
+/// WAF profile signals — if this value is changed, that site auto-
+/// follows because both alias the same workspace constant.
+const MAX_HINTS_PER_LIST: usize = wafrift_types::HOST_TECHNIQUE_HINTS_CAP;
 
 /// Hard cap on `technique_stats` and `winner_consecutive_blocks` —
 /// per-host structures that key on the technique name. With ~100
@@ -53,7 +54,7 @@ const MAX_HINTS_PER_LIST: usize = 200;
 const MAX_TECHNIQUE_STATS: usize = 500;
 
 /// Per-host evasion state — tracks what works and what doesn't.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct HostState {
     /// Number of requests blocked.
     pub blocks: u32,
@@ -158,8 +159,7 @@ impl HostState {
                 // WAF relaxed: move the entire blocked corpus to retry queue.
                 // The strategy drains `drift_retry_queue` with
                 // `drain_drift_retry_queue()`.
-                self.drift_retry_queue
-                    .extend(self.previously_blocked.drain(..));
+                self.drift_retry_queue.append(&mut self.previously_blocked);
             }
             RegimeChange::StricterNow => {
                 // WAF tightened: discard the retry queue (those techniques

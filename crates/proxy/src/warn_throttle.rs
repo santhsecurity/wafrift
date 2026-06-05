@@ -71,16 +71,17 @@ impl WarnThrottle {
         true
     }
 
-    /// Cap exposed for tests + downstream introspection.
-    #[must_use]
-    pub fn max_entries() -> usize {
-        MAX_THROTTLE_ENTRIES
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl WarnThrottle {
+        fn max_entries() -> usize {
+            MAX_THROTTLE_ENTRIES
+        }
+    }
     use std::thread::sleep;
 
     #[test]

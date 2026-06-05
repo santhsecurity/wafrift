@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[derive(Args, Debug)]
-pub struct InitArgs {
+pub(crate) struct InitArgs {
     /// Output path for the scaffold. Defaults to `./.wafrift.toml`.
     #[arg(long)]
     pub output: Option<PathBuf>,
@@ -31,34 +31,76 @@ pub struct InitArgs {
     pub quiet: bool,
 }
 
-pub fn run_init(args: InitArgs, quiet: bool) -> ExitCode {
+pub(crate) fn run_init(args: InitArgs) -> ExitCode {
     let out_path = args
         .output
         .clone()
         .unwrap_or_else(|| PathBuf::from(".wafrift.toml"));
 
-    if out_path.exists() && !args.force {
-        eprintln!(
-            "error: {} already exists; pass --force to overwrite",
-            out_path.display()
-        );
-        return ExitCode::from(1);
+    // R49 tail (CLAUDE.md §15 AUDIT/TOCTOU): the prior exists()+write
+    // pattern was racy on shared NFS — a concurrent agent could
+    // create the file in the window and have it overwritten. Use
+    // OpenOptions::create_new(true) for atomic create-or-error.
+    // --force preserves the prior overwrite semantic.
+    if args.force {
+        if let Err(e) = fs::write(&out_path, SCAFFOLD) {
+            eprintln!("error: write {}: {e}", out_path.display());
+            return ExitCode::from(1);
+        }
+    } else {
+        use std::io::Write;
+        let mut f = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&out_path)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                eprintln!(
+                    "error: {} already exists; pass --force to overwrite",
+                    out_path.display()
+                );
+                return ExitCode::from(1);
+            }
+            Err(e) => {
+                eprintln!("error: create {}: {e}", out_path.display());
+                return ExitCode::from(1);
+            }
+        };
+        if let Err(e) = f.write_all(SCAFFOLD.as_bytes()) {
+            eprintln!("error: write {}: {e}", out_path.display());
+            return ExitCode::from(1);
+        }
     }
 
-    if let Err(e) = fs::write(&out_path, SCAFFOLD) {
-        eprintln!("error: write {}: {e}. Fix: verify the directory is writable.", out_path.display());
-        return ExitCode::from(1);
-    }
-
-    if !quiet {
+    if !args.quiet {
         eprintln!(
             "wrote scaffold ({} bytes) → {}",
             SCAFFOLD.len(),
             out_path.display()
         );
         eprintln!("Next steps:");
-        eprintln!("  1. Edit the file — uncomment the keys you want to override.");
-        eprintln!("  2. Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and point your client at it.");
+        eprintln!(
+            "  1. Edit the file — uncomment the keys you want. `wafrift scan` \
+             auto-loads it (CLI flags still win)."
+        );
+        match locate_proxy() {
+            Some(p) => eprintln!(
+                "  2. Run `{} --listen 127.0.0.1:8080 --mitm` and point your client at it.",
+                p.display()
+            ),
+            None => {
+                eprintln!(
+                    "  2. `wafrift-proxy` is NOT on your PATH. It is a separate binary in the \
+                     same workspace — build/install it with:"
+                );
+                eprintln!("       cargo install --path crates/proxy   # from a wafrift checkout");
+                eprintln!(
+                    "       (or `cargo build -p wafrift-proxy` and run target/.../wafrift-proxy)"
+                );
+                eprintln!("     then: wafrift-proxy --listen 127.0.0.1:8080 --mitm");
+            }
+        }
         eprintln!("  3. Run `wafrift report` after you have findings.");
     }
     ExitCode::SUCCESS
@@ -92,10 +134,10 @@ const SCAFFOLD: &str = r#"# .wafrift.toml — wafrift configuration scaffold.
 # Every key below is commented out, so an unmodified file behaves
 # identically to the compiled defaults — uncomment what you need.
 #
-# NOTE: `wafrift scan` does not yet auto-load this file. The `[scan]`
-# section below documents the keys that match `ScanArgs` flags; they
-# must be passed as CLI flags until the config-integration pass wires
-# `WafRiftConfig::load()` into the scan command.
+# `wafrift scan` AUTO-LOADS this file (./.wafrift.toml, then
+# ~/.config/wafrift/config.toml). Precedence is: CLI flag > this file >
+# compiled default — an explicit flag always wins, so the config only
+# fills in values you didn't pass on the command line.
 #
 # wafrift-proxy is configured via CLI flags, not this file. The values
 # below mirror the proxy flag names so you can copy-paste them into a
@@ -106,11 +148,44 @@ const SCAFFOLD: &str = r#"# .wafrift.toml — wafrift configuration scaffold.
 # Default evasion intensity: "light" | "medium" | "heavy".
 # level = "heavy"
 
+# Default query parameter name for injection.
+# param = "q"
+
 # Inter-request delay in milliseconds. Bump if the target rate-limits.
 # delay_ms = 50
 
+# Apply encoding-only transforms (no grammar mutations).
+# encoding_only = false
+
+# Number of variants to fire concurrently. Raise on fast targets.
+# concurrency = 8
+
+# ── HTTP transport settings ──
+[http]
+# TLS fingerprint profile to impersonate: "chrome", "firefox", "safari".
+# Requires the wafrift binary to be built with `--features tls-impersonate`.
+# stealth_browser = "chrome"
+
+# Skip TLS certificate verification (for self-signed test stacks).
+# insecure = false
+
+# Custom User-Agent string. Default is a browser-shaped UA that avoids
+# WAF bot-detection rules that fire on `reqwest/*` or `curl/*`.
+# user_agent = "Mozilla/5.0 ..."
+
+# Per-request timeout in seconds.
+# timeout_secs = 10
+
+# ── output settings ──
+[output]
 # Default output format: "text" | "json".
 # format = "text"
+
+# Include the layer report in JSON output (shows per-layer bypass rates).
+# report_layers = false
+
+# Suppress all human-readable progress output (only results are emitted).
+# quiet = false
 
 # ── proxy hints (NOT auto-loaded — use these as a `wafrift-proxy` flag reference) ──
 # wafrift-proxy --listen 127.0.0.1:8080 \
@@ -128,17 +203,20 @@ mod tests {
     #[test]
     fn scaffold_round_trips_as_valid_toml() {
         let parsed: toml::Value = toml::from_str(SCAFFOLD).expect("scaffold must be valid TOML");
-        // The body should expose at least the [scan] table even though
-        // every value is commented out — otherwise we silently shipped
-        // a config the parser can't open.
+        // All three config sections must be present even though every value
+        // is commented out. A missing section means the scaffold silently
+        // hides a config surface from operators who open the file to learn
+        // the available knobs.
         assert!(parsed.get("scan").is_some(), "[scan] section missing");
+        assert!(parsed.get("http").is_some(), "[http] section missing");
+        assert!(parsed.get("output").is_some(), "[output] section missing");
     }
 
     #[test]
     fn scaffold_keys_are_commented_out() {
-        // Every key inside [scan] must be commented so the file is a
-        // pure no-op. Catch the regression where someone uncomments
-        // a default and accidentally ships an opinion.
+        // Every key-value assignment must be commented so the file is a
+        // pure no-op. Catch the regression where someone uncomments a
+        // default and accidentally ships an opinion.
         for line in SCAFFOLD.lines() {
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') || trimmed.is_empty() {
@@ -148,6 +226,33 @@ mod tests {
             assert!(
                 trimmed.starts_with('[') && trimmed.ends_with(']'),
                 "uncommented non-section line in scaffold: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn scaffold_covers_all_config_fields() {
+        // Pin that every WafRiftConfig field has a matching comment in the
+        // scaffold so operators can discover every knob from `wafrift init`.
+        // Adding a new config field without mentioning it here fails the
+        // test (§10 COHERENCE: scaffold ↔ config must agree).
+        for key in &[
+            "level",
+            "param",
+            "delay_ms",
+            "encoding_only",
+            "concurrency",
+            "stealth_browser",
+            "insecure",
+            "user_agent",
+            "timeout_secs",
+            "format",
+            "report_layers",
+            "quiet",
+        ] {
+            assert!(
+                SCAFFOLD.contains(key),
+                "scaffold missing config key `{key}` — add a commented-out example line"
             );
         }
     }

@@ -114,7 +114,13 @@ impl AlpnConfusionPayload {
         if wire_bytes.is_empty() {
             return Err(AlpnConfusionError::EmptyWirePayload);
         }
-        Ok(Self { name, description, variant, alpn_protocols, wire_bytes })
+        Ok(Self {
+            name,
+            description,
+            variant,
+            alpn_protocols,
+            wire_bytes,
+        })
     }
 }
 
@@ -291,7 +297,11 @@ mod tests {
     fn all_probes_have_non_empty_names_and_descriptions() {
         for p in all_probes().unwrap() {
             assert!(!p.name.is_empty(), "probe has empty name");
-            assert!(!p.description.is_empty(), "probe {:?} has empty description", p.name);
+            assert!(
+                !p.description.is_empty(),
+                "probe {:?} has empty description",
+                p.name
+            );
         }
     }
 
@@ -299,7 +309,11 @@ mod tests {
     fn alpn_tokens_within_rfc7301_limit() {
         for p in all_probes().unwrap() {
             for tok in &p.alpn_protocols {
-                assert!(tok.len() <= 255, "probe {:?}: token exceeds 255 bytes", p.name);
+                assert!(
+                    tok.len() <= 255,
+                    "probe {:?}: token exceeds 255 bytes",
+                    p.name
+                );
             }
         }
     }
@@ -338,7 +352,8 @@ mod tests {
     fn h1_negotiated_h2_spoken_wire_starts_with_h2_preface() {
         let p = h1_negotiated_h2_spoken().unwrap();
         assert!(
-            p.wire_bytes.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
+            p.wire_bytes
+                .starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
             "wire must begin with the HTTP/2 client connection preface"
         );
     }
@@ -363,7 +378,10 @@ mod tests {
     #[test]
     fn alpn_absent_probe_wire_is_h2_preface() {
         let p = alpn_absent_h2_spoken().unwrap();
-        assert!(p.wire_bytes.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"));
+        assert!(
+            p.wire_bytes
+                .starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        );
     }
 
     #[test]
@@ -385,7 +403,10 @@ mod tests {
     #[test]
     fn multi_alpn_probe_wire_is_h2_preface() {
         let p = multi_alpn_h2_preface().unwrap();
-        assert!(p.wire_bytes.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"));
+        assert!(
+            p.wire_bytes
+                .starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        );
     }
 
     #[test]
@@ -415,7 +436,10 @@ mod tests {
         // Must NOT contain the SM continuation (partial preface)
         let preface_end = b"PRI * HTTP/2.0\r\n\r\n".len();
         let remainder = std::str::from_utf8(&wire[preface_end..]).unwrap();
-        assert!(remainder.starts_with("GET"), "H1 request must follow the partial preface");
+        assert!(
+            remainder.starts_with("GET"),
+            "H1 request must follow the partial preface"
+        );
     }
 
     // ── error paths ───────────────────────────────────────────────────────

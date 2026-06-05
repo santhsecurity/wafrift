@@ -65,16 +65,14 @@ async fn spawn_graphql_mock() -> (std::net::SocketAddr, Arc<tokio::sync::Mutex<V
                         Ok(n) => n,
                     };
                     buf.extend_from_slice(&tmp[..n]);
-                    if !headers_done {
-                        if let Some(pos) = find_double_crlf(&buf) {
-                            headers_done = true;
-                            header_end = pos + 4;
-                            let hdr = String::from_utf8_lossy(&buf[..pos]);
-                            for line in hdr.lines() {
-                                let lower = line.to_ascii_lowercase();
-                                if let Some(v) = lower.strip_prefix("content-length:") {
-                                    content_length = v.trim().parse().unwrap_or(0);
-                                }
+                    if !headers_done && let Some(pos) = find_double_crlf(&buf) {
+                        headers_done = true;
+                        header_end = pos + 4;
+                        let hdr = String::from_utf8_lossy(&buf[..pos]);
+                        for line in hdr.lines() {
+                            let lower = line.to_ascii_lowercase();
+                            if let Some(v) = lower.strip_prefix("content-length:") {
+                                content_length = v.trim().parse().unwrap_or(0);
                             }
                         }
                     }
@@ -111,7 +109,8 @@ async fn spawn_graphql_mock() -> (std::net::SocketAddr, Arc<tokio::sync::Mutex<V
                         resp_body.len()
                     )
                 } else {
-                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_string()
                 };
 
                 let _ = sock.write_all(response.as_bytes()).await;
@@ -124,8 +123,7 @@ async fn spawn_graphql_mock() -> (std::net::SocketAddr, Arc<tokio::sync::Mutex<V
 }
 
 fn find_double_crlf(buf: &[u8]) -> Option<usize> {
-    buf.windows(4)
-        .position(|w| w == b"\r\n\r\n")
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -219,9 +217,9 @@ fn graphql_flag_forces_injection_at_base_url() {
     let received = rt.block_on(async { log.lock().await.clone() });
     // With --graphql the evasion payloads fire; assert at least one GraphQL
     // evasion body (not just the detection probe) landed.
-    let evasion_fired = received.iter().any(|b| {
-        b.contains("AliasFlood") || b.contains("__schema") || b.contains("operationName")
-    });
+    let evasion_fired = received
+        .iter()
+        .any(|b| b.contains("AliasFlood") || b.contains("__schema") || b.contains("operationName"));
     assert!(
         evasion_fired,
         "--graphql flag must inject alias-flood/introspection/op-name-mismatch payloads; stderr:\n{stderr}\nbodies: {received:?}"
@@ -330,11 +328,8 @@ fn strategy_form_body_not_routed_to_graphql() {
     use wafrift_strategy::{graphql_payloads_for_request, is_graphql_request};
     use wafrift_types::Request;
 
-    let req = Request::post(
-        "https://example.com/api",
-        b"q=SELECT+1+FROM+users".to_vec(),
-    )
-    .header("Content-Type", "application/x-www-form-urlencoded");
+    let req = Request::post("https://example.com/api", b"q=SELECT+1+FROM+users".to_vec())
+        .header("Content-Type", "application/x-www-form-urlencoded");
 
     assert!(
         !is_graphql_request(&req),

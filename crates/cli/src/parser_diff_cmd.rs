@@ -56,7 +56,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 #[derive(Args, Debug)]
-pub struct ParserDiffArgs {
+pub(crate) struct ParserDiffArgs {
     /// Target URL. The path component is the "protected route" we
     /// suspect the WAF gates; parser-diff fires variants of that
     /// path that exercise known WAF↔origin disagreements.
@@ -105,7 +105,7 @@ pub struct ParserDiffArgs {
 /// `variants` list is the literal URL transformations the operator
 /// can copy-paste.
 #[derive(Debug, Clone)]
-pub struct ParserDisagreement {
+pub(crate) struct ParserDisagreement {
     /// Stable short identifier (`semicolon-strip`, `backslash-path`,
     /// `nul-truncate`, `double-urldecode`, `fullwidth-slash`,
     /// `dot-segment`, `case-percent`, `empty-segment`,
@@ -119,7 +119,7 @@ pub struct ParserDisagreement {
 
 /// Result of one variant probe.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct DiffResult {
+pub(crate) struct DiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub variant_path: String,
@@ -138,7 +138,7 @@ pub struct DiffResult {
 /// operator who pins a specific variant by index will get the same
 /// one tomorrow.
 #[must_use]
-pub fn generate_variants(path: &str) -> Vec<ParserDisagreement> {
+pub(crate) fn generate_variants(path: &str) -> Vec<ParserDisagreement> {
     let mut out: Vec<ParserDisagreement> = Vec::new();
     let path = if path.is_empty() { "/" } else { path };
     let trimmed = path.trim_end_matches('/');
@@ -341,7 +341,7 @@ fn severity_of(baseline_status: u16, probe_status: u16, body_delta: f64) -> &'st
 /// Returns `Err(String)` if the URL is malformed or the HTTP client
 /// cannot be built. Individual probe failures are non-fatal and
 /// surfaced in the report.
-pub fn run_parser_diff(mut args: ParserDiffArgs) -> Result<(), String> {
+pub(crate) fn run_parser_diff(mut args: ParserDiffArgs) -> Result<(), String> {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -416,7 +416,10 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
             ));
         }
         Err(crate::safe_body::ReadError::Transport(e)) => {
-            return Err(format!("baseline GET {url} body read failed: {e}", url = args.url));
+            return Err(format!(
+                "baseline GET {url} body read failed: {e}",
+                url = args.url
+            ));
         }
     };
     let baseline_len = baseline_body.len();
@@ -445,6 +448,16 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
             );
             let resp = client_c.get(&url).send().await.ok()?;
             let probe_status = resp.status().as_u16();
+            // Throttle / origin-unavailable (429, 503, Cloudflare 52x, …)
+            // is the target rate-limiting the probe, NOT a parser
+            // disagreement. Skip it as noise — the same gate bypass_probe
+            // applies at probe_classify::is_throttle_or_unavailable, so the
+            // whole parser-diff family suppresses rate-limit findings
+            // consistently. Pre-fix `wafrift parser-diff` surfaced a
+            // 200→429 flip as a LOW divergence and buried real findings.
+            if crate::probe_classify::is_throttle_or_unavailable(probe_status) {
+                return None;
+            }
             let body =
                 crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
                     .await
@@ -518,9 +531,21 @@ async fn run_async(args: ParserDiffArgs) -> Result<(), String> {
 
     let json_only = args.quiet || args.format == "json";
     if json_only {
+        // R71 pass-21 §10 COHERENCE: parser-diff JSON was the only
+        // diff-family output without a `schema_version`. CI consumers
+        // parsing this surface had no forward-compat signal — a future
+        // field rename or restructure would silently break their
+        // pipelines. Also renames the baseline's inner `status` to
+        // `baseline_status` to match the per-probe `DiffResult` naming
+        // (pre-fix the same concept appeared under two names depending
+        // on which JSON node you read).
         let out = serde_json::json!({
+            "schema_version": 1u32,
             "baseline": {
                 "url": args.url,
+                "baseline_status": baseline_status,
+                // `status` kept as an alias for one release per LAW 2
+                // backwards-compat — remove no earlier than next minor.
                 "status": baseline_status,
                 "body_len": baseline_len,
             },

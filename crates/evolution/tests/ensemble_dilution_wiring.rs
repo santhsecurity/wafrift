@@ -12,9 +12,7 @@ use wafrift_types::EvasionConfig;
 use wafrift_wafmodel::ensemble_dilution::{RuleGroup, SubScoreEstimator};
 
 fn config_with_weight(w: f64) -> EvasionConfig {
-    let mut cfg = EvasionConfig::default();
-    cfg.dilution_weight = w;
-    cfg
+    EvasionConfig { dilution_weight: w, ..Default::default() }
 }
 
 // ── Test 1: dilution_weight=0.0 leaves oracle fitness unchanged ──────────────
@@ -200,8 +198,7 @@ fn adjusted_fitness_always_in_unit_interval() {
     for payload in payloads {
         for &w in &weights {
             for &oracle in &oracles {
-                let mut cfg = EvasionConfig::default();
-                cfg.dilution_weight = w;
+                let cfg = EvasionConfig { dilution_weight: w, ..Default::default() };
                 let adj = dilution_adjusted_fitness(
                     oracle,
                     payload,
@@ -211,7 +208,7 @@ fn adjusted_fitness_always_in_unit_interval() {
                     "Cloudflare WAF",
                 );
                 assert!(
-                    adj >= 0.0 && adj <= 1.0,
+                    (0.0..=1.0).contains(&adj),
                     "out of [0,1]: payload={payload:?} w={w} oracle={oracle} → {adj}"
                 );
             }

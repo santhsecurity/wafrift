@@ -69,7 +69,7 @@ pub fn is_blocked_response(status: u16, body: &[u8]) -> bool {
         return true;
     }
 
-    // Scan only the first 4 KiB — block pages are always in the head.
-    let window = &body[..body.len().min(4096)];
+    // Scan only the first BLOCK_SCAN_BODY_WINDOW bytes — block pages are always in the head.
+    let window = &body[..body.len().min(wafrift_types::BLOCK_SCAN_BODY_WINDOW)];
     BLOCK_AC.is_match(window)
 }

@@ -77,7 +77,6 @@ fn kmp_sfa(needle: &[u8]) -> Sfa {
     let n_states = m + 1;
     let mut accept = vec![false; n_states];
     accept[m] = true;
-    let catch_all_idx = alpha.catch_all();
     let mut delta: Vec<Vec<(BytePred, StateId)>> = Vec::with_capacity(n_states);
 
     for st in 0..n_states {

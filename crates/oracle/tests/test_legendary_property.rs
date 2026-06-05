@@ -58,6 +58,7 @@ proptest! {
             PayloadType::PathTraversal,
             PayloadType::Ldap,
             PayloadType::Ssrf,
+            PayloadType::Ssi,
         ];
 
         let payload_type = payload_types[(payload_type_u8 as usize) % payload_types.len()];

@@ -225,7 +225,8 @@ impl ResponseProfileDb {
         headers: &[(String, String)],
         body: &[u8],
     ) -> ResponseSignal {
-        let body_str = crate::response::scan_body_lowercase(body, 4096);
+        let body_str =
+            crate::response::scan_body_lowercase(body, wafrift_types::BLOCK_SCAN_BODY_WINDOW);
 
         // Check for rate limiting first (any profile's rate_limit_status)
         for profile in &self.profiles {

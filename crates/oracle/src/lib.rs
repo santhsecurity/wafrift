@@ -60,8 +60,10 @@
 //! ```
 
 mod ascii_scan;
-/// Per-target calibration session.
-pub mod calibration;
+/// Per-target calibration session. R76 §8 — internal-only;
+/// `wafrift_types::calibration` is the cross-crate name; this is
+/// oracle-internal state.
+pub(crate) mod calibration;
 /// Cloudflare-specific WAF response parser.
 pub mod cloudflare;
 /// Command injection oracle.
@@ -72,29 +74,39 @@ pub mod ldap;
 pub mod path;
 /// WAF response oracle.
 pub mod response_oracle;
+// R76 pass-21 §8 ARCHITECTURE: the six signal modules below + `timing`
+// + `calibration` are internal building blocks of `response_oracle`.
+// Verified workspace-wide grep finds zero non-doc-comment external
+// consumers (the one hit was a `//!` reference in
+// `evolution/src/coverage_feedback.rs`). Pre-fix they were `pub mod`,
+// which is a 10-year LAW 2 commitment for a symbol no caller outside
+// this crate touches. Tightening to `pub(crate)` shrinks the oracle's
+// public surface by 8 modules without breaking any current consumer.
 /// Body-marker signal extractor.
-pub mod signal_body_marker;
+pub(crate) mod signal_body_marker;
 
 /// Connection-behavior signal extractor.
-pub mod signal_connection;
+pub(crate) mod signal_connection;
 /// H2 GOAWAY signal extractor.
-pub mod signal_h2_goaway;
+pub(crate) mod signal_h2_goaway;
 /// Response header signal extractor.
-pub mod signal_headers;
+pub(crate) mod signal_headers;
 /// Response-time signal extractor.
-pub mod signal_response_time;
+pub(crate) mod signal_response_time;
 /// Status-code signal extractor.
-pub mod signal_status_code;
+pub(crate) mod signal_status_code;
 /// SQL AST oracle.
 pub mod sql;
+/// SSI (Server-Side Includes) oracle.
+pub mod ssi;
 /// SSRF (Server-Side Request Forgery) oracle.
 pub mod ssrf;
 /// SSTI (Server-Side Template Injection) oracle.
 pub mod ssti;
 /// Timing oracle — confirms blind attacks via latency anomaly when
 /// the DNS callback channel is blocked and the error oracle is
-/// squashed by the WAF.
-pub mod timing;
+/// squashed by the WAF. R76 §8 — internal-only.
+pub(crate) mod timing;
 /// Oracle trait definition.
 pub mod traits;
 /// XSS (Cross-Site Scripting) oracle.
@@ -155,6 +167,7 @@ pub fn oracle_for(payload_type: PayloadType) -> Option<Box<dyn PayloadOracle>> {
         PayloadType::PathTraversal => Some(Box::new(path::PathOracle)),
         PayloadType::Ldap => Some(Box::new(ldap::LdapOracle)),
         PayloadType::Ssrf => Some(Box::new(ssrf::SsrfOracle)),
+        PayloadType::Ssi => Some(Box::new(ssi::SsiOracle)),
         // Future-proof: new payload types get oracles when they're built.
         // Until then, returning None means "don't validate" — safe default.
         _ => None,
@@ -216,6 +229,13 @@ mod tests {
     fn oracle_for_unknown_is_none() {
         let oracle = oracle_for(PayloadType::Unknown);
         assert!(oracle.is_none());
+    }
+
+    #[test]
+    fn oracle_for_ssi() {
+        let oracle = oracle_for(PayloadType::Ssi);
+        assert!(oracle.is_some());
+        assert_eq!(oracle.as_ref().map(|o| o.name()), Some("SSI"));
     }
 
     #[test]

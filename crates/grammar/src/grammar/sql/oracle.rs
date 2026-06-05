@@ -14,7 +14,7 @@
 /// Generate Oracle-specific mutations for a payload.
 #[must_use]
 pub fn mutate(payload: &str, max_mutations: usize) -> Vec<String> {
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_mutations);
     let lower = payload.to_ascii_lowercase();
 
     // ── Time-based blind ──

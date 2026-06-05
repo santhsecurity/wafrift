@@ -31,6 +31,39 @@ pub struct TamperConfig {
 /// and shoved at `toml::from_str` with no guardrail.
 const STRATEGY_FILE_MAX_BYTES: u64 = 256 * 1024; // 256 KiB
 
+/// UTF-8 text reader with the cap enforced DURING the read (so a
+/// `/dev/zero` symlink cannot evade the size gate the way it would
+/// with a `metadata()`-then-`read()` pattern). The advisory
+/// `metadata()` gate in `load_toml` filters obvious giant files
+/// without opening them; this function backstops it for the cases
+/// metadata lies about (symlinks, races, posthumous file-replace).
+fn read_capped_tamper_text(
+    path: &std::path::Path,
+    max_bytes: u64,
+) -> std::io::Result<String> {
+    use std::io::Read;
+    let f = std::fs::File::open(path)?;
+    let mut limited = f.take(max_bytes + 1);
+    let mut buf = Vec::with_capacity(8 * 1024);
+    limited.read_to_end(&mut buf)?;
+    if (buf.len() as u64) > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{}: tamper config exceeds {}-byte cap",
+                path.display(),
+                max_bytes,
+            ),
+        ));
+    }
+    String::from_utf8(buf).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{}: tamper config is not valid UTF-8: {e}", path.display()),
+        )
+    })
+}
+
 impl TamperRegistry {
     /// Loads strategy configurations from a TOML file.
     ///
@@ -43,8 +76,11 @@ impl TamperRegistry {
     ) -> Result<TamperConfig, TamperError> {
         let path_ref = path.as_ref();
 
-        // Cheap pre-check via file metadata — avoids ever opening
-        // a multi-GB tar pretending to be a TOML file.
+        // Cheap pre-check via file metadata avoids ever opening a
+        // multi-GB tar pretending to be a TOML file. But metadata is
+        // advisory only: a symlink to /dev/zero reports len=0 and
+        // would pass this gate. The bounded read below is
+        // authoritative — it enforces the cap DURING the read.
         let meta = std::fs::metadata(path_ref).map_err(|e| {
             TamperError::LoadError(format!("Failed to stat {}: {e}", path_ref.display()))
         })?;
@@ -57,7 +93,7 @@ impl TamperRegistry {
             )));
         }
 
-        let content = std::fs::read_to_string(path_ref)
+        let content = read_capped_tamper_text(path_ref, STRATEGY_FILE_MAX_BYTES)
             .map_err(|e| TamperError::LoadError(format!("Failed to read file: {e}")))?;
 
         let config: TamperConfig = toml::from_str(&content)
@@ -214,7 +250,16 @@ contexts = ["sql", "xss"]
         let mut registry = TamperRegistry::with_defaults();
         let invalid_toml = "not valid toml [[";
 
-        let temp_file = std::env::temp_dir().join("invalid_toml_test.toml");
+        // Use a unique suffix to avoid races when `cargo test` runs this
+        // test in parallel with other process instances.
+        let temp_file = std::env::temp_dir().join(format!(
+            "wafrift-invalid-toml-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        ));
         std::fs::write(&temp_file, invalid_toml).unwrap();
 
         let result = registry.load_toml(&temp_file);

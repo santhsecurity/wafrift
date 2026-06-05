@@ -12,20 +12,8 @@
 //! 6. --quick produces fewer probes than the full set.
 //! 7. Every probe's expected_blocked is a boolean.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ── Help surface ──────────────────────────────────────────────────────────
 
@@ -61,10 +49,16 @@ fn probe_emits_ndjson_one_object_per_line() {
         }
         let obj: serde_json::Value =
             serde_json::from_str(trimmed).expect("each probe line must be valid JSON");
-        assert!(obj.is_object(), "probe line must be a JSON object: {trimmed}");
+        assert!(
+            obj.is_object(),
+            "probe line must be a JSON object: {trimmed}"
+        );
         line_count += 1;
     }
-    assert!(line_count > 0, "probe must emit at least one line: {stdout}");
+    assert!(
+        line_count > 0,
+        "probe must emit at least one line: {stdout}"
+    );
 }
 
 #[test]

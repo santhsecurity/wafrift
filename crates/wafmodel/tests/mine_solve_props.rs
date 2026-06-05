@@ -8,7 +8,7 @@
 //! 26. **Solver invariant**: over 10k random sink pipelines, whenever
 //!     `solve_bypass` returns `Some(s)`, the structural identity
 //!     `sink(s.input) == s.sink_view ⊇ attack` holds AND a FRESH real
-//!     WAF actually passes `s.input` (active boundary learning verifies internally; we
+//!     WAF actually passes `s.input` (CEGIS verifies internally; we
 //!     re-verify independently — the solver may never fabricate). A
 //!     `None` is always acceptable; an Identity sink against a WAF that
 //!     blocks the raw attack must be `None` (pinned precision twin —
@@ -95,14 +95,20 @@ proptest! {
 
 // ── E3/26 ──
 fn stage(i: u8) -> Stage {
-    match i % 5 {
+    match i % 11 {
         0 => Stage::Identity,
         1 => Stage::UrlDecode {
             plus_is_space: false,
         },
         2 => Stage::DoubleUrlDecode,
         3 => Stage::JsonUnescape,
-        _ => Stage::HtmlEntityDecode,
+        4 => Stage::HtmlEntityDecode,
+        5 => Stage::NfkcNormalize,
+        6 => Stage::BestFitDownconvert,
+        7 => Stage::StripNulls,
+        8 => Stage::OverlongUtf8Decode,
+        9 => Stage::Base64Decode,
+        _ => Stage::HexDecode,
     }
 }
 const ATTACKS: [&[u8]; 4] = [b"<script", b"<s/s", b"' or", b"<svg"];
@@ -113,7 +119,7 @@ proptest! {
     #[test]
     fn solver_never_fabricates_and_respects_the_sink_identity(
         ai in 0usize..ATTACKS.len(),
-        stages in proptest::collection::vec(0u8..5, 1..=3usize),
+        stages in proptest::collection::vec(0u8..11, 1..=3usize),
     ) {
         let attack = ATTACKS[ai];
         let sink = Pipeline(stages.iter().map(|&i| stage(i)).collect());
